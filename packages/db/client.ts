@@ -4,10 +4,15 @@ import * as schema from './schema'
 
 let _db: ReturnType<typeof drizzle> | null = null
 
-export function getDb(connectionString?: string) {
+/**
+ * Returns the singleton Drizzle DB client.
+ * DATABASE_URL env var must be set before the first call.
+ * Subsequent calls ignore the argument and return the cached instance.
+ */
+export function getDb() {
   if (_db) return _db
-  const url = connectionString ?? process.env.DATABASE_URL!
-  if (!url) throw new Error('DATABASE_URL is not set')
+  const url = process.env.DATABASE_URL
+  if (!url) throw new Error('DATABASE_URL environment variable is not set')
   const sql = postgres(url, { max: 10 })
   _db = drizzle(sql, { schema })
   return _db

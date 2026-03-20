@@ -25,7 +25,7 @@ export const transactions = pgTable('transactions', {
   blockNumber:  bigint('block_number', { mode: 'number' }).notNull().references(() => blocks.number),
   fromAddress:  varchar('from_address', { length: 42 }).notNull(),
   toAddress:    varchar('to_address', { length: 42 }),
-  value:        numeric('value', { precision: 36, scale: 18 }).notNull().default('0'),
+  value:        numeric('value', { precision: 78, scale: 18 }).notNull().default('0'),
   gas:          bigint('gas', { mode: 'bigint' }).notNull(),
   gasPrice:     numeric('gas_price', { precision: 36, scale: 0 }).notNull(),
   gasUsed:      bigint('gas_used', { mode: 'bigint' }).notNull().default(0n),
