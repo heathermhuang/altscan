@@ -51,7 +51,7 @@ export default async function AddressPage({
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <StatItem
             label="BNB Balance"
-            value={`${formatBNB(BigInt(addressInfo?.balance ?? '0'))} BNB`}
+            value={`${formatBNB(BigInt((addressInfo?.balance ?? '0').split('.')[0]))} BNB`}
           />
           <StatItem
             label="Transactions"
@@ -142,7 +142,7 @@ export default async function AddressPage({
                     </div>
                   </td>
                   <td className="px-4 py-2">
-                    {formatBNB(BigInt(tx.value ?? '0'))} BNB
+                    {formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB
                   </td>
                 </tr>
               ))}

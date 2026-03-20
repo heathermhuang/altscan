@@ -53,7 +53,7 @@ export function TxTable({ txs, compact = false }: {
                   )}
                 </td>
               )}
-              <td className="px-4 py-2">{formatBNB(BigInt(tx.value ?? '0'))} BNB</td>
+              <td className="px-4 py-2">{formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB</td>
               <td className="px-4 py-2">
                 <Badge variant={tx.status ? 'success' : 'fail'}>
                   {tx.status ? 'Success' : 'Failed'}

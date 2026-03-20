@@ -68,7 +68,7 @@ export default async function TxDetailPage({
             />
             <Row
               label="Value"
-              value={`${formatBNB(BigInt(tx.value ?? '0'))} BNB`}
+              value={`${formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB`}
             />
             <Row
               label="Transaction Fee"

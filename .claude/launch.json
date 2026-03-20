@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "BNBScan Web (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "BNBScan Indexer (Worker)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/indexer", "dev"],
+      "port": 0
+    },
+    {
+      "name": "All (Turbo)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["dev"],
+      "port": 3000
+    }
+  ]
+}
