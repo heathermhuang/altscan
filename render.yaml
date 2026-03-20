@@ -2,7 +2,7 @@ services:
   - type: web
     name: bnbscan-web
     env: node
-    plan: standard
+    plan: starter
     rootDir: apps/web
     buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build && psql $DATABASE_URL -f schema.sql
     startCommand: pnpm start
@@ -25,7 +25,7 @@ services:
   - type: worker
     name: bnbscan-indexer
     env: node
-    plan: standard
+    plan: starter
     rootDir: apps/indexer
     buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
@@ -48,11 +48,11 @@ services:
 
   - type: redis
     name: bnbscan-redis
-    plan: starter
+    plan: free
     ipAllowList: []
 
 databases:
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: standard
+    plan: free
