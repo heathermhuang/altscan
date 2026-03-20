@@ -9,6 +9,7 @@ export const revalidate = 120
 export default async function ValidatorsPage() {
   const validators = await db.select().from(schema.validators)
     .orderBy(desc(schema.validators.votingPower))
+    .limit(100)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -44,9 +45,9 @@ export default async function ValidatorsPage() {
                     {v.status}
                   </Badge>
                 </td>
-                <td className="px-4 py-2">{formatNumber(Number(v.votingPower ?? 0))}</td>
-                <td className="px-4 py-2">{(Number(v.commission ?? 0) * 100).toFixed(1)}%</td>
-                <td className="px-4 py-2">{(Number(v.uptime ?? 0) * 100).toFixed(1)}%</td>
+                <td className="px-4 py-2">{formatNumber(parseFloat(v.votingPower ?? '0'))}</td>
+                <td className="px-4 py-2">{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
+                <td className="px-4 py-2">{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
               </tr>
             ))}
             {validators.length === 0 && (

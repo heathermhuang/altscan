@@ -6,6 +6,8 @@ import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
 
+export const revalidate = 60
+
 export default async function TokenDetailPage({
   params,
 }: {
@@ -26,9 +28,11 @@ export default async function TokenDetailPage({
 
   const displaySupply = (() => {
     try {
-      return formatNumber(Number(BigInt(token.totalSupply ?? '0') / 10n ** BigInt(token.decimals)))
+      const divisor = 10n ** BigInt(token.decimals)
+      const whole = BigInt(token.totalSupply ?? '0') / divisor
+      return whole.toLocaleString()
     } catch {
-      return token.totalSupply.slice(0, 20)
+      return (token.totalSupply ?? '0').slice(0, 20)
     }
   })()
 
@@ -74,13 +78,18 @@ export default async function TokenDetailPage({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {transfers.map((t, i) => {
+            {transfers.map((t) => {
               const amount = (() => {
-                try { return (Number(BigInt(t.value ?? '0')) / 10 ** token.decimals).toFixed(4) }
-                catch { return t.value.slice(0, 10) }
+                try {
+                  const divisor = 10n ** BigInt(token.decimals)
+                  const whole = BigInt(t.value ?? '0') / divisor
+                  const frac = BigInt(t.value ?? '0') % divisor
+                  const fracStr = frac.toString().padStart(token.decimals, '0').slice(0, 4).replace(/0+$/, '')
+                  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
+                } catch { return (t.value ?? '0').slice(0, 10) }
               })()
               return (
-                <tr key={i} className="hover:bg-gray-50">
+                <tr key={t.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono text-xs">
                     <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
                       {t.txHash.slice(0, 14)}…

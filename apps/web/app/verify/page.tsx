@@ -11,15 +11,25 @@ export default function VerifyPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!address.trim()) return
+    const trimmed = address.trim()
+    if (!trimmed) return
+    if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+      setStatus('error')
+      setMessage('Invalid address format. Must be a 0x-prefixed 40-character hex string.')
+      return
+    }
     setStatus('loading')
     setMessage('')
     try {
       const res = await fetch('/api/v1/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: address.trim(), compilerVersion: compiler }),
+        body: JSON.stringify({ address: trimmed, compilerVersion: compiler }),
       })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setStatus('success')
@@ -28,9 +38,9 @@ export default function VerifyPage() {
         setStatus('error')
         setMessage(data.error ?? 'Verification failed — contract may not be on Sourcify yet.')
       }
-    } catch {
+    } catch (err) {
       setStatus('error')
-      setMessage('Network error. Please try again.')
+      setMessage(err instanceof Error ? err.message : 'Network error. Please try again.')
     }
   }
 

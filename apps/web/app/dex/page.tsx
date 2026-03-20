@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { desc } from 'drizzle-orm'
-import { timeAgo } from '@/lib/format'
+import { timeAgo, formatBNB } from '@/lib/format'
 import Link from 'next/link'
 
 export const revalidate = 10
@@ -20,8 +20,9 @@ export default async function DexPage() {
               <th className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
               <th className="text-left px-4 py-2 text-gray-500">DEX</th>
               <th className="text-left px-4 py-2 text-gray-500">Pair</th>
+              <th className="text-left px-4 py-2 text-gray-500">Amount In</th>
+              <th className="text-left px-4 py-2 text-gray-500">Amount Out</th>
               <th className="text-left px-4 py-2 text-gray-500">Maker</th>
-              <th className="text-left px-4 py-2 text-gray-500">Block</th>
               <th className="text-left px-4 py-2 text-gray-500">Age</th>
             </tr>
           </thead>
@@ -39,17 +40,18 @@ export default async function DexPage() {
                     {t.pairAddress.slice(0, 12)}…
                   </Link>
                 </td>
+                <td className="px-4 py-2 text-gray-700">{formatBNB(BigInt(t.amountIn ?? '0'))}</td>
+                <td className="px-4 py-2 text-gray-700">{formatBNB(BigInt(t.amountOut ?? '0'))}</td>
                 <td className="px-4 py-2 font-mono text-xs">
                   <Link href={`/address/${t.maker}`} className="text-blue-600 hover:underline">
                     {t.maker.slice(0, 12)}…
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
-                <td className="px-4 py-2 text-gray-500">{timeAgo(new Date(t.timestamp))}</td>
+                <td className="px-4 py-2 text-gray-500">{timeAgo(t.timestamp)}</td>
               </tr>
             ))}
             {trades.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No trades indexed yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No trades indexed yet.</td></tr>
             )}
           </tbody>
         </table>
