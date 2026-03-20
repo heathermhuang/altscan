@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: bnbscan-web
+    env: node
+    plan: standard
+    rootDir: apps/web
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build
+    startCommand: pnpm start
+    healthCheckPath: /api/v1/stats
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bnbscan-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bnbscan-redis
+          property: connectionString
+      - key: BNB_RPC_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+  - type: worker
+    name: bnbscan-indexer
+    env: node
+    plan: standard
+    rootDir: apps/indexer
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/indexer build
+    startCommand: node dist/index.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bnbscan-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bnbscan-redis
+          property: connectionString
+      - key: BNB_RPC_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+  - type: redis
+    name: bnbscan-redis
+    plan: starter
+    ipAllowList: []
+
+databases:
+  - name: bnbscan-db
+    databaseName: bnbscan
+    user: bnbscan
+    plan: standard
