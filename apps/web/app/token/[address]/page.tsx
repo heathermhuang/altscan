@@ -26,7 +26,7 @@ export default async function TokenDetailPage({
 
   const displaySupply = (() => {
     try {
-      return formatNumber(Number(BigInt(token.totalSupply) / 10n ** BigInt(token.decimals)))
+      return formatNumber(Number(BigInt(token.totalSupply ?? '0') / 10n ** BigInt(token.decimals)))
     } catch {
       return token.totalSupply.slice(0, 20)
     }
@@ -76,7 +76,7 @@ export default async function TokenDetailPage({
           <tbody className="divide-y">
             {transfers.map((t, i) => {
               const amount = (() => {
-                try { return (Number(BigInt(t.value)) / 10 ** token.decimals).toFixed(4) }
+                try { return (Number(BigInt(t.value ?? '0')) / 10 ** token.decimals).toFixed(4) }
                 catch { return t.value.slice(0, 10) }
               })()
               return (
