@@ -1,0 +1,25 @@
+{
+  "name": "@bnbscan/indexer",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "backfill": "tsx src/backfill.ts"
+  },
+  "dependencies": {
+    "@bnbscan/db": "workspace:*",
+    "@bnbscan/types": "workspace:*",
+    "ethers": "^6.11.0",
+    "bullmq": "^5.4.0",
+    "ioredis": "^5.3.0",
+    "dotenv": "^16.4.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
