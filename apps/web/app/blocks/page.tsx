@@ -16,15 +16,21 @@ export default async function BlocksPage({
   const page = Math.max(1, Number(params.page ?? 1))
   const offset = (page - 1) * PER_PAGE
 
-  const [blocks, totalResult] = await Promise.all([
-    db.select().from(schema.blocks)
-      .orderBy(desc(schema.blocks.number))
-      .limit(PER_PAGE)
-      .offset(offset),
-    db.select({ count: count() }).from(schema.blocks),
-  ])
-
-  const total = Number(totalResult[0]?.count ?? 0)
+  let blocks: typeof schema.blocks.$inferSelect[] = []
+  let total = 0
+  try {
+    const [blocksResult, totalResult] = await Promise.all([
+      db.select().from(schema.blocks)
+        .orderBy(desc(schema.blocks.number))
+        .limit(PER_PAGE)
+        .offset(offset),
+      db.select({ count: count() }).from(schema.blocks),
+    ])
+    blocks = blocksResult
+    total = Number(totalResult[0]?.count ?? 0)
+  } catch {
+    // DB not connected — show empty state
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

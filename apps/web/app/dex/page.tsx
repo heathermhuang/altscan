@@ -6,9 +6,12 @@ import Link from 'next/link'
 export const revalidate = 10
 
 export default async function DexPage() {
-  const trades = await db.select().from(schema.dexTrades)
-    .orderBy(desc(schema.dexTrades.blockNumber))
-    .limit(50)
+  let trades: typeof schema.dexTrades.$inferSelect[] = []
+  try {
+    trades = await db.select().from(schema.dexTrades)
+      .orderBy(desc(schema.dexTrades.blockNumber))
+      .limit(50)
+  } catch { /* DB not connected */ }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

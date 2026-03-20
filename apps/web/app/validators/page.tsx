@@ -7,9 +7,12 @@ import Link from 'next/link'
 export const revalidate = 120
 
 export default async function ValidatorsPage() {
-  const validators = await db.select().from(schema.validators)
-    .orderBy(desc(schema.validators.votingPower))
-    .limit(100)
+  let validators: typeof schema.validators.$inferSelect[] = []
+  try {
+    validators = await db.select().from(schema.validators)
+      .orderBy(desc(schema.validators.votingPower))
+      .limit(100)
+  } catch { /* DB not connected */ }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

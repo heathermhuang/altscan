@@ -6,10 +6,13 @@ import { formatNumber } from '@/lib/format'
 export const revalidate = 60
 
 export default async function TokenListPage() {
-  const tokens = await db.select().from(schema.tokens)
-    .where(eq(schema.tokens.type, 'BEP20'))
-    .orderBy(desc(schema.tokens.holderCount))
-    .limit(50)
+  let tokens: typeof schema.tokens.$inferSelect[] = []
+  try {
+    tokens = await db.select().from(schema.tokens)
+      .where(eq(schema.tokens.type, 'BEP20'))
+      .orderBy(desc(schema.tokens.holderCount))
+      .limit(50)
+  } catch { /* DB not connected */ }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

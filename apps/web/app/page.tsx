@@ -8,10 +8,16 @@ import { TxTable } from '@/components/transactions/TxTable'
 export const revalidate = 10
 
 export default async function HomePage() {
-  const [latestBlocks, latestTxs] = await Promise.all([
-    db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7),
-    db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7),
-  ])
+  let latestBlocks: typeof schema.blocks.$inferSelect[] = []
+  let latestTxs: typeof schema.transactions.$inferSelect[] = []
+  try {
+    ;[latestBlocks, latestTxs] = await Promise.all([
+      db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7),
+      db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7),
+    ])
+  } catch {
+    // DB not connected — show empty state
+  }
 
   const latestBlock = latestBlocks[0]
 
