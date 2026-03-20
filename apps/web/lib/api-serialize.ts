@@ -6,6 +6,7 @@
 export function serializeBigInt(obj: unknown): unknown {
   if (typeof obj === 'bigint') return obj.toString()
   if (Array.isArray(obj)) return obj.map(serializeBigInt)
+  if (obj instanceof Date) return obj.toISOString()
   if (obj !== null && typeof obj === 'object') {
     return Object.fromEntries(
       Object.entries(obj as Record<string, unknown>).map(([k, v]) => [k, serializeBigInt(v)])

@@ -4,7 +4,7 @@ services:
     env: node
     plan: standard
     rootDir: apps/web
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build && psql $DATABASE_URL -f schema.sql
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     envVars:
@@ -18,7 +18,7 @@ services:
           name: bnbscan-redis
           property: connectionString
       - key: BNB_RPC_URL
-        sync: false
+        sync: false   # Set to your Ankr BNB endpoint: https://rpc.ankr.com/bsc/<YOUR_KEY>
       - key: NODE_ENV
         value: production
 
@@ -40,7 +40,9 @@ services:
           name: bnbscan-redis
           property: connectionString
       - key: BNB_RPC_URL
-        sync: false
+        sync: false   # Set to your Ankr BNB endpoint: https://rpc.ankr.com/bsc/<YOUR_KEY>
+      - key: START_BLOCK
+        sync: false   # Block to start indexing from on a fresh DB (leave unset to use DB max or 38000000)
       - key: NODE_ENV
         value: production
 
