@@ -1,10 +1,18 @@
 -- BNBScan database schema
 -- Generated manually from packages/db/schema.ts (drizzle-kit v0.22.8 has BigInt serialization bug)
 
--- Enums
-CREATE TYPE token_type AS ENUM ('BEP20', 'BEP721', 'BEP1155');
-CREATE TYPE validator_status AS ENUM ('active', 'inactive', 'jailed');
-CREATE TYPE verify_source AS ENUM ('own', 'sourcify');
+-- Enums (idempotent — safe to re-run on every deploy)
+DO $$ BEGIN
+  CREATE TYPE token_type AS ENUM ('BEP20', 'BEP721', 'BEP1155');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE validator_status AS ENUM ('active', 'inactive', 'jailed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE verify_source AS ENUM ('own', 'sourcify');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- blocks
 CREATE TABLE IF NOT EXISTS blocks (
