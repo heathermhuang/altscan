@@ -18,8 +18,8 @@ export async function processBlock(blockNumber: number) {
     parentHash: block.parentHash,
     timestamp,
     miner: block.miner.toLowerCase(),
-    gasUsed: block.gasUsed,
-    gasLimit: block.gasLimit,
+    gasUsed: block.gasUsed.toString(),
+    gasLimit: block.gasLimit.toString(),
     baseFeePerGas: block.baseFeePerGas?.toString() ?? null,
     txCount: block.transactions.length,
     size: 0,
@@ -32,9 +32,9 @@ export async function processBlock(blockNumber: number) {
     fromAddress: tx.from.toLowerCase(),
     toAddress: tx.to?.toLowerCase() ?? null,
     value: tx.value.toString(),  // raw wei string
-    gas: tx.gasLimit,
+    gas: tx.gasLimit.toString(),
     gasPrice: tx.gasPrice?.toString() ?? '0',
-    gasUsed: 0n,  // updated from receipt by log-processor
+    gasUsed: '0',  // updated from receipt by log-processor
     input: tx.data,
     status: true,  // updated from receipt by log-processor
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
@@ -55,6 +55,7 @@ export async function processBlock(blockNumber: number) {
     }, {
       jobId: `logs-${tx.hash}`,
       attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
     })
   }
 

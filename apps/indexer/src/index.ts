@@ -9,17 +9,19 @@ async function main() {
   console.log('[indexer] Starting BNBScan indexer...')
 
   // Block processor worker
-  new Worker('blocks', async (job) => {
+  const blockWorker = new Worker('blocks', async (job) => {
     await processBlock(job.data.blockNumber)
   }, { connection, concurrency: 5 })
+  blockWorker.on('error', err => console.error('[block-worker] error:', err))
 
   // Log processor worker
-  new Worker('logs', async (job) => {
+  const logWorker = new Worker('logs', async (job) => {
     await processLogs(job.data.txHash, job.data.blockNumber, new Date(job.data.timestamp))
   }, { connection, concurrency: 10 })
+  logWorker.on('error', err => console.error('[log-worker] error:', err))
 
   // Sync validators every 10 minutes
-  setInterval(() => syncValidators(), 10 * 60 * 1000)
+  setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 10 * 60 * 1000)
   await syncValidators()
 
   // Start main polling loop
