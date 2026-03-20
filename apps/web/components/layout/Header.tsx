@@ -15,6 +15,7 @@ export function Header() {
           <Link href="/dex">DEX</Link>
           <Link href="/gas">Gas</Link>
           <Link href="/validators">Validators</Link>
+          <Link href="/verify">Verify</Link>
         </nav>
       </div>
     </header>
