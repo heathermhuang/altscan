@@ -4,7 +4,7 @@ import { logQueue } from './queue'
 
 const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
 
-export async function processBlock(blockNumber: number) {
+export async function processBlock(blockNumber: number, skipLogs = false) {
   const db = getDb()
   const block = await provider.getBlock(blockNumber, true)  // true = include txs
   if (!block) throw new Error(`Block ${blockNumber} not found`)
@@ -46,17 +46,19 @@ export async function processBlock(blockNumber: number) {
     await db.insert(schema.transactions).values(txValues).onConflictDoNothing()
   }
 
-  // Queue log processing for each tx
-  for (const tx of block.prefetchedTransactions) {
-    await logQueue.add('process-logs', {
-      txHash: tx.hash,
-      blockNumber: block.number,
-      timestamp: timestamp.toISOString(),
-    }, {
-      jobId: `logs-${tx.hash}`,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
-    })
+  // Queue log processing for each tx (skip for historical backfill to save RPC calls)
+  if (!skipLogs) {
+    for (const tx of block.prefetchedTransactions) {
+      await logQueue.add('process-logs', {
+        txHash: tx.hash,
+        blockNumber: block.number,
+        timestamp: timestamp.toISOString(),
+      }, {
+        jobId: `logs-${tx.hash}`,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+      })
+    }
   }
 
   console.log(`[block-processor] Block ${block.number} — ${block.prefetchedTransactions.length} txs`)

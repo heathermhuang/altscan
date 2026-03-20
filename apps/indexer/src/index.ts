@@ -10,7 +10,7 @@ async function main() {
 
   // Block processor worker
   const blockWorker = new Worker('blocks', async (job) => {
-    await processBlock(job.data.blockNumber)
+    await processBlock(job.data.blockNumber, job.data.skipLogs ?? false)
   }, { connection, concurrency: 5 })
   blockWorker.on('error', err => console.error('[block-worker] error:', err))
 
