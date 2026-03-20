@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { checkRateLimit } from '@/lib/api-rate-limit'
+import { apiJson } from '@/lib/api-serialize'
 
 export async function GET(
   request: Request,
@@ -33,5 +34,5 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  return NextResponse.json({ transaction: transactions[0] }, { status: 200 })
+  return apiJson({ transaction: transactions[0] })
 }

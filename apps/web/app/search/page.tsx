@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 
 export default async function SearchPage({
   searchParams,
@@ -7,6 +8,13 @@ export default async function SearchPage({
 }) {
   const { q } = await searchParams
   const query = q?.trim() ?? ''
+
+  // Server-side redirect for recognized query patterns
+  if (query) {
+    if (/^0x[0-9a-fA-F]{64}$/.test(query)) redirect(`/tx/${query}`)
+    if (/^0x[0-9a-fA-F]{40}$/.test(query)) redirect(`/address/${query}`)
+    if (/^\d+$/.test(query)) redirect(`/blocks/${query}`)
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-16 text-center">

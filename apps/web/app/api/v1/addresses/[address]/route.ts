@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, desc, or } from 'drizzle-orm'
 import { checkRateLimit } from '@/lib/api-rate-limit'
+import { apiJson } from '@/lib/api-serialize'
 
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
@@ -57,5 +58,5 @@ export async function GET(
 
   const isContract = contracts.length > 0
 
-  return NextResponse.json({ transactions, tokenTransfers, isContract }, { status: 200 })
+  return apiJson({ transactions, tokenTransfers, isContract })
 }
