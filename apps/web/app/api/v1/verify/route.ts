@@ -34,12 +34,14 @@ export async function POST(request: Request) {
         address,
         bytecode: '0x',
         verifySource: 'sourcify',
+        compilerVersion: compilerVersion || null,
         verifiedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: schema.contracts.address,
         set: {
           verifySource: 'sourcify',
+          compilerVersion: compilerVersion || null,
           verifiedAt: new Date(),
         },
       })
