@@ -1,0 +1,36 @@
+import { NextResponse } from 'next/server'
+import { db, schema } from '@/lib/db'
+import { desc, count, eq } from 'drizzle-orm'
+import { checkRateLimit } from '@/lib/api-rate-limit'
+
+export async function GET(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  }
+
+  const { searchParams } = new URL(request.url)
+  const page = Math.max(1, Number(searchParams.get('page') ?? 1))
+  const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') ?? 20)))
+  const offset = (page - 1) * limit
+  const type = searchParams.get('type') as 'BEP20' | 'BEP721' | 'BEP1155' | null
+
+  const validTypes = ['BEP20', 'BEP721', 'BEP1155']
+
+  let query = db.select().from(schema.tokens).$dynamic()
+  let countQuery = db.select({ count: count() }).from(schema.tokens).$dynamic()
+
+  if (type && validTypes.includes(type)) {
+    query = query.where(eq(schema.tokens.type, type))
+    countQuery = countQuery.where(eq(schema.tokens.type, type))
+  }
+
+  const [tokens, totalResult] = await Promise.all([
+    query.orderBy(desc(schema.tokens.holderCount)).limit(limit).offset(offset),
+    countQuery,
+  ])
+
+  const total = Number(totalResult[0]?.count ?? 0)
+
+  return NextResponse.json({ tokens, total }, { status: 200 })
+}
