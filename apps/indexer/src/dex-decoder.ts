@@ -37,7 +37,8 @@ export async function decodeDexTrade(
     const pairAddress = log.address.toLowerCase()
 
     // V2 Swap: topics[0]=event sig, topics[1]=sender, topics[2]=to — data has 4 x uint256
-    const isV2 = log.topics.length === 3 && log.data.length >= 130
+    // V2 Swap encodes 4 x uint256 = 256 bytes = 514 hex chars with 0x prefix
+    const isV2 = log.topics.length === 3 && log.data.length >= 514
     if (!isV2) return
 
     const tokens = await getPairTokens(pairAddress)
@@ -71,7 +72,7 @@ export async function decodeDexTrade(
       maker,
       blockNumber,
       timestamp,
-    })
+    }).onConflictDoNothing()
   } catch {
     // Skip malformed swap events
   }
