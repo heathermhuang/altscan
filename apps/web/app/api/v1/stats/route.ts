@@ -10,17 +10,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 
-  const [latestBlockResult, totalTxResult, totalTokensResult, feeData] = await Promise.all([
-    db.select({ max: max(schema.blocks.number) }).from(schema.blocks),
-    db.select({ count: count() }).from(schema.transactions),
-    db.select({ count: count() }).from(schema.tokens),
-    getProvider().getFeeData(),
-  ])
+  let latestBlockResult, totalTxResult, totalTokensResult
+  try {
+    ;[latestBlockResult, totalTxResult, totalTokensResult] = await Promise.all([
+      db.select({ max: max(schema.blocks.number) }).from(schema.blocks),
+      db.select({ count: count() }).from(schema.transactions),
+      db.select({ count: count() }).from(schema.tokens),
+    ])
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+
+  let avgGasPrice = '0'
+  try {
+    const feeData = await getProvider().getFeeData()
+    avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()
+  } catch {
+    // RPC failure — leave avgGasPrice as '0'
+  }
 
   const latestBlock = Number(latestBlockResult[0]?.max ?? 0)
   const totalTransactions = Number(totalTxResult[0]?.count ?? 0)
   const totalTokens = Number(totalTokensResult[0]?.count ?? 0)
-  const avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()
 
   return NextResponse.json(
     { latestBlock, totalTransactions, totalTokens, avgGasPrice },

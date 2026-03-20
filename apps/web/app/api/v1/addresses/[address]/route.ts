@@ -20,35 +20,40 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 
-  const [transactions, tokenTransfers, contracts] = await Promise.all([
-    db
-      .select()
-      .from(schema.transactions)
-      .where(
-        or(
-          eq(schema.transactions.fromAddress, address),
-          eq(schema.transactions.toAddress, address),
-        ),
-      )
-      .orderBy(desc(schema.transactions.timestamp))
-      .limit(20),
-    db
-      .select()
-      .from(schema.tokenTransfers)
-      .where(
-        or(
-          eq(schema.tokenTransfers.fromAddress, address),
-          eq(schema.tokenTransfers.toAddress, address),
-        ),
-      )
-      .orderBy(desc(schema.tokenTransfers.timestamp))
-      .limit(20),
-    db
-      .select()
-      .from(schema.contracts)
-      .where(eq(schema.contracts.address, address))
-      .limit(1),
-  ])
+  let transactions, tokenTransfers, contracts
+  try {
+    ;[transactions, tokenTransfers, contracts] = await Promise.all([
+      db
+        .select()
+        .from(schema.transactions)
+        .where(
+          or(
+            eq(schema.transactions.fromAddress, address),
+            eq(schema.transactions.toAddress, address),
+          ),
+        )
+        .orderBy(desc(schema.transactions.timestamp))
+        .limit(20),
+      db
+        .select()
+        .from(schema.tokenTransfers)
+        .where(
+          or(
+            eq(schema.tokenTransfers.fromAddress, address),
+            eq(schema.tokenTransfers.toAddress, address),
+          ),
+        )
+        .orderBy(desc(schema.tokenTransfers.timestamp))
+        .limit(20),
+      db
+        .select()
+        .from(schema.contracts)
+        .where(eq(schema.contracts.address, address))
+        .limit(1),
+    ])
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 
   const isContract = contracts.length > 0
 

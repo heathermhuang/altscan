@@ -14,6 +14,7 @@ export async function checkSourcify(address: string): Promise<{
         addresses: address,
         chainIds: BSC_CHAIN_ID,
       },
+      timeout: 5000,
     })
 
     const data = response.data
@@ -27,11 +28,11 @@ export async function checkSourcify(address: string): Promise<{
     }
 
     if (result.status === 'perfect') {
-      return { verified: true, match: 'full', source: result.storageTimestamp }
+      return { verified: true, match: 'full', source: 'full' }
     }
 
     if (result.status === 'partial') {
-      return { verified: true, match: 'partial', source: result.storageTimestamp }
+      return { verified: true, match: 'partial', source: 'partial' }
     }
 
     return { verified: false }

@@ -28,26 +28,33 @@ export async function POST(request: Request) {
   const result = await triggerSourcifyVerification(address, compilerVersion)
 
   if (result.success) {
-    await db
-      .insert(schema.contracts)
-      .values({
-        address,
-        bytecode: '0x',
-        verifySource: 'sourcify',
-        compilerVersion: compilerVersion || null,
-        verifiedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: schema.contracts.address,
-        set: {
+    try {
+      await db
+        .insert(schema.contracts)
+        .values({
+          address,
+          bytecode: '0x',
           verifySource: 'sourcify',
           compilerVersion: compilerVersion || null,
           verifiedAt: new Date(),
-        },
-      })
+        })
+        .onConflictDoUpdate({
+          target: schema.contracts.address,
+          set: {
+            verifySource: 'sourcify',
+            compilerVersion: compilerVersion || null,
+            verifiedAt: new Date(),
+          },
+        })
+    } catch {
+      return NextResponse.json(
+        { success: true, match: 'sourcify', warning: 'Verified but failed to save to local DB' },
+        { status: 200 },
+      )
+    }
 
     return NextResponse.json({ success: true, match: 'sourcify' }, { status: 200 })
   }
 
-  return NextResponse.json({ success: false, error: result.error }, { status: 200 })
+  return NextResponse.json({ success: false, error: result.error }, { status: 422 })
 }

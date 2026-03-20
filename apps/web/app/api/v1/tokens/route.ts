@@ -25,10 +25,15 @@ export async function GET(request: Request) {
     countQuery = countQuery.where(eq(schema.tokens.type, type))
   }
 
-  const [tokens, totalResult] = await Promise.all([
-    query.orderBy(desc(schema.tokens.holderCount)).limit(limit).offset(offset),
-    countQuery,
-  ])
+  let tokens, totalResult
+  try {
+    ;[tokens, totalResult] = await Promise.all([
+      query.orderBy(desc(schema.tokens.holderCount)).limit(limit).offset(offset),
+      countQuery,
+    ])
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 
   const total = Number(totalResult[0]?.count ?? 0)
 
