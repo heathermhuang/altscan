@@ -1,0 +1,78 @@
+import { Log, AbiCoder, Contract, JsonRpcProvider } from 'ethers'
+import { getDb, schema } from '@bnbscan/db'
+
+const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
+const abi = AbiCoder.defaultAbiCoder()
+
+// Cache pair → [token0, token1] to avoid repeated RPC calls
+const pairCache = new Map<string, [string, string]>()
+
+const PAIR_ABI = [
+  'function token0() view returns (address)',
+  'function token1() view returns (address)',
+]
+
+async function getPairTokens(pairAddress: string): Promise<[string, string] | null> {
+  if (pairCache.has(pairAddress)) return pairCache.get(pairAddress)!
+  try {
+    const pair = new Contract(pairAddress, PAIR_ABI, provider)
+    const [t0, t1] = await Promise.all([pair.token0(), pair.token1()])
+    const tokens: [string, string] = [t0.toLowerCase(), t1.toLowerCase()]
+    pairCache.set(pairAddress, tokens)
+    return tokens
+  } catch {
+    return null
+  }
+}
+
+export async function decodeDexTrade(
+  log: Log,
+  txHash: string,
+  blockNumber: number,
+  timestamp: Date
+) {
+  const db = getDb()
+
+  try {
+    const pairAddress = log.address.toLowerCase()
+
+    // V2 Swap: topics[0]=event sig, topics[1]=sender, topics[2]=to — data has 4 x uint256
+    const isV2 = log.topics.length === 3 && log.data.length >= 130
+    if (!isV2) return
+
+    const tokens = await getPairTokens(pairAddress)
+    if (!tokens) return
+
+    const [token0, token1] = tokens
+    const [a0In, a1In, a0Out, a1Out] = abi.decode(
+      ['uint256', 'uint256', 'uint256', 'uint256'], log.data
+    ) as bigint[]
+
+    let tokenIn: string, tokenOut: string, amountIn: bigint, amountOut: bigint
+
+    if (a0In > 0n) {
+      tokenIn = token0; tokenOut = token1
+      amountIn = a0In; amountOut = a1Out
+    } else {
+      tokenIn = token1; tokenOut = token0
+      amountIn = a1In; amountOut = a0Out
+    }
+
+    const maker = ('0x' + log.topics[2].slice(26)).toLowerCase()
+
+    await db.insert(schema.dexTrades).values({
+      txHash,
+      dex: 'PancakeSwap V2',
+      pairAddress,
+      tokenIn,
+      tokenOut,
+      amountIn: amountIn.toString(),
+      amountOut: amountOut.toString(),
+      maker,
+      blockNumber,
+      timestamp,
+    })
+  } catch {
+    // Skip malformed swap events
+  }
+}
