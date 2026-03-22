@@ -34,7 +34,7 @@ export async function processBlock(blockNumber: number, skipLogs = false) {
     value: tx.value.toString(),  // raw wei string
     gas: tx.gasLimit.toString(),
     gasPrice: tx.gasPrice?.toString() ?? '0',
-    gasUsed: '0',  // updated from receipt by log-processor
+    gasUsed: 0n,   // updated from receipt by log-processor
     input: tx.data,
     status: true,  // updated from receipt by log-processor
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,

@@ -23,7 +23,8 @@ export function getDb() {
     _db = drizzle(sql, { schema })
     return _db
   }
-  const sql = postgres(url, { max: 10 })
+  // max:20 — indexer runs 5 block workers + 10 log workers + web server connections
+  const sql = postgres(url, { max: 20 })
   _db = drizzle(sql, { schema })
   return _db
 }

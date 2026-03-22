@@ -21,6 +21,9 @@ export function apiJson(data: unknown, init?: ResponseInit): Response {
     status: (init as { status?: number })?.status ?? 200,
     headers: {
       'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
       ...((init as { headers?: Record<string, string> })?.headers ?? {}),
     },
   })

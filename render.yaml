@@ -2,7 +2,7 @@ services:
   - type: web
     name: bnbscan-web
     env: node
-    plan: starter
+    plan: free
     rootDir: apps/web
     buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build && psql $DATABASE_URL -f schema.sql
     startCommand: pnpm start
@@ -25,7 +25,7 @@ services:
   - type: worker
     name: bnbscan-indexer
     env: node
-    plan: starter
+    plan: free
     rootDir: apps/indexer
     buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
