@@ -1,287 +1,333 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # =============================================================================
-# BNB Smart Chain Full Node — Hetzner Setup Script
-# =============================================================================
-# Tested on: Ubuntu 22.04 LTS (Hetzner AX41-NVMe)
+# BNBScan — BSC Full Node Setup Script
+# Target:  Hetzner AX52 (2×960GB NVMe), Ubuntu 22.04
+# Snapshot: ~1.5TB pruned (needs ~2TB free) — takes 4-8 hours to download
+# Cost:    €65/mo — unlimited bandwidth, no egress fees
 #
-# What this does:
-#   1. Installs dependencies (aria2, jq, etc.)
-#   2. Downloads the latest BSC geth binary
-#   3. Fetches mainnet config.toml + genesis.json
-#   4. Downloads the latest pruned snapshot via aria2 (parallel, resumable)
-#   5. Extracts the snapshot to the data directory
-#   6. Sets up a systemd service (auto-start, auto-restart)
-#   7. Configures ufw firewall (P2P open, RPC restricted to your IP)
-#
-# Usage:
+# Usage (run as root on the Hetzner server):
 #   curl -sO https://raw.githubusercontent.com/heathermhuang/bnbscan/main/scripts/setup-bsc-node.sh
-#   chmod +x setup-bsc-node.sh
-#   sudo ./setup-bsc-node.sh
+#   bash setup-bsc-node.sh
 #
-# After setup, your RPC is at: http://<server-ip>:8545
-# Set BNB_RPC_URL=http://<server-ip>:8545 in Render env vars.
+# After setup:
+#   Set BNB_RPC_URL=http://<server-ip>:8545 in Render env vars
 # =============================================================================
-
 set -euo pipefail
 
-# --- Config ------------------------------------------------------------------
-BSC_VERSION="v1.4.15"          # Check latest: https://github.com/bnb-chain/bsc/releases
-BSC_DATA_DIR="/data/bsc"
-BSC_LOG_DIR="/var/log/bsc"
-BSC_USER="bsc"
+# ── Config — edit before running ─────────────────────────────────────────────
+DATA_DIR="/data/bsc"             # where chaindata lives (on your large NVMe)
+SNAP_DIR="/data/snapshot"        # temp dir for snapshot download (auto-deleted after extract)
+BSC_USER="bsc"                   # dedicated system user for the node process
 RPC_PORT="8545"
 P2P_PORT="30311"
 
-# Your Render outbound IPs — restrict RPC access to these only.
-# Find them: Render dashboard → your service → "Outbound IPs"
-# Leave empty ("") to allow all (less secure, ok for testing)
-ALLOWED_RPC_IPS=""  # e.g. "34.1.2.3 34.5.6.7"
+# Snapshot name — check latest at: https://github.com/bnb-chain/bsc-snapshots
+# Format: mainnet-geth-pbss-YYYYMMDD  (updated monthly by BNB Chain team)
+SNAPSHOT_NAME="mainnet-geth-pbss-20260306"
 
-# Snapshot URL — check the latest at: https://github.com/bnb-chain/bsc-snapshots
-# These rotate frequently. Get the current URL from the repo and paste it below.
-SNAPSHOT_URL=""  # e.g. "https://pub-c0627345c16f47ab858c9469133073a.r2.dev/geth-20240101.tar.gz"
+# Your Render outbound IPs — find at: Render dashboard → service → Outbound IPs
+# Space-separated. Leave empty to allow all (fine for private/testing nodes).
+RENDER_IPS=""   # e.g. "12.34.56.78 98.76.54.32"
 
-# --- Colors ------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[+]${NC} $*"; }
+# ── Colors ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+info()    { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-error()   { echo -e "${RED}[x]${NC} $*"; exit 1; }
+error()   { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+step()    { echo -e "\n${CYAN}━━━ $* ━━━${NC}"; }
 
-# --- Checks ------------------------------------------------------------------
-[[ $EUID -ne 0 ]] && error "Run as root: sudo ./setup-bsc-node.sh"
+[[ $EUID -ne 0 ]] && error "Run as root: sudo bash setup-bsc-node.sh"
 
-if [[ -z "$SNAPSHOT_URL" ]]; then
-  warn "SNAPSHOT_URL is not set."
-  warn "Get the latest URL from: https://github.com/bnb-chain/bsc-snapshots"
-  warn "Then set SNAPSHOT_URL at the top of this script and re-run."
-  warn ""
-  warn "Example URLs from the repo (may be outdated — always check GitHub):"
-  warn "  Pruned (recommended): https://pub-c0627345c16f47ab858c9469133073a.r2.dev/geth-*.tar.gz"
-  warn "  Full: larger, slower to download"
-  read -rp "Paste the snapshot URL now (or press Enter to skip snapshot download): " SNAPSHOT_URL
+# =============================================================================
+step "1/9 — Disk: merge two NVMe drives into one volume"
+# =============================================================================
+# Hetzner AX52 ships with 2×960GB NVMe. We stripe them together
+# for ~1.9TB of fast storage under /data.
+# Skip this step if /data is already mounted (e.g. re-running script).
+if ! mountpoint -q /data; then
+  # Find the two NVMe devices (usually nvme0n1 + nvme1n1)
+  NVME_DEVS=$(lsblk -dno NAME,TYPE | awk '$2=="disk" && $1~/nvme/{print "/dev/"$1}')
+  NVME_COUNT=$(echo "$NVME_DEVS" | wc -l)
+
+  if [[ $NVME_COUNT -ge 2 ]]; then
+    info "Found $NVME_COUNT NVMe drives — creating RAID-0 stripe for max throughput"
+    apt-get install -y -qq mdadm
+    DEVS_ARRAY=($NVME_DEVS)
+    # Create RAID-0 (stripe) — all space available, 2× read/write speed
+    mdadm --create --verbose /dev/md0 --level=0 --raid-devices=2 "${DEVS_ARRAY[@]}" --force <<< "yes" || true
+    mkfs.ext4 -F /dev/md0
+    mkdir -p /data
+    mount /dev/md0 /data
+    echo '/dev/md0 /data ext4 defaults,nofail 0 2' >> /etc/fstab
+    info "RAID-0 mounted at /data (~1.9TB)"
+  else
+    # Single drive fallback
+    SINGLE_DEV=$(echo "$NVME_DEVS" | head -1)
+    warn "Only 1 NVMe found — using $SINGLE_DEV directly"
+    mkfs.ext4 -F "$SINGLE_DEV"
+    mkdir -p /data
+    mount "$SINGLE_DEV" /data
+    echo "$SINGLE_DEV /data ext4 defaults,nofail 0 2" >> /etc/fstab
+  fi
+else
+  info "/data already mounted — skipping disk setup"
 fi
 
-# --- 1. System deps ----------------------------------------------------------
-info "Installing dependencies..."
+df -h /data
+
+# =============================================================================
+step "2/9 — Dependencies"
+# =============================================================================
 apt-get update -qq
 apt-get install -y -qq \
-  aria2 curl wget jq unzip tar \
-  ufw htop screen
+  curl wget aria2 unzip screen ufw fail2ban \
+  htop iotop nethogs lz4 jq git
+info "Dependencies installed"
 
-# --- 2. Disk setup -----------------------------------------------------------
-info "Setting up data directory at $BSC_DATA_DIR..."
-# If you have a second NVMe on Hetzner AX41 (/dev/nvme1n1), mount it first:
-# mkfs.ext4 /dev/nvme1n1 && mkdir -p /data && mount /dev/nvme1n1 /data
-# echo '/dev/nvme1n1 /data ext4 defaults 0 2' >> /etc/fstab
-# (Uncomment and run manually if needed before running this script)
-mkdir -p "$BSC_DATA_DIR" "$BSC_LOG_DIR"
+# =============================================================================
+step "3/9 — BSC user & directories"
+# =============================================================================
+if ! id "$BSC_USER" &>/dev/null; then
+  useradd -m -s /bin/bash -d "/home/$BSC_USER" "$BSC_USER"
+fi
 
-# --- 3. BSC user -------------------------------------------------------------
-info "Creating bsc system user..."
-id -u "$BSC_USER" &>/dev/null || useradd -r -s /bin/false -d "$BSC_DATA_DIR" "$BSC_USER"
-chown -R "$BSC_USER:$BSC_USER" "$BSC_DATA_DIR" "$BSC_LOG_DIR"
+mkdir -p "$DATA_DIR" "$SNAP_DIR" "/home/$BSC_USER/bsc"
+chown -R "$BSC_USER:$BSC_USER" "$DATA_DIR" "$SNAP_DIR" "/home/$BSC_USER/bsc"
+info "Directories ready"
 
-# --- 4. Download BSC binary --------------------------------------------------
-info "Downloading BSC geth binary ($BSC_VERSION)..."
-ARCH=$(uname -m)
-case $ARCH in
-  x86_64)  GETH_ARCH="linux-amd64" ;;
-  aarch64) GETH_ARCH="linux-arm64" ;;
-  *)       error "Unsupported architecture: $ARCH" ;;
-esac
+# =============================================================================
+step "4/9 — BSC geth binary"
+# =============================================================================
+BSC_DIR="/home/$BSC_USER/bsc"
+cd "$BSC_DIR"
 
-GETH_URL="https://github.com/bnb-chain/bsc/releases/download/${BSC_VERSION}/geth_${GETH_ARCH}"
-curl -fSL "$GETH_URL" -o /usr/local/bin/geth
-chmod +x /usr/local/bin/geth
+info "Fetching latest BSC release..."
+LATEST_API=$(curl -s https://api.github.com/repos/bnb-chain/bsc/releases/latest)
+GETH_URL=$(echo "$LATEST_API" | jq -r '.assets[].browser_download_url | select(test("geth_linux"))')
+MAINNET_URL=$(echo "$LATEST_API" | jq -r '.assets[].browser_download_url | select(test("mainnet.zip"))')
+BSC_TAG=$(echo "$LATEST_API" | jq -r '.tag_name')
 
-geth version | head -3
-info "geth installed at /usr/local/bin/geth"
+[[ -z "$GETH_URL" ]] && error "Could not find geth_linux download. Check https://github.com/bnb-chain/bsc/releases"
 
-# --- 5. Download mainnet config ----------------------------------------------
-info "Downloading mainnet config files..."
-CONFIG_DIR="$BSC_DATA_DIR/config"
-mkdir -p "$CONFIG_DIR"
+wget -q --show-progress -O geth "$GETH_URL"
+chmod +x geth
+info "Installed BSC geth $BSC_TAG: $(./geth version 2>&1 | head -1)"
 
-RELEASE_BASE="https://github.com/bnb-chain/bsc/releases/download/${BSC_VERSION}"
-curl -fSL "$RELEASE_BASE/mainnet.zip" -o /tmp/mainnet.zip
-unzip -o /tmp/mainnet.zip -d "$CONFIG_DIR"
+# Config files (genesis.json + config.toml)
+wget -q --show-progress -O mainnet.zip "$MAINNET_URL"
+unzip -o mainnet.zip && rm mainnet.zip
+[[ -f genesis.json ]] || error "genesis.json not found after unzip"
+[[ -f config.toml  ]] || error "config.toml not found after unzip"
+info "Config files ready: genesis.json  config.toml"
 
-# mainnet.zip extracts: config.toml, genesis.json
-GENESIS="$CONFIG_DIR/genesis.json"
-CONFIG_TOML="$CONFIG_DIR/config.toml"
-
-[[ -f "$GENESIS" ]]     || error "genesis.json not found after extraction"
-[[ -f "$CONFIG_TOML" ]] || error "config.toml not found after extraction"
-info "Config files ready."
-
-# --- 6. Patch config.toml for RPC + performance ------------------------------
-info "Patching config.toml..."
-
-# Enable HTTP RPC
-sed -i 's/^HTTPHost = .*/HTTPHost = "0.0.0.0"/' "$CONFIG_TOML"
-sed -i "s/^HTTPPort = .*/HTTPPort = $RPC_PORT/" "$CONFIG_TOML"
-# Allow standard ETH APIs
-grep -q 'HTTPModules' "$CONFIG_TOML" || \
-  echo 'HTTPModules = ["eth","net","web3","txpool","debug"]' >> "$CONFIG_TOML"
-
-# Pruning mode (saves ~40% disk vs full)
-grep -q 'NoPruning' "$CONFIG_TOML" || \
-  echo 'NoPruning = false' >> "$CONFIG_TOML"
-
-chown -R "$BSC_USER:$BSC_USER" "$CONFIG_DIR"
-
-# --- 7. Init genesis ---------------------------------------------------------
-CHAINDATA_DIR="$BSC_DATA_DIR/node/geth/chaindata"
-if [[ ! -d "$CHAINDATA_DIR" ]]; then
+# Init genesis (safe to re-run)
+if [[ ! -d "$DATA_DIR/geth/chaindata" ]]; then
   info "Initializing genesis block..."
-  sudo -u "$BSC_USER" geth \
-    --datadir "$BSC_DATA_DIR/node" \
-    init "$GENESIS"
-  info "Genesis initialized."
-else
-  info "Genesis already initialized — skipping."
+  sudo -u "$BSC_USER" "$BSC_DIR/geth" --datadir "$DATA_DIR" init "$BSC_DIR/genesis.json"
 fi
 
-# --- 8. Download + extract snapshot ------------------------------------------
-if [[ -n "$SNAPSHOT_URL" ]]; then
-  SNAP_FILE="/data/snapshot.tar.gz"
+chown -R "$BSC_USER:$BSC_USER" "$BSC_DIR"
 
-  if [[ ! -f "$SNAP_FILE" ]]; then
-    info "Downloading snapshot (this is ~400GB — will take hours)..."
-    info "URL: $SNAPSHOT_URL"
-    info "Using aria2 with 16 connections for max speed. Safe to Ctrl+C and resume."
-    aria2c \
-      --out="$SNAP_FILE" \
-      --continue=true \
-      --max-connection-per-server=16 \
-      --split=16 \
-      --min-split-size=100M \
-      --file-allocation=falloc \
-      --summary-interval=60 \
-      "$SNAPSHOT_URL"
-  else
-    info "Snapshot file already exists — skipping download."
-  fi
-
-  info "Extracting snapshot to $BSC_DATA_DIR/node..."
-  warn "This may take 30-60 minutes for a 400GB archive."
-  # BSC snapshots extract directly into the geth datadir
-  tar -xzvf "$SNAP_FILE" -C "$BSC_DATA_DIR/node" --strip-components=1 2>&1 | tail -5
-  chown -R "$BSC_USER:$BSC_USER" "$BSC_DATA_DIR/node"
-
-  info "Cleaning up snapshot archive..."
-  rm -f "$SNAP_FILE"
-  info "Snapshot extracted."
-else
-  warn "Skipping snapshot download — node will sync from scratch (takes weeks, not recommended)."
-fi
-
-# --- 9. Systemd service ------------------------------------------------------
-info "Creating systemd service..."
-cat > /etc/systemd/system/bsc-node.service <<EOF
+# =============================================================================
+step "5/9 — Systemd service"
+# =============================================================================
+cat > /etc/systemd/system/bsc-node.service << EOF
 [Unit]
 Description=BNB Smart Chain Full Node
-After=network.target
-Wants=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 User=$BSC_USER
 Group=$BSC_USER
-Type=simple
-Restart=always
+WorkingDirectory=$BSC_DIR
+Restart=on-failure
 RestartSec=10
+LimitNOFILE=65536
 KillSignal=SIGINT
-TimeoutStopSec=120
+TimeoutStopSec=300
 
-ExecStart=/usr/local/bin/geth \\
-  --config $CONFIG_TOML \\
-  --datadir $BSC_DATA_DIR/node \\
+ExecStart=$BSC_DIR/geth \\
+  --config $BSC_DIR/config.toml \\
+  --datadir $DATA_DIR \\
   --cache 8192 \\
+  --rpc.allow-unprotected-txs \\
+  --history.transactions 0 \\
+  --history.logs 576000 \\
+  --tries-verify-mode none \\
   --http \\
   --http.addr 0.0.0.0 \\
   --http.port $RPC_PORT \\
-  --http.api eth,net,web3,txpool \\
   --http.vhosts "*" \\
   --http.corsdomain "*" \\
-  --ws \\
-  --ws.addr 0.0.0.0 \\
-  --ws.port 8546 \\
-  --ws.api eth,net,web3 \\
-  --syncmode snap \\
-  --gcmode full \\
-  --maxpeers 50 \\
-  --txlookuplimit 0
+  --http.api eth,net,web3,txpool,debug \\
+  --maxpeers 50
 
-StandardOutput=append:$BSC_LOG_DIR/bsc.log
-StandardError=append:$BSC_LOG_DIR/bsc-error.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable bsc-node
-info "Systemd service created: bsc-node"
+# Note: NOT enabling yet — start after snapshot is extracted
+info "Systemd service written (will auto-start after snapshot download)"
 
-# --- 10. Firewall ------------------------------------------------------------
-info "Configuring firewall..."
+# =============================================================================
+step "6/9 — Firewall (UFW)"
+# =============================================================================
 ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 
-# SSH (don't lock yourself out!)
-ufw allow 22/tcp
+ufw allow 22/tcp    comment "SSH"
+ufw allow $P2P_PORT/tcp comment "BSC P2P"
+ufw allow $P2P_PORT/udp comment "BSC P2P"
 
-# P2P — open to all (required for peer discovery)
-ufw allow "$P2P_PORT/tcp"
-ufw allow "$P2P_PORT/udp"
-
-# RPC — restrict to Render IPs (or all if not set)
-if [[ -n "$ALLOWED_RPC_IPS" ]]; then
-  for IP in $ALLOWED_RPC_IPS; do
-    ufw allow from "$IP" to any port "$RPC_PORT" proto tcp
-    info "RPC allowed from $IP"
+if [[ -n "$RENDER_IPS" ]]; then
+  for ip in $RENDER_IPS; do
+    ufw allow from "$ip" to any port $RPC_PORT proto tcp comment "RPC - Render"
+    info "RPC allowed from $ip"
   done
 else
-  warn "No ALLOWED_RPC_IPS set — RPC port $RPC_PORT open to all. Set it after deploy!"
-  ufw allow "$RPC_PORT/tcp"
+  warn "No RENDER_IPS set — RPC port open to all. Update after deploy!"
+  ufw allow $RPC_PORT/tcp comment "BSC RPC (open - update later)"
 fi
 
+ufw allow from 127.0.0.1 to any port $RPC_PORT proto tcp comment "RPC - localhost"
 ufw --force enable
 ufw status verbose
+info "Firewall configured"
 
-# --- 11. Start node ----------------------------------------------------------
-info "Starting BSC node..."
+# =============================================================================
+step "7/9 — fail2ban"
+# =============================================================================
+cat > /etc/fail2ban/jail.local << 'EOF'
+[sshd]
+enabled  = true
+port     = ssh
+maxretry = 5
+bantime  = 3600
+findtime = 600
+EOF
+systemctl enable fail2ban --now
+info "fail2ban enabled"
+
+# =============================================================================
+step "8/9 — Snapshot download (runs in screen, ~4-8 hours)"
+# =============================================================================
+# Download official fetch-snapshot.sh from BNB Chain
+wget -q -O "$SNAP_DIR/fetch-snapshot.sh" \
+  https://raw.githubusercontent.com/bnb-chain/bsc-snapshots/main/dist/fetch-snapshot.sh
+chmod +x "$SNAP_DIR/fetch-snapshot.sh"
+
+# Write the download+start script
+cat > /home/$BSC_USER/run-snapshot.sh << SNAP
+#!/bin/bash
+set -e
+echo "════════════════════════════════════════"
+echo "  BSC Snapshot Download"
+echo "  Snapshot: $SNAPSHOT_NAME (pruned ~1.5TB)"
+echo "  Started:  \$(date)"
+echo "  Log:      /tmp/snapshot.log"
+echo "════════════════════════════════════════"
+
+cd $SNAP_DIR
+bash fetch-snapshot.sh -d -e -c -p --auto-delete \\
+  -D $SNAP_DIR \\
+  -E $DATA_DIR \\
+  $SNAPSHOT_NAME 2>&1 | tee /tmp/snapshot.log
+
+echo ""
+echo "════════════════════════════════════════"
+echo "  Snapshot done! Starting node..."
+echo "════════════════════════════════════════"
+chown -R $BSC_USER:$BSC_USER $DATA_DIR
+systemctl enable bsc-node
 systemctl start bsc-node
+echo "BSC node started. Check: journalctl -u bsc-node -f"
+SNAP
 
-sleep 3
-if systemctl is-active --quiet bsc-node; then
-  info "BSC node is running!"
+chmod +x /home/$BSC_USER/run-snapshot.sh
+chown "$BSC_USER:$BSC_USER" /home/$BSC_USER/run-snapshot.sh
+
+# Launch in detached screen session so it survives disconnection
+screen -dmS bsc-snapshot bash /home/$BSC_USER/run-snapshot.sh
+info "Snapshot download running in screen session 'bsc-snapshot'"
+
+# =============================================================================
+step "9/9 — Status helper"
+# =============================================================================
+cat > /usr/local/bin/bsc-status << 'HELPER'
+#!/bin/bash
+echo "════════════════════════════════════════"
+echo "  BSC Node — $(date)"
+echo "════════════════════════════════════════"
+
+echo ""
+echo "▸ SNAPSHOT DOWNLOAD:"
+if screen -ls 2>/dev/null | grep -q bsc-snapshot; then
+  echo "  In progress..."
+  tail -3 /tmp/snapshot.log 2>/dev/null || echo "  (starting...)"
 else
-  warn "Node didn't start. Check logs: journalctl -u bsc-node -f"
+  echo "  Complete (or not started)"
 fi
 
-# --- Done --------------------------------------------------------------------
-SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+echo ""
+echo "▸ NODE:"
+if systemctl is-active bsc-node &>/dev/null; then
+  SYNC=$(curl -sf -X POST http://localhost:8545 \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null)
+  if echo "$SYNC" | grep -q '"result":false'; then
+    echo "  ✓ Fully synced"
+  else
+    CURRENT=$(echo "$SYNC" | jq -r '.result.currentBlock // "?"' 2>/dev/null)
+    HIGHEST=$(echo "$SYNC" | jq -r '.result.highestBlock // "?"' 2>/dev/null)
+    echo "  Syncing: block $CURRENT / $HIGHEST"
+  fi
+else
+  echo "  Not running"
+fi
 
 echo ""
-echo -e "${GREEN}======================================================${NC}"
-echo -e "${GREEN}  BSC Node Setup Complete!${NC}"
-echo -e "${GREEN}======================================================${NC}"
+echo "▸ DISK:"
+df -h /data | tail -1
+
+echo ""
+echo "▸ RECENT LOGS:"
+journalctl -u bsc-node -n 5 --no-pager 2>/dev/null || echo "  (node not started)"
+
+echo ""
+echo "Commands:"
+echo "  screen -r bsc-snapshot     — watch snapshot download live"
+echo "  tail -f /tmp/snapshot.log  — snapshot log"
+echo "  journalctl -u bsc-node -f  — node logs"
+HELPER
+
+chmod +x /usr/local/bin/bsc-status
+
+# =============================================================================
+SERVER_IP=$(curl -sf ifconfig.me || hostname -I | awk '{print $1}')
+
+echo ""
+echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  Setup complete!                                 ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
+echo ""
+echo "  Snapshot: downloading in background (4-8 hours)"
+echo "  Node will auto-start when snapshot is done"
 echo ""
 echo "  RPC endpoint:  http://$SERVER_IP:$RPC_PORT"
-echo "  WS endpoint:   ws://$SERVER_IP:8546"
 echo ""
-echo "  Monitor logs:  journalctl -u bsc-node -f"
-echo "  Check sync:    curl -s -X POST http://localhost:$RPC_PORT \\"
-echo "                   -H 'Content-Type: application/json' \\"
-echo "                   -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}'"
+echo "  Monitor:  bsc-status"
 echo ""
-echo "  Next steps:"
+echo -e "${YELLOW}  Next steps after node is synced:${NC}"
 echo "  1. Set in Render env vars:"
 echo "     BNB_RPC_URL=http://$SERVER_IP:$RPC_PORT"
-echo "  2. Once synced, run backfill from Render Shell:"
-echo "     node dist/backfill.js 1 \$(curl -s http://localhost:$RPC_PORT ...)"
-echo "  3. Restrict RPC firewall to Render outbound IPs only (see ALLOWED_RPC_IPS)"
+echo "  2. Run backfill from Render Shell:"
+echo "     node dist/backfill.js 1 47800000 --skip-logs"
+echo "  3. Add your Render outbound IPs to RENDER_IPS in this script"
+echo "     and re-run to lock down the firewall"
 echo ""
-echo -e "${GREEN}======================================================${NC}"
