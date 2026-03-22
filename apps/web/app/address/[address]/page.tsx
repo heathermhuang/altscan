@@ -6,6 +6,26 @@ import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
+import type { Metadata } from 'next'
+import { getAddressLabel } from '@/lib/known-addresses'
+
+export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
+  const { address } = await params
+  let info: typeof schema.addresses.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
+    info = row ?? null
+  } catch { /* DB error */ }
+  const type = info?.isContract ? 'Contract' : 'Address'
+  return {
+    title: `${type} ${address.slice(0, 14)}… — BNBScan`,
+    description: `BNB Chain ${type.toLowerCase()} ${address} — Balance: ${formatBNB(BigInt((info?.balance ?? '0').split('.')[0]))} BNB, ${info?.txCount ?? 0} transactions`,
+    openGraph: {
+      title: `${type} ${address.slice(0, 14)}…`,
+      description: `Balance: ${formatBNB(BigInt((info?.balance ?? '0').split('.')[0]))} BNB`,
+    },
+  }
+}
 
 const PAGE_SIZE = 25
 
@@ -65,7 +85,9 @@ export default async function AddressPage({
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Address</h1>
         {addressInfo?.isContract && <Badge variant="default">Contract</Badge>}
-        {addressInfo?.label && <Badge variant="default">{addressInfo.label}</Badge>}
+        {(addressInfo?.label ?? getAddressLabel(addr)) && (
+          <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
+        )}
       </div>
 
       {/* Address + stats */}
@@ -145,6 +167,11 @@ export default async function AddressPage({
           label="Token Transfers"
         />
         <TabLink
+          href={`/address/${addr}?tab=holdings`}
+          active={activeTab === 'holdings'}
+          label="Holdings"
+        />
+        <TabLink
           href={`/address/${addr}?tab=analytics`}
           active={activeTab === 'analytics'}
           label="Analytics"
@@ -156,6 +183,7 @@ export default async function AddressPage({
         <TxnsTab addr={addr} page={page} total={txCount} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
+      {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
     </div>
   )
@@ -198,6 +226,18 @@ async function TxnsTab({
 
   return (
     <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm text-gray-500">
+          Transactions ({formatNumber(total)})
+        </p>
+        <a
+          href={`/api/v1/addresses/${addr}/export`}
+          className="text-xs text-yellow-600 hover:underline border border-yellow-400 rounded px-2 py-0.5"
+          download
+        >
+          ↓ Export CSV
+        </a>
+      </div>
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
@@ -367,6 +407,110 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
         perPage={PAGE_SIZE}
         baseUrl={`/address/${addr}?tab=transfers`}
       />
+    </div>
+  )
+}
+
+// ---- Holdings Tab ----
+
+type HoldingRow = { tokenAddress: string; balance: string; name: string | null; symbol: string | null; decimals: number | null }
+
+async function HoldingsTab({ addr }: { addr: string }) {
+  let holdings: HoldingRow[] = []
+
+  try {
+    const result = await db.execute(sql`
+      WITH inflows AS (
+        SELECT token_address, SUM(value::numeric) as total
+        FROM token_transfers WHERE to_address = ${addr} GROUP BY token_address
+      ),
+      outflows AS (
+        SELECT token_address, SUM(value::numeric) as total
+        FROM token_transfers WHERE from_address = ${addr} GROUP BY token_address
+      )
+      SELECT i.token_address,
+             (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
+      FROM inflows i
+      LEFT JOIN outflows o ON i.token_address = o.token_address
+      WHERE (COALESCE(i.total, 0) - COALESCE(o.total, 0)) > 0
+      ORDER BY (COALESCE(i.total, 0) - COALESCE(o.total, 0)) DESC
+      LIMIT 50
+    `)
+
+    const rows = Array.from(result) as Record<string, unknown>[]
+    // Fetch token info for each
+    holdings = await Promise.all(
+      rows.map(async (row) => {
+        const tokenAddress = String(row.token_address)
+        const balance = String(row.balance)
+        try {
+          const [tok] = await db.select({
+            name: schema.tokens.name,
+            symbol: schema.tokens.symbol,
+            decimals: schema.tokens.decimals,
+          }).from(schema.tokens).where(eq(schema.tokens.address, tokenAddress)).limit(1)
+          return {
+            tokenAddress,
+            balance,
+            name: tok?.name ?? null,
+            symbol: tok?.symbol ?? null,
+            decimals: tok?.decimals ?? null,
+          }
+        } catch {
+          return { tokenAddress, balance, name: null, symbol: null, decimals: null }
+        }
+      })
+    )
+  } catch {
+    // DB error
+  }
+
+  if (holdings.length === 0) {
+    return <p className="text-gray-500">No token holdings found for this address.</p>
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b">
+          <tr>
+            <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+            <th className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
+            <th className="text-left px-4 py-2 font-medium text-gray-500">Approx. Balance</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {holdings.map((h) => {
+            const displayBalance = (() => {
+              try {
+                if (h.decimals !== null) {
+                  const divisor = 10n ** BigInt(h.decimals)
+                  const whole = BigInt(h.balance) / divisor
+                  const frac = BigInt(h.balance) % divisor
+                  const fracStr = frac.toString().padStart(h.decimals, '0').slice(0, 4).replace(/0+$/, '')
+                  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
+                }
+                return h.balance.slice(0, 18)
+              } catch {
+                return h.balance.slice(0, 18)
+              }
+            })()
+            return (
+              <tr key={h.tokenAddress} className="hover:bg-gray-50">
+                <td className="px-4 py-2">
+                  <Link href={`/token/${h.tokenAddress}`} className="text-yellow-600 hover:underline font-medium">
+                    {h.name ?? h.tokenAddress.slice(0, 14) + '…'}
+                  </Link>
+                </td>
+                <td className="px-4 py-2 text-gray-600">{h.symbol ?? '—'}</td>
+                <td className="px-4 py-2">
+                  {displayBalance} {h.symbol ?? ''}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

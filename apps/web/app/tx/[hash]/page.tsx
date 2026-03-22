@@ -5,6 +5,28 @@ import { formatBNB, formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import Link from 'next/link'
+import type { Metadata } from 'next'
+import { decodeTx } from '@/lib/tx-decoder'
+import { getAddressLabel } from '@/lib/known-addresses'
+
+export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
+  const { hash } = await params
+  let tx: typeof schema.transactions.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash)).limit(1)
+    tx = row ?? null
+  } catch { /* DB error */ }
+  if (!tx) return { title: 'Transaction Not Found — BNBScan' }
+  const val = formatBNB(BigInt((tx.value ?? '0').split('.')[0]))
+  return {
+    title: `Tx ${hash.slice(0, 18)}… — BNBScan`,
+    description: `BNB Chain transaction: ${val} BNB from ${tx.fromAddress.slice(0, 12)}… to ${(tx.toAddress ?? 'contract creation').slice(0, 12)}…`,
+    openGraph: {
+      title: `Transaction ${hash.slice(0, 18)}…`,
+      description: `${val} BNB · Block #${tx.blockNumber} · ${tx.status ? '✅ Success' : '❌ Failed'}`,
+    },
+  }
+}
 
 async function resolveMethodName(methodId: string): Promise<string | null> {
   if (!methodId || methodId === '0x' || methodId.length < 10) return null
@@ -78,6 +100,45 @@ export default async function TxDetailPage({
   const hasInput = tx.input && tx.input !== '0x'
   const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(tx.input) : null
 
+  // Build transfer info for decoder (enrich with token symbol/decimals if available)
+  const transferInfos = await Promise.all(
+    transfers.map(async (t) => {
+      let tokenSymbol: string | undefined
+      let tokenDecimals: number | undefined
+      try {
+        const [tok] = await db.select({ symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
+          .from(schema.tokens)
+          .where(eq(schema.tokens.address, t.tokenAddress))
+          .limit(1)
+        if (tok) {
+          tokenSymbol = tok.symbol
+          tokenDecimals = tok.decimals
+        }
+      } catch { /* ignore */ }
+      return {
+        tokenAddress: t.tokenAddress,
+        fromAddress: t.fromAddress,
+        toAddress: t.toAddress,
+        value: t.value ?? '0',
+        tokenSymbol,
+        tokenDecimals,
+      }
+    })
+  )
+
+  const decoded = decodeTx(
+    {
+      hash: tx.hash,
+      fromAddress: tx.fromAddress,
+      toAddress: tx.toAddress,
+      value: tx.value ?? '0',
+      methodId: tx.methodId,
+      status: tx.status,
+      methodName,
+    },
+    transferInfos
+  )
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <div className="flex items-center gap-3 mb-6">
@@ -86,6 +147,13 @@ export default async function TxDetailPage({
           {tx.status ? 'Success' : 'Failed'}
         </Badge>
       </div>
+
+      {decoded && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+          <span className="text-2xl">{decoded.emoji}</span>
+          <p className="text-sm text-blue-800">{decoded.summary}</p>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
         <table className="w-full text-sm">
@@ -107,6 +175,7 @@ export default async function TxDetailPage({
               mono
               copy
               link={`/address/${tx.fromAddress}`}
+              addressLabel={getAddressLabel(tx.fromAddress)}
             />
             <Row
               label="To"
@@ -114,6 +183,7 @@ export default async function TxDetailPage({
               mono
               copy={!!tx.toAddress}
               link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
+              addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
             />
             <Row
               label="Value"
@@ -260,12 +330,14 @@ function Row({
   mono = false,
   copy = false,
   link,
+  addressLabel,
 }: {
   label: string
   value: string
   mono?: boolean
   copy?: boolean
   link?: string
+  addressLabel?: string | null
 }) {
   return (
     <tr>
@@ -279,6 +351,11 @@ function Row({
           value
         )}
         {copy && <CopyButton text={value} />}
+        {addressLabel && (
+          <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 border border-yellow-200 rounded px-1.5 py-0.5">
+            {addressLabel}
+          </span>
+        )}
       </td>
     </tr>
   )

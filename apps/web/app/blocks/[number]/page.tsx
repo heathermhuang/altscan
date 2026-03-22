@@ -5,6 +5,27 @@ import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import Link from 'next/link'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
+  const { number } = await params
+  const blockNumber = Number(number)
+  if (isNaN(blockNumber)) return { title: 'Block Not Found — BNBScan' }
+  let block: typeof schema.blocks.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber)).limit(1)
+    block = row ?? null
+  } catch { /* DB error */ }
+  if (!block) return { title: `Block #${formatNumber(blockNumber)} — BNBScan` }
+  return {
+    title: `Block #${formatNumber(blockNumber)} — BNBScan`,
+    description: `BNB Chain block #${formatNumber(blockNumber)} mined by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
+    openGraph: {
+      title: `Block #${formatNumber(blockNumber)}`,
+      description: `${block.txCount} transactions · Miner: ${block.miner.slice(0, 14)}…`,
+    },
+  }
+}
 
 export default async function BlockDetailPage({
   params,

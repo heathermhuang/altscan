@@ -14,6 +14,7 @@ export function Header() {
           <Link href="/token">Tokens</Link>
           <Link href="/dex">DEX</Link>
           <Link href="/charts">Charts</Link>
+          <Link href="/whales">Whales</Link>
           <Link href="/gas">Gas</Link>
           <Link href="/validators">Validators</Link>
           <Link href="/api-docs">API</Link>

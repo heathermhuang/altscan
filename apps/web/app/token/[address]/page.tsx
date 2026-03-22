@@ -6,6 +6,25 @@ import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
+  const { address } = await params
+  let token: typeof schema.tokens.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.tokens).where(eq(schema.tokens.address, address.toLowerCase())).limit(1)
+    token = row ?? null
+  } catch { /* DB error */ }
+  if (!token) return { title: 'Token Not Found — BNBScan' }
+  return {
+    title: `${token.name} (${token.symbol}) — BNBScan`,
+    description: `${token.name} (${token.symbol}) ${token.type} token on BNB Chain. ${token.holderCount.toLocaleString()} holders.`,
+    openGraph: {
+      title: `${token.name} (${token.symbol})`,
+      description: `${token.type} · ${token.holderCount.toLocaleString()} holders`,
+    },
+  }
+}
 
 export const revalidate = 60
 
