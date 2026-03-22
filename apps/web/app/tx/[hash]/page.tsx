@@ -6,6 +6,44 @@ import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import Link from 'next/link'
 
+async function resolveMethodName(methodId: string): Promise<string | null> {
+  if (!methodId || methodId === '0x' || methodId.length < 10) return null
+  try {
+    const res = await fetch(
+      `https://www.4byte.directory/api/v1/signatures/?hex_signature=${methodId}`,
+      { next: { revalidate: 86400 } },
+    )
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      results?: { text_signature: string }[]
+    }
+    return data.results?.[0]?.text_signature ?? null
+  } catch {
+    return null
+  }
+}
+
+function tryDecodeInputAsUtf8(input: string): string | null {
+  if (!input || input === '0x') return null
+  try {
+    const hex = input.startsWith('0x') ? input.slice(2) : input
+    if (hex.length === 0) return null
+    const bytes = Buffer.from(hex, 'hex')
+    const decoded = bytes.toString('utf8')
+    // Only return if it has enough printable characters (>50% printable)
+    const printableCount = decoded.split('').filter((c) => {
+      const code = c.charCodeAt(0)
+      return code >= 32 && code < 127
+    }).length
+    if (printableCount / decoded.length > 0.5 && printableCount > 3) {
+      return decoded
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export default async function TxDetailPage({
   params,
 }: {
@@ -13,21 +51,32 @@ export default async function TxDetailPage({
 }) {
   const { hash } = await params
 
-  const [tx] = await db.select().from(schema.transactions)
+  const [tx] = await db
+    .select()
+    .from(schema.transactions)
     .where(eq(schema.transactions.hash, hash))
 
   if (!tx) notFound()
 
-  const [txLogs, transfers] = await Promise.all([
-    db.select().from(schema.logs)
+  const [txLogs, transfers, methodName] = await Promise.all([
+    db
+      .select()
+      .from(schema.logs)
       .where(eq(schema.logs.txHash, hash))
       .limit(50),
-    db.select().from(schema.tokenTransfers)
+    db
+      .select()
+      .from(schema.tokenTransfers)
       .where(eq(schema.tokenTransfers.txHash, hash))
       .limit(25),
+    tx.methodId && tx.methodId !== '0x'
+      ? resolveMethodName(tx.methodId)
+      : Promise.resolve(null),
   ])
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
+  const hasInput = tx.input && tx.input !== '0x'
+  const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(tx.input) : null
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -70,10 +119,7 @@ export default async function TxDetailPage({
               label="Value"
               value={`${formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB`}
             />
-            <Row
-              label="Transaction Fee"
-              value={`${formatBNB(fee)} BNB`}
-            />
+            <Row label="Transaction Fee" value={`${formatBNB(fee)} BNB`} />
             <Row
               label="Gas Price"
               value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
@@ -82,12 +128,54 @@ export default async function TxDetailPage({
               label="Gas Used / Limit"
               value={`${formatNumber(Number(tx.gasUsed ?? 0))} / ${formatNumber(Number(tx.gas ?? 0))}`}
             />
-            {tx.methodId && (
-              <Row label="Method ID" value={tx.methodId} mono />
+            {tx.methodId && tx.methodId !== '0x' && (
+              <Row
+                label="Method"
+                value={
+                  methodName
+                    ? `${methodName} (${tx.methodId})`
+                    : tx.methodId
+                }
+                mono
+              />
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Input Data */}
+      {hasInput && (
+        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
+          <details>
+            <summary className="cursor-pointer font-semibold text-sm select-none list-none flex items-center gap-2 group">
+              <span className="group-open:rotate-90 transition-transform inline-block text-gray-400">
+                ▶
+              </span>
+              View Input Data
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">
+                  Hex
+                </p>
+                <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-auto max-h-48 break-all whitespace-pre-wrap">
+                  {tx.input}
+                </pre>
+              </div>
+              {decodedUtf8 && (
+                <div>
+                  <p className="text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">
+                    UTF-8 Decoded
+                  </p>
+                  <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-auto max-h-48 break-all whitespace-pre-wrap">
+                    {decodedUtf8}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
 
       {transfers.length > 0 && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
@@ -127,18 +215,30 @@ export default async function TxDetailPage({
           <h2 className="font-semibold mb-3">Event Logs ({txLogs.length})</h2>
           <div className="space-y-3">
             {txLogs.map((log, i) => (
-              <div key={i} className="bg-gray-50 rounded p-3 font-mono text-xs overflow-auto">
+              <div
+                key={i}
+                className="bg-gray-50 rounded p-3 font-mono text-xs overflow-auto"
+              >
                 <div>
                   <span className="text-gray-500">Address: </span>
-                  <Link href={`/address/${log.address}`} className="text-blue-600 hover:underline">
+                  <Link
+                    href={`/address/${log.address}`}
+                    className="text-blue-600 hover:underline"
+                  >
                     {log.address}
                   </Link>
                 </div>
                 {log.topic0 && (
-                  <div><span className="text-gray-500">Topic0: </span>{log.topic0}</div>
+                  <div>
+                    <span className="text-gray-500">Topic0: </span>
+                    {log.topic0}
+                  </div>
                 )}
                 {log.topic1 && (
-                  <div><span className="text-gray-500">Topic1: </span>{log.topic1}</div>
+                  <div>
+                    <span className="text-gray-500">Topic1: </span>
+                    {log.topic1}
+                  </div>
                 )}
                 <div>
                   <span className="text-gray-500">Data: </span>
@@ -172,7 +272,9 @@ function Row({
       <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">{label}</td>
       <td className={`px-6 py-3 break-all ${mono ? 'font-mono text-xs' : ''}`}>
         {link ? (
-          <Link href={link} className="text-blue-600 hover:underline">{value}</Link>
+          <Link href={link} className="text-blue-600 hover:underline">
+            {value}
+          </Link>
         ) : (
           value
         )}

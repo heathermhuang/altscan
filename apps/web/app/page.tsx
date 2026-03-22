@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc } from 'drizzle-orm'
+import { desc, count } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
@@ -10,11 +10,20 @@ export const revalidate = 10
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
+  let totalTxCount = 0
+  let totalTokenCount = 0
+
   try {
-    ;[latestBlocks, latestTxs] = await Promise.all([
+    const [blocksResult, txsResult, txCountResult, tokenCountResult] = await Promise.all([
       db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7),
       db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7),
+      db.select({ value: count() }).from(schema.transactions),
+      db.select({ value: count() }).from(schema.tokens),
     ])
+    latestBlocks = blocksResult
+    latestTxs = txsResult
+    totalTxCount = txCountResult[0]?.value ?? 0
+    totalTokenCount = tokenCountResult[0]?.value ?? 0
   } catch {
     // DB not connected — show empty state
   }
@@ -26,8 +35,8 @@ export default async function HomePage() {
       {/* Stats bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard label="Latest Block" value={latestBlock ? formatNumber(latestBlock.number) : '—'} />
-        <StatCard label="Total Transactions" value={formatNumber(latestTxs.length)} />
-        <StatCard label="BNB Price" value="See CoinGecko" />
+        <StatCard label="Total Transactions" value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'} />
+        <StatCard label="Total Tokens" value={totalTokenCount > 0 ? formatNumber(totalTokenCount) : '—'} />
         <StatCard label="Avg Block Time" value="~3s" />
       </div>
 

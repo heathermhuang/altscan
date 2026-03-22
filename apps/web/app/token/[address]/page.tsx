@@ -1,30 +1,79 @@
 import { db, schema } from '@/lib/db'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, count, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, formatAddress } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
+import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 
 export const revalidate = 60
 
+const PAGE_SIZE = 25
+
+type HolderRow = { addr: string; balance: string }
+
+async function fetchTopHolders(tokenAddr: string): Promise<HolderRow[]> {
+  try {
+    const result = await db.execute(sql`
+      WITH inflows AS (
+        SELECT to_address as addr, SUM(value::numeric) as total
+        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
+      ),
+      outflows AS (
+        SELECT from_address as addr, SUM(value::numeric) as total
+        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
+      )
+      SELECT i.addr, (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
+      FROM inflows i
+      LEFT JOIN outflows o ON i.addr = o.addr
+      WHERE (COALESCE(i.total, 0) - COALESCE(o.total, 0)) > 0
+      ORDER BY balance DESC
+      LIMIT 10
+    `)
+    return Array.from(result).map((row) => ({
+      addr: String((row as Record<string, unknown>).addr),
+      balance: String((row as Record<string, unknown>).balance),
+    }))
+  } catch {
+    return []
+  }
+}
+
 export default async function TokenDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ address: string }>
+  searchParams: Promise<{ page?: string }>
 }) {
   const { address } = await params
+  const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
+  const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
+  const offset = (page - 1) * PAGE_SIZE
 
-  const [token] = await db.select().from(schema.tokens)
+  const [token] = await db
+    .select()
+    .from(schema.tokens)
     .where(eq(schema.tokens.address, addr))
 
   if (!token) notFound()
 
-  const transfers = await db.select().from(schema.tokenTransfers)
-    .where(eq(schema.tokenTransfers.tokenAddress, addr))
-    .orderBy(desc(schema.tokenTransfers.blockNumber))
-    .limit(25)
+  const [transfers, [{ value: totalTransfers }], topHolders] = await Promise.all([
+    db
+      .select()
+      .from(schema.tokenTransfers)
+      .where(eq(schema.tokenTransfers.tokenAddress, addr))
+      .orderBy(desc(schema.tokenTransfers.blockNumber))
+      .limit(PAGE_SIZE)
+      .offset(offset),
+    db
+      .select({ value: count() })
+      .from(schema.tokenTransfers)
+      .where(eq(schema.tokenTransfers.tokenAddress, addr)),
+    fetchTopHolders(addr),
+  ])
 
   const displaySupply = (() => {
     try {
@@ -33,6 +82,15 @@ export default async function TokenDetailPage({
       return whole.toLocaleString()
     } catch {
       return (token.totalSupply ?? '0').slice(0, 20)
+    }
+  })()
+
+  // Compute total supply as BigInt for percentage calculation
+  const totalSupplyBig = (() => {
+    try {
+      return BigInt(token.totalSupply ?? '0')
+    } catch {
+      return 0n
     }
   })()
 
@@ -48,7 +106,9 @@ export default async function TokenDetailPage({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <p className="text-gray-500 text-xs mb-0.5">Contract</p>
-            <p className="font-mono text-xs">{addr.slice(0, 14)}…<CopyButton text={addr} /></p>
+            <p className="font-mono text-xs">
+              {addr.slice(0, 14)}…<CopyButton text={addr} />
+            </p>
           </div>
           <div>
             <p className="text-gray-500 text-xs mb-0.5">Decimals</p>
@@ -65,8 +125,80 @@ export default async function TokenDetailPage({
         </div>
       </div>
 
-      <h2 className="font-semibold mb-4">Token Transfers</h2>
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+      {/* Top Holders */}
+      {topHolders.length > 0 && (
+        <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
+          <div className="px-4 py-3 border-b">
+            <h2 className="font-semibold">Top Holders</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-2 text-gray-500 w-10">#</th>
+                <th className="text-left px-4 py-2 text-gray-500">Address</th>
+                <th className="text-left px-4 py-2 text-gray-500">
+                  Approx. Balance
+                </th>
+                <th className="text-left px-4 py-2 text-gray-500">
+                  % of Supply
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {topHolders.map((holder, i) => {
+                const holderAmount = (() => {
+                  try {
+                    const divisor = 10n ** BigInt(token.decimals)
+                    const whole = BigInt(holder.balance) / divisor
+                    return whole.toLocaleString()
+                  } catch {
+                    return holder.balance.slice(0, 12)
+                  }
+                })()
+                const pct = (() => {
+                  try {
+                    if (totalSupplyBig === 0n) return '—'
+                    const bal = BigInt(holder.balance)
+                    // Use integer math, scale by 10000 for 2 decimal places
+                    const scaled = (bal * 10000n) / totalSupplyBig
+                    return `${(Number(scaled) / 100).toFixed(2)}%`
+                  } catch {
+                    return '—'
+                  }
+                })()
+                return (
+                  <tr key={holder.addr} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-gray-400">{i + 1}</td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <Link
+                        href={`/address/${holder.addr}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {holder.addr}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      {holderAmount} {token.symbol}
+                    </td>
+                    <td className="px-4 py-2 text-gray-600">{pct}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Token Transfers */}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-semibold">
+          Token Transfers{' '}
+          <span className="text-gray-400 font-normal text-sm">
+            ({formatNumber(totalTransfers)} total)
+          </span>
+        </h2>
+      </div>
+      <div className="bg-white rounded-xl border shadow-sm overflow-hidden mb-4">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>
@@ -84,38 +216,67 @@ export default async function TokenDetailPage({
                   const divisor = 10n ** BigInt(token.decimals)
                   const whole = BigInt(t.value ?? '0') / divisor
                   const frac = BigInt(t.value ?? '0') % divisor
-                  const fracStr = frac.toString().padStart(token.decimals, '0').slice(0, 4).replace(/0+$/, '')
-                  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
-                } catch { return (t.value ?? '0').slice(0, 10) }
+                  const fracStr = frac
+                    .toString()
+                    .padStart(token.decimals, '0')
+                    .slice(0, 4)
+                    .replace(/0+$/, '')
+                  return fracStr
+                    ? `${whole.toLocaleString()}.${fracStr}`
+                    : whole.toLocaleString()
+                } catch {
+                  return (t.value ?? '0').slice(0, 10)
+                }
               })()
               return (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
+                    <Link
+                      href={`/tx/${t.txHash}`}
+                      className="text-yellow-600 hover:underline"
+                    >
                       {t.txHash.slice(0, 14)}…
                     </Link>
                   </td>
                   <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.fromAddress}`} className="text-blue-600 hover:underline">
-                      {t.fromAddress.slice(0, 12)}…
+                    <Link
+                      href={`/address/${t.fromAddress}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {formatAddress(t.fromAddress)}
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.toAddress}`} className="text-blue-600 hover:underline">
-                      {t.toAddress.slice(0, 12)}…
+                    <Link
+                      href={`/address/${t.toAddress}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {formatAddress(t.toAddress)}
                     </Link>
                   </td>
-                  <td className="px-4 py-2">{amount} {token.symbol}</td>
+                  <td className="px-4 py-2">
+                    {amount} {token.symbol}
+                  </td>
                 </tr>
               )
             })}
             {transfers.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No transfers yet.</td></tr>
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                  No transfers yet.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
+      <Pagination
+        page={page}
+        total={totalTransfers}
+        perPage={PAGE_SIZE}
+        baseUrl={`/token/${addr}`}
+      />
     </div>
   )
 }
