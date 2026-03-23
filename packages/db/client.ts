@@ -2,7 +2,13 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
 
-let _db: ReturnType<typeof drizzle> | null = null
+// Use globalThis so the singleton survives Next.js hot-module reloads in dev.
+// Without this, each HMR cycle creates a fresh postgres pool, exhausting
+// the "too many clients" limit on the database.
+const g = globalThis as typeof globalThis & {
+  __bnbscan_db?: ReturnType<typeof drizzle>
+  __bnbscan_sql?: postgres.Sql
+}
 
 /**
  * Returns the singleton Drizzle DB client.
@@ -10,7 +16,8 @@ let _db: ReturnType<typeof drizzle> | null = null
  * Subsequent calls ignore the argument and return the cached instance.
  */
 export function getDb() {
-  if (_db) return _db
+  if (g.__bnbscan_db) return g.__bnbscan_db
+
   const url = process.env.DATABASE_URL
   if (!url) {
     // In non-production, allow startup without a DB — queries will fail at request time,
@@ -20,13 +27,17 @@ export function getDb() {
     }
     console.warn('[bnbscan/db] DATABASE_URL not set — DB queries will fail at runtime')
     const sql = postgres('postgresql://localhost:5432/bnbscan', { max: 1, connect_timeout: 2 })
-    _db = drizzle(sql, { schema })
-    return _db
+    g.__bnbscan_sql = sql
+    g.__bnbscan_db = drizzle(sql, { schema })
+    return g.__bnbscan_db
   }
-  // max:20 — indexer runs 5 block workers + 10 log workers + web server connections
-  const sql = postgres(url, { max: 20 })
-  _db = drizzle(sql, { schema })
-  return _db
+
+  // max:5 for web app — leaves headroom for the indexer (max:10) within Render Standard's 25 connections.
+  // Total: web=5 + indexer=10 = 15 connections used, 10 available for tools and monitoring.
+  const sql = postgres(url, { max: 5 })
+  g.__bnbscan_sql = sql
+  g.__bnbscan_db = drizzle(sql, { schema })
+  return g.__bnbscan_db
 }
 
 export { schema }

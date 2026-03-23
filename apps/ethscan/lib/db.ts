@@ -29,7 +29,8 @@ function getEthDb() {
     return g.__ethscan_db
   }
 
-  const sql = postgres(url, { max: 10 })
+  // max:5 — leaves headroom for eth-indexer (max:10) within Render Standard's 25 connections.
+  const sql = postgres(url, { max: 5 })
   g.__ethscan_sql = sql
   g.__ethscan_db = drizzle(sql, { schema })
   return g.__ethscan_db

@@ -1,6 +1,7 @@
 import { JsonRpcProvider } from 'ethers'
 import { getDb, schema } from '@bnbscan/db'
 import { logQueue } from './queue'
+import { notifyWebhooks } from './webhook-notifier'
 
 const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
 
@@ -62,4 +63,13 @@ export async function processBlock(blockNumber: number, skipLogs = false) {
   }
 
   console.log(`[block-processor] Block ${block.number} — ${block.prefetchedTransactions.length} txs`)
+
+  // Deliver webhooks for this block's transactions (non-blocking — errors are logged internally)
+  if (!skipLogs && txValues.length > 0) {
+    notifyWebhooks(
+      txValues.map(tx => ({ hash: tx.hash, fromAddress: tx.fromAddress, toAddress: tx.toAddress, value: tx.value })),
+      block.number,
+      timestamp,
+    ).catch(err => console.error('[webhook-notifier] delivery error:', err))
+  }
 }
