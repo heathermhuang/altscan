@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { and, eq } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const { id } = await params
   const webhookId = parseInt(id, 10)

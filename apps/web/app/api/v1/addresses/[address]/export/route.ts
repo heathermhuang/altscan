@@ -1,13 +1,12 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ address: string }> }
 ) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return new Response('Rate limit exceeded', { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return new Response('Rate limit exceeded', { status: 429 })
 
   const { address } = await params
   const addr = address.toLowerCase()

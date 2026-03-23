@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { desc, count, eq } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
 export async function GET(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) {
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

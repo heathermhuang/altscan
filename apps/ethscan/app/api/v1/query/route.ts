@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, or, desc } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
 
@@ -23,8 +23,7 @@ type QueryBody = {
 }
 
 export async function POST(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   let body: QueryBody
   try {

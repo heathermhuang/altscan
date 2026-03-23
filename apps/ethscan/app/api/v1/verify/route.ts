@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { triggerSourcifyVerification } from '@/lib/verifier'
 
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function POST(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) {
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

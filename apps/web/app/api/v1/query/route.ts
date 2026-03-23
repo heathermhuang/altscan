@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, or, desc } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { authRequest } from '@/lib/api-auth'
+
+const ADDR = /^0x[0-9a-fA-F]{40}$/
+
+function validateAddr(v: unknown): string | null {
+  if (!v || typeof v !== 'string' || !ADDR.test(v)) return null
+  return v.toLowerCase()
+}
 
 type QueryBody = {
   entity: 'transactions' | 'blocks' | 'tokens' | 'token_transfers' | 'dex_trades'
@@ -21,22 +28,50 @@ type QueryBody = {
 }
 
 export async function POST(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  const auth = await authRequest(request)
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' },
+      { status: auth.reason === 'invalid_key' ? 401 : 429 }
+    )
+  }
 
-  const body = await request.json() as QueryBody
+  let body: QueryBody
+  try {
+    body = await request.json() as QueryBody
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
   const { entity, filter = {}, orderBy = 'desc', limit = 25, offset = 0 } = body
 
-  const safeLimit = Math.min(Math.max(1, limit), 100)
+  // Validate numeric params
+  const safeLimit = Math.min(Math.max(1, Number(limit) || 25), 100)
+  const safeOffset = Math.max(0, Number(offset) || 0)
+
+  // Validate address filters upfront
+  if (filter.address && !ADDR.test(filter.address)) {
+    return NextResponse.json({ error: 'Invalid filter.address' }, { status: 400 })
+  }
+  if (filter.from && !ADDR.test(filter.from)) {
+    return NextResponse.json({ error: 'Invalid filter.from' }, { status: 400 })
+  }
+  if (filter.to && !ADDR.test(filter.to)) {
+    return NextResponse.json({ error: 'Invalid filter.to' }, { status: 400 })
+  }
+  if (filter.tokenAddress && !ADDR.test(filter.tokenAddress)) {
+    return NextResponse.json({ error: 'Invalid filter.tokenAddress' }, { status: 400 })
+  }
 
   try {
     switch (entity) {
       case 'transactions': {
         const conditions = []
         if (filter.address) {
+          const a = filter.address.toLowerCase()
           conditions.push(or(
-            eq(schema.transactions.fromAddress, filter.address.toLowerCase()),
-            eq(schema.transactions.toAddress, filter.address.toLowerCase()),
+            eq(schema.transactions.fromAddress, a),
+            eq(schema.transactions.toAddress, a),
           )!)
         }
         if (filter.from) conditions.push(eq(schema.transactions.fromAddress, filter.from.toLowerCase()))
@@ -47,7 +82,7 @@ export async function POST(request: Request) {
 
         const q = db.select().from(schema.transactions)
           .orderBy(orderBy === 'asc' ? schema.transactions.blockNumber : desc(schema.transactions.blockNumber))
-          .limit(safeLimit).offset(offset)
+          .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return NextResponse.json({ entity, count: rows.length, data: rows })
       }
@@ -59,7 +94,7 @@ export async function POST(request: Request) {
 
         const q = db.select().from(schema.blocks)
           .orderBy(orderBy === 'asc' ? schema.blocks.number : desc(schema.blocks.number))
-          .limit(safeLimit).offset(offset)
+          .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return NextResponse.json({ entity, count: rows.length, data: rows })
       }
@@ -67,16 +102,17 @@ export async function POST(request: Request) {
       case 'tokens': {
         const rows = await db.select().from(schema.tokens)
           .orderBy(orderBy === 'asc' ? schema.tokens.holderCount : desc(schema.tokens.holderCount))
-          .limit(safeLimit).offset(offset)
+          .limit(safeLimit).offset(safeOffset)
         return NextResponse.json({ entity, count: rows.length, data: rows })
       }
 
       case 'token_transfers': {
         const conditions = []
         if (filter.address) {
+          const a = filter.address.toLowerCase()
           conditions.push(or(
-            eq(schema.tokenTransfers.fromAddress, filter.address.toLowerCase()),
-            eq(schema.tokenTransfers.toAddress, filter.address.toLowerCase()),
+            eq(schema.tokenTransfers.fromAddress, a),
+            eq(schema.tokenTransfers.toAddress, a),
           )!)
         }
         if (filter.from) conditions.push(eq(schema.tokenTransfers.fromAddress, filter.from.toLowerCase()))
@@ -87,7 +123,7 @@ export async function POST(request: Request) {
 
         const q = db.select().from(schema.tokenTransfers)
           .orderBy(orderBy === 'asc' ? schema.tokenTransfers.blockNumber : desc(schema.tokenTransfers.blockNumber))
-          .limit(safeLimit).offset(offset)
+          .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return NextResponse.json({ entity, count: rows.length, data: rows })
       }
@@ -101,7 +137,7 @@ export async function POST(request: Request) {
 
         const q = db.select().from(schema.dexTrades)
           .orderBy(orderBy === 'asc' ? schema.dexTrades.blockNumber : desc(schema.dexTrades.blockNumber))
-          .limit(safeLimit).offset(offset)
+          .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return NextResponse.json({ entity, count: rows.length, data: rows })
       }
@@ -109,7 +145,8 @@ export async function POST(request: Request) {
       default:
         return NextResponse.json({ error: 'Invalid entity. Use: transactions, blocks, tokens, token_transfers, dex_trades' }, { status: 400 })
     }
-  } catch (err) {
-    return NextResponse.json({ error: 'Query failed', detail: String(err) }, { status: 500 })
+  } catch {
+    // Do not leak DB error details to callers
+    return NextResponse.json({ error: 'Query failed' }, { status: 500 })
   }
 }

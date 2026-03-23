@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { checkRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import crypto from 'crypto'
 
 // GET: list webhooks for an owner
 export async function GET(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
@@ -31,8 +30,7 @@ export async function GET(request: Request) {
 
 // POST: register a new webhook
 export async function POST(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-  if (!checkRateLimit(ip)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const body = await request.json() as {
     ownerAddress: string
@@ -77,19 +75,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'eventTypes must contain at least one of: tx, token_transfer, new_block' }, { status: 400 })
   }
 
-  const secret = crypto.randomBytes(32).toString('hex')
+  // Generate raw secret, store SHA-256 hash in DB (same pattern as API keys).
+  // The raw secret is returned once and never stored — if the DB is compromised,
+  // the attacker cannot forge webhook signatures.
+  const rawSecret = crypto.randomBytes(32).toString('hex')
+  const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 
   const [created] = await db.insert(schema.webhooks).values({
     ownerAddress: ownerAddress.toLowerCase(),
     url,
     watchAddress: watchAddress?.toLowerCase(),
     eventTypes: sanitizedEvents,
-    secret,
+    secret: secretHash,
   }).returning()
 
   return NextResponse.json({
     id: created.id,
-    secret,
-    message: 'Webhook created. Keep the secret — it will not be shown again. EthScan will POST to your URL with an X-EthScan-Signature header (HMAC-SHA256 of the payload using your secret).',
+    secret: rawSecret,
+    message: 'Webhook created. Keep the secret — it will not be shown again. EthScan will POST to your URL with an X-EthScan-Signature header (HMAC-SHA256 of the payload using sha256(yourSecret) as the HMAC key).',
   }, { status: 201 })
 }
