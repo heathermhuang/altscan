@@ -5,9 +5,13 @@ import { processBlock } from './block-processor'
 import { processLogs } from './log-processor'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup } from './retention-cleanup'
+import { ensureSchema } from './ensure-schema'
 
 async function main() {
   console.log('[indexer] Starting BNBScan indexer...')
+
+  // Create tables if they don't exist yet (idempotent — safe on every restart)
+  await ensureSchema()
 
   // 90-day retention cleanup — runs once at startup then every 24h
   startRetentionCleanup()
