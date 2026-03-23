@@ -1,4 +1,4 @@
-import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index } from 'drizzle-orm/pg-core'
+import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, unique } from 'drizzle-orm/pg-core'
 
 export const tokenTypeEnum = pgEnum('token_type', ['BEP20', 'BEP721', 'BEP1155'])
 export const validatorStatusEnum = pgEnum('validator_status', ['active', 'inactive', 'jailed'])
@@ -68,6 +68,8 @@ export const tokenTransfers = pgTable('token_transfers', {
   toIdx:        index('tt_to_idx').on(t.toAddress),
   txIdx:        index('tt_tx_idx').on(t.txHash),
   blockIdx:     index('tt_block_idx').on(t.blockNumber),
+  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay
+  txLogUnique:  unique('tt_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
 export const tokens = pgTable('tokens', {
@@ -95,6 +97,8 @@ export const logs = pgTable('logs', {
 }, (t) => ({
   addressTopic0Idx: index('logs_address_topic0_idx').on(t.address, t.topic0),
   txIdx:            index('logs_tx_idx').on(t.txHash),
+  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay
+  txLogUnique:      unique('logs_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
 export const contracts = pgTable('contracts', {
@@ -145,3 +149,34 @@ export const gasHistory = pgTable('gas_history', {
   blockNumber:  bigint('block_number', { mode: 'number' }).notNull(),
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 })
+
+export const webhooks = pgTable('webhooks', {
+  id:               serial('id').primaryKey(),
+  ownerAddress:     varchar('owner_address', { length: 42 }).notNull(),
+  url:              text('url').notNull(),
+  watchAddress:     varchar('watch_address', { length: 42 }),
+  eventTypes:       text('event_types').array().notNull().default(['tx'] as string[]),
+  secret:           varchar('secret', { length: 64 }),
+  active:           boolean('active').notNull().default(true),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastTriggeredAt:  timestamp('last_triggered_at', { withTimezone: true }),
+  failCount:        integer('fail_count').notNull().default(0),
+}, (t) => ({
+  ownerIdx: index('webhooks_owner_idx').on(t.ownerAddress),
+  watchIdx:  index('webhooks_watch_idx').on(t.watchAddress),
+}))
+
+export const apiKeys = pgTable('api_keys', {
+  id:                 serial('id').primaryKey(),
+  keyHash:            varchar('key_hash', { length: 64 }).notNull().unique(),
+  keyPrefix:          varchar('key_prefix', { length: 12 }).notNull(),
+  label:              varchar('label', { length: 255 }),
+  ownerAddress:       varchar('owner_address', { length: 42 }),
+  requestsPerMinute:  integer('requests_per_minute').notNull().default(100),
+  totalRequests:      bigint('total_requests', { mode: 'number' }).notNull().default(0),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt:         timestamp('last_used_at', { withTimezone: true }),
+  active:             boolean('active').notNull().default(true),
+}, (t) => ({
+  ownerIdx: index('api_keys_owner_idx').on(t.ownerAddress),
+}))

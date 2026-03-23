@@ -6,8 +6,8 @@ interface BlockRow {
   timestamp: Date
   miner: string
   txCount: number
-  gasUsed: string | null
-  gasLimit: string | null
+  gasUsed: string | bigint | null
+  gasLimit: string | bigint | null
 }
 
 export function BlockTable({ blocks, compact = false }: {
