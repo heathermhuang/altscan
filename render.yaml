@@ -37,7 +37,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/ethscan
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/ethscan build
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/ethscan-web build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     autoDeploy: true
