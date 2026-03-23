@@ -1,11 +1,13 @@
 {
   "name": "@bnbscan/db",
   "version": "0.0.1",
-  "main": "./client.ts",
+  "main": "./dist/client.js",
+  "types": "./dist/client.d.ts",
   "exports": {
-    ".": { "default": "./client.ts" }
+    ".": { "default": "./dist/client.js", "types": "./dist/client.d.ts" }
   },
   "scripts": {
+    "build": "tsc",
     "migrate": "drizzle-kit migrate",
     "generate": "drizzle-kit generate"
   },

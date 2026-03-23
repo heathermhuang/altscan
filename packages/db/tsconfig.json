@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "declaration": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
     "outDir": "./dist"
   },
-  "include": ["schema.ts", "client.ts", "drizzle.config.ts"]
+  "include": ["schema.ts", "client.ts"]
 }

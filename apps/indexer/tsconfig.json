@@ -9,10 +9,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "paths": {
-      "@bnbscan/db": ["../../packages/db/client.ts"],
-      "@bnbscan/types": ["../../packages/types/index.ts"]
-    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

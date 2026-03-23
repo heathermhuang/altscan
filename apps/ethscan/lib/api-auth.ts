@@ -72,7 +72,7 @@ export async function requireApiKeyOwner(request: Request, owner: string): Promi
     )
 
     if (!row) return { ok: false, status: 401, error: 'Invalid or inactive API key' }
-    if (row.ownerAddress.toLowerCase() !== owner.toLowerCase()) {
+    if ((row.ownerAddress ?? '').toLowerCase() !== owner.toLowerCase()) {
       return { ok: false, status: 403, error: 'API key does not belong to this owner address' }
     }
   } catch {
