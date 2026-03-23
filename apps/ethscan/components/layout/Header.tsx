@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { SearchBar } from './SearchBar'
+import { NetworkSwitcher } from './NetworkSwitcher'
 
 const NAV_LINKS = [
   { href: '/blocks',   label: 'Blocks',          group: 'Explore' },
@@ -87,6 +88,9 @@ export function Header() {
             </div>
           </Link>
 
+          {/* Network switcher */}
+          <NetworkSwitcher />
+
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end">
             {DESKTOP_NAV.map(({ href, label }) => (
@@ -125,6 +129,9 @@ export function Header() {
       {/* ── Mobile menu panel ── */}
       {open && (
         <div className="md:hidden border-t border-white/10 bg-indigo-700">
+          <div className="max-w-7xl mx-auto px-4 pt-3 pb-1">
+            <NetworkSwitcher />
+          </div>
           <div className="max-w-7xl mx-auto px-4 py-4 space-y-5">
             {groups.map(group => (
               <div key={group}>
