@@ -1,12 +1,16 @@
 services:
+
+  # ── BNBScan.com — Next.js frontend ──────────────────────────────────────────
   - type: web
     name: bnbscan-web
     env: node
-    plan: free
+    plan: standard          # 1 GB RAM / 1 CPU — $25/mo
+    region: oregon
     rootDir: apps/web
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build && psql $DATABASE_URL -f schema.sql
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
+    autoDeploy: true
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -18,14 +22,46 @@ services:
           name: bnbscan-redis
           property: connectionString
       - key: BNB_RPC_URL
-        sync: false   # Set to your Ankr BNB endpoint: https://rpc.ankr.com/bsc/<YOUR_KEY>
+        sync: false         # Chainstack BSC endpoint — set in Render dashboard
+      - key: MORALIS_API_KEY
+        sync: false         # moralis.io — free tier sufficient to start
+      - key: NEXT_PUBLIC_PEER_URL
+        value: https://ethscan.io
       - key: NODE_ENV
         value: production
 
+  # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
+  - type: web
+    name: ethscan-web
+    env: node
+    plan: standard          # 1 GB RAM / 1 CPU — $25/mo
+    region: oregon
+    rootDir: apps/ethscan
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/ethscan build
+    startCommand: pnpm start
+    healthCheckPath: /api/v1/stats
+    autoDeploy: true
+    envVars:
+      - key: ETH_DATABASE_URL
+        fromDatabase:
+          name: ethscan-db
+          property: connectionString
+      - key: ETH_RPC_URL
+        sync: false         # Chainstack ETH endpoint — set in Render dashboard
+      - key: MORALIS_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_PEER_URL
+        value: https://bnbscan.com
+      - key: NODE_ENV
+        value: production
+
+  # ── BNB Chain Indexer ────────────────────────────────────────────────────────
+  # BullMQ with concurrency 15 — needs 1 GB RAM minimum
   - type: worker
     name: bnbscan-indexer
     env: node
-    plan: free
+    plan: standard          # 1 GB RAM / 1 CPU — $25/mo
+    region: oregon
     rootDir: apps/indexer
     buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
@@ -40,19 +76,53 @@ services:
           name: bnbscan-redis
           property: connectionString
       - key: BNB_RPC_URL
-        sync: false   # Set to your Ankr BNB endpoint: https://rpc.ankr.com/bsc/<YOUR_KEY>
+        sync: false
       - key: START_BLOCK
-        sync: false   # Block to start indexing from on a fresh DB (leave unset to use DB max or 38000000)
+        sync: false         # Leave unset to resume from DB max (default 38000000)
       - key: NODE_ENV
         value: production
 
+  # ── Ethereum Indexer ─────────────────────────────────────────────────────────
+  # Simple polling loop — 512 MB is sufficient
+  - type: worker
+    name: eth-indexer
+    env: node
+    plan: starter           # 512 MB RAM / 0.5 CPU — $7/mo
+    region: oregon
+    rootDir: apps/eth-indexer
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/eth-indexer build
+    startCommand: node dist/index.js
+    envVars:
+      - key: ETH_DATABASE_URL
+        fromDatabase:
+          name: ethscan-db
+          property: connectionString
+      - key: ETH_RPC_URL
+        sync: false
+      - key: START_BLOCK
+        sync: false         # Leave unset to start from chain tip - 1000
+      - key: NODE_ENV
+        value: production
+
+  # ── Redis (shared BullMQ queue for BNB indexer) ───────────────────────────
   - type: redis
     name: bnbscan-redis
-    plan: free
-    ipAllowList: []
+    plan: starter           # 25 MB — sufficient for BullMQ job queues — $10/mo
+    ipAllowList: []         # private networking only
 
 databases:
+
+  # ── BNB Chain PostgreSQL ──────────────────────────────────────────────────
+  # BNB grows ~12-15 GB/month — start on standard, upgrade to pro at ~20 GB
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: free
+    plan: standard          # 1 GB RAM, 25 GB storage — $20/mo
+                            # Upgrade to pro ($97) at ~month 2 when storage fills
+
+  # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
+  # ETH grows ~6-8 GB/month — standard holds for 3-4 months
+  - name: ethscan-db
+    databaseName: ethscan
+    user: ethscan
+    plan: standard          # 1 GB RAM, 25 GB storage — $20/mo

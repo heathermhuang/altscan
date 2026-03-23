@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
@@ -98,8 +98,16 @@ export default async function HomePage() {
         </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Latest Block" value={latestBlock ? formatNumber(latestBlock.number) : '—'} />
-        <StatCard label="Total Transactions" value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'} />
+        <StatCard
+          label="Latest Block"
+          value={latestBlock ? formatNumber(latestBlock.number) : '—'}
+          subtext={latestBlock ? timeAgo(new Date(latestBlock.timestamp)) : null}
+        />
+        <StatCard
+          label="Total Transactions"
+          value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'}
+          subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
+        />
         <StatCard label="Total Tokens" value={totalTokenCount > 0 ? formatNumber(totalTokenCount) : '—'} />
         <StatCard
           label="ETH Price"

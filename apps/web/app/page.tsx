@@ -1,12 +1,12 @@
 import { db, schema } from '@/lib/db'
-import { desc, count } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 
-export const revalidate = 5
+export const revalidate = 10
 
 async function fetchBNBPrice(): Promise<{ usd: number; change24h: number } | null> {
   try {
@@ -25,6 +25,21 @@ async function fetchBNBPrice(): Promise<{ usd: number; change24h: number } | nul
   }
 }
 
+// Use pg_class.reltuples for instant approximate row counts.
+// COUNT(*) on 36M+ rows can take minutes — reltuples is updated by ANALYZE and
+// is accurate within ~1-2% for large tables. Good enough for a stats bar.
+async function fetchTableEstimate(tableName: string): Promise<number> {
+  try {
+    const result = await db.execute(
+      sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = ${tableName}`
+    )
+    const rows = Array.from(result)
+    return Number((rows[0] as Record<string, unknown>)?.estimate ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
@@ -34,15 +49,15 @@ export default async function HomePage() {
   const [blocksResult, txsResult, txCountResult, tokenCountResult, bnbPrice] = await Promise.all([
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
-    db.select({ value: count() }).from(schema.transactions).catch(() => [{ value: 0 }]),
-    db.select({ value: count() }).from(schema.tokens).catch(() => [{ value: 0 }]),
+    fetchTableEstimate('transactions'),
+    fetchTableEstimate('tokens'),
     fetchBNBPrice(),
   ])
 
   latestBlocks = blocksResult
   latestTxs = txsResult
-  totalTxCount = (txCountResult as { value: number }[])[0]?.value ?? 0
-  totalTokenCount = (tokenCountResult as { value: number }[])[0]?.value ?? 0
+  totalTxCount = typeof txCountResult === 'number' ? txCountResult : 0
+  totalTokenCount = typeof tokenCountResult === 'number' ? tokenCountResult : 0
 
   const latestBlock = latestBlocks[0]
 
@@ -86,8 +101,16 @@ export default async function HomePage() {
         </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Latest Block" value={latestBlock ? formatNumber(latestBlock.number) : '—'} />
-        <StatCard label="Total Transactions" value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'} />
+        <StatCard
+          label="Latest Block"
+          value={latestBlock ? formatNumber(latestBlock.number) : '—'}
+          subtext={latestBlock ? timeAgo(new Date(latestBlock.timestamp)) : null}
+        />
+        <StatCard
+          label="Total Transactions"
+          value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'}
+          subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
+        />
         <StatCard label="Total Tokens" value={totalTokenCount > 0 ? formatNumber(totalTokenCount) : '—'} />
         <StatCard
           label="BNB Price"

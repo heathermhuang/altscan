@@ -4,7 +4,9 @@ import { notFound } from 'next/navigation'
 import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
+import Link from 'next/link'
 import type { Metadata } from 'next'
+import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const { number } = await params
@@ -36,14 +38,23 @@ export default async function BlockDetailPage({
 
   if (isNaN(blockNumber)) notFound()
 
-  const [block] = await db.select().from(schema.blocks)
-    .where(eq(schema.blocks.number, blockNumber))
+  let dbBlock: typeof schema.blocks.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber))
+    dbBlock = row ?? null
+  } catch { /* DB error — fall through to RPC */ }
 
+  const rpcBlock: RpcBlock | null = !dbBlock ? await fetchBlockFromRpc(blockNumber) : null
+  const block = dbBlock ?? rpcBlock
   if (!block) notFound()
 
-  const txs = await db.select().from(schema.transactions)
-    .where(eq(schema.transactions.blockNumber, blockNumber))
-    .limit(50)
+  const fromRpc = !dbBlock && !!rpcBlock
+
+  const txs = fromRpc
+    ? []
+    : await db.select().from(schema.transactions)
+        .where(eq(schema.transactions.blockNumber, blockNumber))
+        .limit(50)
 
   const gasUsedPct = block.gasUsed && block.gasLimit
     ? ((Number(block.gasUsed) / Number(block.gasLimit)) * 100).toFixed(2)
@@ -80,10 +91,34 @@ export default async function BlockDetailPage({
         </table>
       </div>
 
+      {fromRpc && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 flex items-center gap-2 text-sm text-amber-800">
+          <span>⚡</span>
+          <span>Block fetched live from Ethereum — predates our index. Click any transaction hash below to view details.</span>
+        </div>
+      )}
+
       <h2 className="text-lg font-semibold mb-4">
-        Transactions ({txs.length}{txs.length === 50 ? '+' : ''})
+        Transactions ({fromRpc ? (rpcBlock?.txHashes.length ?? 0) : txs.length}{!fromRpc && txs.length === 50 ? '+' : ''})
       </h2>
-      {txs.length > 0 ? (
+      {fromRpc && rpcBlock && rpcBlock.txHashes.length > 0 ? (
+        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr><th className="text-left px-4 py-2 text-gray-500">Transaction Hash</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {rpcBlock.txHashes.slice(0, 50).map(h => (
+                <tr key={h} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-mono text-xs">
+                    <Link href={`/tx/${h}`} className="text-indigo-600 hover:underline">{h}</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : txs.length > 0 ? (
         <TxTable txs={txs} />
       ) : (
         <p className="text-gray-500">No transactions in this block.</p>

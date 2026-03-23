@@ -38,7 +38,7 @@ const NETWORKS = [
   },
 ]
 
-export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | 'up' }) {
+export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { direction?: 'down' | 'up'; theme?: 'header' | 'footer' }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
@@ -58,14 +58,18 @@ export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | '
     <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/15 hover:bg-black/25 transition-colors text-[12px] font-semibold text-black border border-black/15"
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-colors text-[12px] font-semibold border ${
+          theme === 'footer'
+            ? 'bg-white/15 hover:bg-white/25 text-white border-white/20'
+            : 'bg-black/15 hover:bg-black/25 text-black border-black/15'
+        }`}
         aria-label="Switch network"
         aria-expanded={open}
       >
         <span className={`w-2 h-2 rounded-full ${current.dot} shrink-0`} />
         {current.short}
         <svg
-          className={`w-3 h-3 text-black/50 transition-transform duration-150 ${chevronOpen ? 'rotate-180' : ''}`}
+          className={`w-3 h-3 transition-transform duration-150 ${chevronOpen ? 'rotate-180' : ''} ${theme === 'footer' ? 'text-white/70' : 'text-black/50'}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

@@ -3,6 +3,22 @@ import { desc, eq } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatNumber } from '@/lib/format'
 
+/** Format a raw token supply string into a human-readable number by dividing by 10^decimals. */
+function formatSupply(raw: string, decimals: number): string {
+  try {
+    const divisor = 10n ** BigInt(decimals)
+    const whole = BigInt(raw.split('.')[0]) / divisor
+    // Abbreviate large numbers: T, B, M, K
+    const n = Number(whole)
+    if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`
+    if (n >= 1e9)  return `${(n / 1e9).toFixed(2)}B`
+    if (n >= 1e6)  return `${(n / 1e6).toFixed(2)}M`
+    return whole.toLocaleString()
+  } catch {
+    return raw.slice(0, 12) + (raw.length > 12 ? '…' : '')
+  }
+}
+
 export const revalidate = 60
 
 export default async function TokenListPage() {
@@ -39,8 +55,8 @@ export default async function TokenListPage() {
                 </td>
                 <td className="px-4 py-2 text-gray-500">{t.symbol}</td>
                 <td className="px-4 py-2">{formatNumber(t.holderCount)}</td>
-                <td className="px-4 py-2 font-mono text-xs text-gray-500">
-                  {t.totalSupply.slice(0, 20)}{t.totalSupply.length > 20 ? '…' : ''}
+                <td className="px-4 py-2 text-gray-600">
+                  {formatSupply(t.totalSupply, t.decimals)}
                 </td>
               </tr>
             ))}

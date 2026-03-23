@@ -34,13 +34,23 @@ export default async function WhalesPage({
   const { period: periodParam } = await searchParams
   const period = ['1h', '24h', '7d', 'all'].includes(periodParam ?? '') ? (periodParam as string) : '24h'
 
+  // Compute cutoff relative to the most recently indexed data, not NOW().
+  // This ensures filters work even when the indexer is behind real-time.
+  // "All Time" uses null (no cutoff) which is always correct.
+  const maxTimestamp: Date | null = await db
+    .select({ max: sql<Date>`MAX(timestamp)` })
+    .from(schema.tokenTransfers)
+    .then(r => r[0]?.max ?? null)
+    .catch(() => null)
+
+  const base = maxTimestamp ? new Date(maxTimestamp) : new Date()
   const cutoff =
     period === '1h'
-      ? new Date(Date.now() - 3600000)
+      ? new Date(base.getTime() - 3600000)
       : period === '24h'
-      ? new Date(Date.now() - 86400000)
+      ? new Date(base.getTime() - 86400000)
       : period === '7d'
-      ? new Date(Date.now() - 7 * 86400000)
+      ? new Date(base.getTime() - 7 * 86400000)
       : null
 
   let whales: WhaleTransfer[] = []
@@ -139,22 +149,22 @@ export default async function WhalesPage({
             {whales.map((w) => {
               const displayAmount = (() => {
                 try {
-                  if (w.tokenDecimals !== null) {
-                    const divisor = 10n ** BigInt(w.tokenDecimals)
-                    const whole = BigInt(w.value) / divisor
-                    const frac = BigInt(w.value) % divisor
-                    const fracStr = frac
-                      .toString()
-                      .padStart(w.tokenDecimals, '0')
-                      .slice(0, 2)
-                      .replace(/0+$/, '')
-                    return fracStr
-                      ? `${whole.toLocaleString()}.${fracStr}`
-                      : whole.toLocaleString()
-                  }
-                  return w.value.slice(0, 18)
+                  // Use known decimals, or fall back to 18 (standard ERC20)
+                  const decimals = w.tokenDecimals ?? 18
+                  const divisor = 10n ** BigInt(decimals)
+                  const raw = BigInt(w.value.split('.')[0])
+                  const whole = raw / divisor
+                  const frac = raw % divisor
+                  const fracStr = frac
+                    .toString()
+                    .padStart(decimals, '0')
+                    .slice(0, 4)
+                    .replace(/0+$/, '')
+                  return fracStr
+                    ? `${whole.toLocaleString()}.${fracStr}`
+                    : whole.toLocaleString()
                 } catch {
-                  return w.value.slice(0, 18)
+                  return '—'
                 }
               })()
 

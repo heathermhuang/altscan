@@ -8,6 +8,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
+import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
@@ -73,24 +74,21 @@ export default async function TxDetailPage({
 }) {
   const { hash } = await params
 
-  const [tx] = await db
-    .select()
-    .from(schema.transactions)
-    .where(eq(schema.transactions.hash, hash))
+  let dbTx: typeof schema.transactions.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash))
+    dbTx = row ?? null
+  } catch { /* DB error — fall through to RPC */ }
 
+  const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
+  const tx = dbTx ?? rpcTx
   if (!tx) notFound()
 
+  const fromRpc = !dbTx && !!rpcTx
+
   const [txLogs, transfers, methodName] = await Promise.all([
-    db
-      .select()
-      .from(schema.logs)
-      .where(eq(schema.logs.txHash, hash))
-      .limit(50),
-    db
-      .select()
-      .from(schema.tokenTransfers)
-      .where(eq(schema.tokenTransfers.txHash, hash))
-      .limit(25),
+    fromRpc ? Promise.resolve([]) : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50),
+    fromRpc ? Promise.resolve([]) : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25),
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
@@ -148,6 +146,13 @@ export default async function TxDetailPage({
         </Badge>
       </div>
 
+      {fromRpc && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
+          <span>⚡</span>
+          <span>Fetched live from BNB Chain — this transaction predates our index. Token transfer details are not available.</span>
+        </div>
+      )}
+
       {decoded && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
           <span className="text-2xl">{decoded.emoji}</span>
@@ -196,7 +201,15 @@ export default async function TxDetailPage({
             />
             <Row
               label="Gas Used / Limit"
-              value={`${formatNumber(Number(tx.gasUsed ?? 0))} / ${formatNumber(Number(tx.gas ?? 0))}`}
+              value={(() => {
+                // Guard against Long.MAX_VALUE sentinel (9223372036854775807) from indexer overflow
+                const MAX_REASONABLE_GAS = 50_000_000n
+                const gasUsed = BigInt(tx.gasUsed ?? 0)
+                const gasLimit = BigInt(tx.gas ?? 0)
+                const usedStr = gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'
+                const limitStr = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'
+                return `${usedStr} / ${limitStr}`
+              })()}
             />
             {tx.methodId && tx.methodId !== '0x' && (
               <Row

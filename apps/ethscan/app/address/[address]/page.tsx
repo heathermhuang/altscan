@@ -9,6 +9,9 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
+import { resolveEns } from '@/lib/ens'
+import { getAddressRisk } from '@/lib/goplus'
+import { getWalletHistory, getNfts } from '@/lib/moralis'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
@@ -64,13 +67,39 @@ export default async function AddressPage({
     // DB not connected
   }
 
+  const [ensName, riskData] = await Promise.all([
+    resolveEns(addr),
+    getAddressRisk(addr),
+  ])
+
   const activeTab = tab ?? 'txns'
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* GoPlus risk warning */}
+      {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+          <span className="text-lg mt-0.5">🚨</span>
+          <div>
+            <p className="font-semibold text-red-800 text-sm">Security Risk Detected</p>
+            <ul className="mt-1 space-y-0.5">
+              {riskData.riskItems.map(item => (
+                <li key={item} className="text-xs text-red-700">• {item}</li>
+              ))}
+            </ul>
+            <p className="text-xs text-red-500 mt-1">Source: GoPlus Security</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Address</h1>
+        {ensName && (
+          <Badge variant="default">
+            <span>🪪</span> {ensName}
+          </Badge>
+        )}
         {addressInfo?.isContract && <Badge variant="default">Contract</Badge>}
         {(addressInfo?.label ?? getAddressLabel(addr)) && (
           <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
@@ -169,6 +198,49 @@ async function TxnsTab({ addr, page, total }: { addr: string; page: number; tota
   } catch { /* DB error */ }
 
   if (txs.length === 0 && page === 1) {
+    const moralis = await getWalletHistory(addr)
+    if (moralis && moralis.txs.length > 0) {
+      return (
+        <div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
+            <span>📡</span>
+            <span>Showing full transaction history from Moralis — this address has activity before our index.</span>
+          </div>
+          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Summary</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Value (ETH)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {moralis.txs.map(tx => (
+                  <tr key={tx.hash} className={`hover:bg-gray-50 ${tx.possibleSpam ? 'opacity-50' : ''}`}>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <Link href={`/tx/${tx.hash}`} className="text-indigo-600 hover:underline">
+                        {tx.hash.slice(0, 14)}…
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">
+                      {new Date(tx.blockTimestamp).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-2 text-gray-700 text-xs max-w-xs truncate">
+                      {tx.summary || tx.category}
+                    </td>
+                    <td className="px-4 py-2 text-xs">
+                      {(Number(tx.value) / 1e18).toFixed(6)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    }
     return <p className="text-gray-500">No transactions found for this address.</p>
   }
 

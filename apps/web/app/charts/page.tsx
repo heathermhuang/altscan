@@ -10,7 +10,7 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
     const result = await db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date, COUNT(*)::int as value
       FROM transactions
-      WHERE timestamp >= NOW() - INTERVAL '30 days'
+      WHERE timestamp >= (SELECT MAX(timestamp) FROM transactions) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `)
@@ -29,7 +29,7 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
              AVG(standard::numeric / 1e9)::numeric(18,4) as value
       FROM gas_history
-      WHERE timestamp >= NOW() - INTERVAL '30 days'
+      WHERE timestamp >= (SELECT MAX(timestamp) FROM gas_history) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `)
@@ -42,13 +42,16 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
   }
 }
 
-async function fetchDailyActiveAddresses(): Promise<DataPoint[]> {
+// COUNT(DISTINCT from_address) on 36M rows is too slow for an on-demand query.
+// Use daily block count from the much smaller blocks table (272K rows → instant)
+// as a useful proxy metric. Rename chart accordingly.
+async function fetchDailyBlockCount(): Promise<DataPoint[]> {
   try {
     const result = await db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
-             COUNT(DISTINCT from_address)::int as value
-      FROM transactions
-      WHERE timestamp >= NOW() - INTERVAL '30 days'
+             COUNT(*)::int as value
+      FROM blocks
+      WHERE timestamp >= (SELECT MAX(timestamp) FROM blocks) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `)
@@ -62,10 +65,10 @@ async function fetchDailyActiveAddresses(): Promise<DataPoint[]> {
 }
 
 export default async function ChartsPage() {
-  const [txData, gasData, addressData] = await Promise.all([
+  const [txData, gasData, blockData] = await Promise.all([
     fetchDailyTxCount(),
     fetchDailyGasHistory(),
-    fetchDailyActiveAddresses(),
+    fetchDailyBlockCount(),
   ])
 
   return (
@@ -89,10 +92,10 @@ export default async function ChartsPage() {
           />
         </ChartCard>
 
-        <ChartCard title="Active Addresses (Last 30 Days)">
+        <ChartCard title="Daily Block Count (Last 30 Days)">
           <LineChart
-            data={addressData}
-            label="Active Addresses"
+            data={blockData}
+            label="Blocks"
             formatY={(n) => n.toLocaleString()}
           />
         </ChartCard>
