@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { authRequest } from '@/lib/api-auth'
 import crypto from 'crypto'
 
 // GET: list keys for an address
 export async function GET(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  const auth = await authRequest(request)
+  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
@@ -30,7 +31,8 @@ export async function GET(request: Request) {
 
 // POST: generate a new API key
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  const auth = await authRequest(request)
+  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
 
   const body = await request.json() as { ownerAddress: string; label?: string }
   const { ownerAddress, label } = body

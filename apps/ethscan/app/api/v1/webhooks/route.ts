@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 
-// GET: list webhooks for an owner
+// GET: list webhooks for an owner — requires X-API-Key matching ownerAddress
 export async function GET(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
-
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
   if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
+
+  const ownerAuth = await requireApiKeyOwner(request, owner)
+  if (!ownerAuth.ok) return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status })
 
   const webhooks = await db.select({
     id: schema.webhooks.id,
@@ -30,7 +31,8 @@ export async function GET(request: Request) {
 
 // POST: register a new webhook
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  const auth = await authRequest(request)
+  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
 
   const body = await request.json() as {
     ownerAddress: string

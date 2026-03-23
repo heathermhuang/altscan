@@ -1,24 +1,25 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { and, eq } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { requireApiKeyOwner } from '@/lib/api-auth'
 
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
-
   const { id } = await params
   const webhookId = parseInt(id, 10)
   if (isNaN(webhookId)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
 
-  // Require ownerAddress to prevent unauthorized deletion
+  // Require ownerAddress + matching API key to prevent unauthorized deletion
   const { searchParams } = new URL(request.url)
   const ownerAddress = searchParams.get('ownerAddress')?.toLowerCase()
   if (!ownerAddress || !/^0x[0-9a-f]{40}$/i.test(ownerAddress)) {
     return NextResponse.json({ error: 'ownerAddress query param required' }, { status: 400 })
   }
+
+  const ownerAuth = await requireApiKeyOwner(request, ownerAddress)
+  if (!ownerAuth.ok) return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status })
 
   const deleted = await db.delete(schema.webhooks)
     .where(and(

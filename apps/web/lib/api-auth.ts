@@ -13,6 +13,40 @@ import { eq, and } from 'drizzle-orm'
 import { checkIpRateLimit, checkRateLimit } from '@/lib/api-rate-limit'
 import crypto from 'crypto'
 
+export type OwnerAuthResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 401 | 403; error: string }
+
+/**
+ * Require a valid X-API-Key whose ownerAddress matches the provided owner.
+ * Use on webhook and key management endpoints to prevent unauthorized enumeration/deletion.
+ */
+export async function requireApiKeyOwner(request: Request, owner: string): Promise<OwnerAuthResult> {
+  const apiKey = request.headers.get('x-api-key')
+  if (!apiKey) {
+    return { ok: false, status: 401, error: 'X-API-Key header required for this operation' }
+  }
+
+  const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
+  try {
+    const [row] = await db.select({
+      ownerAddress: schema.apiKeys.ownerAddress,
+      active: schema.apiKeys.active,
+    }).from(schema.apiKeys).where(
+      and(eq(schema.apiKeys.keyHash, keyHash), eq(schema.apiKeys.active, true))
+    )
+
+    if (!row) return { ok: false, status: 401, error: 'Invalid or inactive API key' }
+    if (row.ownerAddress.toLowerCase() !== owner.toLowerCase()) {
+      return { ok: false, status: 403, error: 'API key does not belong to this owner address' }
+    }
+  } catch {
+    return { ok: false, status: 401, error: 'Invalid or inactive API key' }
+  }
+
+  return { ok: true }
+}
+
 export type AuthResult =
   | { ok: true; limited: false }
   | { ok: false; limited: true; reason: 'rate_limit' | 'invalid_key' }

@@ -1,4 +1,4 @@
-import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index } from 'drizzle-orm/pg-core'
+import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, unique } from 'drizzle-orm/pg-core'
 
 export const tokenTypeEnum = pgEnum('token_type', ['BEP20', 'BEP721', 'BEP1155'])
 export const validatorStatusEnum = pgEnum('validator_status', ['active', 'inactive', 'jailed'])
@@ -68,6 +68,8 @@ export const tokenTransfers = pgTable('token_transfers', {
   toIdx:        index('tt_to_idx').on(t.toAddress),
   txIdx:        index('tt_tx_idx').on(t.txHash),
   blockIdx:     index('tt_block_idx').on(t.blockNumber),
+  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay
+  txLogUnique:  unique('tt_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
 export const tokens = pgTable('tokens', {
@@ -95,6 +97,8 @@ export const logs = pgTable('logs', {
 }, (t) => ({
   addressTopic0Idx: index('logs_address_topic0_idx').on(t.address, t.topic0),
   txIdx:            index('logs_tx_idx').on(t.txHash),
+  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay
+  txLogUnique:      unique('logs_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
 export const contracts = pgTable('contracts', {
