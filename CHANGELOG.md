@@ -2,6 +2,21 @@
 
 All notable changes to BNBScan / EthScan are documented here.
 
+## [0.1.1.0] - 2026-03-23
+
+### Security
+- **Webhook management authentication**: `GET /webhooks` and `DELETE /webhooks/:id` now require `X-API-Key` whose `ownerAddress` matches the requested owner — prevents enumeration and unauthorized deletion by anyone who knows an address
+- **`requireApiKeyOwner()` helper**: New middleware in both `apps/web` and `apps/ethscan` enforces ownership proof on sensitive management endpoints
+- **Remaining API routes hardened**: `keys`, `contracts/call`, and `webhooks POST` now use `authRequest()` middleware instead of raw `checkIpRateLimit`
+
+### Fixed
+- **Schema idempotency**: Added `unique(tx_hash, log_index)` constraints to `logs` and `token_transfers` tables — `ON CONFLICT DO NOTHING` now functions correctly on indexer replays and crash recovery
+- **NFT image lazy loading**: Added `loading="lazy"` to NFT grid images in address page to prevent layout shift
+
+### Added
+- **`apps/ethscan/lib/api-auth.ts`**: EthScan now has its own `authRequest` + `requireApiKeyOwner` middleware (mirrors BNBScan)
+- **TODOS.md**: Comprehensive post-launch backlog with P0–P3 prioritized items from Codex outside-voice review (reorg handling, idempotency, webhook auth, data quality, storage planning)
+
 ## [0.1.0.0] - 2026-03-23
 
 ### Added

@@ -741,7 +741,7 @@ async function NftsTab({ addr }: { addr: string }) {
             {moralisNfts.map(nft => (
               <div key={`${nft.tokenAddress}-${nft.tokenId}`} className="bg-white rounded-xl border shadow-sm overflow-hidden">
                 {nft.imageUrl ? (
-                  <img src={nft.imageUrl} alt={nft.name} className="w-full aspect-square object-cover" />
+                  <img src={nft.imageUrl} alt={nft.name} loading="lazy" className="w-full aspect-square object-cover" />
                 ) : (
                   <div className="w-full aspect-square bg-gray-100 flex items-center justify-center text-3xl">🖼️</div>
                 )}
