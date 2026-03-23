@@ -4,9 +4,13 @@ import { Worker, connection } from './queue'  // static import — never use dyn
 import { processBlock } from './block-processor'
 import { processLogs } from './log-processor'
 import { syncValidators } from './validator-syncer'
+import { startRetentionCleanup } from './retention-cleanup'
 
 async function main() {
   console.log('[indexer] Starting BNBScan indexer...')
+
+  // 90-day retention cleanup — runs once at startup then every 24h
+  startRetentionCleanup()
 
   // Block processor worker
   const blockWorker = new Worker('blocks', async (job) => {

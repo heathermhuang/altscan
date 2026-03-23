@@ -15,6 +15,7 @@ import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { sql } from 'drizzle-orm'
 import { processLogs } from './log-processor'
+import { startRetentionCleanup } from './retention-cleanup'
 
 const RPC_URL      = process.env.ETH_RPC_URL      ?? 'https://eth.llamarpc.com'
 const DATABASE_URL = process.env.ETH_DATABASE_URL  ?? 'postgresql://localhost:5432/ethscan'
@@ -35,6 +36,9 @@ async function main() {
   const provider = new JsonRpcProvider(RPC_URL)
 
   await ensureSchema(db)
+
+  // 90-day retention cleanup — runs once at startup then every 24h
+  startRetentionCleanup(db)
 
   let lastIndexed = await getLastIndexedBlock(db)
   const tip = await provider.getBlockNumber()
