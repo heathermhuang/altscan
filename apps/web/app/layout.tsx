@@ -7,8 +7,13 @@ import { Footer } from '@/components/layout/Footer'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'BNBScan — BNB Chain Block Explorer',
-  description: 'The BNB Chain Block Explorer and Analytics Platform',
+  title: 'BNBScan — The Alternative BNB Chain Explorer',
+  description: 'BNBScan is an alternative BNB Chain block explorer maintained by Measurable Data Token (MDT). Explore blocks, transactions, tokens, DEX trades, and more.',
+  openGraph: {
+    title: 'BNBScan — The Alternative BNB Chain Explorer',
+    description: 'An open, independent BNB Chain explorer maintained by Measurable Data Token (MDT).',
+    siteName: 'BNBScan by MDT',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

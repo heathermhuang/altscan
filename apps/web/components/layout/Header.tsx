@@ -5,9 +5,14 @@ export function Header() {
   return (
     <header className="bg-yellow-500 text-black shadow-sm">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-        <Link href="/" className="font-bold text-xl tracking-tight shrink-0">
-          🔍 BNBScan
-        </Link>
+        <div className="shrink-0">
+          <Link href="/" className="font-bold text-xl tracking-tight block leading-tight">
+            🔍 BNBScan
+          </Link>
+          <span className="text-xs text-black/60 font-medium tracking-wide hidden sm:block">
+            by Measurable Data Token
+          </span>
+        </div>
         <SearchBar />
         <nav className="hidden md:flex gap-6 text-sm font-medium shrink-0">
           <Link href="/blocks">Blocks</Link>

@@ -58,6 +58,25 @@ export default async function HomePage() {
     <div className="max-w-7xl mx-auto px-4 py-8">
       <AutoRefresh intervalMs={10000} />
 
+      {/* Hero tagline */}
+      <div className="mb-8">
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">
+          The Alternative BNB Chain Explorer
+        </h1>
+        <p className="text-sm text-gray-500">
+          Maintained by{' '}
+          <a
+            href="https://mdt.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-yellow-600 hover:underline font-medium"
+          >
+            Measurable Data Token (MDT)
+          </a>
+          {' '}— open, independent, and community-driven.
+        </p>
+      </div>
+
       {/* Stats bar */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-medium text-gray-500">Network Overview</h2>
