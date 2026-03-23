@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { NetworkSwitcher } from './NetworkSwitcher'
 
 function FooterLogo() {
   return (
@@ -26,7 +27,7 @@ export function Footer() {
           <div className="flex items-center gap-3">
             <FooterLogo />
             <div>
-              <p className="text-white font-semibold text-base leading-tight">EthScan</p>
+              <p className="text-white font-semibold text-base leading-tight">EthScan.io</p>
               <p className="text-gray-400 text-xs">The Alternative Ethereum Explorer</p>
             </div>
           </div>
@@ -44,7 +45,7 @@ export function Footer() {
         </div>
       </div>
 
-      {/* Links + copyright */}
+      {/* Links + network switcher + copyright */}
       <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="flex flex-wrap justify-center md:justify-start gap-4 text-xs">
           <Link href="/blocks" className="hover:text-gray-200 transition-colors">Blocks</Link>
@@ -55,10 +56,13 @@ export function Footer() {
           <Link href="/developer" className="hover:text-gray-200 transition-colors">Developer</Link>
           <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">MDT Website ↗</a>
         </div>
-        <p className="text-xs text-gray-600">
-          © {new Date().getFullYear()} EthScan · Powered by{' '}
-          <a href="https://ethereum.org" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">Ethereum</a>
-        </p>
+        <div className="flex items-center gap-4">
+          <NetworkSwitcher />
+          <p className="text-xs text-gray-600">
+            © {new Date().getFullYear()} EthScan.io · Powered by{' '}
+            <a href="https://ethereum.org" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">Ethereum</a>
+          </p>
+        </div>
       </div>
     </footer>
   )

@@ -73,7 +73,7 @@ export function Header() {
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
             <Logo />
             <div className="leading-tight">
-              <span className="font-black text-[17px] tracking-tight block">BNBScan</span>
+              <span className="font-black text-[17px] tracking-tight block">BNBScan.com</span>
               <span className="text-[10px] text-black/50 font-medium hidden sm:block leading-none">
                 by Measurable Data Token
               </span>
