@@ -113,16 +113,16 @@ services:
 databases:
 
   # ── BNB Chain PostgreSQL ──────────────────────────────────────────────────
-  # BNB grows ~12-15 GB/month — start on standard, upgrade to pro at ~20 GB
+  # BNB grows ~12-15 GB/month — pro-1gb holds ~2 months before upgrade
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: standard          # 1 GB RAM, 25 GB storage — $20/mo
-                            # Upgrade to pro ($97) at ~month 2 when storage fills
+    plan: pro-1gb           # 1 GB RAM, 25 GB storage — $20/mo
+                            # Upgrade to pro-2gb ($45) at ~month 2 when storage fills
 
   # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
-  # ETH grows ~6-8 GB/month — standard holds for 3-4 months
+  # ETH grows ~6-8 GB/month — pro-1gb holds for 3-4 months
   - name: ethscan-db
     databaseName: ethscan
     user: ethscan
-    plan: standard          # 1 GB RAM, 25 GB storage — $20/mo
+    plan: pro-1gb           # 1 GB RAM, 25 GB storage — $20/mo
