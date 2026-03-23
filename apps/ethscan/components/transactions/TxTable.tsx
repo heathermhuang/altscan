@@ -17,13 +17,14 @@ export function TxTable({ txs, compact = false }: {
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 border-b">
           <tr>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-            <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
+            <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">From</th>
-            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500">To</th>}
+            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>}
             <th className="text-left px-4 py-2 font-medium text-gray-500">Value</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Status</th>
           </tr>
@@ -36,14 +37,14 @@ export function TxTable({ txs, compact = false }: {
                   {formatAddress(tx.hash, 10)}
                 </Link>
               </td>
-              <td className="px-4 py-2 text-gray-500">{timeAgo(new Date(tx.timestamp))}</td>
+              <td className="px-4 py-2 text-gray-500 hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>
               <td className="px-4 py-2 font-mono text-xs">
                 <Link href={`/address/${tx.fromAddress}`} className="text-blue-600 hover:underline">
                   {formatAddress(tx.fromAddress)}
                 </Link>
               </td>
               {!compact && (
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-4 py-2 font-mono text-xs hidden sm:table-cell">
                   {tx.toAddress ? (
                     <Link href={`/address/${tx.toAddress}`} className="text-blue-600 hover:underline">
                       {formatAddress(tx.toAddress)}
@@ -63,6 +64,7 @@ export function TxTable({ txs, compact = false }: {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
