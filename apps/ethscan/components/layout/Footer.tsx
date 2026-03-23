@@ -57,7 +57,7 @@ export function Footer() {
           <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">MDT Website ↗</a>
         </div>
         <div className="flex items-center gap-4">
-          <NetworkSwitcher />
+          <NetworkSwitcher direction="up" />
           <p className="text-xs text-gray-600">
             © {new Date().getFullYear()} EthScan.io · Powered by{' '}
             <a href="https://ethereum.org" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">Ethereum</a>

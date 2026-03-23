@@ -38,7 +38,7 @@ const NETWORKS = [
   },
 ]
 
-export function NetworkSwitcher() {
+export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | 'up' }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
@@ -52,6 +52,7 @@ export function NetworkSwitcher() {
   }, [])
 
   const current = NETWORKS.find(n => n.current)!
+  const chevronOpen = direction === 'up' ? !open : open
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -64,7 +65,7 @@ export function NetworkSwitcher() {
         <span className={`w-2 h-2 rounded-full ${current.dot} shrink-0`} />
         {current.short}
         <svg
-          className={`w-3 h-3 text-black/50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          className={`w-3 h-3 text-black/50 transition-transform duration-150 ${chevronOpen ? 'rotate-180' : ''}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -72,7 +73,9 @@ export function NetworkSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-2 w-52 rounded-xl shadow-xl bg-white border border-gray-100 overflow-hidden z-50">
+        <div className={`absolute left-0 w-52 rounded-xl shadow-xl bg-white border border-gray-100 overflow-hidden z-50 ${
+          direction === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
+        }`}>
           <p className="px-3 pt-2.5 pb-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
             Switch Network
           </p>
