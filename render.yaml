@@ -117,12 +117,12 @@ databases:
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: pro-1gb           # 1 GB RAM, 25 GB storage — $20/mo
-                            # Upgrade to pro-2gb ($45) at ~month 2 when storage fills
+    plan: basic-1gb         # 1 GB RAM, 25 GB storage — $20/mo
+                            # Upgrade to pro-4gb when storage fills
 
   # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
-  # ETH grows ~6-8 GB/month — pro-1gb holds for 3-4 months
+  # ETH grows ~6-8 GB/month — basic-1gb holds for 3-4 months
   - name: ethscan-db
     databaseName: ethscan
     user: ethscan
-    plan: pro-1gb           # 1 GB RAM, 25 GB storage — $20/mo
+    plan: basic-1gb         # 1 GB RAM, 25 GB storage — $20/mo
