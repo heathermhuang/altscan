@@ -145,3 +145,34 @@ export const gasHistory = pgTable('gas_history', {
   blockNumber:  bigint('block_number', { mode: 'number' }).notNull(),
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 })
+
+export const webhooks = pgTable('webhooks', {
+  id:               serial('id').primaryKey(),
+  ownerAddress:     varchar('owner_address', { length: 42 }).notNull(),
+  url:              text('url').notNull(),
+  watchAddress:     varchar('watch_address', { length: 42 }),
+  eventTypes:       text('event_types').array().notNull().default(['tx'] as string[]),
+  secret:           varchar('secret', { length: 64 }),
+  active:           boolean('active').notNull().default(true),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastTriggeredAt:  timestamp('last_triggered_at', { withTimezone: true }),
+  failCount:        integer('fail_count').notNull().default(0),
+}, (t) => ({
+  ownerIdx: index('webhooks_owner_idx').on(t.ownerAddress),
+  watchIdx:  index('webhooks_watch_idx').on(t.watchAddress),
+}))
+
+export const apiKeys = pgTable('api_keys', {
+  id:                 serial('id').primaryKey(),
+  keyHash:            varchar('key_hash', { length: 64 }).notNull().unique(),
+  keyPrefix:          varchar('key_prefix', { length: 12 }).notNull(),
+  label:              varchar('label', { length: 255 }),
+  ownerAddress:       varchar('owner_address', { length: 42 }),
+  requestsPerMinute:  integer('requests_per_minute').notNull().default(100),
+  totalRequests:      bigint('total_requests', { mode: 'number' }).notNull().default(0),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt:         timestamp('last_used_at', { withTimezone: true }),
+  active:             boolean('active').notNull().default(true),
+}, (t) => ({
+  ownerIdx: index('api_keys_owner_idx').on(t.ownerAddress),
+}))

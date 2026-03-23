@@ -17,7 +17,9 @@ export function Header() {
           <Link href="/whales">Whales</Link>
           <Link href="/gas">Gas</Link>
           <Link href="/validators">Validators</Link>
+          <Link href="/watchlist">⭐ Watchlist</Link>
           <Link href="/api-docs">API</Link>
+          <Link href="/developer">Developer</Link>
           <Link href="/verify">Verify</Link>
         </nav>
       </div>

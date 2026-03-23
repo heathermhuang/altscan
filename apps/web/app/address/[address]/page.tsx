@@ -8,6 +8,10 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
+import dynamic from 'next/dynamic'
+
+const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
+const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -88,6 +92,7 @@ export default async function AddressPage({
         {(addressInfo?.label ?? getAddressLabel(addr)) && (
           <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
         )}
+        <WatchlistButton address={addr} />
       </div>
 
       {/* Address + stats */}
@@ -142,6 +147,12 @@ export default async function AddressPage({
                     : ''}
                 </pre>
               )}
+              {contractResult.verifiedAt && contractResult.abi != null && (
+                <div className="mt-4">
+                  <h3 className="font-medium text-sm mb-2">Read Contract</h3>
+                  <AbiReader address={addr} abi={contractResult.abi as unknown[]} />
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-3">
@@ -176,6 +187,11 @@ export default async function AddressPage({
           active={activeTab === 'analytics'}
           label="Analytics"
         />
+        <TabLink
+          href={`/address/${addr}?tab=nfts`}
+          active={activeTab === 'nfts'}
+          label="NFTs"
+        />
       </div>
 
       {/* Tab content */}
@@ -185,6 +201,7 @@ export default async function AddressPage({
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
+      {activeTab === 'nfts' && <NftsTab addr={addr} />}
     </div>
   )
 }
@@ -583,6 +600,102 @@ async function AnalyticsTab({
           value={lastSeen ? lastSeen.toLocaleDateString() : 'Unknown'}
         />
       </div>
+    </div>
+  )
+}
+
+// ---- NFTs Tab ----
+
+async function NftsTab({ addr }: { addr: string }) {
+  let nftTransfers: Array<{
+    txHash: string
+    tokenAddress: string
+    tokenId: string | null
+    fromAddress: string
+    toAddress: string
+    blockNumber: number
+    name?: string
+    symbol?: string
+  }> = []
+
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        tt.tx_hash as "txHash",
+        tt.token_address as "tokenAddress",
+        tt.token_id::text as "tokenId",
+        tt.from_address as "fromAddress",
+        tt.to_address as "toAddress",
+        tt.block_number as "blockNumber",
+        t.name,
+        t.symbol
+      FROM token_transfers tt
+      LEFT JOIN tokens t ON t.address = tt.token_address
+      WHERE
+        (tt.to_address = ${addr} OR tt.from_address = ${addr})
+        AND t.type = 'BEP721'
+        AND tt.token_id IS NOT NULL
+      ORDER BY tt.block_number DESC
+      LIMIT 50
+    `)
+    nftTransfers = Array.from(result).map(row => {
+      const r = row as Record<string, unknown>
+      return {
+        txHash: String(r.txHash ?? ''),
+        tokenAddress: String(r.tokenAddress ?? ''),
+        tokenId: r.tokenId ? String(r.tokenId) : null,
+        fromAddress: String(r.fromAddress ?? ''),
+        toAddress: String(r.toAddress ?? ''),
+        blockNumber: Number(r.blockNumber ?? 0),
+        name: r.name ? String(r.name) : undefined,
+        symbol: r.symbol ? String(r.symbol) : undefined,
+      }
+    })
+  } catch { /* DB error */ }
+
+  if (nftTransfers.length === 0) {
+    return <p className="text-gray-500 py-8 text-center">No NFT activity found for this address.</p>
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b">
+          <tr>
+            <th className="text-left px-4 py-2 text-gray-500">NFT</th>
+            <th className="text-left px-4 py-2 text-gray-500">Token ID</th>
+            <th className="text-left px-4 py-2 text-gray-500">Action</th>
+            <th className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
+            <th className="text-left px-4 py-2 text-gray-500">Block</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {nftTransfers.map((t, i) => (
+            <tr key={i} className="hover:bg-gray-50">
+              <td className="px-4 py-2">
+                <Link href={`/token/${t.tokenAddress}`} className="text-yellow-600 hover:underline">
+                  {t.name ?? t.tokenAddress.slice(0, 12) + '...'}
+                </Link>
+                {t.symbol && <span className="ml-1 text-xs text-gray-400">({t.symbol})</span>}
+              </td>
+              <td className="px-4 py-2 font-mono text-xs">
+                #{t.tokenId}
+              </td>
+              <td className="px-4 py-2">
+                <span className={`text-xs font-medium ${t.toAddress.toLowerCase() === addr ? 'text-green-600' : 'text-red-500'}`}>
+                  {t.toAddress.toLowerCase() === addr ? 'Received' : 'Sent'}
+                </span>
+              </td>
+              <td className="px-4 py-2 font-mono text-xs">
+                <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
+                  {t.txHash.slice(0, 14)}...
+                </Link>
+              </td>
+              <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

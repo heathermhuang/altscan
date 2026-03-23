@@ -158,6 +158,141 @@ const endpoints: Endpoint[] = [
       2
     ),
   },
+  {
+    method: 'POST',
+    path: '/api/v1/contracts/:address/call',
+    description: 'Call a read-only (view/pure) function on a verified contract using its ABI. Returns the result with BigInt values serialized as strings.',
+    params: [
+      { name: 'address', type: 'string', required: true, description: 'Contract address (must be verified with ABI)' },
+      { name: 'functionName', type: 'string', required: true, description: 'Name of the view/pure function to call' },
+      { name: 'args', type: 'array', required: false, description: 'Array of arguments to pass to the function' },
+    ],
+    exampleResponse: JSON.stringify(
+      { result: '1000000000000000000' },
+      null,
+      2
+    ),
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/webhooks',
+    description: 'List all webhooks registered to an owner address.',
+    params: [
+      { name: 'owner', type: 'string', required: true, description: 'Owner BNB address (0x-prefixed)' },
+    ],
+    exampleResponse: JSON.stringify(
+      {
+        webhooks: [
+          {
+            id: 1,
+            url: 'https://your-app.com/webhook',
+            watchAddress: '0xabc...',
+            eventTypes: ['tx', 'token_transfer'],
+            active: true,
+            createdAt: '2024-01-01T00:00:00Z',
+            lastTriggeredAt: null,
+            failCount: 0,
+          },
+        ],
+      },
+      null,
+      2
+    ),
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/webhooks',
+    description: 'Register a new webhook. Returns a one-time secret for verifying incoming webhook signatures (HMAC-SHA256). BNBScan will POST events to your URL with an X-BNBScan-Signature header.',
+    params: [
+      { name: 'ownerAddress', type: 'string', required: true, description: 'Your BNB address (0x-prefixed)' },
+      { name: 'url', type: 'string', required: true, description: 'Your HTTPS endpoint to receive events' },
+      { name: 'watchAddress', type: 'string', required: false, description: 'Address to watch for events' },
+      { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types: ["tx", "token_transfer"] (default: ["tx"])' },
+    ],
+    exampleResponse: JSON.stringify(
+      {
+        id: 1,
+        secret: 'abc123...',
+        message: 'Webhook created. Keep the secret — it will not be shown again.',
+      },
+      null,
+      2
+    ),
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/keys',
+    description: 'List API keys for an owner address. Key hashes are never returned — only the prefix for identification.',
+    params: [
+      { name: 'owner', type: 'string', required: true, description: 'Owner BNB address (0x-prefixed)' },
+    ],
+    exampleResponse: JSON.stringify(
+      {
+        keys: [
+          {
+            id: 1,
+            keyPrefix: 'bnbs_abc123',
+            label: 'My App',
+            requestsPerMinute: 100,
+            totalRequests: 5420,
+            createdAt: '2024-01-01T00:00:00Z',
+            lastUsedAt: '2024-01-10T12:00:00Z',
+            active: true,
+          },
+        ],
+      },
+      null,
+      2
+    ),
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/keys',
+    description: 'Generate a new API key linked to your BNB address. The full key is shown once — save it immediately. Use the X-API-Key header to authenticate requests.',
+    params: [
+      { name: 'ownerAddress', type: 'string', required: true, description: 'Your BNB address (0x-prefixed)' },
+      { name: 'label', type: 'string', required: false, description: 'Human-readable label for this key' },
+    ],
+    exampleResponse: JSON.stringify(
+      {
+        id: 1,
+        key: 'bnbs_abc123...',
+        keyPrefix: 'bnbs_abc123',
+        message: 'API key created. Save it now — the full key will not be shown again.',
+      },
+      null,
+      2
+    ),
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/query',
+    description: 'Flexible query endpoint for fetching any entity with filters, ordering, and pagination. Supports: transactions, blocks, tokens, token_transfers, dex_trades.',
+    params: [
+      { name: 'entity', type: 'string', required: true, description: 'One of: transactions, blocks, tokens, token_transfers, dex_trades' },
+      { name: 'filter', type: 'object', required: false, description: 'Filter object: { address, from, to, blockNumber, blockFrom, blockTo, tokenAddress, dex }' },
+      { name: 'orderBy', type: 'string', required: false, description: '"asc" or "desc" (default: "desc")' },
+      { name: 'limit', type: 'number', required: false, description: 'Number of results (default: 25, max: 100)' },
+      { name: 'offset', type: 'number', required: false, description: 'Pagination offset (default: 0)' },
+    ],
+    exampleResponse: JSON.stringify(
+      {
+        entity: 'transactions',
+        count: 25,
+        data: [
+          {
+            hash: '0x123...',
+            blockNumber: 42000000,
+            fromAddress: '0xaaa...',
+            toAddress: '0xbbb...',
+            value: '1000000000000000000',
+          },
+        ],
+      },
+      null,
+      2
+    ),
+  },
 ]
 
 export default function ApiDocsPage() {

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -79,7 +80,7 @@ export default async function TokenDetailPage({
 
   if (!token) notFound()
 
-  const [transfers, [{ value: totalTransfers }], topHolders] = await Promise.all([
+  const [transfers, [{ value: totalTransfers }], topHolders, riskSignals] = await Promise.all([
     db
       .select()
       .from(schema.tokenTransfers)
@@ -92,6 +93,7 @@ export default async function TokenDetailPage({
       .from(schema.tokenTransfers)
       .where(eq(schema.tokenTransfers.tokenAddress, addr)),
     fetchTopHolders(addr),
+    analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]),
   ])
 
   const displaySupply = (() => {
@@ -205,6 +207,25 @@ export default async function TokenDetailPage({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Risk Signals */}
+      {riskSignals.length > 0 && (
+        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
+          <h2 className="font-semibold mb-3">🛡️ Risk Signals</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {riskSignals.map((s, i) => (
+              <div key={i} className={`flex items-start gap-2 rounded-lg p-2 text-sm
+                ${s.severity === 'danger' ? 'bg-red-50' : s.severity === 'warn' ? 'bg-yellow-50' : 'bg-green-50'}`}>
+                <span>{s.ok ? '✅' : s.severity === 'danger' ? '🚨' : '⚠️'}</span>
+                <div>
+                  <p className="font-medium">{s.label}</p>
+                  <p className="text-xs text-gray-600">{s.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
