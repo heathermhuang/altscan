@@ -45,7 +45,7 @@ export default function DeveloperPage() {
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Get an API Key</h3>
               <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Request a key with your BNB address
-curl -X POST https://bnbscan.io/api/v1/keys \\
+curl -X POST https://bnbscan.com/api/v1/keys \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -64,11 +64,11 @@ curl -X POST https://bnbscan.io/api/v1/keys \\
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Use Your Key</h3>
               <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Pass your key via the X-API-Key header
-curl https://bnbscan.io/api/v1/blocks \\
+curl https://bnbscan.com/api/v1/blocks \\
   -H "X-API-Key: bnbs_abc123..."
 
 # List your keys
-curl "https://bnbscan.io/api/v1/keys?owner=0xYourAddress"`}</pre>
+curl "https://bnbscan.com/api/v1/keys?owner=0xYourAddress"`}</pre>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -100,7 +100,7 @@ curl "https://bnbscan.io/api/v1/keys?owner=0xYourAddress"`}</pre>
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Register a Webhook</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.io/api/v1/webhooks \\
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.com/api/v1/webhooks \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -157,10 +157,10 @@ function verifyWebhook(body, signature, secret) {
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Manage Webhooks</h3>
               <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# List your webhooks
-curl "https://bnbscan.io/api/v1/webhooks?owner=0xYourAddress"
+curl "https://bnbscan.com/api/v1/webhooks?owner=0xYourAddress"
 
 # Delete a webhook
-curl -X DELETE https://bnbscan.io/api/v1/webhooks/42`}</pre>
+curl -X DELETE https://bnbscan.com/api/v1/webhooks/42`}</pre>
             </div>
           </div>
         </div>
@@ -189,7 +189,7 @@ curl -X DELETE https://bnbscan.io/api/v1/webhooks/42`}</pre>
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Query Transactions by Address</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.io/api/v1/query \\
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.com/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "transactions",
@@ -201,7 +201,7 @@ curl -X DELETE https://bnbscan.io/api/v1/webhooks/42`}</pre>
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Query Token Transfers in Block Range</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.io/api/v1/query \\
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST https://bnbscan.com/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "token_transfers",
