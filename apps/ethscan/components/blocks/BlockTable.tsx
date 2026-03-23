@@ -22,7 +22,7 @@ export function BlockTable({ blocks, compact = false }: {
             <th className="text-left px-4 py-2 font-medium text-gray-500">Block</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Txns</th>
-            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500">Miner</th>}
+            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500">Validator</th>}
             {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500">Gas Used</th>}
           </tr>
         </thead>
@@ -30,7 +30,7 @@ export function BlockTable({ blocks, compact = false }: {
           {blocks.map(b => (
             <tr key={b.number} className="hover:bg-gray-50">
               <td className="px-4 py-2">
-                <Link href={`/blocks/${b.number}`} className="text-yellow-600 font-medium hover:underline">
+                <Link href={`/blocks/${b.number}`} className="text-indigo-600 font-medium hover:underline">
                   {formatNumber(b.number)}
                 </Link>
               </td>
