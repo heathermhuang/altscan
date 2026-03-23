@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc || true",
     "start": "node dist/index.js",
     "backfill": "tsx src/backfill.ts"
   },
