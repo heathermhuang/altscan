@@ -110,8 +110,12 @@ export default async function TxDetailPage({
   const fromRpc = !dbTx && !!rpcTx
 
   const [txLogs, transfers, methodName] = await Promise.all([
-    fromRpc ? Promise.resolve([]) : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50),
-    fromRpc ? Promise.resolve([]) : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25),
+    fromRpc
+      ? Promise.resolve([])
+      : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(() => []),
+    fromRpc
+      ? Promise.resolve([])
+      : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25).catch(() => []),
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),

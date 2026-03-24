@@ -305,6 +305,7 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS logs (
+      id              SERIAL,
       tx_hash         VARCHAR(66) NOT NULL,
       log_index       INTEGER NOT NULL,
       address         VARCHAR(42) NOT NULL,
@@ -317,6 +318,8 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       PRIMARY KEY (tx_hash, log_index)
     )
   `)
+  // Backfill: add id column to existing logs tables created without it
+  await db.execute(sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS id SERIAL`)
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS contracts (
