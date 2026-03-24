@@ -37,8 +37,8 @@ async function main() {
 
   await ensureSchema(db)
 
-  // 90-day retention cleanup — runs once at startup then every 24h
-  startRetentionCleanup(db)
+  // 90-day retention cleanup — await first run so DB is clean before we read lastIndexedBlock
+  await startRetentionCleanup(db)
 
   let lastIndexed = await getLastIndexedBlock(db)
   const tip = await provider.getBlockNumber()

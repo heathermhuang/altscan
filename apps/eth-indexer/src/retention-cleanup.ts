@@ -78,8 +78,9 @@ async function runCleanup(db: any): Promise<void> {
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
 }
 
-export function startRetentionCleanup(db: any): void {
-  runCleanup(db).catch(err => console.error('[retention] cleanup error:', err))
+export async function startRetentionCleanup(db: any): Promise<void> {
+  // Await first run so getLastIndexedBlock sees the clean state
+  await runCleanup(db).catch(err => console.error('[retention] cleanup error:', err))
   setInterval(() => {
     runCleanup(db).catch(err => console.error('[retention] cleanup error:', err))
   }, RUN_EVERY_MS)

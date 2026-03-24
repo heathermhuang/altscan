@@ -138,6 +138,22 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   }
 }
 
+export async function getWalletStats(address: string): Promise<{ txCount: number } | null> {
+  const h = headers()
+  if (!h) return null
+  try {
+    const res = await fetch(
+      `${BASE}/wallets/${address}/stats?chain=${CHAIN}`,
+      { headers: h, next: { revalidate: 60 } },
+    )
+    if (!res.ok) return null
+    const data = (await res.json()) as { transactions?: { total?: number } }
+    return { txCount: data.transactions?.total ?? 0 }
+  } catch {
+    return null
+  }
+}
+
 export async function getNfts(address: string): Promise<MoralisNft[]> {
   const h = headers()
   if (!h) return []

@@ -91,9 +91,9 @@ async function runCleanup(): Promise<void> {
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
 }
 
-export function startRetentionCleanup(): void {
-  // Run once at startup (catches up if the worker was down), then every 24h
-  runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+export async function startRetentionCleanup(): Promise<void> {
+  // Await first run so getLastIndexedBlock sees the clean state
+  await runCleanup().catch(err => console.error('[retention] cleanup error:', err))
   setInterval(() => {
     runCleanup().catch(err => console.error('[retention] cleanup error:', err))
   }, RUN_EVERY_MS)

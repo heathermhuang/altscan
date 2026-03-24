@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveSpaceId } from '@/lib/spaceid'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getWalletStats } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
@@ -86,16 +86,18 @@ export default async function AddressPage({
   }
 
   // Enrich with external data — all fire in parallel, failures are silent
-  const [bnbName, riskData, liveBalance] = await Promise.all([
+  const [bnbName, riskData, liveBalance, walletStats] = await Promise.all([
     resolveSpaceId(addr),
     getAddressRisk(addr),
     getProvider().getBalance(addr).catch(() => null),
+    txCount === 0 && !addressInfo ? getWalletStats(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
+  const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
 
   const activeTab = tab ?? 'txns'
 
@@ -145,7 +147,7 @@ export default async function AddressPage({
           />
           <StatItem
             label="Transactions"
-            value={formatNumber(txCount || addressInfo?.txCount || 0)}
+            value={formatNumber(displayTxCount)}
           />
           <StatItem
             label="First Seen"

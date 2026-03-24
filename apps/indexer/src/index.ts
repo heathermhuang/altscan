@@ -13,8 +13,8 @@ async function main() {
   // Create tables if they don't exist yet (idempotent — safe on every restart)
   await ensureSchema()
 
-  // 90-day retention cleanup — runs once at startup then every 24h
-  startRetentionCleanup()
+  // 90-day retention cleanup — await first run so DB is clean before we read lastIndexedBlock
+  await startRetentionCleanup()
 
   // Block processor worker
   const blockWorker = new Worker('blocks', async (job) => {

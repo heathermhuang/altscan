@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveEns } from '@/lib/ens'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getNfts } from '@/lib/moralis'
+import { getWalletHistory, getNfts, getWalletStats } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
@@ -68,15 +68,17 @@ export default async function AddressPage({
     // DB not connected
   }
 
-  const [ensName, riskData, liveBalance] = await Promise.all([
+  const [ensName, riskData, liveBalance, walletStats] = await Promise.all([
     resolveEns(addr),
     getAddressRisk(addr),
     getProvider().getBalance(addr).catch(() => null),
+    txCount === 0 && !addressInfo ? getWalletStats(addr) : Promise.resolve(null),
   ])
 
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
+  const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
 
   const activeTab = tab ?? 'txns'
 
@@ -124,7 +126,7 @@ export default async function AddressPage({
             label="ETH Balance"
             value={`${formatETH(displayBalance)} ETH`}
           />
-          <StatItem label="Transactions" value={formatNumber(txCount || addressInfo?.txCount || 0)} />
+          <StatItem label="Transactions" value={formatNumber(displayTxCount)} />
           <StatItem
             label="First Seen"
             value={addressInfo?.firstSeen ? timeAgo(new Date(addressInfo.firstSeen)) : 'Unknown'}
