@@ -154,6 +154,104 @@ export async function getWalletStats(address: string): Promise<{ txCount: number
   }
 }
 
+export type MoralisTokenTransfer = {
+  txHash: string
+  blockNumber: string
+  blockTimestamp: string
+  fromAddress: string
+  toAddress: string
+  tokenAddress: string
+  tokenName: string
+  tokenSymbol: string
+  tokenDecimals: string
+  value: string
+  valueFormatted: string
+}
+
+export async function getTokenTransfers(
+  address: string,
+  cursor?: string,
+): Promise<{ transfers: MoralisTokenTransfer[]; cursor: string | null } | null> {
+  const h = headers()
+  if (!h) return null
+
+  try {
+    const url = new URL(`${BASE}/wallets/${address}/erc20-transfers`)
+    url.searchParams.set('chain', CHAIN)
+    url.searchParams.set('limit', '25')
+    if (cursor) url.searchParams.set('cursor', cursor)
+
+    const res = await fetch(url.toString(), {
+      headers: h,
+      next: { revalidate: 60 },
+    })
+    if (!res.ok) return null
+
+    const data = (await res.json()) as {
+      result: Array<{
+        transaction_hash: string
+        block_number: string
+        block_timestamp: string
+        from_address: string
+        to_address: string
+        contract_address: string
+        token_name: string
+        token_symbol: string
+        token_decimals: string
+        value: string
+        value_formatted: string
+      }>
+      cursor: string | null
+    }
+
+    return {
+      transfers: data.result.map(t => ({
+        txHash: t.transaction_hash,
+        blockNumber: t.block_number,
+        blockTimestamp: t.block_timestamp,
+        fromAddress: t.from_address,
+        toAddress: t.to_address,
+        tokenAddress: t.contract_address,
+        tokenName: t.token_name,
+        tokenSymbol: t.token_symbol,
+        tokenDecimals: t.token_decimals,
+        value: t.value,
+        valueFormatted: t.value_formatted,
+      })),
+      cursor: data.cursor ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function getWalletFirstSeen(address: string): Promise<Date | null> {
+  const h = headers()
+  if (!h) return null
+
+  try {
+    const url = new URL(`${BASE}/wallets/${address}/history`)
+    url.searchParams.set('chain', CHAIN)
+    url.searchParams.set('limit', '1')
+    url.searchParams.set('order', 'ASC')
+    url.searchParams.set('include_internal_transactions', '0')
+
+    const res = await fetch(url.toString(), {
+      headers: h,
+      next: { revalidate: 3600 },
+    })
+    if (!res.ok) return null
+
+    const data = (await res.json()) as {
+      result?: Array<{ block_timestamp?: string }>
+    }
+    const ts = data.result?.[0]?.block_timestamp
+    return ts ? new Date(ts) : null
+  } catch {
+    return null
+  }
+}
+
 export async function getNfts(address: string): Promise<MoralisNft[]> {
   const h = headers()
   if (!h) return []

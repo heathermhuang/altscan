@@ -9,6 +9,7 @@ import type { Metadata } from 'next'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+import { getProvider } from '@/lib/rpc'
 
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
@@ -86,6 +87,15 @@ export default async function TxDetailPage({
 
   const fromRpc = !dbTx && !!rpcTx
 
+  // If DB has gasUsed=0, fetch the receipt for real gas data
+  let receiptGasUsed: bigint | null = null
+  if (dbTx && Number(dbTx.gasUsed ?? 0) === 0) {
+    try {
+      const receipt = await getProvider().getTransactionReceipt(hash)
+      if (receipt) receiptGasUsed = receipt.gasUsed
+    } catch { /* ignore */ }
+  }
+
   const [txLogs, transfers, methodName] = await Promise.all([
     fromRpc ? Promise.resolve([]) : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50),
     fromRpc ? Promise.resolve([]) : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25),
@@ -139,11 +149,19 @@ export default async function TxDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Transaction Details</h1>
         <Badge variant={tx.status ? 'success' : 'fail'}>
           {tx.status ? 'Success' : 'Failed'}
         </Badge>
+        <a
+          href={`https://bscscan.com/tx/${hash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-xs text-gray-400 hover:text-yellow-600 border border-gray-200 hover:border-yellow-400 rounded px-2 py-1 transition-colors"
+        >
+          View on BscScan ↗
+        </a>
       </div>
 
       {fromRpc && (
@@ -204,7 +222,7 @@ export default async function TxDetailPage({
               value={(() => {
                 // Guard against Long.MAX_VALUE sentinel (9223372036854775807) from indexer overflow
                 const MAX_REASONABLE_GAS = 50_000_000n
-                const gasUsed = BigInt(tx.gasUsed ?? 0)
+                const gasUsed = receiptGasUsed ?? BigInt(tx.gasUsed ?? 0)
                 const gasLimit = BigInt(tx.gas ?? 0)
                 const usedStr = gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'
                 const limitStr = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'

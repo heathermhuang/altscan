@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveSpaceId } from '@/lib/spaceid'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getWalletStats } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, getWalletFirstSeen } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
@@ -86,11 +86,13 @@ export default async function AddressPage({
   }
 
   // Enrich with external data — all fire in parallel, failures are silent
-  const [bnbName, riskData, liveBalance, walletStats] = await Promise.all([
+  const noLocalData = txCount === 0 && !addressInfo
+  const [bnbName, riskData, liveBalance, walletStats, moralisFirstSeen] = await Promise.all([
     resolveSpaceId(addr),
     getAddressRisk(addr),
     getProvider().getBalance(addr).catch(() => null),
-    txCount === 0 && !addressInfo ? getWalletStats(addr) : Promise.resolve(null),
+    noLocalData ? getWalletStats(addr) : Promise.resolve(null),
+    !addressInfo?.firstSeen ? getWalletFirstSeen(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
@@ -98,6 +100,7 @@ export default async function AddressPage({
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
   const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
+  const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : moralisFirstSeen
 
   const activeTab = tab ?? 'txns'
 
@@ -122,6 +125,14 @@ export default async function AddressPage({
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Address</h1>
+        <a
+          href={`https://bscscan.com/address/${addr}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-xs text-gray-400 hover:text-yellow-600 border border-gray-200 hover:border-yellow-400 rounded px-2 py-1 transition-colors"
+        >
+          View on BscScan ↗
+        </a>
         {bnbName && (
           <Badge variant="default">
             <span className="text-yellow-700">🪪</span> {bnbName}
@@ -151,11 +162,7 @@ export default async function AddressPage({
           />
           <StatItem
             label="First Seen"
-            value={
-              addressInfo?.firstSeen
-                ? timeAgo(new Date(addressInfo.firstSeen))
-                : 'Unknown'
-            }
+            value={displayFirstSeen ? timeAgo(displayFirstSeen) : 'Unknown'}
           />
         </div>
       </div>
@@ -239,7 +246,7 @@ export default async function AddressPage({
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
-      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
+      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} moralisFirstSeen={displayFirstSeen} />}
       {activeTab === 'nfts' && <NftsTab addr={addr} />}
     </div>
   )
@@ -435,6 +442,69 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
   }
 
   if (transfers.length === 0 && page === 1) {
+    const moralis = await getTokenTransfers(addr)
+    if (moralis && moralis.transfers.length > 0) {
+      return (
+        <div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
+            <span>📡</span>
+            <span>Showing token transfer history from Moralis.</span>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">From</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">To</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {moralis.transfers.map((t) => (
+                  <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
+                        {t.txHash.slice(0, 14)}…
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">
+                      {timeAgo(new Date(t.blockTimestamp))}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <Link
+                        href={`/address/${t.fromAddress}`}
+                        className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : 'text-blue-600 hover:underline'}
+                      >
+                        {formatAddress(t.fromAddress)}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      <Link
+                        href={`/address/${t.toAddress}`}
+                        className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : 'text-blue-600 hover:underline'}
+                      >
+                        {formatAddress(t.toAddress)}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-xs">
+                      <Link href={`/token/${t.tokenAddress}`} className="text-yellow-600 hover:underline">
+                        {t.tokenSymbol || formatAddress(t.tokenAddress)}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-xs">
+                      {parseFloat(t.valueFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })} {t.tokenSymbol}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    }
     return <p className="text-gray-500">No token transfers found for this address.</p>
   }
 
@@ -566,6 +636,47 @@ async function HoldingsTab({ addr }: { addr: string }) {
   }
 
   if (holdings.length === 0) {
+    const moralisTokens = await getTokenBalances(addr)
+    if (moralisTokens.length > 0) {
+      return (
+        <div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
+            <span>📡</span>
+            <span>Showing current token holdings from Moralis.</span>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">Balance</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500">USD Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {moralisTokens.map((t) => (
+                  <tr key={t.tokenAddress} className="hover:bg-gray-50">
+                    <td className="px-4 py-2">
+                      <Link href={`/token/${t.tokenAddress}`} className="text-yellow-600 hover:underline font-medium">
+                        {t.name ?? t.tokenAddress.slice(0, 14) + '…'}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-gray-600">{t.symbol ?? '—'}</td>
+                    <td className="px-4 py-2">
+                      {parseFloat(t.balanceFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                    </td>
+                    <td className="px-4 py-2">
+                      {t.usdValue ? `$${parseFloat(t.usdValue).toFixed(2)}` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    }
     return <p className="text-gray-500">No token holdings found for this address.</p>
   }
 
@@ -620,13 +731,15 @@ async function HoldingsTab({ addr }: { addr: string }) {
 async function AnalyticsTab({
   addr,
   addressInfo,
+  moralisFirstSeen,
 }: {
   addr: string
   addressInfo: typeof schema.addresses.$inferSelect | null
+  moralisFirstSeen: Date | null
 }) {
   let totalSentBNB = '0'
   let totalReceivedBNB = '0'
-  let firstSeen: Date | null = null
+  let firstSeen: Date | null = moralisFirstSeen
   let lastSeen: Date | null = null
 
   try {

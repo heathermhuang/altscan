@@ -62,7 +62,17 @@ export default async function BlockDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Block #{formatNumber(block.number)}</h1>
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <h1 className="text-2xl font-bold">Block #{formatNumber(block.number)}</h1>
+        <a
+          href={`https://etherscan.io/block/${block.number}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-xs text-gray-400 hover:text-indigo-600 border border-gray-200 hover:border-indigo-400 rounded px-2 py-1 transition-colors"
+        >
+          View on Etherscan ↗
+        </a>
+      </div>
 
       <div className="bg-white rounded-xl border shadow-sm mb-8 overflow-hidden">
         <table className="w-full text-sm">

@@ -116,6 +116,14 @@ export default async function TokenDetailPage({
         <h1 className="text-2xl font-bold">{token.name}</h1>
         <Badge variant="default">{token.symbol}</Badge>
         <Badge variant="default">ERC-20</Badge>
+        <a
+          href={`https://etherscan.io/token/${addr}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-xs text-gray-400 hover:text-indigo-600 border border-gray-200 hover:border-indigo-400 rounded px-2 py-1 transition-colors"
+        >
+          View on Etherscan ↗
+        </a>
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
