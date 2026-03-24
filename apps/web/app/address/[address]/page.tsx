@@ -12,6 +12,7 @@ import dynamic from 'next/dynamic'
 import { resolveSpaceId } from '@/lib/spaceid'
 import { getAddressRisk } from '@/lib/goplus'
 import { getWalletHistory, getTokenBalances, getNfts } from '@/lib/moralis'
+import { getProvider } from '@/lib/rpc'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
@@ -85,10 +86,16 @@ export default async function AddressPage({
   }
 
   // Enrich with external data — all fire in parallel, failures are silent
-  const [bnbName, riskData] = await Promise.all([
+  const [bnbName, riskData, liveBalance] = await Promise.all([
     resolveSpaceId(addr),
     getAddressRisk(addr),
+    getProvider().getBalance(addr).catch(() => null),
   ])
+
+  // Use live RPC balance when the address isn't in our index yet
+  const displayBalance = liveBalance !== null
+    ? liveBalance
+    : BigInt((addressInfo?.balance ?? '0').split('.')[0])
 
   const activeTab = tab ?? 'txns'
 
@@ -134,11 +141,11 @@ export default async function AddressPage({
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <StatItem
             label="BNB Balance"
-            value={`${formatBNB(BigInt((addressInfo?.balance ?? '0').split('.')[0]))} BNB`}
+            value={`${formatBNB(displayBalance)} BNB`}
           />
           <StatItem
             label="Transactions"
-            value={formatNumber(addressInfo?.txCount ?? 0)}
+            value={formatNumber(txCount || addressInfo?.txCount || 0)}
           />
           <StatItem
             label="First Seen"
