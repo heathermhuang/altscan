@@ -6,7 +6,7 @@
  */
 import { sql } from 'drizzle-orm'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '30', 10)
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 5_000
 const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours
 

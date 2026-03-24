@@ -17,10 +17,11 @@ import { ensureSchema } from './ensure-schema'
 import { getDb, schema } from '@bnbscan/db'
 import { desc } from 'drizzle-orm'
 
-const RPC_URL   = process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/'
-const POLL_MS   = 3_000
-const BATCH     = 3
-const LOG_EVERY = parseInt(process.env.LOG_EVERY ?? '10', 10)
+const RPC_URL     = process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/'
+const POLL_MS     = 3_000
+const BATCH_SIZE  = 20   // fetch up to 20 blocks per iteration when catching up
+const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? '3', 10)  // parallel block workers
+const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 
 let running = true
 process.on('SIGINT',  () => { running = false })
@@ -74,11 +75,16 @@ async function main() {
       }
 
       const from = lastIndexed + 1
-      const to   = Math.min(from + BATCH - 1, latest)
+      const to   = Math.min(from + BATCH_SIZE - 1, latest)
 
-      for (let num = from; num <= to && running; num++) {
-        await processBlock(num, provider)
-        lastIndexed = num
+      // Process blocks in parallel batches of CONCURRENCY — much faster catchup
+      const blockNums: number[] = []
+      for (let n = from; n <= to; n++) blockNums.push(n)
+
+      for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
+        const chunk = blockNums.slice(i, i + CONCURRENCY)
+        await Promise.all(chunk.map(num => processBlock(num, provider)))
+        lastIndexed = chunk[chunk.length - 1]
         if (lastIndexed % LOG_EVERY === 0) {
           console.log(`[indexer] Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed})`)
         }
