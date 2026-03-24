@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveEns } from '@/lib/ens'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, getWalletFirstSeen, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
 
@@ -84,19 +84,18 @@ export default async function AddressPage({
   }
 
   const noLocalData = txCount === 0 && !addressInfo
-  const [ensName, riskData, liveBalance, walletStats, moralisFirstSeen] = await Promise.all([
+  const [ensName, riskData, liveBalance, walletStats] = await Promise.all([
     resolveEns(addr),
     getAddressRisk(addr),
     fetchEthBalance(addr),
     noLocalData ? getWalletStats(addr) : Promise.resolve(null),
-    !addressInfo?.firstSeen ? getWalletFirstSeen(addr) : Promise.resolve(null),
   ])
 
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
   const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
-  const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : moralisFirstSeen
+  const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
 
   const activeTab = tab ?? 'txns'
 
@@ -211,7 +210,7 @@ export default async function AddressPage({
       {activeTab === 'txns' && <TxnsTab addr={addr} page={page} total={displayTxCount} />}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
-      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} moralisFirstSeen={displayFirstSeen} />}
+      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
       {activeTab === 'nfts' && <NftsTab addr={addr} />}
     </div>
   )
@@ -621,10 +620,10 @@ async function HoldingsTab({ addr }: { addr: string }) {
   )
 }
 
-async function AnalyticsTab({ addr, addressInfo, moralisFirstSeen }: { addr: string; addressInfo: typeof schema.addresses.$inferSelect | null; moralisFirstSeen: Date | null }) {
+async function AnalyticsTab({ addr, addressInfo }: { addr: string; addressInfo: typeof schema.addresses.$inferSelect | null }) {
   let totalSentETH = '0'
   let totalReceivedETH = '0'
-  let firstSeen: Date | null = moralisFirstSeen
+  let firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
   let lastSeen: Date | null = null
 
   try {
