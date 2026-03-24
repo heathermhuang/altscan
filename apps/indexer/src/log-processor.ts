@@ -48,22 +48,10 @@ export async function processLogs(
     .set({ status: receipt.status, gasUsed: receipt.gasUsed.toString() })
     .where(eq(schema.transactions.hash, txHash))
 
-  // Bulk insert raw logs
-  const logValues = receipt.logs.map(log => ({
-    txHash,
-    logIndex: log.index,
-    address: log.address,
-    topic0: log.topics[0] ?? null,
-    topic1: log.topics[1] ?? null,
-    topic2: log.topics[2] ?? null,
-    topic3: log.topics[3] ?? null,
-    data: log.data,
-    blockNumber,
-  }))
-
-  if (logValues.length > 0) {
-    await db.insert(schema.logs).values(logValues).onConflictDoNothing()
-  }
+  // NOTE: Raw logs are NOT stored in the logs table for BNB Chain.
+  // BSC generates ~8 GB/day of raw log data which would overflow any reasonable DB plan.
+  // Token transfers are decoded and stored in token_transfers (more useful anyway).
+  // If raw logs are needed in future, add a time-limited logs table or use an RPC lookup.
 
   // Decode token transfers + DEX trades
   for (const log of receipt.logs) {
