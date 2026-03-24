@@ -1,11 +1,9 @@
 import { JsonRpcProvider } from 'ethers'
 import { getDb, schema } from '@bnbscan/db'
-import { logQueue } from './queue'
+import { processLogs, type NormalizedReceipt } from './log-processor'
 import { notifyWebhooks } from './webhook-notifier'
 
-const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
-
-export async function processBlock(blockNumber: number, skipLogs = false) {
+export async function processBlock(blockNumber: number, provider: JsonRpcProvider, skipLogs = false) {
   const db = getDb()
   const block = await provider.getBlock(blockNumber, true)  // true = include txs
   if (!block) throw new Error(`Block ${blockNumber} not found`)
@@ -32,12 +30,12 @@ export async function processBlock(blockNumber: number, skipLogs = false) {
     blockNumber: block.number,
     fromAddress: tx.from.toLowerCase(),
     toAddress: tx.to?.toLowerCase() ?? null,
-    value: tx.value.toString(),  // raw wei string
+    value: tx.value.toString(),
     gas: tx.gasLimit.toString(),
     gasPrice: tx.gasPrice?.toString() ?? '0',
-    gasUsed: 0n,   // updated from receipt by log-processor
+    gasUsed: 0n,
     input: tx.data,
-    status: true,  // updated from receipt by log-processor
+    status: true,
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
     txIndex: idx,
     timestamp,
@@ -47,29 +45,59 @@ export async function processBlock(blockNumber: number, skipLogs = false) {
     await db.insert(schema.transactions).values(txValues).onConflictDoNothing()
   }
 
-  // Queue log processing for each tx (skip for historical backfill to save RPC calls)
-  if (!skipLogs) {
+  // Process logs inline (no queue) — fetch all receipts in ONE RPC call
+  if (!skipLogs && block.prefetchedTransactions.length > 0) {
+    const receiptMap = await fetchBlockReceipts(provider, blockNumber)
     for (const tx of block.prefetchedTransactions) {
-      await logQueue.add('process-logs', {
-        txHash: tx.hash,
-        blockNumber: block.number,
-        timestamp: timestamp.toISOString(),
-      }, {
-        jobId: `logs-${tx.hash}`,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-      })
+      try {
+        await processLogs(tx.hash, blockNumber, timestamp, provider, receiptMap.get(tx.hash.toLowerCase()))
+      } catch (err) {
+        console.warn(`[block-processor] Log processing failed for ${tx.hash}:`, err instanceof Error ? err.message : err)
+      }
     }
   }
 
   console.log(`[block-processor] Block ${block.number} — ${block.prefetchedTransactions.length} txs`)
 
-  // Deliver webhooks for this block's transactions (non-blocking — errors are logged internally)
+  // Deliver webhooks (non-blocking)
   if (!skipLogs && txValues.length > 0) {
     notifyWebhooks(
-      txValues.map(tx => ({ hash: tx.hash, fromAddress: tx.fromAddress, toAddress: tx.toAddress, value: tx.value })),
+      txValues.map(tx => ({ hash: tx.hash, fromAddress: tx.fromAddress, toAddress: tx.toAddress ?? null, value: tx.value })),
       block.number,
       timestamp,
     ).catch(err => console.error('[webhook-notifier] delivery error:', err))
   }
+}
+
+/** Fetch all receipts for a block in one RPC call. Falls back to empty map if unsupported. */
+async function fetchBlockReceipts(
+  provider: JsonRpcProvider,
+  blockNumber: number,
+): Promise<Map<string, NormalizedReceipt>> {
+  const map = new Map<string, NormalizedReceipt>()
+  try {
+    const blockHex = '0x' + blockNumber.toString(16)
+    const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
+      transactionHash: string
+      status: string
+      gasUsed: string
+      logs: Array<{ address: string; topics: string[]; data: string; logIndex: string }>
+    }> | null
+
+    for (const r of raw ?? []) {
+      map.set(r.transactionHash.toLowerCase(), {
+        status: r.status === '0x1',
+        gasUsed: BigInt(r.gasUsed),
+        logs: r.logs.map(l => ({
+          address: l.address.toLowerCase(),
+          topics: l.topics,
+          data: l.data,
+          index: parseInt(l.logIndex, 16),
+        })),
+      })
+    }
+  } catch {
+    // eth_getBlockReceipts not supported — processLogs will fall back to per-tx fetching
+  }
+  return map
 }

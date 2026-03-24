@@ -1,5 +1,6 @@
 import 'dotenv/config'
-import { blockQueue } from './queue'
+import { JsonRpcProvider } from 'ethers'
+import { processBlock } from './block-processor'
 
 // Usage: node dist/backfill.js <start> <end> [--skip-logs]
 // --skip-logs: skip receipt/log enrichment (much cheaper — 1 RPC call per block vs 1+txCount)
@@ -7,26 +8,33 @@ import { blockQueue } from './queue'
 const START = Number(process.argv[2] ?? '38000000')
 const END = Number(process.argv[3] ?? '38001000')
 const SKIP_LOGS = process.argv.includes('--skip-logs')
-const BATCH = 100
+const CONCURRENCY = 3  // process N blocks in parallel
+
+const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
 
 async function backfill() {
-  console.log(`[backfill] Queueing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS})`)
+  console.log(`[backfill] Processing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS}, concurrency=${CONCURRENCY})`)
 
-  for (let n = START; n <= END; n += BATCH) {
-    const batchEnd = Math.min(n + BATCH - 1, END)
-    const jobs = []
-    for (let i = n; i <= batchEnd; i++) {
-      jobs.push({
-        name: 'process-block',
-        data: { blockNumber: i, skipLogs: SKIP_LOGS },
-        opts: { jobId: `block-${i}`, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-      })
+  const blocks = Array.from({ length: END - START + 1 }, (_, i) => START + i)
+  let done = 0
+
+  // Process in chunks of CONCURRENCY
+  for (let i = 0; i < blocks.length; i += CONCURRENCY) {
+    const chunk = blocks.slice(i, i + CONCURRENCY)
+    await Promise.all(
+      chunk.map(n =>
+        processBlock(n, provider, SKIP_LOGS).catch(err =>
+          console.error(`[backfill] Block ${n} failed:`, err instanceof Error ? err.message : err)
+        )
+      )
+    )
+    done += chunk.length
+    if (done % 100 === 0 || done === blocks.length) {
+      console.log(`[backfill] Progress: ${done}/${blocks.length} (${Math.round(done / blocks.length * 100)}%)`)
     }
-    await blockQueue.addBulk(jobs)
-    console.log(`[backfill] Queued ${n}–${batchEnd}`)
   }
 
-  console.log('[backfill] Done. Monitor queue progress via BullMQ dashboard or blockQueue.getJobCounts().')
+  console.log('[backfill] Done.')
   process.exit(0)
 }
 
