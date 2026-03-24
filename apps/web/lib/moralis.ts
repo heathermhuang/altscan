@@ -77,7 +77,7 @@ export async function getWalletHistory(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: 60 },
+      next: { revalidate: 300 },
     })
     if (!res.ok) return null
 
@@ -148,7 +148,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   try {
     const res = await fetch(
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=50`,
-      { headers: h, next: { revalidate: 60 } },
+      { headers: h, next: { revalidate: 300 } },
     )
     if (!res.ok) return []
     const data = (await res.json()) as Array<{
@@ -182,7 +182,7 @@ export async function getWalletStats(address: string): Promise<{ txCount: number
   try {
     const res = await fetch(
       `${BASE}/wallets/${address}/stats?chain=${CHAIN}`,
-      { headers: h, next: { revalidate: 60 } },
+      { headers: h, next: { revalidate: 600 } },
     )
     if (!res.ok) return null
     const data = (await res.json()) as { transactions?: { total?: number } }
@@ -221,7 +221,7 @@ export async function getTokenTransfers(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: 60 },
+      next: { revalidate: 300 },
     })
     if (!res.ok) return null
 
@@ -297,7 +297,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
   try {
     const res = await fetch(
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=20&media_items=false`,
-      { headers: h, next: { revalidate: 120 } },
+      { headers: h, next: { revalidate: 600 } },
     )
     if (!res.ok) return []
     const data = (await res.json()) as {
