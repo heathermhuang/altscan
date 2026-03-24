@@ -7,14 +7,20 @@
  * Env vars:
  *   ETH_RPC_URL        — Ethereum JSON-RPC endpoint (default: https://eth.llamarpc.com)
  *   ETH_DATABASE_URL   — PostgreSQL connection string (default: postgresql://localhost:5432/ethscan)
- *   START_BLOCK        — Block to start from if DB is empty (default: 0 = chain tip - 100)
+ *   START_BLOCK        — Block to start from if DB is empty (default: 0 = chain tip - 1000)
+ *   FORCE_START_BLOCK  — Override DB resume and start from this block regardless (use to reset stale index)
  *   LOG_EVERY          — Log progress every N blocks (default: 10)
+ *
+ * Performance:
+ *   Uses eth_getBlockReceipts to fetch all receipts for a block in ONE RPC call,
+ *   instead of one getTransactionReceipt per transaction (200x fewer RPC calls per block).
+ *   Falls back to per-tx receipt fetching if the endpoint doesn't support eth_getBlockReceipts.
  */
 import { JsonRpcProvider } from 'ethers'
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { sql } from 'drizzle-orm'
-import { processLogs } from './log-processor'
+import { processLogs, type NormalizedReceipt } from './log-processor'
 import { startRetentionCleanup } from './retention-cleanup'
 
 const RPC_URL      = process.env.ETH_RPC_URL      ?? 'https://eth.llamarpc.com'
@@ -41,9 +47,27 @@ async function main() {
   await startRetentionCleanup(db)
 
   let lastIndexed = await getLastIndexedBlock(db)
-  const tip = await provider.getBlockNumber()
-  // If DB is empty, start from tip - 1000 (avoid syncing full history on first run)
-  if (lastIndexed === 0) {
+
+  // Retry getBlockNumber — don't die on transient RPC errors at startup
+  let tip = 0
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      tip = await provider.getBlockNumber()
+      break
+    } catch (err) {
+      console.error(`[eth-indexer] getBlockNumber attempt ${attempt}/5 failed:`, err instanceof Error ? err.message : err)
+      if (attempt < 5) await sleep(5000 * attempt)
+      else throw err
+    }
+  }
+
+  // FORCE_START_BLOCK overrides DB resume — use when index is stale (e.g. started at wrong block)
+  const forceStart = parseInt(process.env.FORCE_START_BLOCK ?? '0', 10)
+  if (forceStart > 0) {
+    lastIndexed = forceStart - 1
+    console.log(`[eth-indexer] FORCE_START_BLOCK=${forceStart} — skipping to block ${forceStart} (tip: ${tip})`)
+  } else if (lastIndexed === 0) {
+    // If DB is empty, start from tip - 1000 (avoid syncing full history on first run)
     const startBlock = parseInt(process.env.START_BLOCK ?? '0', 10)
     lastIndexed = startBlock > 0 ? startBlock - 1 : Math.max(0, tip - 1000)
     console.log(`[eth-indexer] Empty DB — starting from block ${lastIndexed + 1} (tip: ${tip})`)
@@ -159,14 +183,56 @@ async function indexBlock(
     `)
   }
 
+  // Fetch all receipts for the block in ONE RPC call (eth_getBlockReceipts).
+  // This replaces one getTransactionReceipt per tx — a ~200x reduction in RPC calls per block.
+  const receiptMap = await fetchBlockReceipts(provider, blockNumber)
+
   // Process logs for each tx: update status/gasUsed, decode tokens + DEX trades
   for (const tx of txs) {
     try {
-      await processLogs(db, tx.hash, blockNumber, timestamp)
+      await processLogs(db, provider, tx.hash, blockNumber, timestamp, receiptMap.get(tx.hash.toLowerCase()))
     } catch (err) {
       console.warn(`[eth-indexer] Log processing failed for ${tx.hash}:`, err instanceof Error ? err.message : err)
     }
   }
+}
+
+/** Fetch all receipts for a block in one RPC call. Falls back to empty map if unsupported. */
+async function fetchBlockReceipts(
+  provider: JsonRpcProvider,
+  blockNumber: number,
+): Promise<Map<string, NormalizedReceipt>> {
+  const map = new Map<string, NormalizedReceipt>()
+  try {
+    const blockHex = '0x' + blockNumber.toString(16)
+    const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
+      transactionHash: string
+      status: string
+      gasUsed: string
+      logs: Array<{
+        address: string
+        topics: string[]
+        data: string
+        logIndex: string
+      }>
+    }> | null
+
+    for (const r of raw ?? []) {
+      map.set(r.transactionHash.toLowerCase(), {
+        status: r.status === '0x1',
+        gasUsed: BigInt(r.gasUsed),
+        logs: r.logs.map(l => ({
+          address: l.address.toLowerCase(),
+          topics: l.topics,
+          data: l.data,
+          index: parseInt(l.logIndex, 16),
+        })),
+      })
+    }
+  } catch {
+    // eth_getBlockReceipts not supported by this RPC — processLogs will fall back to per-tx fetching
+  }
+  return map
 }
 
 async function ensureSchema(db: ReturnType<typeof drizzle>) {
