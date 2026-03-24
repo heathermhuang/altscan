@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveEns } from '@/lib/ens'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, getWalletFirstSeen } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, getWalletFirstSeen, type MoralisTokenTransfer } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
@@ -186,14 +186,14 @@ export default async function AddressPage({
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-200 mb-6">
-        <TabLink href={`/address/${addr}?tab=txns`} active={activeTab === 'txns'} label={`Transactions (${formatNumber(txCount)})`} />
+        <TabLink href={`/address/${addr}?tab=txns`} active={activeTab === 'txns'} label={`Transactions (${formatNumber(displayTxCount)})`} />
         <TabLink href={`/address/${addr}?tab=transfers`} active={activeTab === 'transfers'} label="Token Transfers" />
         <TabLink href={`/address/${addr}?tab=holdings`} active={activeTab === 'holdings'} label="Holdings" />
         <TabLink href={`/address/${addr}?tab=analytics`} active={activeTab === 'analytics'} label="Analytics" />
         <TabLink href={`/address/${addr}?tab=nfts`} active={activeTab === 'nfts'} label="NFTs" />
       </div>
 
-      {activeTab === 'txns' && <TxnsTab addr={addr} page={page} total={txCount} />}
+      {activeTab === 'txns' && <TxnsTab addr={addr} page={page} total={displayTxCount} />}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} moralisFirstSeen={displayFirstSeen} />}
@@ -343,8 +343,33 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
   } catch { /* DB error */ }
 
   if (transfers.length === 0 && page === 1) {
+    let moralisTransfers: MoralisTokenTransfer[] = []
     const moralis = await getTokenTransfers(addr)
     if (moralis && moralis.transfers.length > 0) {
+      moralisTransfers = moralis.transfers
+    } else {
+      const history = await getWalletHistory(addr)
+      if (history) {
+        for (const tx of history.txs) {
+          for (const e of tx.erc20Transfers) {
+            moralisTransfers.push({
+              txHash: tx.hash,
+              blockNumber: tx.blockNumber,
+              blockTimestamp: tx.blockTimestamp,
+              fromAddress: e.fromAddress,
+              toAddress: e.toAddress,
+              tokenAddress: e.tokenAddress,
+              tokenName: e.tokenName,
+              tokenSymbol: e.tokenSymbol,
+              tokenDecimals: e.tokenDecimals,
+              value: e.value,
+              valueFormatted: e.valueFormatted,
+            })
+          }
+        }
+      }
+    }
+    if (moralisTransfers.length > 0) {
       return (
         <div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
@@ -364,7 +389,7 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {moralis.transfers.map((t) => (
+                {moralisTransfers.map((t) => (
                   <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-mono text-xs">
                       <Link href={`/tx/${t.txHash}`} className="text-indigo-600 hover:underline">
@@ -534,7 +559,15 @@ async function HoldingsTab({ addr }: { addr: string }) {
                     </td>
                     <td className="px-4 py-2 text-gray-600">{t.symbol ?? '—'}</td>
                     <td className="px-4 py-2">
-                      {parseFloat(t.balanceFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                      {(() => {
+                        const f = parseFloat(t.balanceFormatted ?? '')
+                        if (!isNaN(f)) return f.toLocaleString(undefined, { maximumFractionDigits: 6 })
+                        try {
+                          const raw = BigInt(t.balance)
+                          const d = 10n ** BigInt(t.decimals)
+                          return (Number(raw / d) + Number(raw % d) / Number(d)).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                        } catch { return '—' }
+                      })()}
                     </td>
                     <td className="px-4 py-2">
                       {t.usdValue ? `$${parseFloat(t.usdValue).toFixed(2)}` : '—'}

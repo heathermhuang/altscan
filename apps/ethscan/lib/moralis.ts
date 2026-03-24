@@ -6,6 +6,18 @@
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = '0x1' // Ethereum mainnet
 
+export type MoralisErc20Transfer = {
+  fromAddress: string
+  toAddress: string
+  tokenAddress: string
+  tokenName: string
+  tokenSymbol: string
+  tokenDecimals: string
+  value: string
+  valueFormatted: string
+  direction: string
+}
+
 export type MoralisTx = {
   hash: string
   blockNumber: string
@@ -18,6 +30,7 @@ export type MoralisTx = {
   category: string
   summary: string
   possibleSpam: boolean
+  erc20Transfers: MoralisErc20Transfer[]
 }
 
 export type MoralisToken = {
@@ -26,7 +39,8 @@ export type MoralisToken = {
   name: string
   logo: string | null
   decimals: number
-  balanceFormatted: string
+  balance: string
+  balanceFormatted: string | null
   usdValue: string | null
 }
 
@@ -78,6 +92,17 @@ export async function getWalletHistory(
         category: string
         summary: string
         possible_spam: boolean
+        erc20_transfers?: Array<{
+          from_address: string
+          to_address: string
+          contract_address: string
+          token_name: string
+          token_symbol: string
+          token_decimals: string
+          value: string
+          value_formatted: string
+          direction: string
+        }>
       }>
       cursor: string | null
     }
@@ -95,6 +120,17 @@ export async function getWalletHistory(
         category: t.category,
         summary: t.summary,
         possibleSpam: t.possible_spam,
+        erc20Transfers: (t.erc20_transfers ?? []).map(e => ({
+          fromAddress: e.from_address,
+          toAddress: e.to_address,
+          tokenAddress: e.contract_address,
+          tokenName: e.token_name,
+          tokenSymbol: e.token_symbol,
+          tokenDecimals: e.token_decimals,
+          value: e.value,
+          valueFormatted: e.value_formatted,
+          direction: e.direction,
+        })),
       })),
       cursor: data.cursor ?? null,
     }
@@ -119,7 +155,8 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       name: string
       logo: string | null
       decimals: number
-      balance_formatted: string
+      balance: string
+      balance_formatted: string | null
       usd_value: string | null
     }>
     return data.map(t => ({
@@ -128,7 +165,8 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       name: t.name,
       logo: t.logo,
       decimals: t.decimals,
-      balanceFormatted: t.balance_formatted,
+      balance: t.balance ?? '0',
+      balanceFormatted: t.balance_formatted ?? null,
       usdValue: t.usd_value,
     }))
   } catch {
