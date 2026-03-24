@@ -173,7 +173,7 @@ async function indexBlock(
         ${tx.gasLimit.toString()},
         ${effectiveGasPrice.toString()},
         0,
-        ${tx.data.length > 10000 ? tx.data.slice(0, 10000) : tx.data},
+        ${tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data},
         true,
         ${tx.data.length >= 10 ? tx.data.slice(0, 10) : null},
         ${tx.index ?? 0},

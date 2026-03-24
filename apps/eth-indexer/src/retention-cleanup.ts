@@ -6,9 +6,9 @@
  */
 import { sql } from 'drizzle-orm'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '90', 10)
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '30', 10)
 const BATCH_SIZE     = 5_000
-const RUN_EVERY_MS   = 24 * 60 * 60 * 1000
+const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours
 
 async function deleteBatch(db: any, table: string, timestampCol: string, cutoff: Date): Promise<number> {
   const result = await db.execute(sql.raw(`
@@ -76,6 +76,20 @@ async function runCleanup(db: any): Promise<void> {
   totalDeleted += blocksDeleted
 
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
+
+  // VACUUM reclaims disk space from dead tuples left by the deletes above.
+  if (totalDeleted > 0) {
+    console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
+    const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history']
+    for (const t of highVolumeTables) {
+      try {
+        await db.execute(sql.raw(`VACUUM ANALYZE ${t}`))
+        console.log(`[retention] VACUUM ANALYZE ${t} done`)
+      } catch (err) {
+        console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+  }
 }
 
 export async function startRetentionCleanup(db: any): Promise<void> {

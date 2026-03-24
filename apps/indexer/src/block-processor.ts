@@ -34,7 +34,10 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     gas: tx.gasLimit.toString(),
     gasPrice: tx.gasPrice?.toString() ?? '0',
     gasUsed: 0n,
-    input: tx.data,
+    // Truncate calldata to 500 chars — saves ~95% of input storage.
+    // Method ID (first 10 chars) + ~245 bytes is enough for ERC-20/swap decoding.
+    // Full calldata is rarely needed on a block explorer.
+    input: tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data,
     status: true,
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
     txIndex: idx,

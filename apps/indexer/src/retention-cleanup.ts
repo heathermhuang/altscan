@@ -11,9 +11,9 @@
 import { getDb } from '@bnbscan/db'
 import { sql } from 'drizzle-orm'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '90', 10)
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '30', 10)
 const BATCH_SIZE     = 5_000   // rows per delete batch — keeps lock time short
-const RUN_EVERY_MS   = 24 * 60 * 60 * 1000   // 24 hours
+const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours (was 24h — more frequent on BSC)
 
 async function deleteBatch(table: string, timestampCol: string, cutoff: Date): Promise<number> {
   const db = getDb()
@@ -89,6 +89,22 @@ async function runCleanup(): Promise<void> {
   totalDeleted += blocksDeleted
 
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
+
+  // VACUUM reclaims disk space from dead tuples left by the deletes above.
+  // Must run outside a transaction — postgres.js execute() handles this fine.
+  if (totalDeleted > 0) {
+    console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
+    const db = getDb()
+    const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history']
+    for (const t of highVolumeTables) {
+      try {
+        await db.execute(sql.raw(`VACUUM ANALYZE ${t}`))
+        console.log(`[retention] VACUUM ANALYZE ${t} done`)
+      } catch (err) {
+        console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+  }
 }
 
 export async function startRetentionCleanup(): Promise<void> {
