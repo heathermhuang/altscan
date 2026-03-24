@@ -26,8 +26,9 @@ import { startRetentionCleanup } from './retention-cleanup'
 const RPC_URL      = process.env.ETH_RPC_URL      ?? 'https://eth.llamarpc.com'
 const DATABASE_URL = process.env.ETH_DATABASE_URL  ?? 'postgresql://localhost:5432/ethscan'
 const POLL_MS      = 12_000   // Ethereum ~12s slot time
-const BATCH_SIZE   = 3        // ETH blocks are heavier — keep batches small
-const LOG_EVERY    = parseInt(process.env.LOG_EVERY ?? '10', 10)
+const BATCH_SIZE   = 20       // Process 20 blocks per iteration when catching up
+const CONCURRENCY  = parseInt(process.env.INDEX_CONCURRENCY ?? '5', 10)  // parallel block workers
+const LOG_EVERY    = parseInt(process.env.LOG_EVERY ?? '50', 10)
 
 let running = true
 process.on('SIGINT',  () => { running = false })
@@ -87,9 +88,14 @@ async function main() {
       const from = lastIndexed + 1
       const to   = Math.min(from + BATCH_SIZE - 1, latest)
 
-      for (let num = from; num <= to && running; num++) {
-        await indexBlock(db, provider, num)
-        lastIndexed = num
+      // Process blocks in parallel batches of CONCURRENCY — much faster catchup
+      const blockNums: number[] = []
+      for (let n = from; n <= to; n++) blockNums.push(n)
+
+      for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
+        const chunk = blockNums.slice(i, i + CONCURRENCY)
+        await Promise.all(chunk.map(num => indexBlock(db, provider, num)))
+        lastIndexed = chunk[chunk.length - 1]
         if (lastIndexed % LOG_EVERY === 0) {
           console.log(`[eth-indexer] Indexed block ${lastIndexed} (chain head: ${latest}, lag: ${latest - lastIndexed})`)
         }
