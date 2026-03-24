@@ -37,23 +37,42 @@ async function fetchTableEstimate(tableName: string): Promise<number> {
   }
 }
 
+/** Fetch total Ethereum transaction count from Etherscan stats API (no key needed, cached 1h). */
+async function fetchEtherscanTotalTxCount(): Promise<number | null> {
+  try {
+    const res = await fetch(
+      'https://api.etherscan.io/api?module=stats&action=txcount',
+      { next: { revalidate: 3600 } },
+    )
+    if (!res.ok) return null
+    const data = (await res.json()) as { status: string; result?: string }
+    if (data.status !== '1' || !data.result) return null
+    // result is a hex string e.g. "0x1a2b3c4d"
+    return Number(BigInt(data.result))
+  } catch {
+    return null
+  }
+}
+
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
   let totalTxCount = 0
   let totalTokenCount = 0
 
-  const [blocksResult, txsResult, txCountResult, tokenCountResult, ethPrice] = await Promise.all([
+  const [blocksResult, txsResult, txCountResult, tokenCountResult, ethPrice, etherscanTxCount] = await Promise.all([
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
     fetchTableEstimate('transactions'),
     fetchTableEstimate('tokens'),
     fetchETHPrice(),
+    fetchEtherscanTotalTxCount(),
   ])
 
   latestBlocks = blocksResult
   latestTxs = txsResult
-  totalTxCount = typeof txCountResult === 'number' ? txCountResult : 0
+  // Prefer the live Etherscan total over our partial local index
+  totalTxCount = etherscanTxCount ?? (typeof txCountResult === 'number' ? txCountResult : 0)
   totalTokenCount = typeof tokenCountResult === 'number' ? tokenCountResult : 0
 
   const latestBlock = latestBlocks[0]
