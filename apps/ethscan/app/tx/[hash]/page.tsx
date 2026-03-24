@@ -9,7 +9,6 @@ import type { Metadata } from 'next'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
-import { getProvider } from '@/lib/rpc'
 
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
@@ -83,15 +82,6 @@ export default async function TxDetailPage({
   if (!tx) notFound()
 
   const fromRpc = !dbTx && !!rpcTx
-
-  // If DB has gasUsed=0, fetch the receipt for real gas data
-  let receiptGasUsed: bigint | null = null
-  if (dbTx && Number(dbTx.gasUsed ?? 0) === 0) {
-    try {
-      const receipt = await getProvider().getTransactionReceipt(hash)
-      if (receipt) receiptGasUsed = receipt.gasUsed
-    } catch { /* ignore */ }
-  }
 
   const [txLogs, transfers, methodName] = await Promise.all([
     fromRpc ? Promise.resolve([]) : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50),
@@ -209,7 +199,7 @@ export default async function TxDetailPage({
               label="Gas Used / Limit"
               value={(() => {
                 const MAX_REASONABLE_GAS = 50_000_000n
-                const gasUsed = receiptGasUsed ?? BigInt(tx.gasUsed ?? 0)
+                const gasUsed = BigInt(tx.gasUsed ?? 0)
                 const gasLimit = BigInt(tx.gas ?? 0)
                 const usedStr = gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'
                 const limitStr = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'
