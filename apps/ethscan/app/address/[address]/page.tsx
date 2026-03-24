@@ -12,8 +12,6 @@ import dynamic from 'next/dynamic'
 import { resolveEns } from '@/lib/ens'
 import { getAddressRisk } from '@/lib/goplus'
 import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, getWalletFirstSeen, type MoralisTokenTransfer } from '@/lib/moralis'
-import { getProvider } from '@/lib/rpc'
-
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
 
@@ -36,6 +34,23 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
 }
 
 const PAGE_SIZE = 25
+
+async function fetchEthBalance(address: string): Promise<bigint | null> {
+  try {
+    const rpcUrl = process.env.ETH_RPC_URL ?? 'https://eth.llamarpc.com'
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getBalance', params: [address, 'latest'], id: 1 }),
+      next: { revalidate: 30 },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { result?: string }
+    return data.result ? BigInt(data.result) : null
+  } catch {
+    return null
+  }
+}
 
 export default async function AddressPage({
   params,
@@ -72,7 +87,7 @@ export default async function AddressPage({
   const [ensName, riskData, liveBalance, walletStats, moralisFirstSeen] = await Promise.all([
     resolveEns(addr),
     getAddressRisk(addr),
-    getProvider().getBalance(addr).catch(() => null),
+    fetchEthBalance(addr),
     noLocalData ? getWalletStats(addr) : Promise.resolve(null),
     !addressInfo?.firstSeen ? getWalletFirstSeen(addr) : Promise.resolve(null),
   ])
