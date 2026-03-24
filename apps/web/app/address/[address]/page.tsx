@@ -446,28 +446,6 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
     const moralis = await getTokenTransfers(addr)
     if (moralis && moralis.transfers.length > 0) {
       moralisTransfers = moralis.transfers
-    } else {
-      // Fallback: extract erc20 transfers from wallet history
-      const history = await getWalletHistory(addr)
-      if (history) {
-        for (const tx of history.txs) {
-          for (const e of tx.erc20Transfers) {
-            moralisTransfers.push({
-              txHash: tx.hash,
-              blockNumber: tx.blockNumber,
-              blockTimestamp: tx.blockTimestamp,
-              fromAddress: e.fromAddress,
-              toAddress: e.toAddress,
-              tokenAddress: e.tokenAddress,
-              tokenName: e.tokenName,
-              tokenSymbol: e.tokenSymbol,
-              tokenDecimals: e.tokenDecimals,
-              value: e.value,
-              valueFormatted: e.valueFormatted,
-            })
-          }
-        }
-      }
     }
     if (moralisTransfers.length > 0) {
       return (

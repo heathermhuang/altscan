@@ -54,6 +54,7 @@ export type MoralisNft = {
 }
 
 function headers() {
+  if (process.env.MORALIS_DISABLED === 'true') return null
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
   return { 'X-API-Key': key, 'Accept': 'application/json' }
