@@ -30,8 +30,24 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
   }
 }
 
+// Canonical method signatures — take precedence over 4byte.directory (which has collisions)
+const KNOWN_SIGNATURES: Record<string, string> = {
+  '0xa9059cbb': 'transfer(address,uint256)',
+  '0x23b872dd': 'transferFrom(address,address,uint256)',
+  '0x095ea7b3': 'approve(address,uint256)',
+  '0x38ed1739': 'swapExactTokensForTokens(uint256,uint256,address[],address,uint256)',
+  '0x18cbafe5': 'swapExactTokensForETH(uint256,uint256,address[],address,uint256)',
+  '0x7ff36ab5': 'swapExactETHForTokens(uint256,address[],address,uint256)',
+  '0xe8e33700': 'addLiquidity(address,address,uint256,uint256,uint256,uint256,address,uint256)',
+  '0xbaa2abde': 'removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)',
+  '0xd0e30db0': 'deposit()',
+  '0x2e1a7d4d': 'withdraw(uint256)',
+}
+
 async function resolveMethodName(methodId: string): Promise<string | null> {
   if (!methodId || methodId === '0x' || methodId.length < 10) return null
+  // Use canonical name if known — avoids 4byte.directory collisions
+  if (KNOWN_SIGNATURES[methodId]) return KNOWN_SIGNATURES[methodId]
   try {
     const res = await fetch(
       `https://www.4byte.directory/api/v1/signatures/?hex_signature=${methodId}`,
@@ -42,6 +58,19 @@ async function resolveMethodName(methodId: string): Promise<string | null> {
       results?: { text_signature: string }[]
     }
     return data.results?.[0]?.text_signature ?? null
+  } catch {
+    return null
+  }
+}
+
+// Decode ERC-20 transfer(address,uint256) call data
+function decodeTransferInput(input: string | null): { to: string; amount: bigint } | null {
+  if (!input || input.length !== 138) return null // 0x + 8 + 64 + 64
+  try {
+    const to = ('0x' + input.slice(34, 74)).toLowerCase()
+    const amount = BigInt('0x' + input.slice(74))
+    if (!/^0x[0-9a-f]{40}$/.test(to)) return null
+    return { to, amount }
   } catch {
     return null
   }
@@ -134,6 +163,30 @@ export default async function TxDetailPage({
     })
   )
 
+  // If no DB transfers, try to decode from input data (works for RPC txs too)
+  let decodedInputTransfer: { tokenAddress: string; to: string; amount: bigint; tokenSymbol?: string; tokenDecimals?: number } | null = null
+  if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {
+    const parsed = decodeTransferInput(tx.input ?? null)
+    if (parsed) {
+      let tokenSymbol: string | undefined
+      let tokenDecimals: number | undefined
+      try {
+        const [tok] = await db.select({ symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
+          .from(schema.tokens).where(eq(schema.tokens.address, tx.toAddress.toLowerCase())).limit(1)
+        if (tok) { tokenSymbol = tok.symbol; tokenDecimals = tok.decimals }
+      } catch { /* ignore */ }
+      decodedInputTransfer = { tokenAddress: tx.toAddress, to: parsed.to, amount: parsed.amount, tokenSymbol, tokenDecimals }
+      transferInfos.push({
+        tokenAddress: tx.toAddress,
+        fromAddress: tx.fromAddress,
+        toAddress: parsed.to,
+        value: parsed.amount.toString(),
+        tokenSymbol,
+        tokenDecimals,
+      })
+    }
+  }
+
   const decoded = decodeTx(
     {
       hash: tx.hash,
@@ -167,7 +220,7 @@ export default async function TxDetailPage({
       {fromRpc && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
           <span>⚡</span>
-          <span>Fetched live from BNB Chain — this transaction predates our index. Token transfer details are not available.</span>
+          <span>Fetched live from BNB Chain — this transaction predates our index.{!decodedInputTransfer && ' Token transfer details are not available.'}</span>
         </div>
       )}
 
@@ -278,35 +331,49 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {transfers.length > 0 && (
+      {(transfers.length > 0 || decodedInputTransfer) && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Token Transfers ({transfers.length})</h2>
+          <h2 className="font-semibold mb-3">Token Transfers ({transfers.length || 1})</h2>
           <div className="space-y-2">
             {transfers.map((t, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-gray-500">From</span>
-                <Link
-                  href={`/address/${t.fromAddress}`}
-                  className="text-blue-600 font-mono text-xs hover:underline"
-                >
+                <Link href={`/address/${t.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
                   {t.fromAddress.slice(0, 12)}...
                 </Link>
                 <span className="text-gray-500">To</span>
-                <Link
-                  href={`/address/${t.toAddress}`}
-                  className="text-blue-600 font-mono text-xs hover:underline"
-                >
+                <Link href={`/address/${t.toAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
                   {t.toAddress.slice(0, 12)}...
                 </Link>
                 <span className="text-gray-500">Token</span>
-                <Link
-                  href={`/token/${t.tokenAddress}`}
-                  className="text-yellow-600 hover:underline"
-                >
+                <Link href={`/token/${t.tokenAddress}`} className="text-yellow-600 hover:underline">
                   {t.tokenAddress.slice(0, 12)}...
                 </Link>
               </div>
             ))}
+            {decodedInputTransfer && transfers.length === 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-500">From</span>
+                <Link href={`/address/${tx.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
+                  {tx.fromAddress.slice(0, 12)}...
+                </Link>
+                <span className="text-gray-500">To</span>
+                <Link href={`/address/${decodedInputTransfer.to}`} className="text-blue-600 font-mono text-xs hover:underline">
+                  {decodedInputTransfer.to.slice(0, 12)}...
+                </Link>
+                <span className="text-gray-500">For</span>
+                <span className="font-medium">
+                  {decodedInputTransfer.tokenDecimals != null
+                    ? (Number(decodedInputTransfer.amount) / Math.pow(10, decodedInputTransfer.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
+                    : decodedInputTransfer.amount.toString()}
+                  {' '}{decodedInputTransfer.tokenSymbol && (
+                    <Link href={`/token/${decodedInputTransfer.tokenAddress}`} className="text-yellow-600 hover:underline">
+                      {decodedInputTransfer.tokenSymbol}
+                    </Link>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
