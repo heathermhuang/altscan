@@ -33,6 +33,8 @@ export const transactions = pgTable('transactions', {
   status:       boolean('status').notNull().default(true),
   methodId:     varchar('method_id', { length: 10 }),
   txIndex:      integer('tx_index').notNull(),
+  nonce:        integer('nonce'),
+  txType:       integer('tx_type'),
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 }, (t) => ({
   fromIdx:      index('tx_from_idx').on(t.fromAddress),

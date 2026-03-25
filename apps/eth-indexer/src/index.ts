@@ -180,7 +180,7 @@ async function indexBlock(
     const effectiveGasPrice = tx.gasPrice ?? (baseFeePerGas + (tx.maxPriorityFeePerGas ?? 0n))
 
     await db.execute(sql`
-      INSERT INTO transactions (hash, block_number, from_address, to_address, value, gas, gas_price, gas_used, input, status, method_id, tx_index, timestamp)
+      INSERT INTO transactions (hash, block_number, from_address, to_address, value, gas, gas_price, gas_used, input, status, method_id, tx_index, nonce, tx_type, timestamp)
       VALUES (
         ${tx.hash},
         ${blockNumber},
@@ -194,6 +194,8 @@ async function indexBlock(
         true,
         ${tx.data.length >= 10 ? tx.data.slice(0, 10) : null},
         ${tx.index ?? 0},
+        ${tx.nonce},
+        ${tx.type ?? 0},
         ${timestamp.toISOString()}
       )
       ON CONFLICT (hash) DO NOTHING
@@ -288,6 +290,8 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       status          BOOLEAN NOT NULL DEFAULT true,
       method_id       VARCHAR(10),
       tx_index        INTEGER NOT NULL DEFAULT 0,
+      nonce           INTEGER,
+      tx_type         INTEGER,
       timestamp       TIMESTAMPTZ NOT NULL
     )
   `)
@@ -335,8 +339,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       PRIMARY KEY (tx_hash, log_index)
     )
   `)
-  // Backfill: add id column to existing logs tables created without it
+  // Backfill: add missing columns to existing tables
   await db.execute(sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS id SERIAL`)
+  await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS nonce INTEGER`)
+  await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tx_type INTEGER`)
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS contracts (

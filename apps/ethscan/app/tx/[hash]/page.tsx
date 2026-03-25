@@ -9,6 +9,7 @@ import type { Metadata } from 'next'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 
 async function fetchETHPrice(): Promise<number | null> {
   try {
@@ -180,9 +181,9 @@ export default async function TxDetailPage({
   // Confirmations
   const confirmations = chainTip ? chainTip - tx.blockNumber : null
 
-  // Nonce + txType (only from RPC fallback — DB doesn't store these)
-  const nonce = fromRpc ? (rpcTx as RpcTx).nonce : null
-  const txType = fromRpc ? (rpcTx as RpcTx).txType : null
+  // Nonce + txType — prefer DB, fallback to RPC
+  const nonce = tx.nonce ?? (fromRpc ? (rpcTx as RpcTx).nonce : null)
+  const txType = tx.txType ?? (fromRpc ? (rpcTx as RpcTx).txType : null)
 
   const transferInfos = await Promise.all(
     transfers.map(async (t) => {
@@ -430,22 +431,62 @@ export default async function TxDetailPage({
         <div className="bg-white rounded-xl border shadow-sm p-4">
           <h2 className="font-semibold mb-3">Event Logs ({txLogs.length})</h2>
           <div className="space-y-3">
-            {txLogs.map((log, i) => (
-              <div key={i} className="bg-gray-50 rounded p-3 font-mono text-xs overflow-auto">
-                <div>
-                  <span className="text-gray-500">Address: </span>
-                  <Link href={`/address/${log.address}`} className="text-blue-600 hover:underline">
-                    {log.address}
-                  </Link>
+            {txLogs.map((log, i) => {
+              const decoded = decodeEventName(log.topic0)
+              return (
+                <div key={i} className="bg-gray-50 rounded p-3 text-xs overflow-auto">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-gray-400 font-mono">#{i}</span>
+                    <Link href={`/address/${log.address}`} className="text-blue-600 hover:underline font-mono">
+                      {log.address}
+                    </Link>
+                    {decoded && (
+                      <span className="bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-semibold text-xs">
+                        {decoded.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1 pl-6">
+                    {log.topic0 && (
+                      <div className="flex gap-2">
+                        <span className="text-gray-400 w-14 shrink-0">Topic0</span>
+                        <span className="font-mono text-gray-600 break-all">{log.topic0}</span>
+                      </div>
+                    )}
+                    {log.topic1 && (
+                      <div className="flex gap-2">
+                        <span className="text-gray-400 w-14 shrink-0">Topic1</span>
+                        <span className="font-mono break-all">
+                          <span className="text-gray-600">{log.topic1}</span>
+                          {decoded && decoded.params[0] && (
+                            <span className="text-indigo-600 ml-2">→ {decoded.params[0]}: {decodeTopicParam(log.topic1)}</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {log.topic2 && (
+                      <div className="flex gap-2">
+                        <span className="text-gray-400 w-14 shrink-0">Topic2</span>
+                        <span className="font-mono break-all">
+                          <span className="text-gray-600">{log.topic2}</span>
+                          {decoded && decoded.params[1] && (
+                            <span className="text-indigo-600 ml-2">→ {decoded.params[1]}: {decodeTopicParam(log.topic2)}</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {log.data && log.data !== '0x' && (
+                      <div className="flex gap-2">
+                        <span className="text-gray-400 w-14 shrink-0">Data</span>
+                        <span className="font-mono text-gray-600 break-all">
+                          {log.data.slice(0, 130)}{log.data.length > 130 ? '…' : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {log.topic0 && <div><span className="text-gray-500">Topic0: </span>{log.topic0}</div>}
-                {log.topic1 && <div><span className="text-gray-500">Topic1: </span>{log.topic1}</div>}
-                <div>
-                  <span className="text-gray-500">Data: </span>
-                  {log.data.slice(0, 130)}{log.data.length > 130 ? '…' : ''}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

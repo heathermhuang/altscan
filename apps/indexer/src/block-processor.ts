@@ -41,6 +41,8 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     status: true,
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
     txIndex: idx,
+    nonce: tx.nonce,
+    txType: tx.type ?? 0,
     timestamp,
   }))
 
