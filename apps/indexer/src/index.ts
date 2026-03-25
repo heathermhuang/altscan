@@ -65,6 +65,11 @@ async function main() {
   syncValidators().catch(err => console.error('[validator-syncer] initial error:', err))
   setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 10 * 60 * 1000)
 
+  // Auto-skip: if too far behind, jump to near chain tip.
+  // A block explorer with stale data is useless — better to show recent blocks
+  // than grind through days of backlog.
+  const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
+
   while (running) {
     try {
       const latest = await provider.getBlockNumber()
@@ -72,6 +77,12 @@ async function main() {
       if (latest <= lastIndexed) {
         await sleep(POLL_MS)
         continue
+      }
+
+      // If we're too far behind, skip ahead to near tip
+      if (latest - lastIndexed > MAX_LAG) {
+        console.log(`[indexer] ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — skipping to block ${latest - 200}`)
+        lastIndexed = latest - 200
       }
 
       const from = lastIndexed + 1
