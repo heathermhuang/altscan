@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { formatETH, formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
@@ -9,6 +9,29 @@ import type { Metadata } from 'next'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+
+async function fetchETHPrice(): Promise<number | null> {
+  try {
+    const res = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+      { next: { revalidate: 60 } },
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.ethereum?.usd ?? null
+  } catch {
+    return null
+  }
+}
+
+async function fetchChainTip(): Promise<number | null> {
+  try {
+    const [row] = await db.select({ max: sql<number>`MAX(number)` }).from(schema.blocks)
+    return row?.max ?? null
+  } catch {
+    return null
+  }
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
@@ -24,7 +47,7 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     description: `Ethereum transaction: ${val} ETH from ${tx.fromAddress.slice(0, 12)}… to ${(tx.toAddress ?? 'contract creation').slice(0, 12)}…`,
     openGraph: {
       title: `Transaction ${hash.slice(0, 18)}…`,
-      description: `${val} ETH · Block #${tx.blockNumber} · ${tx.status ? '✅ Success' : '❌ Failed'}`,
+      description: `${val} ETH · Block #${tx.blockNumber} · ${tx.status ? 'Success' : 'Failed'}`,
     },
   }
 }
@@ -40,6 +63,13 @@ const KNOWN_SIGNATURES: Record<string, string> = {
   '0xbaa2abde': 'removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)',
   '0xd0e30db0': 'deposit()',
   '0x2e1a7d4d': 'withdraw(uint256)',
+}
+
+const TX_TYPE_LABELS: Record<number, string> = {
+  0: 'Legacy',
+  1: 'EIP-2930 (Access List)',
+  2: 'EIP-1559 (Dynamic Fee)',
+  3: 'EIP-4844 (Blob)',
 }
 
 async function resolveMethodName(methodId: string): Promise<string | null> {
@@ -90,6 +120,12 @@ function tryDecodeInputAsUtf8(input: string): string | null {
   }
 }
 
+function formatUsd(ethAmount: number, price: number): string {
+  const usd = ethAmount * price
+  if (usd < 0.01 && usd > 0) return '< $0.01'
+  return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export default async function TxDetailPage({
   params,
 }: {
@@ -109,7 +145,7 @@ export default async function TxDetailPage({
 
   const fromRpc = !dbTx && !!rpcTx
 
-  const [txLogs, transfers, methodName] = await Promise.all([
+  const [txLogs, transfers, methodName, ethPrice, chainTip] = await Promise.all([
     fromRpc
       ? Promise.resolve([])
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(() => []),
@@ -119,11 +155,34 @@ export default async function TxDetailPage({
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
+    fetchETHPrice(),
+    fetchChainTip(),
   ])
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
   const hasInput = tx.input && tx.input !== '0x'
   const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(tx.input) : null
+
+  // Gas usage percentage
+  const gasUsed = BigInt(tx.gasUsed ?? 0)
+  const gasLimit = BigInt(tx.gas ?? 0)
+  const MAX_REASONABLE_GAS = 50_000_000n
+  const gasPercent = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS && gasUsed < MAX_REASONABLE_GAS
+    ? Number((gasUsed * 100n) / gasLimit)
+    : null
+
+  // USD values
+  const ethValue = Number(BigInt((tx.value ?? '0').split('.')[0])) / 1e18
+  const feeEth = Number(fee) / 1e18
+  const valueUsd = ethPrice ? formatUsd(ethValue, ethPrice) : null
+  const feeUsd = ethPrice ? formatUsd(feeEth, ethPrice) : null
+
+  // Confirmations
+  const confirmations = chainTip ? chainTip - tx.blockNumber : null
+
+  // Nonce + txType (only from RPC fallback — DB doesn't store these)
+  const nonce = fromRpc ? (rpcTx as RpcTx).nonce : null
+  const txType = fromRpc ? (rpcTx as RpcTx).txType : null
 
   const transferInfos = await Promise.all(
     transfers.map(async (t) => {
@@ -147,7 +206,6 @@ export default async function TxDetailPage({
     })
   )
 
-  let decodedInputTransfer: { tokenAddress: string; to: string; amount: bigint; tokenSymbol?: string; tokenDecimals?: number } | null = null
   if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {
     const parsed = decodeTransferInput(tx.input ?? null)
     if (parsed) {
@@ -158,7 +216,6 @@ export default async function TxDetailPage({
           .from(schema.tokens).where(eq(schema.tokens.address, tx.toAddress.toLowerCase())).limit(1)
         if (tok) { tokenSymbol = tok.symbol; tokenDecimals = tok.decimals }
       } catch { /* ignore */ }
-      decodedInputTransfer = { tokenAddress: tx.toAddress, to: parsed.to, amount: parsed.amount, tokenSymbol, tokenDecimals }
       transferInfos.push({
         tokenAddress: tx.toAddress,
         fromAddress: tx.fromAddress,
@@ -203,7 +260,7 @@ export default async function TxDetailPage({
       {fromRpc && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
           <span>⚡</span>
-          <span>Fetched live from Ethereum — this transaction predates our index.{!decodedInputTransfer && ' Token transfer details are not available.'}</span>
+          <span>Fetched live from Ethereum — this transaction predates our index.</span>
         </div>
       )}
 
@@ -219,7 +276,19 @@ export default async function TxDetailPage({
           <tbody className="divide-y">
             <Row label="Transaction Hash" value={tx.hash} mono copy />
             <Row label="Status" value={tx.status ? 'Success' : 'Failed'} />
-            <Row label="Block" value={String(tx.blockNumber)} link={`/blocks/${tx.blockNumber}`} />
+            <tr>
+              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Block</td>
+              <td className="px-6 py-3">
+                <Link href={`/blocks/${tx.blockNumber}`} className="text-indigo-600 hover:underline">
+                  {String(tx.blockNumber)}
+                </Link>
+                {confirmations != null && confirmations > 0 && (
+                  <span className="ml-2 text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">
+                    {formatNumber(confirmations)} Confirmations
+                  </span>
+                )}
+              </td>
+            </tr>
             <Row
               label="Timestamp"
               value={`${timeAgo(new Date(tx.timestamp))} (${new Date(tx.timestamp).toUTCString()})`}
@@ -239,32 +308,58 @@ export default async function TxDetailPage({
               link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
               addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
             />
-            <Row
-              label="Value"
-              value={`${formatETH(BigInt((tx.value ?? '0').split('.')[0]))} ETH`}
-            />
-            <Row label="Transaction Fee" value={`${formatETH(fee)} ETH`} />
+            <tr>
+              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Value</td>
+              <td className="px-6 py-3">
+                {formatETH(BigInt((tx.value ?? '0').split('.')[0]))} ETH
+                {valueUsd && <span className="text-gray-400 ml-1">({valueUsd})</span>}
+              </td>
+            </tr>
+            <tr>
+              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Transaction Fee</td>
+              <td className="px-6 py-3">
+                {formatETH(fee)} ETH
+                {feeUsd && <span className="text-gray-400 ml-1">({feeUsd})</span>}
+              </td>
+            </tr>
             <Row
               label="Gas Price"
               value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
             />
-            <Row
-              label="Gas Used / Limit"
-              value={(() => {
-                const MAX_REASONABLE_GAS = 50_000_000n
-                const gasUsed = BigInt(tx.gasUsed ?? 0)
-                const gasLimit = BigInt(tx.gas ?? 0)
-                const usedStr = gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'
-                const limitStr = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'
-                return `${usedStr} / ${limitStr}`
-              })()}
-            />
+            <tr>
+              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Gas Used / Limit</td>
+              <td className="px-6 py-3">
+                <span>
+                  {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'}
+                  {' / '}
+                  {gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'}
+                </span>
+                {gasPercent != null && (
+                  <span className="ml-2 text-xs text-gray-500">({gasPercent}%)</span>
+                )}
+                {gasPercent != null && (
+                  <div className="mt-1 w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-indigo-500"
+                      style={{ width: `${Math.min(gasPercent, 100)}%` }}
+                    />
+                  </div>
+                )}
+              </td>
+            </tr>
             {tx.methodId && tx.methodId !== '0x' && (
               <Row
                 label="Method"
                 value={methodName ? `${methodName} (${tx.methodId})` : tx.methodId}
                 mono
               />
+            )}
+            {nonce != null && (
+              <Row label="Nonce" value={String(nonce)} />
+            )}
+            <Row label="Position In Block" value={String(tx.txIndex)} />
+            {txType != null && (
+              <Row label="Transaction Type" value={TX_TYPE_LABELS[txType] ?? `Type ${txType}`} />
             )}
           </tbody>
         </table>
@@ -298,49 +393,35 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {(transfers.length > 0 || decodedInputTransfer) && (
+      {transferInfos.length > 0 && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Token Transfers ({transfers.length || 1})</h2>
+          <h2 className="font-semibold mb-3">Token Transfers ({transferInfos.length})</h2>
           <div className="space-y-2">
-            {transfers.map((t, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-500">From</span>
-                <Link href={`/address/${t.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
-                  {t.fromAddress.slice(0, 12)}...
-                </Link>
-                <span className="text-gray-500">To</span>
-                <Link href={`/address/${t.toAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
-                  {t.toAddress.slice(0, 12)}...
-                </Link>
-                <span className="text-gray-500">Token</span>
-                <Link href={`/token/${t.tokenAddress}`} className="text-indigo-600 hover:underline">
-                  {t.tokenAddress.slice(0, 12)}...
-                </Link>
-              </div>
-            ))}
-            {decodedInputTransfer && transfers.length === 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-500">From</span>
-                <Link href={`/address/${tx.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
-                  {tx.fromAddress.slice(0, 12)}...
-                </Link>
-                <span className="text-gray-500">To</span>
-                <Link href={`/address/${decodedInputTransfer.to}`} className="text-blue-600 font-mono text-xs hover:underline">
-                  {decodedInputTransfer.to.slice(0, 12)}...
-                </Link>
-                <span className="text-gray-500">For</span>
-                <span className="font-medium">
-                  {decodedInputTransfer.tokenDecimals != null
-                    ? (Number(decodedInputTransfer.amount) / Math.pow(10, decodedInputTransfer.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
-                    : decodedInputTransfer.amount.toString()}
-                  {' '}{decodedInputTransfer.tokenSymbol && (
-                    <Link href={`/token/${decodedInputTransfer.tokenAddress}`} className="text-indigo-600 hover:underline">
-                      {decodedInputTransfer.tokenSymbol}
+            {transferInfos.map((t, i) => {
+              const formattedAmount = t.tokenDecimals != null
+                ? (Number(BigInt(t.value)) / Math.pow(10, t.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
+                : null
+              return (
+                <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-gray-500">From</span>
+                  <Link href={`/address/${t.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
+                    {t.fromAddress.slice(0, 12)}...
+                  </Link>
+                  <span className="text-gray-500">To</span>
+                  <Link href={`/address/${t.toAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
+                    {t.toAddress.slice(0, 12)}...
+                  </Link>
+                  <span className="text-gray-500">For</span>
+                  <span className="font-medium">
+                    {formattedAmount ?? t.value}
+                    {' '}
+                    <Link href={`/token/${t.tokenAddress}`} className="text-indigo-600 hover:underline">
+                      {t.tokenSymbol ?? t.tokenAddress.slice(0, 10) + '…'}
                     </Link>
-                  )}
-                </span>
-              </div>
-            )}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

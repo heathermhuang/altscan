@@ -17,6 +17,8 @@ export type RpcTx = {
   status: boolean
   methodId: string | null
   txIndex: number
+  nonce: number
+  txType: number
   timestamp: Date
   _fromRpc: true
 }
@@ -62,6 +64,8 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
       status: receipt ? receipt.status === 1 : true,
       methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
       txIndex: tx.index ?? 0,
+      nonce: tx.nonce,
+      txType: tx.type ?? 0,
       timestamp: blockTs,
       _fromRpc: true,
     }
