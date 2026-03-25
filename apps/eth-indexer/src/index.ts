@@ -409,6 +409,24 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     )
   `)
 
+  // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
+  // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
+  try {
+    const invalid = await db.execute(sql`
+      SELECT c.relname as index_name
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      WHERE NOT i.indisvalid
+    `)
+    for (const row of Array.from(invalid)) {
+      const name = (row as Record<string, unknown>).index_name as string
+      console.log(`[eth-indexer] Dropping invalid index: ${name}`)
+      await db.execute(sql.raw(`DROP INDEX IF EXISTS "${name}"`))
+    }
+  } catch (err) {
+    console.warn('[eth-indexer] Could not check for invalid indexes:', err instanceof Error ? err.message : err)
+  }
+
   // Indexes (all idempotent)
   const indexes = [
     'CREATE INDEX IF NOT EXISTS eth_blocks_miner_idx    ON blocks(miner)',
