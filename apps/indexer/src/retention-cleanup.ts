@@ -11,7 +11,7 @@
 import { getDb } from '@bnbscan/db'
 import { sql } from 'drizzle-orm'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '1', 10)
 const BATCH_SIZE     = 5_000   // rows per delete batch — keeps lock time short
 const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours (was 24h — more frequent on BSC)
 
