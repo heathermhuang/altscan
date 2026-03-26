@@ -378,7 +378,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
 
   try {
     const res = await fetch(
-      `${BASE}/${address}/nft?chain=${CHAIN}&limit=10&media_items=false&exclude_spam=true`,
+      `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
       { headers: h, cache: 'no-store' },
     )
     if (!res.ok) return []

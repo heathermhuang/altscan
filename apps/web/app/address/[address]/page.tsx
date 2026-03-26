@@ -93,18 +93,24 @@ export default async function AddressPage({
   // Enrich with external data — all fire in parallel, failures are silent
   const noLocalData = txCount === 0 && !addressInfo
   const needsMoralis = noLocalData && !isBot
-  const [bnbName, riskData, liveBalance, moralisHistory] = await Promise.all([
+  // Fetch all enrichment data in parallel — RPC calls are free
+  const provider = getProvider()
+  const [bnbName, riskData, liveBalance, rpcTxCount, moralisHistory, bnbPrice] = await Promise.all([
     resolveSpaceId(addr),
-    isBot ? Promise.resolve(null) : getAddressRisk(addr),  // GoPlus also costs — skip for bots
-    getProvider().getBalance(addr).catch(() => null),       // RPC is free — always fetch
+    isBot ? Promise.resolve(null) : getAddressRisk(addr),
+    provider.getBalance(addr).catch(() => null),
+    provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
     needsMoralis ? getWalletHistory(addr) : Promise.resolve(null),
+    fetch('https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd', { next: { revalidate: 300 } })
+      .then(r => r.json()).then(d => d.binancecoin?.usd ?? null).catch(() => null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
-  const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
+  // Transaction count: prefer DB, then Moralis total, then RPC nonce (outgoing only but better than 0)
+  const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || rpcTxCount || 0
   // First Seen: prefer DB, fallback to oldest Moralis tx timestamp
   const moralisFirstSeen = moralisHistory?.txs?.length
     ? new Date(moralisHistory.txs[moralisHistory.txs.length - 1].blockTimestamp)
@@ -112,6 +118,10 @@ export default async function AddressPage({
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
     : moralisFirstSeen
+  // USD value of BNB balance
+  const bnbUsd = bnbPrice && displayBalance
+    ? (Number(displayBalance) / 1e18 * bnbPrice)
+    : null
 
   const activeTab = tab ?? 'txns'
 
@@ -166,6 +176,7 @@ export default async function AddressPage({
           <StatItem
             label="BNB Balance"
             value={`${formatBNB(displayBalance)} BNB`}
+            subValue={bnbUsd ? `$${bnbUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
           />
           <StatItem
             label="Transactions"
@@ -998,11 +1009,12 @@ function TabLink({
   )
 }
 
-function StatItem({ label, value }: { label: string; value: string }) {
+function StatItem({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
   return (
     <div>
       <p className="text-gray-500 text-xs mb-0.5">{label}</p>
       <p className="font-semibold">{value}</p>
+      {subValue && <p className="text-xs text-gray-400">{subValue}</p>}
     </div>
   )
 }
