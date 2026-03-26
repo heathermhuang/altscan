@@ -9,7 +9,7 @@
  * TODO (v2): add Redis key cache (TTL=60s) to eliminate per-call DB hit.
  */
 import { db, schema } from '@/lib/db'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { checkIpRateLimit, checkRateLimit, extractClientIp } from '@/lib/api-rate-limit'
 import crypto from 'crypto'
 
@@ -83,9 +83,9 @@ export async function authRequest(request: Request): Promise<AuthResult> {
         console.warn(`[api-auth] Rate limit exceeded for key ${keyHash.slice(0, 8)}...`)
         return { ok: false, limited: true, reason: 'rate_limit' }
       }
-      // Track usage asynchronously (non-blocking)
+      // Track usage asynchronously — atomic increment via SQL to avoid race conditions
       db.update(schema.apiKeys)
-        .set({ lastUsedAt: new Date(), totalRequests: keyRow.id }) // increment via raw SQL would be ideal but this updates lastUsedAt
+        .set({ lastUsedAt: new Date(), totalRequests: sql`${schema.apiKeys.totalRequests} + 1` })
         .where(eq(schema.apiKeys.id, keyRow.id))
         .catch(() => {})
       return { ok: true, limited: false }

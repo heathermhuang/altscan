@@ -3,7 +3,7 @@
  * Mirrors apps/web/lib/api-auth.ts but connects to ETH_DATABASE_URL via @/lib/db.
  */
 import { db, schema } from '@/lib/db'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { checkIpRateLimit, checkRateLimit } from '@/lib/api-rate-limit'
 import crypto from 'crypto'
 
@@ -35,8 +35,9 @@ export async function authRequest(request: Request): Promise<AuthResult> {
       if (!checkRateLimit(bucket, keyRow.requestsPerMinute)) {
         return { ok: false, limited: true, reason: 'rate_limit' }
       }
+      // Track usage asynchronously — atomic increment via SQL to avoid race conditions
       db.update(schema.apiKeys)
-        .set({ lastUsedAt: new Date() })
+        .set({ lastUsedAt: new Date(), totalRequests: sql`${schema.apiKeys.totalRequests} + 1` })
         .where(eq(schema.apiKeys.id, keyRow.id))
         .catch(() => {})
       return { ok: true, limited: false }
