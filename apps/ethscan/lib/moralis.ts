@@ -15,11 +15,10 @@
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = '0x1' // Ethereum mainnet
 
-// Cache TTLs (seconds) — longer = fewer CU, staler data
-const CACHE_HISTORY   = 3600    // 1 hour — tx history changes slowly
-const CACHE_BALANCES  = 3600    // 1 hour — token balances
-const CACHE_NFTS      = 14400   // 4 hours — NFT holdings rarely change
-const CACHE_TRANSFERS = 3600    // 1 hour — token transfer history
+// Cache strategy: force-cache (infinite until redeploy).
+// Moralis data is historical — no need to re-fetch on a timer.
+// Users who want fresh data can hard-refresh. This means each unique
+// address costs CU exactly ONCE until the next deploy.
 
 export type MoralisTx = {
   hash: string
@@ -96,7 +95,7 @@ export async function getWalletHistory(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: CACHE_HISTORY },
+      cache: 'force-cache',
     })
     if (!res.ok) return null
 
@@ -173,7 +172,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   try {
     const res = await fetch(
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
-      { headers: h, next: { revalidate: CACHE_BALANCES } },
+      { headers: h, cache: 'force-cache' },
     )
     if (!res.ok) return []
     const data = (await res.json()) as Array<{
@@ -242,7 +241,7 @@ export async function getTokenTransfers(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: CACHE_TRANSFERS },
+      cache: 'force-cache',
     })
     if (!res.ok) return null
 
@@ -295,7 +294,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
   try {
     const res = await fetch(
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=10&media_items=false&exclude_spam=true`,
-      { headers: h, next: { revalidate: CACHE_NFTS } },
+      { headers: h, cache: 'force-cache' },
     )
     if (!res.ok) return []
     const data = (await res.json()) as {
