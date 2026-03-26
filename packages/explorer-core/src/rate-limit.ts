@@ -14,10 +14,35 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 const DEFAULT_MAX_REQUESTS = 100
 const WINDOW_MS = 60 * 1000
 const MAX_MAP_SIZE = 50_000
+const CLEANUP_INTERVAL_MS = 60_000 // Sweep expired entries every 60s
+
+// Periodic cleanup — prevents unbounded growth from unique IPs that never return
+let cleanupTimer: ReturnType<typeof setInterval> | null = null
+function startCleanupTimer() {
+  if (cleanupTimer) return
+  cleanupTimer = setInterval(() => {
+    const now = Date.now()
+    let swept = 0
+    for (const [k, val] of rateLimitMap) {
+      if (now > val.resetAt) {
+        rateLimitMap.delete(k)
+        swept++
+      }
+    }
+    if (swept > 0) {
+      // Only log when significant cleanup happens
+      if (swept > 100) console.log(`[rate-limit] Swept ${swept} expired entries (${rateLimitMap.size} remaining)`)
+    }
+  }, CLEANUP_INTERVAL_MS)
+  // Don't prevent process exit
+  if (cleanupTimer.unref) cleanupTimer.unref()
+}
 
 /**
  * Extract the real client IP from an X-Forwarded-For header.
  * Render's LB appends the real client IP last — use that one.
+ * Falls back to 'unknown' which shares a single rate limit bucket
+ * (safe because the rate limit is generous at 100 req/min).
  */
 export function extractClientIp(xForwardedFor: string | null): string {
   if (!xForwardedFor) return 'unknown'
@@ -30,9 +55,10 @@ export function extractClientIp(xForwardedFor: string | null): string {
  * Returns true if the request is allowed, false if rate-limited.
  */
 export function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQUESTS): boolean {
+  startCleanupTimer()
   const now = Date.now()
 
-  // Purge expired entries when map grows large (prevents OOM on long-running processes)
+  // Emergency purge if map somehow exceeds cap despite periodic cleanup
   if (rateLimitMap.size > MAX_MAP_SIZE) {
     for (const [k, val] of rateLimitMap) {
       if (now > val.resetAt) rateLimitMap.delete(k)

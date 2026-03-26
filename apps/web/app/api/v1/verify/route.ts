@@ -7,8 +7,17 @@ import { triggerSourcifyVerification } from '@/lib/verifier'
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
+  // Tighter rate limit for write operations — 10 per minute per IP
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'), 10)) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  }
+
+  // Basic bot protection — check referer comes from our site
+  const referer = request.headers.get('referer') ?? ''
+  const origin = request.headers.get('origin') ?? ''
+  const isSameOrigin = referer.includes('bnbscan.com') || referer.includes('localhost') || origin.includes('bnbscan.com') || origin.includes('localhost')
+  if (!isSameOrigin) {
+    return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 })
   }
 
   let body: { address?: string; compilerVersion?: string }

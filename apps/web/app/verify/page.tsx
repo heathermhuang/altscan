@@ -26,11 +26,10 @@ export default function VerifyPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: trimmed, compilerVersion: compiler }),
       })
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
+        throw new Error(data.error ?? `HTTP ${res.status}`)
       }
-      const data = await res.json()
       if (data.success) {
         setStatus('success')
         setMessage('Contract verified successfully via Sourcify!')

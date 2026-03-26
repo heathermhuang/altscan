@@ -32,9 +32,10 @@ export function getDb() {
     return g.__bnbscan_db
   }
 
-  // max:5 for web app — leaves headroom for the indexer (max:10) within Render Standard's 25 connections.
-  // Total: web=5 + indexer=10 = 15 connections used, 10 available for tools and monitoring.
-  const sql = postgres(url, { max: 5 })
+  // Pool size configurable via DB_POOL_SIZE env var.
+  // Default 5 for web app — leaves headroom for the indexer within Render's 25 connections.
+  const poolSize = parseInt(process.env.DB_POOL_SIZE ?? '5', 10) || 5
+  const sql = postgres(url, { max: poolSize })
   g.__bnbscan_sql = sql
   g.__bnbscan_db = drizzle(sql, { schema })
   return g.__bnbscan_db

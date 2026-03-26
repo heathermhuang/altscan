@@ -21,18 +21,45 @@ function formatSupply(raw: string, decimals: number): string {
 
 export const revalidate = 60
 
-export default async function TokenListPage() {
+export default async function TokenListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>
+}) {
+  const { type: typeParam } = await searchParams
+  const validTypes = ['BEP20', 'BEP721', 'BEP1155'] as const
+  const tokenType = validTypes.includes(typeParam as typeof validTypes[number])
+    ? (typeParam as typeof validTypes[number])
+    : 'BEP20'
+
   let tokens: typeof schema.tokens.$inferSelect[] = []
   try {
     tokens = await db.select().from(schema.tokens)
-      .where(eq(schema.tokens.type, 'BEP20'))
+      .where(eq(schema.tokens.type, tokenType))
       .orderBy(desc(schema.tokens.holderCount))
       .limit(50)
   } catch { /* DB not connected */ }
 
+  const typeLabels = { BEP20: 'BEP-20 Tokens', BEP721: 'BEP-721 NFTs', BEP1155: 'BEP-1155 Multi-Tokens' }
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">BEP-20 Tokens</h1>
+      <h1 className="text-2xl font-bold mb-4">{typeLabels[tokenType]}</h1>
+      <div className="flex gap-2 mb-6">
+        {validTypes.map(t => (
+          <a
+            key={t}
+            href={`/token?type=${t}`}
+            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              t === tokenType
+                ? 'bg-yellow-100 border-yellow-400 text-yellow-800 font-semibold'
+                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {t}
+          </a>
+        ))}
+      </div>
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">

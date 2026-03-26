@@ -53,7 +53,15 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json(
-    { latestBlock, totalTransactions, totalTokens, avgGasPrice },
+    {
+      latestBlock,
+      totalTransactions,
+      totalTokens,
+      avgGasPrice,
+      // String versions for consumers that need precision beyond MAX_SAFE_INTEGER
+      latestBlockStr: String(latestBlock),
+      totalTransactionsStr: String(totalTransactions),
+    },
     { status: 200 },
   )
 }

@@ -9,7 +9,7 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string }>
 }) {
   const { q } = await searchParams
-  const query = q?.trim() ?? ''
+  const query = (q?.trim() ?? '').slice(0, 200) // Cap length to prevent abuse
 
   // Server-side redirect for recognized query patterns
   if (query) {
@@ -20,12 +20,14 @@ export default async function SearchPage({
 
   // Token name/symbol search — if nothing else matched, search tokens table
   if (query && query.length >= 2) {
+    // Escape SQL LIKE wildcards in user input
+    const safeQuery = query.replace(/[%_\\]/g, '\\$&')
     try {
       const tokenMatches = await db.select().from(schema.tokens)
         .where(
           or(
-            ilike(schema.tokens.name, `%${query}%`),
-            ilike(schema.tokens.symbol, `%${query}%`),
+            ilike(schema.tokens.name, `%${safeQuery}%`),
+            ilike(schema.tokens.symbol, `%${safeQuery}%`),
           )
         )
         .limit(5)

@@ -1,7 +1,11 @@
 import axios from 'axios'
 import { getDb, schema } from '@bnbscan/db'
 
-const SOURCIFY_API = process.env.SOURCIFY_API ?? 'https://sourcify.dev/server'
+const rawSourcifyUrl = process.env.SOURCIFY_API ?? 'https://sourcify.dev/server'
+// Enforce HTTPS in production to prevent MITM attacks on verification data
+const SOURCIFY_API = process.env.NODE_ENV === 'production' && !rawSourcifyUrl.startsWith('https://')
+  ? 'https://sourcify.dev/server'
+  : rawSourcifyUrl
 const BSC_CHAIN_ID = 56
 
 export interface VerifyRequest {

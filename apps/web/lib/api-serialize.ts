@@ -8,6 +8,8 @@ export function serializeBigInt(obj: unknown): unknown {
   if (Array.isArray(obj)) return obj.map(serializeBigInt)
   if (obj instanceof Date) return obj.toISOString()
   if (obj !== null && typeof obj === 'object') {
+    // Only recurse into plain objects — skip Map, Set, etc.
+    if (obj.constructor !== Object && !Array.isArray(obj)) return String(obj)
     return Object.fromEntries(
       Object.entries(obj as Record<string, unknown>).map(([k, v]) => [k, serializeBigInt(v)])
     )
