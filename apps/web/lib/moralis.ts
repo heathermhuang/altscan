@@ -96,7 +96,7 @@ export type MoralisNft = {
  * We cap at 100/hour to leave headroom.
  */
 const RATE_LIMIT_WINDOW = 3600_000 // 1 hour in ms
-const RATE_LIMIT_MAX = 100         // max Moralis API calls per hour
+const RATE_LIMIT_MAX = 30          // max 30 Moralis API calls per hour (~750 CU/hr = 540K CU/month)
 let rateLimitCounter = 0
 let rateLimitWindowStart = Date.now()
 
@@ -118,9 +118,12 @@ function isRateLimited(): boolean {
 const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
 
 function headers(): Record<string, string> | null {
-  // KILL SWITCH — disable all Moralis calls until CU budget recovers
-  // Remove this line to re-enable Moralis
-  if (!process.env.MORALIS_ENABLED) return null
+  // Moralis is enabled with strict protections:
+  // 1. In-memory cache (4hr per address)
+  // 2. Rate limiter (100 calls/hr hard cap)
+  // 3. Bot detection (address page skips Moralis for bots)
+  // Set MORALIS_DISABLED=true to kill all calls instantly
+  if (process.env.MORALIS_DISABLED === 'true') return null
 
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
