@@ -121,9 +121,12 @@ function headers(): Record<string, string> | null {
   if (process.env.MORALIS_DISABLED === 'true') return null
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
-  if (isRateLimited()) return null  // hard cap — silently degrade
+  if (isRateLimited()) return null
   return { 'X-API-Key': key, 'Accept': 'application/json' }
 }
+
+// ⚠️  TEMPORARY: Set MORALIS_DISABLED=true in Render dashboard to stop CU drain immediately.
+// The in-memory cache + bot blocking above will prevent future drain once this deploy lands.
 
 /**
  * Check if the current request is from a bot. Call from address page
@@ -192,7 +195,7 @@ export async function getWalletHistory(
       total?: number  // Moralis returns total count in history response
     }
 
-    return {
+    const histResult = {
       txs: data.result.map(t => ({
         hash: t.hash,
         blockNumber: t.block_number,
@@ -220,8 +223,8 @@ export async function getWalletHistory(
       cursor: data.cursor ?? null,
       totalTxs: data.total ?? data.result.length,
     }
-    setCache(cacheKey, result)
-    return result
+    setCache(cacheKey, histResult)
+    return histResult
   } catch {
     return null
   }
@@ -250,7 +253,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       balance_formatted: string | null
       usd_value: string | null
     }>
-    return data.map(t => ({
+    const balResult = data.map(t => ({
       tokenAddress: t.token_address,
       symbol: t.symbol,
       name: t.name,
@@ -260,8 +263,8 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       balanceFormatted: t.balance_formatted ?? null,
       usdValue: t.usd_value,
     }))
-    setCache(cacheKey, result)
-    return result
+    setCache(cacheKey, balResult)
+    return balResult
   } catch {
     return []
   }
@@ -333,7 +336,7 @@ export async function getTokenTransfers(
       cursor: string | null
     }
 
-    return {
+    const txResult = {
       transfers: data.result.map(t => ({
         txHash: t.transaction_hash,
         blockNumber: t.block_number,
@@ -349,8 +352,8 @@ export async function getTokenTransfers(
       })),
       cursor: data.cursor ?? null,
     }
-    setCache(cacheKey, result)
-    return result
+    setCache(cacheKey, txResult)
+    return txResult
   } catch {
     return null
   }
