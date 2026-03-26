@@ -162,7 +162,7 @@ export async function getWalletHistory(
   try {
     const url = new URL(`${BASE}/wallets/${address}/history`)
     url.searchParams.set('chain', CHAIN)
-    url.searchParams.set('limit', '10')  // 10 is enough for display, saves CU vs 25
+    url.searchParams.set('limit', '25')  // match PAGE_SIZE for full page of results
     url.searchParams.set('include_internal_transactions', '0')
     if (cursor) url.searchParams.set('cursor', cursor)
 

@@ -43,10 +43,10 @@ export default async function AddressPage({
   searchParams,
 }: {
   params: Promise<{ address: string }>
-  searchParams: Promise<{ tab?: string; page?: string }>
+  searchParams: Promise<{ tab?: string; page?: string; cursor?: string }>
 }) {
   const { address } = await params
-  const { tab, page: pageStr } = await searchParams
+  const { tab, page: pageStr, cursor } = await searchParams
   const addr = address.toLowerCase()
   const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
   const offset = (page - 1) * PAGE_SIZE
@@ -105,7 +105,13 @@ export default async function AddressPage({
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
   const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
-  const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
+  // First Seen: prefer DB, fallback to oldest Moralis tx timestamp
+  const moralisFirstSeen = moralisHistory?.txs?.length
+    ? new Date(moralisHistory.txs[moralisHistory.txs.length - 1].blockTimestamp)
+    : null
+  const displayFirstSeen = addressInfo?.firstSeen
+    ? new Date(addressInfo.firstSeen)
+    : moralisFirstSeen
 
   const activeTab = tab ?? 'txns'
 
@@ -247,7 +253,7 @@ export default async function AddressPage({
 
       {/* Tab content */}
       {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} />
+        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} cursor={cursor} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
@@ -264,11 +270,13 @@ async function TxnsTab({
   page,
   total,
   prefetchedHistory,
+  cursor,
 }: {
   addr: string
   page: number
   total: number
   prefetchedHistory: Awaited<ReturnType<typeof getWalletHistory>> | null
+  cursor?: string
 }) {
   const offset = (page - 1) * PAGE_SIZE
   let txs: typeof schema.transactions.$inferSelect[] = []
@@ -290,15 +298,21 @@ async function TxnsTab({
     // DB error
   }
 
-  // If DB has no data for page 1, use prefetched Moralis history (no extra API call)
+  // If DB has no data, use Moralis history with cursor-based pagination
   if (txs.length === 0 && page === 1) {
-    const moralis = prefetchedHistory ?? await getWalletHistory(addr)
+    // Use prefetched data for first page, or fetch with cursor for subsequent pages
+    const moralis = cursor
+      ? await getWalletHistory(addr, cursor)
+      : (prefetchedHistory ?? await getWalletHistory(addr))
     if (moralis && moralis.txs.length > 0) {
       return (
         <div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
             <span>📡</span>
-            <span>Showing full transaction history from Moralis — this address has activity before our index.</span>
+            <span>
+              Showing transaction history via Moralis
+              {moralis.totalTxs > 0 && ` — ${formatNumber(moralis.totalTxs)} total transactions`}
+            </span>
           </div>
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <table className="w-full text-sm">
@@ -319,7 +333,7 @@ async function TxnsTab({
                       </Link>
                     </td>
                     <td className="px-4 py-2 text-gray-500 text-xs">
-                      {new Date(tx.blockTimestamp).toLocaleDateString()}
+                      {timeAgo(new Date(tx.blockTimestamp))}
                     </td>
                     <td className="px-4 py-2 text-gray-700 text-xs max-w-xs truncate">
                       {tx.summary || tx.category}
@@ -331,6 +345,25 @@ async function TxnsTab({
                 ))}
               </tbody>
             </table>
+          </div>
+          {/* Moralis cursor pagination */}
+          <div className="flex justify-center gap-4 mt-4">
+            {cursor && (
+              <Link
+                href={`/address/${addr}?tab=txns`}
+                className="text-sm text-yellow-600 hover:underline border border-yellow-400 rounded px-3 py-1"
+              >
+                ← First Page
+              </Link>
+            )}
+            {moralis.cursor && (
+              <Link
+                href={`/address/${addr}?tab=txns&cursor=${encodeURIComponent(moralis.cursor)}`}
+                className="text-sm text-yellow-600 hover:underline border border-yellow-400 rounded px-3 py-1"
+              >
+                Next Page →
+              </Link>
+            )}
           </div>
         </div>
       )
