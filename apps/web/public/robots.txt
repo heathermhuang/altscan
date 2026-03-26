@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /address/
+Disallow: /tx/
+Disallow: /token/
+Disallow: /api/
+
+# Only allow homepage, blocks, charts, gas, validators for crawlers
+# Address/tx pages are dynamic and expensive — humans only
+Sitemap: https://bnbscan.com/sitemap.xml

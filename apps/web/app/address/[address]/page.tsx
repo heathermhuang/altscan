@@ -11,8 +11,9 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveSpaceId } from '@/lib/spaceid'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
+import { headers as nextHeaders } from 'next/headers'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
@@ -85,14 +86,18 @@ export default async function AddressPage({
     // DB not connected
   }
 
+  // Skip expensive Moralis calls for bots — they drain CU budget
+  const reqHeaders = await nextHeaders()
+  const isBot = isBotRequest(reqHeaders.get('user-agent'))
+
   // Enrich with external data — all fire in parallel, failures are silent
-  // NOTE: getWalletHistory is used for both tx display AND tx count (avoids separate getWalletStats call = saves ~10 CU)
   const noLocalData = txCount === 0 && !addressInfo
+  const needsMoralis = noLocalData && !isBot
   const [bnbName, riskData, liveBalance, moralisHistory] = await Promise.all([
     resolveSpaceId(addr),
-    getAddressRisk(addr),
-    getProvider().getBalance(addr).catch(() => null),
-    noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
+    isBot ? Promise.resolve(null) : getAddressRisk(addr),  // GoPlus also costs — skip for bots
+    getProvider().getBalance(addr).catch(() => null),       // RPC is free — always fetch
+    needsMoralis ? getWalletHistory(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
@@ -244,10 +249,10 @@ export default async function AddressPage({
       {activeTab === 'txns' && (
         <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} />
       )}
-      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
-      {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
+      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} />}
+      {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
-      {activeTab === 'nfts' && <NftsTab addr={addr} />}
+      {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
     </div>
   )
 }
@@ -410,7 +415,7 @@ async function TxnsTab({
 
 // ---- Token Transfers Tab ----
 
-async function TransfersTab({ addr, page }: { addr: string; page: number }) {
+async function TransfersTab({ addr, page, isBot }: { addr: string; page: number; isBot: boolean }) {
   const offset = (page - 1) * PAGE_SIZE
   let transfers: typeof schema.tokenTransfers.$inferSelect[] = []
   let total = 0
@@ -443,7 +448,7 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
     // DB error
   }
 
-  if (transfers.length === 0 && page === 1) {
+  if (transfers.length === 0 && page === 1 && !isBot) {
     let moralisTransfers: MoralisTokenTransfer[] = []
     const moralis = await getTokenTransfers(addr)
     if (moralis && moralis.transfers.length > 0) {
@@ -591,7 +596,7 @@ async function TransfersTab({ addr, page }: { addr: string; page: number }) {
 
 type HoldingRow = { tokenAddress: string; balance: string; name: string | null; symbol: string | null; decimals: number | null }
 
-async function HoldingsTab({ addr }: { addr: string }) {
+async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   let holdings: HoldingRow[] = []
 
   try {
@@ -641,7 +646,7 @@ async function HoldingsTab({ addr }: { addr: string }) {
     // DB error
   }
 
-  if (holdings.length === 0) {
+  if (holdings.length === 0 && !isBot) {
     const moralisTokens = await getTokenBalances(addr)
     if (moralisTokens.length > 0) {
       return (
@@ -814,7 +819,7 @@ async function AnalyticsTab({
 
 // ---- NFTs Tab ----
 
-async function NftsTab({ addr }: { addr: string }) {
+async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   let nftTransfers: Array<{
     txHash: string
     tokenAddress: string
@@ -861,8 +866,8 @@ async function NftsTab({ addr }: { addr: string }) {
     })
   } catch { /* DB error */ }
 
-  // Augment with Moralis NFT holdings when DB has no data
-  if (nftTransfers.length === 0) {
+  // Augment with Moralis NFT holdings when DB has no data — skip for bots
+  if (nftTransfers.length === 0 && !isBot) {
     const moralisNfts = await getNfts(addr)
     if (moralisNfts.length > 0) {
       return (

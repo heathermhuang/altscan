@@ -15,10 +15,31 @@
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = '0x38' // BSC mainnet
 
-// Cache strategy: force-cache (infinite until redeploy).
-// Moralis data is historical — no need to re-fetch on a timer.
-// Users who want fresh data can hard-refresh. This means each unique
-// address costs CU exactly ONCE until the next deploy.
+// Cache strategy: in-memory LRU cache (survives across requests, NOT invalidated by deploys).
+// Each unique address costs CU exactly ONCE until the server process restarts.
+// No background re-fetches. No bot calls. Pure on-demand.
+const memCache = new Map<string, { data: unknown; ts: number }>()
+const MEM_CACHE_TTL = 4 * 3600_000 // 4 hours — then re-fetch if a real user visits
+const MEM_CACHE_MAX = 500          // max cached addresses — LRU eviction
+
+function getCached<T>(key: string): T | undefined {
+  const entry = memCache.get(key)
+  if (!entry) return undefined
+  if (Date.now() - entry.ts > MEM_CACHE_TTL) {
+    memCache.delete(key)
+    return undefined
+  }
+  return entry.data as T
+}
+
+function setCache(key: string, data: unknown): void {
+  // Simple LRU: if at capacity, delete oldest entry
+  if (memCache.size >= MEM_CACHE_MAX) {
+    const oldest = memCache.keys().next().value
+    if (oldest) memCache.delete(oldest)
+  }
+  memCache.set(key, { data, ts: Date.now() })
+}
 
 export type MoralisTx = {
   hash: string
@@ -67,11 +88,50 @@ export type MoralisNft = {
   imageUrl: string | null
 }
 
-function headers() {
+/**
+ * Rate limiter — hard cap on Moralis calls per hour.
+ * Prevents bot traffic from draining the monthly CU budget.
+ * 2M CU/month ÷ 30 days ÷ 24 hours = ~2,778 CU/hour budget.
+ * At ~25 CU per call, that's ~111 calls/hour.
+ * We cap at 100/hour to leave headroom.
+ */
+const RATE_LIMIT_WINDOW = 3600_000 // 1 hour in ms
+const RATE_LIMIT_MAX = 100         // max Moralis API calls per hour
+let rateLimitCounter = 0
+let rateLimitWindowStart = Date.now()
+
+function isRateLimited(): boolean {
+  const now = Date.now()
+  if (now - rateLimitWindowStart > RATE_LIMIT_WINDOW) {
+    // Reset window
+    rateLimitCounter = 0
+    rateLimitWindowStart = now
+  }
+  if (rateLimitCounter >= RATE_LIMIT_MAX) {
+    return true
+  }
+  rateLimitCounter++
+  return false
+}
+
+/** Known bot user agents — skip Moralis entirely for these */
+const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
+
+function headers(): Record<string, string> | null {
   if (process.env.MORALIS_DISABLED === 'true') return null
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
+  if (isRateLimited()) return null  // hard cap — silently degrade
   return { 'X-API-Key': key, 'Accept': 'application/json' }
+}
+
+/**
+ * Check if the current request is from a bot. Call from address page
+ * before triggering any Moralis calls.
+ */
+export function isBotRequest(userAgent: string | null): boolean {
+  if (!userAgent) return true  // no UA = likely bot
+  return BOT_PATTERNS.test(userAgent)
 }
 
 /**
@@ -83,6 +143,10 @@ export async function getWalletHistory(
   address: string,
   cursor?: string,
 ): Promise<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number } | null> {
+  const cacheKey = `history:${address}:${cursor ?? ''}`
+  const cached = getCached<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number }>(cacheKey)
+  if (cached) return cached
+
   const h = headers()
   if (!h) return null
 
@@ -95,7 +159,7 @@ export async function getWalletHistory(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      cache: 'force-cache',
+      cache: 'no-store',
     })
     if (!res.ok) return null
 
@@ -156,23 +220,24 @@ export async function getWalletHistory(
       cursor: data.cursor ?? null,
       totalTxs: data.total ?? data.result.length,
     }
+    setCache(cacheKey, result)
+    return result
   } catch {
     return null
   }
 }
 
-/**
- * Get ERC-20 token balances for an address.
- * Cost: ~25 CU. Cached for 1 hour.
- */
 export async function getTokenBalances(address: string): Promise<MoralisToken[]> {
+  const cacheKey = `balances:${address}`
+  const cached = getCached<MoralisToken[]>(cacheKey)
+  if (cached) return cached
   const h = headers()
   if (!h) return []
 
   try {
     const res = await fetch(
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
-      { headers: h, cache: 'force-cache' },
+      { headers: h, cache: 'no-store' },
     )
     if (!res.ok) return []
     const data = (await res.json()) as Array<{
@@ -195,6 +260,8 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       balanceFormatted: t.balance_formatted ?? null,
       usdValue: t.usd_value,
     }))
+    setCache(cacheKey, result)
+    return result
   } catch {
     return []
   }
@@ -230,6 +297,10 @@ export async function getTokenTransfers(
   address: string,
   cursor?: string,
 ): Promise<{ transfers: MoralisTokenTransfer[]; cursor: string | null } | null> {
+  const cacheKey = `transfers:${address}:${cursor ?? ''}`
+  const cached = getCached<{ transfers: MoralisTokenTransfer[]; cursor: string | null }>(cacheKey)
+  if (cached) return cached
+
   const h = headers()
   if (!h) return null
 
@@ -241,7 +312,7 @@ export async function getTokenTransfers(
 
     const res = await fetch(url.toString(), {
       headers: h,
-      cache: 'force-cache',
+      cache: 'no-store',
     })
     if (!res.ok) return null
 
@@ -278,6 +349,8 @@ export async function getTokenTransfers(
       })),
       cursor: data.cursor ?? null,
     }
+    setCache(cacheKey, result)
+    return result
   } catch {
     return null
   }
@@ -285,16 +358,19 @@ export async function getTokenTransfers(
 
 /**
  * Get NFTs owned by an address.
- * Cost: ~25 CU. Cached for 4 hours (NFTs rarely change).
  */
 export async function getNfts(address: string): Promise<MoralisNft[]> {
+  const cacheKey = `nfts:${address}`
+  const cached = getCached<MoralisNft[]>(cacheKey)
+  if (cached) return cached
+
   const h = headers()
   if (!h) return []
 
   try {
     const res = await fetch(
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=10&media_items=false&exclude_spam=true`,
-      { headers: h, cache: 'force-cache' },
+      { headers: h, cache: 'no-store' },
     )
     if (!res.ok) return []
     const data = (await res.json()) as {
@@ -307,7 +383,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
         media?: { original_media_url?: string }
       }>
     }
-    return data.result.map(n => {
+    const result = data.result.map(n => {
       let metadata: Record<string, unknown> | null = null
       try { metadata = n.metadata ? JSON.parse(n.metadata) : null } catch { /* ignore */ }
       return {
@@ -319,6 +395,8 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
         imageUrl: (metadata?.image as string) ?? n.media?.original_media_url ?? null,
       }
     })
+    setCache(cacheKey, result)
+    return result
   } catch {
     return []
   }
