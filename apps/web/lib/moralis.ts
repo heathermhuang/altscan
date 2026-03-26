@@ -2,11 +2,24 @@
  * Moralis API client for BNBScan.
  * Provides historical wallet transaction data beyond what the local indexer has.
  * Chain: BSC (chain = '0x38')
- * Docs: https://docs.moralis.com/web3-data-api/evm/reference/wallet-api/get-wallet-history
+ *
+ * CU BUDGET — Free tier: 40,000 CU/day
+ * Strategy:
+ *   - Long cache TTLs (1hr history, 4hr holdings/NFTs) to avoid re-fetches
+ *   - Small page sizes (limit=10) — enough to show useful data, minimizes CU
+ *   - No separate getWalletStats call — derive tx count from history response
+ *   - exclude_spam=true on token endpoints to skip noise
+ *   - Only fetch for the active tab, never prefetch other tabs
  */
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = '0x38' // BSC mainnet
+
+// Cache TTLs (seconds) — longer = fewer CU, staler data
+const CACHE_HISTORY   = 3600    // 1 hour — tx history changes slowly
+const CACHE_BALANCES  = 3600    // 1 hour — token balances
+const CACHE_NFTS      = 14400   // 4 hours — NFT holdings rarely change
+const CACHE_TRANSFERS = 3600    // 1 hour — token transfer history
 
 export type MoralisTx = {
   hash: string
@@ -62,23 +75,28 @@ function headers() {
   return { 'X-API-Key': key, 'Accept': 'application/json' }
 }
 
+/**
+ * Get wallet transaction history. Also returns total tx count in the response
+ * so we don't need a separate getWalletStats call (saves ~10 CU per address).
+ * Cost: ~25 CU
+ */
 export async function getWalletHistory(
   address: string,
   cursor?: string,
-): Promise<{ txs: MoralisTx[]; cursor: string | null } | null> {
+): Promise<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number } | null> {
   const h = headers()
   if (!h) return null
 
   try {
     const url = new URL(`${BASE}/wallets/${address}/history`)
     url.searchParams.set('chain', CHAIN)
-    url.searchParams.set('limit', '25')
+    url.searchParams.set('limit', '10')  // 10 is enough for display, saves CU vs 25
     url.searchParams.set('include_internal_transactions', '0')
     if (cursor) url.searchParams.set('cursor', cursor)
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: 300 },
+      next: { revalidate: CACHE_HISTORY },
     })
     if (!res.ok) return null
 
@@ -108,6 +126,7 @@ export async function getWalletHistory(
         }>
       }>
       cursor: string | null
+      total?: number  // Moralis returns total count in history response
     }
 
     return {
@@ -136,20 +155,25 @@ export async function getWalletHistory(
         })),
       })),
       cursor: data.cursor ?? null,
+      totalTxs: data.total ?? data.result.length,
     }
   } catch {
     return null
   }
 }
 
+/**
+ * Get ERC-20 token balances for an address.
+ * Cost: ~25 CU. Cached for 1 hour.
+ */
 export async function getTokenBalances(address: string): Promise<MoralisToken[]> {
   const h = headers()
   if (!h) return []
 
   try {
     const res = await fetch(
-      `${BASE}/${address}/erc20?chain=${CHAIN}&limit=50`,
-      { headers: h, next: { revalidate: 300 } },
+      `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
+      { headers: h, next: { revalidate: CACHE_BALANCES } },
     )
     if (!res.ok) return []
     const data = (await res.json()) as Array<{
@@ -177,20 +201,12 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   }
 }
 
+/**
+ * @deprecated Use getWalletHistory().totalTxs instead — saves a separate API call (~10 CU)
+ */
 export async function getWalletStats(address: string): Promise<{ txCount: number } | null> {
-  const h = headers()
-  if (!h) return null
-  try {
-    const res = await fetch(
-      `${BASE}/wallets/${address}/stats?chain=${CHAIN}`,
-      { headers: h, next: { revalidate: 600 } },
-    )
-    if (!res.ok) return null
-    const data = (await res.json()) as { transactions?: { total?: number } }
-    return { txCount: data.transactions?.total ?? 0 }
-  } catch {
-    return null
-  }
+  // Eliminated — tx count is now derived from getWalletHistory response
+  return null
 }
 
 export type MoralisTokenTransfer = {
@@ -207,6 +223,10 @@ export type MoralisTokenTransfer = {
   valueFormatted: string
 }
 
+/**
+ * Get ERC-20 token transfer history for an address.
+ * Cost: ~25 CU. Cached for 1 hour.
+ */
 export async function getTokenTransfers(
   address: string,
   cursor?: string,
@@ -217,12 +237,12 @@ export async function getTokenTransfers(
   try {
     const url = new URL(`${BASE}/wallets/${address}/erc20-transfers`)
     url.searchParams.set('chain', CHAIN)
-    url.searchParams.set('limit', '25')
+    url.searchParams.set('limit', '10')  // 10 instead of 25
     if (cursor) url.searchParams.set('cursor', cursor)
 
     const res = await fetch(url.toString(), {
       headers: h,
-      next: { revalidate: 300 },
+      next: { revalidate: CACHE_TRANSFERS },
     })
     if (!res.ok) return null
 
@@ -264,41 +284,18 @@ export async function getTokenTransfers(
   }
 }
 
-export async function getWalletFirstSeen(address: string): Promise<Date | null> {
-  const h = headers()
-  if (!h) return null
-
-  try {
-    const url = new URL(`${BASE}/wallets/${address}/history`)
-    url.searchParams.set('chain', CHAIN)
-    url.searchParams.set('limit', '1')
-    url.searchParams.set('order', 'ASC')
-    url.searchParams.set('include_internal_transactions', '0')
-
-    const res = await fetch(url.toString(), {
-      headers: h,
-      next: { revalidate: 3600 },
-    })
-    if (!res.ok) return null
-
-    const data = (await res.json()) as {
-      result?: Array<{ block_timestamp?: string }>
-    }
-    const ts = data.result?.[0]?.block_timestamp
-    return ts ? new Date(ts) : null
-  } catch {
-    return null
-  }
-}
-
+/**
+ * Get NFTs owned by an address.
+ * Cost: ~25 CU. Cached for 4 hours (NFTs rarely change).
+ */
 export async function getNfts(address: string): Promise<MoralisNft[]> {
   const h = headers()
   if (!h) return []
 
   try {
     const res = await fetch(
-      `${BASE}/${address}/nft?chain=${CHAIN}&limit=20&media_items=false`,
-      { headers: h, next: { revalidate: 600 } },
+      `${BASE}/${address}/nft?chain=${CHAIN}&limit=10&media_items=false&exclude_spam=true`,
+      { headers: h, next: { revalidate: CACHE_NFTS } },
     )
     if (!res.ok) return []
     const data = (await res.json()) as {

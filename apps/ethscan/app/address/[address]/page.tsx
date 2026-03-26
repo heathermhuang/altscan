@@ -11,7 +11,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveEns } from '@/lib/ens'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getWalletStats, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
 
@@ -84,17 +84,17 @@ export default async function AddressPage({
   }
 
   const noLocalData = txCount === 0 && !addressInfo
-  const [ensName, riskData, liveBalance, walletStats] = await Promise.all([
+  const [ensName, riskData, liveBalance, moralisHistory] = await Promise.all([
     resolveEns(addr),
     getAddressRisk(addr),
     fetchEthBalance(addr),
-    noLocalData ? getWalletStats(addr) : Promise.resolve(null),
+    noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
   ])
 
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
-  const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
+  const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
   const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
 
   const activeTab = tab ?? 'txns'
@@ -207,7 +207,7 @@ export default async function AddressPage({
         <TabLink href={`/address/${addr}?tab=nfts`} active={activeTab === 'nfts'} label="NFTs" />
       </div>
 
-      {activeTab === 'txns' && <TxnsTab addr={addr} page={page} total={displayTxCount} />}
+      {activeTab === 'txns' && <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} />}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
@@ -216,7 +216,7 @@ export default async function AddressPage({
   )
 }
 
-async function TxnsTab({ addr, page, total }: { addr: string; page: number; total: number }) {
+async function TxnsTab({ addr, page, total, prefetchedHistory }: { addr: string; page: number; total: number; prefetchedHistory: Awaited<ReturnType<typeof getWalletHistory>> | null }) {
   const offset = (page - 1) * PAGE_SIZE
   let txs: typeof schema.transactions.$inferSelect[] = []
 
@@ -231,7 +231,7 @@ async function TxnsTab({ addr, page, total }: { addr: string; page: number; tota
   } catch { /* DB error */ }
 
   if (txs.length === 0 && page === 1) {
-    const moralis = await getWalletHistory(addr)
+    const moralis = prefetchedHistory ?? await getWalletHistory(addr)
     if (moralis && moralis.txs.length > 0) {
       return (
         <div>

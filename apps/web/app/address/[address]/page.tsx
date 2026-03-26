@@ -86,19 +86,20 @@ export default async function AddressPage({
   }
 
   // Enrich with external data — all fire in parallel, failures are silent
+  // NOTE: getWalletHistory is used for both tx display AND tx count (avoids separate getWalletStats call = saves ~10 CU)
   const noLocalData = txCount === 0 && !addressInfo
-  const [bnbName, riskData, liveBalance, walletStats] = await Promise.all([
+  const [bnbName, riskData, liveBalance, moralisHistory] = await Promise.all([
     resolveSpaceId(addr),
     getAddressRisk(addr),
     getProvider().getBalance(addr).catch(() => null),
-    noLocalData ? getWalletStats(addr) : Promise.resolve(null),
+    noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
   const displayBalance = liveBalance !== null
     ? liveBalance
     : BigInt((addressInfo?.balance ?? '0').split('.')[0])
-  const displayTxCount = txCount || addressInfo?.txCount || walletStats?.txCount || 0
+  const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
   const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
 
   const activeTab = tab ?? 'txns'
@@ -241,7 +242,7 @@ export default async function AddressPage({
 
       {/* Tab content */}
       {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} />
+        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} />}
@@ -257,10 +258,12 @@ async function TxnsTab({
   addr,
   page,
   total,
+  prefetchedHistory,
 }: {
   addr: string
   page: number
   total: number
+  prefetchedHistory: Awaited<ReturnType<typeof getWalletHistory>> | null
 }) {
   const offset = (page - 1) * PAGE_SIZE
   let txs: typeof schema.transactions.$inferSelect[] = []
@@ -282,9 +285,9 @@ async function TxnsTab({
     // DB error
   }
 
-  // If DB has no data for page 1, try Moralis for full historical view
+  // If DB has no data for page 1, use prefetched Moralis history (no extra API call)
   if (txs.length === 0 && page === 1) {
-    const moralis = await getWalletHistory(addr)
+    const moralis = prefetchedHistory ?? await getWalletHistory(addr)
     if (moralis && moralis.txs.length > 0) {
       return (
         <div>
