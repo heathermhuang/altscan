@@ -22,6 +22,7 @@ export default function Icon() {
       }}
     >
       E
-    </div>
+    </div>,
+    { ...size }
   )
 }
