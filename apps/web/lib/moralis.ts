@@ -139,7 +139,7 @@ function headers(): Record<string, string> | null {
  * before triggering any Moralis calls.
  */
 export function isBotRequest(userAgent: string | null): boolean {
-  if (!userAgent) return true  // no UA = likely bot
+  if (!userAgent) return false  // no UA in SSR context = allow (rate limiter still protects)
   return BOT_PATTERNS.test(userAgent)
 }
 
