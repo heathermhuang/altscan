@@ -1,13 +1,13 @@
 import { db, schema } from '@/lib/db'
 import { desc, eq } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, safeBigInt } from '@/lib/format'
 
 /** Format a raw token supply string into a human-readable number by dividing by 10^decimals. */
 function formatSupply(raw: string, decimals: number): string {
   try {
     const divisor = 10n ** BigInt(decimals)
-    const whole = BigInt(raw.split('.')[0]) / divisor
+    const whole = safeBigInt(raw) / divisor
     // Abbreviate large numbers: T, B, M, K
     const n = Number(whole)
     if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`

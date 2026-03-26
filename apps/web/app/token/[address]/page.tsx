@@ -68,6 +68,7 @@ export default async function TokenDetailPage({
   searchParams: Promise<{ page?: string }>
 }) {
   const { address } = await params
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
   const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)

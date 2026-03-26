@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
-import { formatBNB, formatGwei, formatNumber, timeAgo } from '@/lib/format'
+import { formatBNB, formatGwei, formatNumber, timeAgo, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import Link from 'next/link'
@@ -42,7 +42,7 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     tx = row ?? null
   } catch { /* DB error */ }
   if (!tx) return { title: 'Transaction Not Found — BNBScan' }
-  const val = formatBNB(BigInt((tx.value ?? '0').split('.')[0]))
+  const val = formatBNB(safeBigInt(tx.value))
   return {
     title: `Tx ${hash.slice(0, 18)}… — BNBScan`,
     description: `BNB Chain transaction: ${val} BNB from ${tx.fromAddress.slice(0, 12)}… to ${(tx.toAddress ?? 'contract creation').slice(0, 12)}…`,
@@ -133,6 +133,7 @@ export default async function TxDetailPage({
   params: Promise<{ hash: string }>
 }) {
   const { hash } = await params
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
 
   let dbTx: typeof schema.transactions.$inferSelect | null = null
   try {
@@ -173,7 +174,7 @@ export default async function TxDetailPage({
     : null
 
   // USD values
-  const bnbValue = Number(BigInt((tx.value ?? '0').split('.')[0])) / 1e18
+  const bnbValue = Number(safeBigInt(tx.value)) / 1e18
   const feeVal = Number(fee) / 1e18
   const valueUsd = bnbPrice ? formatUsd(bnbValue, bnbPrice) : null
   const feeUsd = bnbPrice ? formatUsd(feeVal, bnbPrice) : null
@@ -313,7 +314,7 @@ export default async function TxDetailPage({
             <tr>
               <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Value</td>
               <td className="px-6 py-3">
-                {formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB
+                {formatBNB(safeBigInt(tx.value))} BNB
                 {valueUsd && <span className="text-gray-400 ml-1">({valueUsd})</span>}
               </td>
             </tr>

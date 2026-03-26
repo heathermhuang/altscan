@@ -1,3 +1,5 @@
+import { safeBigInt } from '@/lib/format'
+
 /** Decode a transaction into a human-readable summary for EthScan. */
 
 interface TransferInfo {
@@ -27,8 +29,8 @@ interface DecodedTx {
 function formatValue(raw: string, decimals = 18): string {
   try {
     const divisor = 10n ** BigInt(decimals)
-    const whole = BigInt(raw.split('.')[0]) / divisor
-    const frac = BigInt(raw.split('.')[0]) % divisor
+    const whole = safeBigInt(raw) / divisor
+    const frac = safeBigInt(raw) % divisor
     const fracStr = frac.toString().padStart(decimals, '0').slice(0, 4).replace(/0+$/, '')
     return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
   } catch {
@@ -38,7 +40,7 @@ function formatValue(raw: string, decimals = 18): string {
 
 function formatETHValue(weiStr: string): string {
   try {
-    const wei = BigInt(weiStr.split('.')[0])
+    const wei = safeBigInt(weiStr)
     const eth = Number(wei) / 1e18
     if (eth === 0) return '0 ETH'
     if (eth < 0.0001) return `${eth.toExponential(2)} ETH`
@@ -82,7 +84,7 @@ export function decodeTx(tx: TxInput, transfers: TransferInfo[]): DecodedTx | nu
 
   // Native ETH transfer
   const value = tx.value ?? '0'
-  const hasValue = BigInt(value.split('.')[0]) > 0n
+  const hasValue = safeBigInt(value) > 0n
   if (hasValue) {
     return { emoji: '💎', summary: `Sent ${formatETHValue(value)}` }
   }

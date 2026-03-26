@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc, count, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
-import { formatBNB, formatNumber, timeAgo, formatAddress } from '@/lib/format'
+import { formatBNB, formatNumber, timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
@@ -28,10 +28,10 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   const type = info?.isContract ? 'Contract' : 'Address'
   return {
     title: `${type} ${address.slice(0, 14)}… — BNBScan`,
-    description: `BNB Chain ${type.toLowerCase()} ${address} — Balance: ${formatBNB(BigInt((info?.balance ?? '0').split('.')[0]))} BNB, ${info?.txCount ?? 0} transactions`,
+    description: `BNB Chain ${type.toLowerCase()} ${address} — Balance: ${formatBNB(safeBigInt(info?.balance))} BNB, ${info?.txCount ?? 0} transactions`,
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
-      description: `Balance: ${formatBNB(BigInt((info?.balance ?? '0').split('.')[0]))} BNB`,
+      description: `Balance: ${formatBNB(safeBigInt(info?.balance))} BNB`,
     },
   }
 }
@@ -108,7 +108,7 @@ export default async function AddressPage({
   // Use live RPC balance when the address isn't in our index yet
   const displayBalance = liveBalance !== null
     ? liveBalance
-    : BigInt((addressInfo?.balance ?? '0').split('.')[0])
+    : safeBigInt(addressInfo?.balance)
   // Transaction count: prefer DB, then Moralis total, then RPC nonce (outgoing only but better than 0)
   const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || rpcTxCount || 0
   // First Seen: prefer DB, fallback to oldest Moralis tx timestamp
@@ -440,7 +440,7 @@ async function TxnsTab({
                   </div>
                 </td>
                 <td className="px-4 py-2">
-                  {formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB
+                  {formatBNB(safeBigInt(tx.value))} BNB
                 </td>
               </tr>
             ))}
@@ -832,8 +832,7 @@ async function AnalyticsTab({
 
   const formatWei = (raw: string) => {
     try {
-      const whole = BigInt(raw.split('.')[0])
-      return formatBNB(whole)
+      return formatBNB(safeBigInt(raw))
     } catch {
       return '0.0000'
     }

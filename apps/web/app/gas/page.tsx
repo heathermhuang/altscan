@@ -5,10 +5,13 @@ export const revalidate = 15
 
 export default async function GasPage() {
   const provider = getProvider()
-  const feeData = await provider.getFeeData()
-
-  // BNB Chain uses legacy gas pricing; gasPrice is the base fee equivalent
-  const baseFee = feeData.gasPrice ?? 0n
+  let baseFee = 0n
+  try {
+    const feeData = await provider.getFeeData()
+    baseFee = feeData.gasPrice ?? 0n
+  } catch {
+    // RPC down — show zeros, page still renders
+  }
   const slow     = (baseFee *  90n) / 100n
   const standard = (baseFee * 110n) / 100n
   const fast     = (baseFee * 130n) / 100n

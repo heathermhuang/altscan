@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { desc, gte, sql } from 'drizzle-orm'
-import { timeAgo, formatAddress } from '@/lib/format'
+import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 
 export const revalidate = 30
@@ -152,7 +152,7 @@ export default async function WhalesPage({
                   // Use known decimals, or fall back to 18 (standard ERC20)
                   const decimals = w.tokenDecimals ?? 18
                   const divisor = 10n ** BigInt(decimals)
-                  const raw = BigInt(w.value.split('.')[0])
+                  const raw = safeBigInt(w.value)
                   const whole = raw / divisor
                   const frac = raw % divisor
                   const fracStr = frac

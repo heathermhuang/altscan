@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { safeBigInt } from '@/lib/format'
 
 export async function GET(
   request: Request,
@@ -27,7 +28,7 @@ export async function GET(
 
   const header = 'Tx Hash,Block,Timestamp,From,To,Value (ETH),Gas Used,Gas Price (Gwei),Status,Method\n'
   const rows = txs.map(tx => {
-    const value = Number(BigInt((tx.value ?? '0').split('.')[0])) / 1e18
+    const value = Number(safeBigInt(tx.value)) / 1e18
     const gwei = Number(BigInt(tx.gasPrice ?? '0')) / 1e9
     return [
       tx.hash,

@@ -27,8 +27,10 @@ export async function GET(
 
   const header = 'Tx Hash,Block,Timestamp,From,To,Value (BNB),Gas Used,Gas Price (Gwei),Status,Method\n'
   const rows = txs.map(tx => {
-    const value = Number(BigInt((tx.value ?? '0').split('.')[0])) / 1e18
-    const gwei = Number(BigInt(tx.gasPrice ?? '0')) / 1e9
+    const intPart = (tx.value ?? '0').split('.')[0] || '0'
+    const value = Number(BigInt(intPart)) / 1e18
+    const gpPart = (tx.gasPrice?.toString() ?? '0').split('.')[0] || '0'
+    const gwei = Number(BigInt(gpPart)) / 1e9
     return [
       tx.hash,
       tx.blockNumber,

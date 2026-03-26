@@ -2,6 +2,7 @@
 // Turns raw tx data into human-readable descriptions
 
 import { getAddressLabel } from './known-addresses'
+import { safeBigInt } from './format'
 
 export interface DecodedTx {
   summary: string
@@ -51,7 +52,7 @@ export function decodeTx(tx: {
     return { summary: 'Deployed a new smart contract', type: 'contract_deploy', emoji: '🏗️' }
   }
 
-  const bnbValue = Number(BigInt((tx.value ?? '0').split('.')[0])) / 1e18
+  const bnbValue = Number(safeBigInt(tx.value)) / 1e18
   const toLabel = getAddressLabel(tx.toAddress) ?? null
 
   // Simple BNB transfer (no input data or 0x method)

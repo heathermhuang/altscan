@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { formatBNB, formatAddress, timeAgo } from '@/lib/format'
+import { formatBNB, formatAddress, timeAgo, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 
 interface TxRow {
@@ -54,7 +54,7 @@ export function TxTable({ txs, compact = false }: {
                   )}
                 </td>
               )}
-              <td className="px-4 py-2">{formatBNB(BigInt((tx.value ?? '0').split('.')[0]))} BNB</td>
+              <td className="px-4 py-2">{formatBNB(safeBigInt(tx.value))} BNB</td>
               <td className="px-4 py-2">
                 <Badge variant={tx.status ? 'success' : 'fail'}>
                   {tx.status ? 'Success' : 'Failed'}

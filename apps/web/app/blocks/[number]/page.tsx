@@ -36,7 +36,7 @@ export default async function BlockDetailPage({
   const { number } = await params
   const blockNumber = Number(number)
 
-  if (isNaN(blockNumber)) notFound()
+  if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) notFound()
 
   let dbBlock: typeof schema.blocks.$inferSelect | null = null
   try {

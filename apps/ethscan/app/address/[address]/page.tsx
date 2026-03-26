@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc, count, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
-import { formatETH, formatNumber, timeAgo, formatAddress } from '@/lib/format'
+import { formatETH, formatNumber, timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
@@ -25,10 +25,10 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   const type = info?.isContract ? 'Contract' : 'Address'
   return {
     title: `${type} ${address.slice(0, 14)}… — EthScan`,
-    description: `Ethereum ${type.toLowerCase()} ${address} — Balance: ${formatETH(BigInt((info?.balance ?? '0').split('.')[0]))} ETH, ${info?.txCount ?? 0} transactions`,
+    description: `Ethereum ${type.toLowerCase()} ${address} — Balance: ${formatETH(safeBigInt(info?.balance))} ETH, ${info?.txCount ?? 0} transactions`,
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
-      description: `Balance: ${formatETH(BigInt((info?.balance ?? '0').split('.')[0]))} ETH`,
+      description: `Balance: ${formatETH(safeBigInt(info?.balance))} ETH`,
     },
   }
 }
@@ -93,7 +93,7 @@ export default async function AddressPage({
 
   const displayBalance = liveBalance !== null
     ? liveBalance
-    : BigInt((addressInfo?.balance ?? '0').split('.')[0])
+    : safeBigInt(addressInfo?.balance)
   const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
   const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
 
@@ -327,7 +327,7 @@ async function TxnsTab({ addr, page, total, prefetchedHistory }: { addr: string;
                   </div>
                 </td>
                 <td className="px-4 py-2">
-                  {formatETH(BigInt((tx.value ?? '0').split('.')[0]))} ETH
+                  {formatETH(safeBigInt(tx.value))} ETH
                 </td>
               </tr>
             ))}
@@ -638,7 +638,7 @@ async function AnalyticsTab({ addr, addressInfo }: { addr: string; addressInfo: 
   } catch { /* DB error */ }
 
   const formatWei = (raw: string) => {
-    try { return formatETH(BigInt(raw.split('.')[0])) } catch { return '0.0000' }
+    try { return formatETH(safeBigInt(raw)) } catch { return '0.0000' }
   }
 
   return (
