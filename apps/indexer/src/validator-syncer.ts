@@ -1,7 +1,8 @@
-import { JsonRpcProvider, Contract } from 'ethers'
+import { Contract } from 'ethers'
 import { getDb, schema } from '@bnbscan/db'
+import { getProvider } from './provider'
 
-const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
+const provider = getProvider()
 
 // BSC StakeHub contract (BEP-294)
 // ⚠️ Verify ABI at: https://bscscan.com/address/0x0000000000000000000000000000000000002001#readContract
@@ -38,8 +39,8 @@ export async function syncValidators(): Promise<void> {
           target: [schema.validators.address],
           set: { status: info.jailed ? 'jailed' : 'active', updatedAt: now },
         })
-      } catch {
-        // Individual validator fetch failed — skip
+      } catch (err) {
+        console.warn('[validator-syncer] Failed to sync validator:', addr, err instanceof Error ? err.message : err)
       }
     }
 

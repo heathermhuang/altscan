@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc, count } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
 
@@ -24,10 +24,10 @@ export default async function TransactionsPage({
         .orderBy(desc(schema.transactions.timestamp))
         .limit(PER_PAGE)
         .offset(offset),
-      db.select({ count: count() }).from(schema.transactions),
+      db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'transactions'`),
     ])
     txs = txsResult
-    total = Number(totalResult[0]?.count ?? 0)
+    total = Number((Array.from(totalResult)[0] as Record<string, unknown>)?.estimate ?? 0)
   } catch {
     // DB not connected — show empty state
   }

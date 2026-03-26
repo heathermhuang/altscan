@@ -1,8 +1,9 @@
-import { Log, AbiCoder, Contract, JsonRpcProvider } from 'ethers'
+import { Log, AbiCoder, Contract } from 'ethers'
 import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@bnbscan/db'
+import { getProvider } from './provider'
 
-const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
+const provider = getProvider()
 const abi = AbiCoder.defaultAbiCoder()
 
 const ERC20_ABI = [
@@ -57,15 +58,18 @@ export async function decodeTokenTransfer(
       timestamp,
     }).onConflictDoNothing()
 
-  } catch {
-    // Silent — malformed log, skip
+  } catch (err) {
+    console.warn('[token-decoder] Error decoding transfer:', txHash, err instanceof Error ? err.message : err)
   }
 }
 
 const tokenCache = new Set<string>()
+const TOKEN_CACHE_MAX = 50_000
 
 async function ensureToken(address: string, type: 'BEP20' | 'BEP721' | 'BEP1155') {
   if (tokenCache.has(address)) return
+  // Evict when cache grows too large (BSC has 100k+ tokens)
+  if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()
   const db = getDb()
 
   const existing = await db.select().from(schema.tokens)

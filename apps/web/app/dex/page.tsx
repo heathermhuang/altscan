@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db'
-import { desc, count, sql } from 'drizzle-orm'
-import { timeAgo, formatBNB } from '@/lib/format'
+import { desc, sql } from 'drizzle-orm'
+import { timeAgo, safeBigInt } from '@/lib/format'
+import { formatUnits } from 'ethers'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 
@@ -23,6 +24,8 @@ export default async function DexPage({
   let totalTrades = 0
   let uniqueMakers = 0
   let topPairs: TopPair[] = []
+  const tokenDecimalsMap = new Map<string, number>()
+  const tokenSymbolMap = new Map<string, string>()
 
   try {
     const [tradesResult, tradeCountResult, makerCountResult, topPairsResult] = await Promise.all([
@@ -30,7 +33,7 @@ export default async function DexPage({
         .orderBy(desc(schema.dexTrades.blockNumber))
         .limit(PAGE_SIZE)
         .offset(offset),
-      db.select({ value: count() }).from(schema.dexTrades),
+      db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'dex_trades'`),
       db.execute(sql`SELECT COUNT(DISTINCT maker)::int as value FROM dex_trades`),
       db.execute(sql`
         SELECT pair_address, dex, COUNT(*)::int as trade_count
@@ -42,7 +45,24 @@ export default async function DexPage({
     ])
 
     trades = tradesResult
-    totalTrades = tradeCountResult[0]?.value ?? 0
+    // Fetch token decimals + symbols for all tokens in these trades
+    const tokenAddrs = new Set<string>()
+    for (const t of tradesResult) {
+      if (t.tokenIn) tokenAddrs.add(t.tokenIn.toLowerCase())
+      if (t.tokenOut) tokenAddrs.add(t.tokenOut.toLowerCase())
+    }
+    if (tokenAddrs.size > 0) {
+      try {
+        const tokens = await db.select({ address: schema.tokens.address, decimals: schema.tokens.decimals, symbol: schema.tokens.symbol })
+          .from(schema.tokens)
+          .where(sql`${schema.tokens.address} IN (${sql.join([...tokenAddrs].map(a => sql`${a}`), sql`, `)})`)
+        for (const tok of tokens) {
+          tokenDecimalsMap.set(tok.address.toLowerCase(), tok.decimals)
+          tokenSymbolMap.set(tok.address.toLowerCase(), tok.symbol)
+        }
+      } catch { /* token lookup failed — will use defaults */ }
+    }
+    totalTrades = Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0)
     uniqueMakers = Number((Array.from(makerCountResult)[0] as Record<string, unknown>)?.value ?? 0)
     topPairs = (Array.from(topPairsResult) as Record<string, unknown>[]).map(r => ({
       pair_address: String(r.pair_address),
@@ -122,29 +142,44 @@ export default async function DexPage({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {trades.map(t => (
-              <tr key={t.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 font-mono text-xs">
-                  <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
-                    {t.txHash.slice(0, 14)}…
-                  </Link>
-                </td>
-                <td className="px-4 py-2 text-gray-700">{t.dex}</td>
-                <td className="px-4 py-2 font-mono text-xs">
-                  <Link href={`/address/${t.pairAddress}`} className="text-blue-600 hover:underline">
-                    {t.pairAddress.slice(0, 12)}…
-                  </Link>
-                </td>
-                <td className="px-4 py-2 text-gray-700">{formatBNB(BigInt(t.amountIn ?? '0'))}</td>
-                <td className="px-4 py-2 text-gray-700">{formatBNB(BigInt(t.amountOut ?? '0'))}</td>
-                <td className="px-4 py-2 font-mono text-xs">
-                  <Link href={`/address/${t.maker}`} className="text-blue-600 hover:underline">
-                    {t.maker.slice(0, 12)}…
-                  </Link>
-                </td>
-                <td className="px-4 py-2 text-gray-500">{timeAgo(t.timestamp)}</td>
-              </tr>
-            ))}
+            {trades.map(t => {
+              // Look up token decimals from enriched data, default to 18
+              const inDecimals = tokenDecimalsMap.get(t.tokenIn?.toLowerCase() ?? '') ?? 18
+              const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '') ?? 18
+              const amtIn = Number(formatUnits(safeBigInt(t.amountIn), inDecimals))
+              const amtOut = Number(formatUnits(safeBigInt(t.amountOut), outDecimals))
+              const inSymbol = tokenSymbolMap.get(t.tokenIn?.toLowerCase() ?? '') ?? ''
+              const outSymbol = tokenSymbolMap.get(t.tokenOut?.toLowerCase() ?? '') ?? ''
+              return (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-mono text-xs">
+                    <Link href={`/tx/${t.txHash}`} className="text-yellow-600 hover:underline">
+                      {t.txHash.slice(0, 14)}…
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-gray-700">{t.dex}</td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    <Link href={`/address/${t.pairAddress}`} className="text-blue-600 hover:underline">
+                      {t.pairAddress.slice(0, 12)}…
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-gray-700">
+                    {amtIn > 1e6 ? `${(amtIn / 1e6).toFixed(2)}M` : amtIn > 1000 ? `${(amtIn / 1000).toFixed(2)}K` : amtIn.toFixed(4)}
+                    {inSymbol && <span className="text-gray-400 ml-1 text-xs">{inSymbol}</span>}
+                  </td>
+                  <td className="px-4 py-2 text-gray-700">
+                    {amtOut > 1e6 ? `${(amtOut / 1e6).toFixed(2)}M` : amtOut > 1000 ? `${(amtOut / 1000).toFixed(2)}K` : amtOut.toFixed(4)}
+                    {outSymbol && <span className="text-gray-400 ml-1 text-xs">{outSymbol}</span>}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    <Link href={`/address/${t.maker}`} className="text-blue-600 hover:underline">
+                      {t.maker.slice(0, 12)}…
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">{timeAgo(t.timestamp)}</td>
+                </tr>
+              )
+            })}
             {trades.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No trades indexed yet.</td></tr>
             )}

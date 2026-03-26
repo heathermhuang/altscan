@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc, count } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
 
@@ -24,10 +24,10 @@ export default async function BlocksPage({
         .orderBy(desc(schema.blocks.number))
         .limit(PER_PAGE)
         .offset(offset),
-      db.select({ count: count() }).from(schema.blocks),
+      db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'blocks'`),
     ])
     blocks = blocksResult
-    total = Number(totalResult[0]?.count ?? 0)
+    total = Number((Array.from(totalResult)[0] as Record<string, unknown>)?.estimate ?? 0)
   } catch {
     // DB not connected — show empty state
   }

@@ -1,7 +1,8 @@
-import { Log, AbiCoder, Contract, JsonRpcProvider } from 'ethers'
+import { Log, AbiCoder, Contract } from 'ethers'
 import { getDb, schema } from '@bnbscan/db'
+import { getProvider } from './provider'
 
-const provider = new JsonRpcProvider(process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/')
+const provider = getProvider()
 const abi = AbiCoder.defaultAbiCoder()
 
 // Cache pair → [token0, token1] to avoid repeated RPC calls
@@ -79,7 +80,7 @@ export async function decodeDexTrade(
       blockNumber,
       timestamp,
     }).onConflictDoNothing()
-  } catch {
-    // Skip malformed swap events
+  } catch (err) {
+    console.warn('[dex-decoder] Error decoding swap:', txHash, err instanceof Error ? err.message : err)
   }
 }

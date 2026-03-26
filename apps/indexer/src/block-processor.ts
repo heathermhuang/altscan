@@ -7,13 +7,14 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   const db = getDb()
   const block = await provider.getBlock(blockNumber, true)  // true = include txs
   if (!block) throw new Error(`Block ${blockNumber} not found`)
+  if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
 
   // Insert block
   await db.insert(schema.blocks).values({
     number: block.number,
-    hash: block.hash!,
+    hash: block.hash,
     parentHash: block.parentHash,
     timestamp,
     miner: block.miner.toLowerCase(),
