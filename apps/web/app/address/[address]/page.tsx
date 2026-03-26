@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
-import { eq, or, desc, count, sql } from 'drizzle-orm'
+import { eq, or, desc, count, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
-import { formatBNB, formatNumber, timeAgo, formatAddress, safeBigInt } from '@/lib/format'
+import { formatBNB, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbol } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
@@ -492,6 +492,23 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
     // DB error
   }
 
+  // Look up token info (name/symbol/decimals) for DB transfers
+  const tokenInfoMap = new Map<string, { name: string; symbol: string; decimals: number }>()
+  if (transfers.length > 0) {
+    try {
+      const uniqueAddrs = [...new Set(transfers.map(t => t.tokenAddress))]
+      const tokenRows = await db.select({
+        address: schema.tokens.address,
+        name: schema.tokens.name,
+        symbol: schema.tokens.symbol,
+        decimals: schema.tokens.decimals,
+      }).from(schema.tokens).where(inArray(schema.tokens.address, uniqueAddrs))
+      for (const tok of tokenRows) {
+        tokenInfoMap.set(tok.address, { name: tok.name, symbol: tok.symbol, decimals: tok.decimals })
+      }
+    } catch { /* token lookup error */ }
+  }
+
   if (transfers.length === 0 && page === 1 && !isBot) {
     let moralisTransfers: MoralisTokenTransfer[] = []
     const moralis = await getTokenTransfers(addr)
@@ -610,16 +627,31 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                     {formatAddress(t.toAddress)}
                   </Link>
                 </td>
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-4 py-2 text-xs">
                   <Link
                     href={`/token/${t.tokenAddress}`}
                     className="text-yellow-600 hover:underline"
                   >
-                    {formatAddress(t.tokenAddress)}
+                    {tokenInfoMap.get(t.tokenAddress)?.symbol
+                      ? sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.symbol)
+                      : tokenInfoMap.get(t.tokenAddress)?.name
+                        ? sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.name)
+                        : formatAddress(t.tokenAddress)}
                   </Link>
                 </td>
                 <td className="px-4 py-2 text-xs">
-                  {(t.value ?? '0').slice(0, 12)}
+                  {(() => {
+                    const decimals = tokenInfoMap.get(t.tokenAddress)?.decimals ?? 0
+                    const raw = t.value ?? '0'
+                    if (decimals > 0) {
+                      const formatted = Number(BigInt(raw)) / 10 ** decimals
+                      return formatted.toLocaleString(undefined, { maximumFractionDigits: 6 })
+                    }
+                    return raw.slice(0, 12)
+                  })()}
+                  {tokenInfoMap.get(t.tokenAddress)?.symbol
+                    ? ` ${sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.symbol)}`
+                    : ''}
                 </td>
               </tr>
             ))}
@@ -773,12 +805,12 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
               <tr key={h.tokenAddress} className="hover:bg-gray-50">
                 <td className="px-4 py-2">
                   <Link href={`/token/${h.tokenAddress}`} className="text-yellow-600 hover:underline font-medium">
-                    {h.name ?? h.tokenAddress.slice(0, 14) + '…'}
+                    {h.name ? sanitizeSymbol(h.name) : h.tokenAddress.slice(0, 14) + '…'}
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-600">{h.symbol ?? '—'}</td>
+                <td className="px-4 py-2 text-gray-600">{h.symbol ? sanitizeSymbol(h.symbol) : '—'}</td>
                 <td className="px-4 py-2">
-                  {displayBalance} {h.symbol ?? ''}
+                  {displayBalance} {h.symbol ? sanitizeSymbol(h.symbol) : ''}
                 </td>
               </tr>
             )
@@ -801,7 +833,7 @@ async function AnalyticsTab({
   let totalSentBNB = '0'
   let totalReceivedBNB = '0'
   let firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
-  let lastSeen: Date | null = null
+  let lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
 
   try {
     const [sentResult, receivedResult] = await Promise.all([
@@ -824,8 +856,19 @@ async function AnalyticsTab({
       (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
     )
 
-    if (addressInfo?.firstSeen) firstSeen = new Date(addressInfo.firstSeen)
-    if (addressInfo?.lastSeen) lastSeen = new Date(addressInfo.lastSeen)
+    // If firstSeen/lastSeen not in addresses table, compute from transactions
+    if (!firstSeen || !lastSeen) {
+      const [seenResult] = await Promise.all([
+        db.execute(sql`
+          SELECT MIN(timestamp) as first_seen, MAX(timestamp) as last_seen
+          FROM transactions
+          WHERE from_address = ${addr} OR to_address = ${addr}
+        `),
+      ])
+      const row = Array.from(seenResult)[0] as Record<string, unknown> | undefined
+      if (row?.first_seen && !firstSeen) firstSeen = new Date(row.first_seen as string)
+      if (row?.last_seen && !lastSeen) lastSeen = new Date(row.last_seen as string)
+    }
   } catch {
     // DB error
   }

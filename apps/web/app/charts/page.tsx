@@ -76,7 +76,7 @@ export default async function ChartsPage() {
       <h1 className="text-2xl font-bold mb-8">Charts</h1>
 
       <div className="space-y-8">
-        <ChartCard title="Daily Transaction Count (Last 30 Days)">
+        <ChartCard title="Daily Transaction Count" data={txData}>
           <LineChart
             data={txData}
             label="Transactions"
@@ -84,7 +84,7 @@ export default async function ChartsPage() {
           />
         </ChartCard>
 
-        <ChartCard title="Gas Price History — Avg Standard (Last 30 Days, Gwei)">
+        <ChartCard title="Gas Price History — Avg Standard (Gwei)" data={gasData}>
           <LineChart
             data={gasData}
             label="Gwei"
@@ -92,7 +92,7 @@ export default async function ChartsPage() {
           />
         </ChartCard>
 
-        <ChartCard title="Daily Block Count (Last 30 Days)">
+        <ChartCard title="Daily Block Count" data={blockData}>
           <LineChart
             data={blockData}
             label="Blocks"
@@ -104,11 +104,27 @@ export default async function ChartsPage() {
   )
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, data, children }: { title: string; data: DataPoint[]; children: React.ReactNode }) {
+  const dateRange = data.length >= 2
+    ? `${data[0].date} — ${data[data.length - 1].date}`
+    : data.length === 1
+    ? data[0].date
+    : null
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-      <h2 className="font-semibold text-gray-800 mb-4">{title}</h2>
-      {children}
+      <h2 className="font-semibold text-gray-800 mb-1">{title}</h2>
+      {dateRange && (
+        <p className="text-xs text-gray-400 mb-4">{dateRange} ({data.length} days)</p>
+      )}
+      {data.length > 0 && data.length < 3 ? (
+        <div className="h-48 flex items-center justify-center text-gray-400">
+          Not enough data yet — only {data.length} day{data.length === 1 ? '' : 's'} recorded.
+          Charts will appear once at least 3 days of data are available.
+        </div>
+      ) : (
+        children
+      )}
     </div>
   )
 }

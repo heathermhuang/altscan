@@ -20,10 +20,10 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
   if (!block) return { title: `Block #${formatNumber(blockNumber)} — BNBScan` }
   return {
     title: `Block #${formatNumber(blockNumber)} — BNBScan`,
-    description: `BNB Chain block #${formatNumber(blockNumber)} mined by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
+    description: `BNB Chain block #${formatNumber(blockNumber)} validated by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
     openGraph: {
       title: `Block #${formatNumber(blockNumber)}`,
-      description: `${block.txCount} transactions · Miner: ${block.miner.slice(0, 14)}…`,
+      description: `${block.txCount} transactions · Validator: ${block.miner.slice(0, 14)}…`,
     },
   }
 }
@@ -83,7 +83,7 @@ export default async function BlockDetailPage({
               value={`${timeAgo(new Date(block.timestamp))} (${new Date(block.timestamp).toUTCString()})`}
             />
             <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
-            <DetailRow label="Miner" value={block.miner} mono copy />
+            <DetailRow label="Validator" value={block.miner} mono copy />
             <DetailRow label="Block Hash" value={block.hash} mono copy />
             <DetailRow label="Parent Hash" value={block.parentHash} mono copy />
             <DetailRow

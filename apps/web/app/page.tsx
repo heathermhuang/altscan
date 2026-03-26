@@ -9,20 +9,38 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 export const revalidate = 10
 
 async function fetchBNBPrice(): Promise<{ usd: number; change24h: number } | null> {
+  // Try CoinGecko first (longer cache to avoid rate limits)
   try {
     const res = await fetch(
       'https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd&include_24hr_change=true',
-      { next: { revalidate: 60 } }
+      { next: { revalidate: 300 } }
     )
-    if (!res.ok) return null
-    const data = await res.json()
-    return {
-      usd: data.binancecoin?.usd ?? 0,
-      change24h: data.binancecoin?.usd_24h_change ?? 0,
+    if (res.ok) {
+      const data = await res.json()
+      if (data.binancecoin?.usd) {
+        return {
+          usd: data.binancecoin.usd,
+          change24h: data.binancecoin.usd_24h_change ?? 0,
+        }
+      }
     }
-  } catch {
-    return null
-  }
+  } catch { /* CoinGecko failed, try backup */ }
+
+  // Fallback: CoinCap API
+  try {
+    const res = await fetch(
+      'https://api.coincap.io/v2/assets/binance-coin',
+      { next: { revalidate: 300 } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data?.data?.priceUsd)
+      const change = parseFloat(data?.data?.changePercent24Hr)
+      if (price > 0) return { usd: price, change24h: change || 0 }
+    }
+  } catch { /* both failed */ }
+
+  return null
 }
 
 // Use pg_class.reltuples for instant approximate row counts.
@@ -67,7 +85,7 @@ export default async function HomePage() {
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
     fetchTableEstimate('transactions'),
-    fetchTableEstimate('tokens'),
+    db.select({ value: sql<number>`count(*)::int` }).from(schema.tokens).then(([r]) => r?.value ?? 0).catch(() => 0),
     fetchBNBPrice(),
     fetchBscScanTotalTxCount(),
   ])

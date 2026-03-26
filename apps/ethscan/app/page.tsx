@@ -9,20 +9,38 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 export const revalidate = 10
 
 async function fetchETHPrice(): Promise<{ usd: number; change24h: number } | null> {
+  // Try CoinGecko first (longer cache to avoid rate limits)
   try {
     const res = await fetch(
       'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd&include_24hr_change=true',
-      { next: { revalidate: 60 } }
+      { next: { revalidate: 300 } }
     )
-    if (!res.ok) return null
-    const data = await res.json()
-    return {
-      usd: data.ethereum?.usd ?? 0,
-      change24h: data.ethereum?.usd_24h_change ?? 0,
+    if (res.ok) {
+      const data = await res.json()
+      if (data.ethereum?.usd) {
+        return {
+          usd: data.ethereum.usd,
+          change24h: data.ethereum.usd_24h_change ?? 0,
+        }
+      }
     }
-  } catch {
-    return null
-  }
+  } catch { /* CoinGecko failed, try backup */ }
+
+  // Fallback: CoinCap API (no key needed, generous limits)
+  try {
+    const res = await fetch(
+      'https://api.coincap.io/v2/assets/ethereum',
+      { next: { revalidate: 300 } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data?.data?.priceUsd)
+      const change = parseFloat(data?.data?.changePercent24Hr)
+      if (price > 0) return { usd: price, change24h: change || 0 }
+    }
+  } catch { /* both failed */ }
+
+  return null
 }
 
 async function fetchTableEstimate(tableName: string): Promise<number> {
@@ -31,7 +49,7 @@ async function fetchTableEstimate(tableName: string): Promise<number> {
       sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = ${tableName}`
     )
     const rows = Array.from(result)
-    return Number((rows[0] as Record<string, unknown>)?.estimate ?? 0)
+    return Math.max(0, Number((rows[0] as Record<string, unknown>)?.estimate ?? 0))
   } catch {
     return 0
   }
@@ -64,7 +82,7 @@ export default async function HomePage() {
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
     fetchTableEstimate('transactions'),
-    fetchTableEstimate('tokens'),
+    db.select({ value: sql<number>`count(*)::int` }).from(schema.tokens).then(([r]) => r?.value ?? 0).catch(() => 0),
     fetchETHPrice(),
     fetchEtherscanTotalTxCount(),
   ])

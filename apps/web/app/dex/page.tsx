@@ -62,8 +62,8 @@ export default async function DexPage({
         }
       } catch { /* token lookup failed — will use defaults */ }
     }
-    totalTrades = Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0)
-    uniqueMakers = Number((Array.from(makerCountResult)[0] as Record<string, unknown>)?.value ?? 0)
+    totalTrades = Math.max(0, Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0))
+    uniqueMakers = Math.max(0, Number((Array.from(makerCountResult)[0] as Record<string, unknown>)?.value ?? 0))
     topPairs = (Array.from(topPairsResult) as Record<string, unknown>[]).map(r => ({
       pair_address: String(r.pair_address),
       dex: String(r.dex),
@@ -82,7 +82,7 @@ export default async function DexPage({
           <p className="text-lg font-bold">{totalTrades.toLocaleString()}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Unique Makers</p>
+          <p className="text-xs text-gray-500 mb-1">Unique Traders</p>
           <p className="text-lg font-bold">{uniqueMakers.toLocaleString()}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">

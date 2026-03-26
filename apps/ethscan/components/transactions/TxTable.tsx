@@ -24,7 +24,7 @@ export function TxTable({ txs, compact = false }: {
             <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">From</th>
-            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>}
+            <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Value</th>
             <th className="text-left px-4 py-2 font-medium text-gray-500">Status</th>
           </tr>
@@ -43,17 +43,15 @@ export function TxTable({ txs, compact = false }: {
                   {formatAddress(tx.fromAddress)}
                 </Link>
               </td>
-              {!compact && (
-                <td className="px-4 py-2 font-mono text-xs hidden sm:table-cell">
-                  {tx.toAddress ? (
-                    <Link href={`/address/${tx.toAddress}`} className="text-blue-600 hover:underline">
-                      {formatAddress(tx.toAddress)}
-                    </Link>
-                  ) : (
-                    <span className="text-gray-400">Contract Creation</span>
-                  )}
-                </td>
-              )}
+              <td className="px-4 py-2 font-mono text-xs hidden sm:table-cell">
+                {tx.toAddress ? (
+                  <Link href={`/address/${tx.toAddress}`} className="text-blue-600 hover:underline">
+                    {formatAddress(tx.toAddress)}
+                  </Link>
+                ) : (
+                  <span className="text-gray-400">Contract Creation</span>
+                )}
+              </td>
               <td className="px-4 py-2">{formatETH(safeBigInt(tx.value))} ETH</td>
               <td className="px-4 py-2">
                 <Badge variant={tx.status ? 'success' : 'fail'}>

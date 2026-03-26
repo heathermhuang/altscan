@@ -74,25 +74,32 @@ export default async function TokenDetailPage({
   const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
   const offset = (page - 1) * PAGE_SIZE
 
-  const [token] = await db
-    .select()
-    .from(schema.tokens)
-    .where(eq(schema.tokens.address, addr))
+  let token: typeof schema.tokens.$inferSelect | null = null
+  try {
+    const [row] = await db
+      .select()
+      .from(schema.tokens)
+      .where(eq(schema.tokens.address, addr))
+    token = row ?? null
+  } catch { /* DB error */ }
 
   if (!token) notFound()
 
-  const [transfers, [{ value: totalTransfers }], topHolders, riskSignals] = await Promise.all([
+  const [transfers, totalTransfers, topHolders, riskSignals] = await Promise.all([
     db
       .select()
       .from(schema.tokenTransfers)
       .where(eq(schema.tokenTransfers.tokenAddress, addr))
       .orderBy(desc(schema.tokenTransfers.blockNumber))
       .limit(PAGE_SIZE)
-      .offset(offset),
+      .offset(offset)
+      .catch(() => []),
     db
       .select({ value: count() })
       .from(schema.tokenTransfers)
-      .where(eq(schema.tokenTransfers.tokenAddress, addr)),
+      .where(eq(schema.tokenTransfers.tokenAddress, addr))
+      .then(([r]) => r?.value ?? 0)
+      .catch(() => 0),
     fetchTopHolders(addr),
     analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]),
   ])

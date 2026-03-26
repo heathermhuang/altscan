@@ -59,8 +59,18 @@ export function decodeTx(tx: {
   if (!tx.methodId || tx.methodId === '0x') {
     if (bnbValue > 0) {
       const to = toLabel ?? `${tx.toAddress.slice(0, 12)}…`
+      // Avoid scientific notation for very small values
+      let bnbStr: string
+      if (bnbValue >= 0.0001) {
+        bnbStr = bnbValue.toFixed(4)
+      } else {
+        // Show enough decimals to display significant digits
+        const weiStr = safeBigInt(tx.value).toString()
+        const decimals = Math.max(18 - weiStr.length + 2, 4)
+        bnbStr = bnbValue.toFixed(Math.min(decimals, 18))
+      }
       return {
-        summary: `Sent ${bnbValue.toFixed(4)} BNB to ${to}`,
+        summary: `Sent ${bnbStr} BNB to ${to}`,
         type: 'transfer',
         emoji: '💸',
       }

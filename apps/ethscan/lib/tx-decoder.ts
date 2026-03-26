@@ -41,10 +41,15 @@ function formatValue(raw: string, decimals = 18): string {
 function formatETHValue(weiStr: string): string {
   try {
     const wei = safeBigInt(weiStr)
+    if (wei === 0n) return '0 ETH'
+    // Use BigInt arithmetic to avoid scientific notation for very small values
     const eth = Number(wei) / 1e18
-    if (eth === 0) return '0 ETH'
-    if (eth < 0.0001) return `${eth.toExponential(2)} ETH`
-    return `${eth.toFixed(4)} ETH`
+    if (eth >= 0.0001) return `${eth.toFixed(4)} ETH`
+    // For very small values, format without scientific notation
+    // Find significant digits by counting leading zeros
+    const absStr = wei.toString()
+    const decimals = Math.max(18 - absStr.length + 2, 4) // show at least 2 significant digits
+    return `${eth.toFixed(Math.min(decimals, 18))} ETH`
   } catch {
     return '? ETH'
   }

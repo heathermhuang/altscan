@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { desc, gte, sql } from 'drizzle-orm'
-import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
+import { timeAgo, formatAddress, safeBigInt, sanitizeSymbol } from '@/lib/format'
 import Link from 'next/link'
 
 export const revalidate = 30
@@ -163,10 +163,10 @@ export default async function WhalesPage({
                   </td>
                   <td className="px-4 py-2">
                     <Link href={`/token/${w.tokenAddress}`} className="text-blue-600 hover:underline font-medium">
-                      {w.tokenSymbol ?? w.tokenAddress.slice(0, 8) + '…'}
+                      {w.tokenSymbol ? sanitizeSymbol(w.tokenSymbol) : formatAddress(w.tokenAddress)}
                     </Link>
                     {w.tokenName && (
-                      <span className="text-xs text-gray-400 ml-1">{w.tokenName}</span>
+                      <span className="text-xs text-gray-400 ml-1">{sanitizeSymbol(w.tokenName)}</span>
                     )}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
@@ -179,9 +179,9 @@ export default async function WhalesPage({
                       {formatAddress(w.toAddress)}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 font-semibold">
+                  <td className="px-4 py-2 font-semibold whitespace-nowrap">
                     {displayAmount}{' '}
-                    <span className="text-gray-500 font-normal">{w.tokenSymbol ?? ''}</span>
+                    <span className="text-gray-500 font-normal">{w.tokenSymbol ? sanitizeSymbol(w.tokenSymbol) : ''}</span>
                   </td>
                 </tr>
               )

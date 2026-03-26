@@ -17,8 +17,17 @@ export default async function ValidatorsPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">
-        BNB Chain Validators ({validators.length})
+        BNB Chain Validators{validators.length > 0 ? ` (${validators.length})` : ''}
       </h1>
+
+      {validators.length === 0 ? (
+        <div className="bg-white rounded-xl border shadow-sm p-12 text-center">
+          <p className="text-gray-400 text-lg mb-2">No validators synced yet</p>
+          <p className="text-gray-300 text-sm">
+            Validator data will appear here once the indexer has synced BNB Chain validator information.
+          </p>
+        </div>
+      ) : (
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
@@ -53,12 +62,10 @@ export default async function ValidatorsPage() {
                 <td className="px-4 py-2">{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
               </tr>
             ))}
-            {validators.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No validators synced yet.</td></tr>
-            )}
           </tbody>
         </table>
       </div>
+      )}
     </div>
   )
 }

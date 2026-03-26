@@ -12,9 +12,14 @@ export default async function GasPage() {
   } catch {
     // RPC down — show zeros, page still renders
   }
-  const slow     = (baseFee *  90n) / 100n
-  const standard = (baseFee * 110n) / 100n
-  const fast     = (baseFee * 130n) / 100n
+  // BNB Chain has a consensus minimum gas price of 3 Gwei.
+  // The base fee from RPC can be lower, but validators won't include txs below 3 Gwei.
+  const MIN_GAS_PRICE = 3_000_000_000n // 3 Gwei in wei
+  const effectiveGasPrice = baseFee > MIN_GAS_PRICE ? baseFee : MIN_GAS_PRICE
+
+  const slow     = effectiveGasPrice
+  const standard = (effectiveGasPrice * 110n) / 100n
+  const fast     = (effectiveGasPrice * 130n) / 100n
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -32,11 +37,17 @@ export default async function GasPage() {
           {formatGwei(baseFee)}
           <span className="text-xl font-normal text-gray-500 ml-2">Gwei</span>
         </p>
+        {baseFee < MIN_GAS_PRICE && baseFee > 0n && (
+          <p className="text-xs text-gray-400 mt-1">
+            Base fee is below the 3 Gwei minimum. Effective gas price = max(base fee, 3 Gwei).
+          </p>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm p-4">
         <p className="text-sm text-gray-500">
-          Gas prices fetched live from BNB Chain RPC. BNB Chain has a fixed minimum gas price of 3 Gwei.
+          Gas prices fetched live from BNB Chain RPC. BNB Chain has a consensus minimum gas price of 3 Gwei —
+          validators will not include transactions below this threshold even if the base fee is lower.
           Transactions are typically confirmed within 1–3 blocks (~3–9 seconds).
         </p>
       </div>
