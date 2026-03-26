@@ -1,13 +1,13 @@
-import { JsonRpcProvider } from 'ethers'
-import { blockQueue } from './queue'
 import { getDb, schema } from '@bnbscan/db'
 import { desc } from 'drizzle-orm'
+import { blockQueue } from './queue'
+import { getProvider } from './provider'
 
 const POLL_INTERVAL_MS = 3000
-const RPC_URL = process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/'
+const MAX_QUEUE_BATCH = 500  // Cap blocks queued per cycle to prevent Redis flooding
 
 export async function startBlockIndexer() {
-  const provider = new JsonRpcProvider(RPC_URL)
+  const provider = getProvider()
   const db = getDb()
   console.log('[block-indexer] Starting polling loop...')
 
@@ -19,15 +19,25 @@ export async function startBlockIndexer() {
       const latestBlock = await provider.getBlockNumber()
 
       if (latestBlock > lastIndexed) {
-        for (let n = lastIndexed + 1; n <= latestBlock; n++) {
+        // Cap the batch size to avoid flooding Redis when far behind
+        const gap = latestBlock - lastIndexed
+        const target = Math.min(lastIndexed + MAX_QUEUE_BATCH, latestBlock)
+
+        if (gap > MAX_QUEUE_BATCH) {
+          console.log(`[block-indexer] ${gap} blocks behind — queueing ${MAX_QUEUE_BATCH} (${lastIndexed + 1}–${target})`)
+        }
+
+        for (let n = lastIndexed + 1; n <= target; n++) {
           await blockQueue.add('process-block', { blockNumber: n }, {
             jobId: `block-${n}`,
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 },
           })
         }
-        console.log(`[block-indexer] Queued blocks ${lastIndexed + 1}–${latestBlock}`)
-        lastIndexed = latestBlock
+        if (gap <= MAX_QUEUE_BATCH) {
+          console.log(`[block-indexer] Queued blocks ${lastIndexed + 1}–${target}`)
+        }
+        lastIndexed = target
       }
     } catch (err) {
       console.error('[block-indexer] Poll error:', err)

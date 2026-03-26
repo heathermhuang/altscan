@@ -8,6 +8,7 @@ interface TxRow {
   toAddress: string | null
   value: string | null
   status: boolean
+  gasUsed: bigint | string | null
   timestamp: Date
 }
 
@@ -56,8 +57,8 @@ export function TxTable({ txs, compact = false }: {
               )}
               <td className="px-4 py-2">{formatBNB(safeBigInt(tx.value))} BNB</td>
               <td className="px-4 py-2">
-                <Badge variant={tx.status ? 'success' : 'fail'}>
-                  {tx.status ? 'Success' : 'Failed'}
+                <Badge variant={!tx.gasUsed || tx.gasUsed.toString() === '0' ? 'pending' : tx.status ? 'success' : 'fail'}>
+                  {!tx.gasUsed || tx.gasUsed.toString() === '0' ? 'Pending' : tx.status ? 'Success' : 'Failed'}
                 </Badge>
               </td>
             </tr>
