@@ -118,7 +118,10 @@ function isRateLimited(): boolean {
 const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
 
 function headers(): Record<string, string> | null {
-  if (process.env.MORALIS_DISABLED === 'true') return null
+  // KILL SWITCH — disable all Moralis calls until CU budget recovers
+  // Remove this line to re-enable Moralis
+  if (!process.env.MORALIS_ENABLED) return null
+
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
   if (isRateLimited()) return null
