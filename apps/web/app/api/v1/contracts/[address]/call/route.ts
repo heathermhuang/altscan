@@ -39,6 +39,17 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid functionName' }, { status: 400 })
   }
 
+  // Validate args: must be array, max 10 elements, max 10KB serialized (prevents DoS)
+  if (!Array.isArray(args)) {
+    return NextResponse.json({ error: 'args must be an array' }, { status: 400 })
+  }
+  if (args.length > 10) {
+    return NextResponse.json({ error: 'Maximum 10 args allowed' }, { status: 400 })
+  }
+  if (JSON.stringify(args).length > 10240) {
+    return NextResponse.json({ error: 'args payload too large (max 10KB)' }, { status: 400 })
+  }
+
   try {
     const iface = new Interface(contract.abi as string)
 

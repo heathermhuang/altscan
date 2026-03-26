@@ -3,6 +3,21 @@ import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { safeBigInt } from '@/lib/format'
 
+/**
+ * Sanitize a CSV field to prevent formula injection.
+ * Excel/Sheets interpret cells starting with =, +, -, @, \t, \r as formulas.
+ */
+function csvSafe(value: string): string {
+  const s = String(value)
+  if (/^[=+\-@\t\r]/.test(s)) {
+    return `"'${s.replace(/"/g, '""')}"`
+  }
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ address: string }> }
@@ -31,16 +46,16 @@ export async function GET(
     const value = Number(safeBigInt(tx.value)) / 1e18
     const gwei = Number(BigInt(tx.gasPrice ?? '0')) / 1e9
     return [
-      tx.hash,
+      csvSafe(tx.hash),
       tx.blockNumber,
       new Date(tx.timestamp).toISOString(),
-      tx.fromAddress,
-      tx.toAddress ?? '',
+      csvSafe(tx.fromAddress),
+      csvSafe(tx.toAddress ?? ''),
       value.toFixed(8),
       tx.gasUsed?.toString() ?? '0',
       gwei.toFixed(2),
       tx.status ? 'Success' : 'Failed',
-      tx.methodId ?? '',
+      csvSafe(tx.methodId ?? ''),
     ].join(',')
   }).join('\n')
 

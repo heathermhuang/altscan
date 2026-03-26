@@ -30,13 +30,21 @@ export async function GET(request: Request) {
 
 // POST: generate a new API key
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'), 5)) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const body = await request.json() as { ownerAddress: string; label?: string }
   const { ownerAddress, label } = body
 
   if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
+  }
+
+  // Limit keys per address to prevent abuse
+  const keyCount = await db.select({ id: schema.apiKeys.id })
+    .from(schema.apiKeys)
+    .where(eq(schema.apiKeys.ownerAddress, ownerAddress.toLowerCase()))
+  if (keyCount.length >= 10) {
+    return NextResponse.json({ error: 'Maximum 10 API keys per address' }, { status: 400 })
   }
 
   // Generate key: eths_<32 random bytes hex>

@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ webhooks })
 }
 
-// POST: register a new webhook
+// POST: register a new webhook (requires API key ownership)
 export async function POST(request: Request) {
   const auth = await authRequest(request)
   if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
@@ -47,6 +47,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 
+  // Verify the requesting API key belongs to the ownerAddress
+  const ownerAuth = await requireApiKeyOwner(request, ownerAddress.toLowerCase())
+  if (!ownerAuth.ok) return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status })
+
   // Parse and validate URL — block localhost + private IPs (SSRF protection)
   if (!url) {
     return NextResponse.json({ error: 'url is required' }, { status: 400 })
@@ -57,13 +61,19 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 })
   }
-  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    return NextResponse.json({ error: 'URL must use http or https' }, { status: 400 })
+  // Require HTTPS — webhook payloads contain HMAC signatures; HTTP allows MITM
+  if (parsedUrl.protocol !== 'https:') {
+    return NextResponse.json({ error: 'Webhook URL must use HTTPS' }, { status: 400 })
   }
   const hostname = parsedUrl.hostname.toLowerCase()
-  const blockedHosts = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fe80:)/
+  // Block internal/private networks — prevents SSRF against internal services
+  const blockedHosts = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fe80:|0x|%)/
   if (blockedHosts.test(hostname)) {
     return NextResponse.json({ error: 'Webhook URL must be a public endpoint' }, { status: 400 })
+  }
+  // Block numeric IPs entirely — DNS rebinding defense (attacker points domain to internal IP after validation)
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) {
+    return NextResponse.json({ error: 'Webhook URL must use a domain name, not an IP address' }, { status: 400 })
   }
 
   if (watchAddress && !/^0x[0-9a-fA-F]{40}$/.test(watchAddress)) {

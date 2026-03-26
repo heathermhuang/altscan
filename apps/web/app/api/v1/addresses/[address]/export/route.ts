@@ -2,6 +2,23 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
+/**
+ * Sanitize a CSV field to prevent formula injection.
+ * Excel/Sheets interpret cells starting with =, +, -, @, \t, \r as formulas.
+ * Prefix with a single quote to force text mode, and wrap in double quotes.
+ */
+function csvSafe(value: string): string {
+  const s = String(value)
+  if (/^[=+\-@\t\r]/.test(s)) {
+    return `"'${s.replace(/"/g, '""')}"`
+  }
+  // Wrap in quotes if contains comma, quote, or newline
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ address: string }> }
@@ -32,16 +49,16 @@ export async function GET(
     const gpPart = (tx.gasPrice?.toString() ?? '0').split('.')[0] || '0'
     const gwei = Number(BigInt(gpPart)) / 1e9
     return [
-      tx.hash,
+      csvSafe(tx.hash),
       tx.blockNumber,
       new Date(tx.timestamp).toISOString(),
-      tx.fromAddress,
-      tx.toAddress ?? '',
+      csvSafe(tx.fromAddress),
+      csvSafe(tx.toAddress ?? ''),
       value.toFixed(8),
       tx.gasUsed?.toString() ?? '0',
       gwei.toFixed(2),
       tx.status ? 'Success' : 'Failed',
-      tx.methodId ?? '',
+      csvSafe(tx.methodId ?? ''),
     ].join(',')
   }).join('\n')
 

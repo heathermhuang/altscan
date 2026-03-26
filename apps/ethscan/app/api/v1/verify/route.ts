@@ -7,8 +7,20 @@ import { triggerSourcifyVerification } from '@/lib/verifier'
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
+  // Tighter rate limit for write operations — 10 per minute per IP
+  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'), 10)) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  }
+
+  // Origin check — verify request comes from our domains (CSRF protection)
+  const origin = request.headers.get('origin') ?? ''
+  const referer = request.headers.get('referer') ?? ''
+  const ALLOWED_ORIGINS = ['https://ethscan.io', 'https://www.ethscan.io']
+  if (process.env.NODE_ENV === 'development') ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:3001')
+  const originAllowed = ALLOWED_ORIGINS.some(o => origin === o)
+  const refererAllowed = ALLOWED_ORIGINS.some(o => referer.startsWith(o + '/') || referer === o)
+  if (!originAllowed && !refererAllowed) {
+    return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 })
   }
 
   let body: { address?: string; compilerVersion?: string }

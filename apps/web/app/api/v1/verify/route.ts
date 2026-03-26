@@ -12,11 +12,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 
-  // Basic bot protection — check referer comes from our site
-  const referer = request.headers.get('referer') ?? ''
+  // Origin check — verify request comes from our domains (CSRF protection)
   const origin = request.headers.get('origin') ?? ''
-  const isSameOrigin = referer.includes('bnbscan.com') || referer.includes('localhost') || origin.includes('bnbscan.com') || origin.includes('localhost')
-  if (!isSameOrigin) {
+  const referer = request.headers.get('referer') ?? ''
+  const ALLOWED_ORIGINS = ['https://bnbscan.com', 'https://www.bnbscan.com']
+  if (process.env.NODE_ENV === 'development') ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:3001')
+  const originAllowed = ALLOWED_ORIGINS.some(o => origin === o)
+  const refererAllowed = ALLOWED_ORIGINS.some(o => referer.startsWith(o + '/') || referer === o)
+  if (!originAllowed && !refererAllowed) {
     return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 })
   }
 
