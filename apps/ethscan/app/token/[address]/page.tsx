@@ -8,6 +8,51 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
+import { Contract } from 'ethers'
+import { getProvider } from '@/lib/rpc'
+
+const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function totalSupply() view returns (uint256)',
+]
+
+type OnDemandToken = {
+  name: string
+  symbol: string
+  decimals: number
+  totalSupply: string
+  holderCount: number
+  address: string
+}
+
+/**
+ * Fetch ERC-20 token metadata directly from the blockchain RPC.
+ * Used when the token is not in the local index. Free — no Moralis CU cost.
+ */
+async function fetchTokenFromRpc(addr: string): Promise<OnDemandToken | null> {
+  try {
+    const contract = new Contract(addr, ERC20_ABI, getProvider())
+    const [name, symbol, decimals, totalSupply] = await Promise.all([
+      contract.name().catch(() => null),
+      contract.symbol().catch(() => null),
+      contract.decimals().catch(() => 18),
+      contract.totalSupply().catch(() => 0n),
+    ])
+    if (!name && !symbol) return null // not an ERC-20
+    return {
+      name: name ?? 'Unknown Token',
+      symbol: symbol ?? '???',
+      decimals: Number(decimals),
+      totalSupply: totalSupply.toString(),
+      holderCount: 0,
+      address: addr,
+    }
+  } catch {
+    return null
+  }
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -16,7 +61,15 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     const [row] = await db.select().from(schema.tokens).where(eq(schema.tokens.address, address.toLowerCase())).limit(1)
     token = row ?? null
   } catch { /* DB error */ }
-  if (!token) return { title: 'Token Not Found — EthScan' }
+  if (!token) {
+    // Try fetching from RPC for metadata
+    const rpcToken = await fetchTokenFromRpc(address.toLowerCase())
+    if (rpcToken) return {
+      title: `${rpcToken.name} (${rpcToken.symbol}) — EthScan`,
+      description: `${rpcToken.name} (${rpcToken.symbol}) ERC-20 token on Ethereum.`,
+    }
+    return { title: 'Token Not Found — EthScan' }
+  }
   return {
     title: `${token.name} (${token.symbol}) — EthScan`,
     description: `${token.name} (${token.symbol}) ERC-20 token on Ethereum. ${token.holderCount.toLocaleString()} holders.`,
@@ -84,24 +137,16 @@ export default async function TokenDetailPage({
     token = row ?? null
   } catch { /* DB error */ }
 
+  // If not in DB, fetch live from RPC (free — no Moralis CU cost)
+  let isLive = false
   if (!token) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">Token Not Found</h1>
-        <p className="text-gray-500 mb-2 font-mono text-sm">{addr}</p>
-        <p className="text-gray-400 text-sm mb-6">
-          This token has not been indexed yet. It may be a new or low-activity token.
-        </p>
-        <a
-          href={`https://etherscan.io/token/${addr}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-indigo-600 hover:underline text-sm"
-        >
-          View on Etherscan ↗
-        </a>
-      </div>
-    )
+    const rpcToken = await fetchTokenFromRpc(addr)
+    if (rpcToken) {
+      token = rpcToken as typeof schema.tokens.$inferSelect
+      isLive = true
+    } else {
+      notFound()
+    }
   }
 
   const [transfers, totalTransfers, topHolders, riskSignals] = await Promise.all([
@@ -152,6 +197,13 @@ export default async function TokenDetailPage({
           View on Etherscan ↗
         </a>
       </div>
+
+      {isLive && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
+          <span>📡</span>
+          <span>Showing live data from Ethereum RPC — this token is not yet in the local index. Transfer history and holder data are unavailable.</span>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
