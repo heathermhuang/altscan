@@ -5,11 +5,13 @@
  *
  * CU BUDGET — Free tier: 40,000 CU/day
  * Strategy:
- *   - Long cache TTLs (1hr history, 4hr holdings/NFTs) to avoid re-fetches
- *   - Small page sizes (limit=10) — enough to show useful data, minimizes CU
+ *   - Strict rate limits: 10 calls/hour, 200 calls/day (~5K CU/day, 12.5% of budget)
+ *   - Long cache TTLs (4hr per address) to avoid re-fetches
+ *   - Small page sizes (limit=10-25) — enough to show useful data, minimizes CU
  *   - No separate getWalletStats call — derive tx count from history response
  *   - exclude_spam=true on token endpoints to skip noise
  *   - Only fetch for the active tab, never prefetch other tabs
+ *   - Bot detection skips Moralis entirely for crawlers
  */
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
@@ -89,28 +91,41 @@ export type MoralisNft = {
 }
 
 /**
- * Rate limiter — hard cap on Moralis calls per hour.
- * Prevents bot traffic from draining the monthly CU budget.
- * 2M CU/month ÷ 30 days ÷ 24 hours = ~2,778 CU/hour budget.
- * At ~25 CU per call, that's ~111 calls/hour.
- * We cap at 100/hour to leave headroom.
+ * Rate limiter — hard cap on Moralis calls per hour AND per day.
+ * Free tier: 40,000 CU/day. Each call costs ~25 CU.
+ * Daily budget: 40,000 CU / 25 CU = 1,600 calls/day max.
+ * We cap conservatively: 10 calls/hour, 200 calls/day (~5,000 CU/day).
+ * Leaves 87% of the daily budget as headroom.
  */
-const RATE_LIMIT_WINDOW = 3600_000 // 1 hour in ms
-const RATE_LIMIT_MAX = 30          // max 30 Moralis API calls per hour (~750 CU/hr = 540K CU/month)
-let rateLimitCounter = 0
-let rateLimitWindowStart = Date.now()
+const HOURLY_WINDOW = 3600_000
+const HOURLY_MAX = 10              // 10 calls/hour = ~250 CU/hr
+const DAILY_WINDOW = 86400_000
+const DAILY_MAX = 200              // 200 calls/day = ~5,000 CU/day (12.5% of 40K budget)
+let hourlyCounter = 0
+let hourlyWindowStart = Date.now()
+let dailyCounter = 0
+let dailyWindowStart = Date.now()
 
 function isRateLimited(): boolean {
   const now = Date.now()
-  if (now - rateLimitWindowStart > RATE_LIMIT_WINDOW) {
-    // Reset window
-    rateLimitCounter = 0
-    rateLimitWindowStart = now
+  // Reset hourly window
+  if (now - hourlyWindowStart > HOURLY_WINDOW) {
+    hourlyCounter = 0
+    hourlyWindowStart = now
   }
-  if (rateLimitCounter >= RATE_LIMIT_MAX) {
+  // Reset daily window
+  if (now - dailyWindowStart > DAILY_WINDOW) {
+    dailyCounter = 0
+    dailyWindowStart = now
+  }
+  if (dailyCounter >= DAILY_MAX) {
     return true
   }
-  rateLimitCounter++
+  if (hourlyCounter >= HOURLY_MAX) {
+    return true
+  }
+  hourlyCounter++
+  dailyCounter++
   return false
 }
 
@@ -120,7 +135,7 @@ const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ah
 function headers(): Record<string, string> | null {
   // Moralis is enabled with strict protections:
   // 1. In-memory cache (4hr per address)
-  // 2. Rate limiter (100 calls/hr hard cap)
+  // 2. Rate limiter (10 calls/hr + 200 calls/day hard caps)
   // 3. Bot detection (address page skips Moralis for bots)
   // Set MORALIS_DISABLED=true to kill all calls instantly
   if (process.env.MORALIS_DISABLED === 'true') return null
