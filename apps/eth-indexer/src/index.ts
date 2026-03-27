@@ -33,6 +33,13 @@ const LOG_EVERY    = parseInt(process.env.LOG_EVERY ?? '50', 10)
 let running = true
 process.on('SIGINT',  () => { running = false })
 process.on('SIGTERM', () => { running = false })
+process.on('unhandledRejection', (err) => {
+  console.error('[eth-indexer] Unhandled rejection:', err)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[eth-indexer] Uncaught exception:', err)
+  process.exit(1)
+})
 
 async function main() {
   console.log('[eth-indexer] Starting Ethereum indexer...')
@@ -44,10 +51,10 @@ async function main() {
 
   await ensureSchema(db)
 
-  // 90-day retention cleanup — await first run so DB is clean before we read lastIndexedBlock
-  await startRetentionCleanup(db)
-
   let lastIndexed = await getLastIndexedBlock(db)
+
+  // Run retention cleanup in background — don't block startup
+  startRetentionCleanup(db).catch(err => console.error('[eth-indexer] retention startup error:', err))
 
   // Retry getBlockNumber — don't die on transient RPC errors at startup
   let tip = 0

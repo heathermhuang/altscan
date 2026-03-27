@@ -26,13 +26,21 @@ const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 let running = true
 process.on('SIGINT',  () => { running = false })
 process.on('SIGTERM', () => { running = false })
+process.on('unhandledRejection', (err) => {
+  console.error('[indexer] Unhandled rejection:', err)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[indexer] Uncaught exception:', err)
+  process.exit(1)
+})
 
 async function main() {
   console.log('[indexer] Starting BNBScan indexer (no-Redis mode)...')
   console.log(`[indexer] RPC: ${RPC_URL.replace(/\/\/.*@/, '//***@')}`)
 
   await ensureSchema()
-  await startRetentionCleanup()
+  // Run retention cleanup in background — don't block startup
+  startRetentionCleanup().catch(err => console.error('[indexer] retention startup error:', err))
 
   const provider = new JsonRpcProvider(RPC_URL)
   const db = getDb()

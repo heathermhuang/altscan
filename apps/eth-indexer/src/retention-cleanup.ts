@@ -10,28 +10,41 @@ const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '3', 10)
 const BATCH_SIZE     = 5_000
 const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours
 
+/**
+ * Whitelist of allowed table names and timestamp columns.
+ * Using sql.raw() for identifiers is inherently dangerous — we mitigate by
+ * strictly validating against this whitelist.
+ */
+const ALLOWED_TABLES = new Set([
+  'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs',
+])
+const ALLOWED_COLUMNS = new Set(['timestamp', 'block_number'])
+
+function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void {
+  const allowed = kind === 'table' ? ALLOWED_TABLES : ALLOWED_COLUMNS
+  if (!allowed.has(value)) {
+    throw new Error(`[retention] Refused ${kind} identifier: "${value}" — not in whitelist`)
+  }
+  if (!/^[a-z_]+$/.test(value)) {
+    throw new Error(`[retention] Invalid ${kind} identifier: "${value}" — must be lowercase alpha/underscore only`)
+  }
+}
+
 async function deleteBatch(db: any, table: string, timestampCol: string, cutoff: Date): Promise<number> {
-  const result = await db.execute(sql.raw(`
-    DELETE FROM ${table}
-    WHERE ctid IN (
-      SELECT ctid FROM ${table}
-      WHERE ${timestampCol} < '${cutoff.toISOString()}'
-      LIMIT ${BATCH_SIZE}
-    )
-  `))
+  assertAllowedIdentifier(table, 'table')
+  assertAllowedIdentifier(timestampCol, 'column')
+  const cutoffStr = cutoff.toISOString()
+  const result = await db.execute(
+    sql`DELETE FROM ${sql.raw(table)} WHERE ctid IN (SELECT ctid FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
+  )
   return result.rowCount ?? result.count ?? 0
 }
 
 async function deleteLogsOlderThan(db: any, cutoff: Date): Promise<number> {
-  const result = await db.execute(sql.raw(`
-    DELETE FROM logs
-    WHERE ctid IN (
-      SELECT l.ctid FROM logs l
-      JOIN blocks b ON b.number = l.block_number
-      WHERE b.timestamp < '${cutoff.toISOString()}'
-      LIMIT ${BATCH_SIZE}
-    )
-  `))
+  const cutoffStr = cutoff.toISOString()
+  const result = await db.execute(
+    sql`DELETE FROM logs WHERE ctid IN (SELECT l.ctid FROM logs l JOIN blocks b ON b.number = l.block_number WHERE b.timestamp < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
+  )
   return result.rowCount ?? result.count ?? 0
 }
 
@@ -77,11 +90,11 @@ async function runCleanup(db: any): Promise<void> {
 
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
 
-  // VACUUM reclaims disk space from dead tuples left by the deletes above.
   if (totalDeleted > 0) {
     console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
     const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history']
     for (const t of highVolumeTables) {
+      assertAllowedIdentifier(t, 'table')
       try {
         await db.execute(sql.raw(`VACUUM ANALYZE ${t}`))
         console.log(`[retention] VACUUM ANALYZE ${t} done`)
@@ -93,7 +106,6 @@ async function runCleanup(db: any): Promise<void> {
 }
 
 export async function startRetentionCleanup(db: any): Promise<void> {
-  // Await first run so getLastIndexedBlock sees the clean state
   await runCleanup(db).catch(err => console.error('[retention] cleanup error:', err))
   setInterval(() => {
     runCleanup(db).catch(err => console.error('[retention] cleanup error:', err))
