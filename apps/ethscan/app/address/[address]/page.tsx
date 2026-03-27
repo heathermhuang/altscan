@@ -274,7 +274,19 @@ async function TxnsTab({ addr, page, total, prefetchedHistory }: { addr: string;
         </div>
       )
     }
-    return <p className="text-gray-500">No transactions found for this address.</p>
+    return (
+      <div>
+        <p className="text-gray-500 mb-2">Transaction history is not available in the local index for this address.</p>
+        {total > 0 && (
+          <p className="text-sm text-gray-400">
+            This address has {formatNumber(total)} transactions on-chain.{' '}
+            <a href={`https://etherscan.io/address/${addr}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+              View on Etherscan ↗
+            </a>
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (

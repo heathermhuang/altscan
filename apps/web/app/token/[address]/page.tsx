@@ -83,7 +83,25 @@ export default async function TokenDetailPage({
     token = row ?? null
   } catch { /* DB error */ }
 
-  if (!token) notFound()
+  if (!token) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">Token Not Found</h1>
+        <p className="text-gray-500 mb-2 font-mono text-sm">{addr}</p>
+        <p className="text-gray-400 text-sm mb-6">
+          This token has not been indexed yet. It may be a new or low-activity token.
+        </p>
+        <a
+          href={`https://bscscan.com/token/${addr}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-yellow-600 hover:underline text-sm"
+        >
+          View on BscScan ↗
+        </a>
+      </div>
+    )
+  }
 
   const [transfers, totalTransfers, topHolders, riskSignals] = await Promise.all([
     db

@@ -379,7 +379,19 @@ async function TxnsTab({
         </div>
       )
     }
-    return <p className="text-gray-500">No transactions found for this address.</p>
+    return (
+      <div>
+        <p className="text-gray-500 mb-2">Transaction history is not available in the local index for this address.</p>
+        {total > 0 && (
+          <p className="text-sm text-gray-400">
+            This address has {formatNumber(total)} transactions on-chain.{' '}
+            <a href={`https://bscscan.com/address/${addr}`} target="_blank" rel="noopener noreferrer" className="text-yellow-600 hover:underline">
+              View on BscScan ↗
+            </a>
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (
