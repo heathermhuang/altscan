@@ -149,24 +149,27 @@ export default async function TokenDetailPage({
     }
   }
 
-  const [transfers, totalTransfers, topHolders, riskSignals] = await Promise.all([
-    db
-      .select()
-      .from(schema.tokenTransfers)
-      .where(eq(schema.tokenTransfers.tokenAddress, addr))
-      .orderBy(desc(schema.tokenTransfers.blockNumber))
-      .limit(PAGE_SIZE)
-      .offset(offset)
-      .catch(() => []),
-    db
-      .select({ value: count() })
-      .from(schema.tokenTransfers)
-      .where(eq(schema.tokenTransfers.tokenAddress, addr))
-      .then(([r]) => r?.value ?? 0)
-      .catch(() => 0),
-    fetchTopHolders(addr),
-    analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]),
-  ])
+  // Skip DB-heavy queries for live-fetched tokens (no local transfer data exists)
+  const [transfers, totalTransfers, topHolders, riskSignals] = isLive
+    ? [[], 0, [], [] as RiskSignal[]]
+    : await Promise.all([
+        db
+          .select()
+          .from(schema.tokenTransfers)
+          .where(eq(schema.tokenTransfers.tokenAddress, addr))
+          .orderBy(desc(schema.tokenTransfers.blockNumber))
+          .limit(PAGE_SIZE)
+          .offset(offset)
+          .catch(() => []),
+        db
+          .select({ value: count() })
+          .from(schema.tokenTransfers)
+          .where(eq(schema.tokenTransfers.tokenAddress, addr))
+          .then(([r]) => r?.value ?? 0)
+          .catch(() => 0),
+        fetchTopHolders(addr),
+        analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]),
+      ])
 
   const displaySupply = (() => {
     try {
@@ -221,10 +224,12 @@ export default async function TokenDetailPage({
             <p className="text-gray-500 text-xs mb-0.5">Total Supply</p>
             <p className="font-semibold">{displaySupply}</p>
           </div>
-          <div>
-            <p className="text-gray-500 text-xs mb-0.5">Holders</p>
-            <p className="font-semibold">{formatNumber(token.holderCount)}</p>
-          </div>
+          {!isLive && (
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">Holders</p>
+              <p className="font-semibold">{formatNumber(token.holderCount)}</p>
+            </div>
+          )}
         </div>
       </div>
 
