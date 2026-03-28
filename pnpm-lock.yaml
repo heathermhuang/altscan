@@ -79,61 +79,6 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
-  apps/explorer:
-    dependencies:
-      '@bnbscan/chain-config':
-        specifier: workspace:*
-        version: link:../../packages/chain-config
-      '@bnbscan/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@bnbscan/explorer-core':
-        specifier: workspace:*
-        version: link:../../packages/explorer-core
-      '@bnbscan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      axios:
-        specifier: ^1.6.0
-        version: 1.13.6
-      drizzle-orm:
-        specifier: ^0.31.0
-        version: 0.31.4(@types/react@18.3.28)(postgres@3.4.8)(react@18.3.1)
-      ethers:
-        specifier: ^6.11.0
-        version: 6.16.0
-      next:
-        specifier: ^14.2.0
-        version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.0
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.0
-        version: 18.3.1(react@18.3.1)
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.37
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.28
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.28)
-      autoprefixer:
-        specifier: ^10.4.0
-        version: 10.4.27(postcss@8.5.8)
-      postcss:
-        specifier: ^8.4.0
-        version: 8.5.8
-      tailwindcss:
-        specifier: ^3.4.0
-        version: 3.4.19(tsx@4.21.0)
-      typescript:
-        specifier: ^5.4.0
-        version: 5.9.3
-
   apps/indexer:
     dependencies:
       '@bnbscan/chain-config':
