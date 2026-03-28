@@ -4,6 +4,11 @@ import { sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { getProvider } from '@/lib/rpc'
 
+// Cache gas price for 30 seconds to avoid hitting RPC on every stats request
+let cachedGasPrice = '0'
+let gasPriceCachedAt = 0
+const GAS_PRICE_TTL = 30_000
+
 // Use pg_class.reltuples for instant approximate counts.
 // COUNT(*) on millions of rows takes 10-30s and kills the health check.
 async function getTableEstimate(tableName: string): Promise<number> {
@@ -40,16 +45,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ latestBlock: 0, totalTransactions: 0, totalTokens: 0, avgGasPrice: '0' }, { status: 200 })
   }
 
-  // Gas price from RPC — best-effort with 3s timeout so it never blocks the health check
-  let avgGasPrice = '0'
-  try {
-    const feeData = await Promise.race([
-      getProvider().getFeeData(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-    ])
-    avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()
-  } catch {
-    // RPC slow or unavailable — leave as '0'
+  // Gas price from RPC — cached for 30s to avoid hitting RPC on every request
+  let avgGasPrice = cachedGasPrice
+  if (Date.now() - gasPriceCachedAt > GAS_PRICE_TTL) {
+    try {
+      const feeData = await Promise.race([
+        getProvider().getFeeData(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ])
+      avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()
+      cachedGasPrice = avgGasPrice
+      gasPriceCachedAt = Date.now()
+    } catch {
+      // RPC slow or unavailable — use cached value
+    }
   }
 
   return NextResponse.json(

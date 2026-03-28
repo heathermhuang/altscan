@@ -69,9 +69,9 @@ async function main() {
     console.log(`[indexer] Resuming from block ${lastIndexed + 1} (tip: ${tip})`)
   }
 
-  // Sync validators every 10 min
+  // Sync validators every 60 min (was 10 min — too many RPC calls at ~121 per sync)
   syncValidators().catch(err => console.error('[validator-syncer] initial error:', err))
-  setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 10 * 60 * 1000)
+  setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 60 * 60 * 1000)
 
   // Auto-skip: if too far behind, jump to near chain tip.
   // A block explorer with stale data is useless — better to show recent blocks
