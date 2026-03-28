@@ -15,6 +15,26 @@
       "port": 0
     },
     {
+      "name": "Explorer BNB (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "port": 3002,
+      "env": {
+        "CHAIN": "bnb",
+        "NEXT_PUBLIC_CHAIN": "bnb"
+      }
+    },
+    {
+      "name": "Explorer ETH (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3003"],
+      "port": 3003,
+      "env": {
+        "CHAIN": "eth",
+        "NEXT_PUBLIC_CHAIN": "eth"
+      }
+    },
+    {
       "name": "All (Turbo)",
       "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
       "runtimeArgs": ["dev"],

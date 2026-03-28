@@ -1,11 +1,13 @@
 import { JsonRpcProvider } from 'ethers'
+import { getChainConfig } from '@bnbscan/chain-config'
 
 /**
- * Shared RPC provider singleton for the BNB indexer.
- * All modules use this instead of creating their own connections.
+ * Shared RPC provider singleton for the indexer.
+ * Uses chain config to determine the correct RPC URL.
  */
+const chain = getChainConfig()
 const provider = new JsonRpcProvider(
-  process.env.BNB_RPC_URL ?? 'https://bsc-dataseed1.binance.org/'
+  process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl
 )
 
 export function getProvider(): JsonRpcProvider {

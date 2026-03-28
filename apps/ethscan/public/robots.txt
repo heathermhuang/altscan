@@ -1,8 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /address/
-Disallow: /tx/
-Disallow: /token/
-Disallow: /api/
-
-Sitemap: https://ethscan.io/sitemap.xml
