@@ -29,7 +29,7 @@ export function BlockTable({ blocks, compact = false }: {
         </thead>
         <tbody className="divide-y">
           {blocks.map(b => (
-            <tr key={b.number} className="hover:bg-gray-50">
+            <tr key={b.number} className="hover:bg-gray-50/80 transition-colors">
               <td className="px-4 py-2">
                 <Link href={`/blocks/${b.number}`} className="text-indigo-600 font-medium hover:underline">
                   {formatNumber(b.number)}

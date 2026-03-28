@@ -32,7 +32,7 @@ export function TxTable({ txs, compact = false }: {
         </thead>
         <tbody className="divide-y">
           {txs.map(tx => (
-            <tr key={tx.hash} className="hover:bg-gray-50">
+            <tr key={tx.hash} className="hover:bg-gray-50/80 transition-colors">
               <td className="px-4 py-2 font-mono text-xs">
                 <Link href={`/tx/${tx.hash}`} className="text-yellow-600 hover:underline">
                   {formatAddress(tx.hash, 10)}

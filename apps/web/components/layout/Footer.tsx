@@ -47,8 +47,8 @@ export function Footer() {
       </div>
 
       {/* Links + network switcher + copyright */}
-      <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="flex flex-wrap justify-center md:justify-start gap-4 text-xs">
+      <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex flex-wrap justify-center md:justify-start gap-x-5 gap-y-2 text-sm">
           <Link href="/blocks" className="hover:text-gray-200 transition-colors">Blocks</Link>
           <Link href="/txs" className="hover:text-gray-200 transition-colors">Transactions</Link>
           <Link href="/token" className="hover:text-gray-200 transition-colors">Tokens</Link>

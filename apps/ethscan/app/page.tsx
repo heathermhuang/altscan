@@ -127,14 +127,15 @@ export default async function HomePage() {
       </div>
 
       {/* Stats bar */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-gray-500">Network Overview</h2>
-        <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
-          <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-pulse" />
-          Live
-        </span>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-gray-500">Network Overview</h2>
+          <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+            <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-pulse" />
+            Live
+          </span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           label="Latest Block"
           value={latestBlock ? formatNumber(latestBlock.number) : '—'}
@@ -152,6 +153,7 @@ export default async function HomePage() {
           subtext={changeDisplay}
           subtextPositive={changePositive}
         />
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -181,7 +183,7 @@ function StatCard({
   subtextPositive?: boolean | null
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+    <div className="bg-gray-50 rounded-xl p-4">
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className="text-lg font-bold">{value}</p>
       {subtext && (
