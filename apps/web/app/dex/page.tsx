@@ -181,7 +181,7 @@ export default async function DexPage({
               )
             })}
             {trades.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No trades indexed yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-16 text-center"><p className="text-gray-400 text-lg mb-1">No DEX trades found</p><p className="text-gray-300 text-sm">Trades from PancakeSwap and other DEXes will appear here as they are indexed.</p></td></tr>
             )}
           </tbody>
         </table>

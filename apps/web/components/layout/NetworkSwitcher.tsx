@@ -58,7 +58,7 @@ export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { dire
     <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-colors text-[12px] font-semibold border ${
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-[13px] font-semibold border ${
           theme === 'footer'
             ? 'bg-white/15 hover:bg-white/25 text-white border-white/20'
             : 'bg-black/15 hover:bg-black/25 text-black border-black/15'

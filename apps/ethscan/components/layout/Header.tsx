@@ -98,7 +98,7 @@ export function Header() {
                 key={href}
                 href={href}
                 title={label === '⭐' ? 'Watchlist' : undefined}
-                className={`px-2.5 py-1.5 rounded-md transition-colors whitespace-nowrap ${
+                className={`px-2.5 py-2.5 rounded-md transition-colors whitespace-nowrap ${
                   pathname === href ? 'bg-white/20 font-semibold' : 'hover:bg-white/10'
                 }`}
               >

@@ -128,7 +128,7 @@ export default async function HomePage() {
 
       {/* Stats bar */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-medium text-gray-500">Network Overview</h2>
+        <h2 className="text-base font-semibold text-gray-500">Network Overview</h2>
         <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
           <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-pulse" />
           Live
