@@ -60,7 +60,6 @@ export function Footer() {
           <Link href="/developer" className="hover:text-gray-200 transition-colors">Developer</Link>
           <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">MDT Website ↗</a>
           <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">GitHub ↗</a>
-          <a href="https://x.com/maboroshi_token" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">Twitter ↗</a>
         </div>
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />
