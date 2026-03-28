@@ -38,8 +38,7 @@ const DESKTOP_NAV = [
   { href: '/verify',     label: 'Verify' },
 ]
 
-function Logo() {
-  // Use currentColor so the logo adapts to header text color (black for BNB, white for ETH)
+function BnbLogo() {
   return (
     <svg viewBox="0 0 36 36" fill="none" className="w-8 h-8 shrink-0" aria-hidden="true">
       <path
@@ -56,6 +55,21 @@ function Logo() {
       <circle cx="18" cy="18" r="2.5" fill="currentColor" />
     </svg>
   )
+}
+
+function EthLogo() {
+  return (
+    <svg viewBox="0 0 36 36" fill="none" className="w-8 h-8 shrink-0" aria-hidden="true">
+      {/* Ethereum diamond shape */}
+      <path d="M18 3L28 18L18 24L8 18L18 3Z" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M18 24L28 18L18 33L8 18L18 24Z" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <line x1="18" y1="3" x2="18" y2="33" stroke="currentColor" strokeWidth="1" strokeOpacity="0.3" />
+    </svg>
+  )
+}
+
+function Logo() {
+  return chainConfig.key === 'eth' ? <EthLogo /> : <BnbLogo />
 }
 
 export function Header() {
