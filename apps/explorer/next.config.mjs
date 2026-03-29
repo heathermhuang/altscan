@@ -5,6 +5,11 @@ const DOMAIN = CHAIN === 'eth' ? 'ethscan.io' : 'bnbscan.com'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Limit build workers to prevent OOM on Render Standard (2GB RAM)
+  experimental: {
+    workerThreads: false,
+    cpus: 1,
+  },
   transpilePackages: ['@bnbscan/db', '@bnbscan/types', '@bnbscan/chain-config'],
   async headers() {
     return [
