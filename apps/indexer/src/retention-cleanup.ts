@@ -8,7 +8,7 @@
  * Delete order respects FK: transactions → blocks (transactions.block_number
  * references blocks.number, so transactions must be deleted first).
  */
-import { getDb } from '@bnbscan/db'
+import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '1', 10)

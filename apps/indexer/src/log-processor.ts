@@ -1,6 +1,6 @@
 import { JsonRpcProvider, id as keccak256id } from 'ethers'
 import { eq } from 'drizzle-orm'
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { decodeTokenTransfer } from './token-decoder'
 import { decodeDexTrade } from './dex-decoder'
 

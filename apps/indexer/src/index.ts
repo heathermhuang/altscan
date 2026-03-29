@@ -18,7 +18,7 @@ import { processBlock } from './block-processor'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { desc } from 'drizzle-orm'
 
 const chain = getChainConfig()
@@ -49,7 +49,7 @@ async function main() {
   startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
 
   const provider = new JsonRpcProvider(RPC_URL)
-  const db = getDb(chain.dbEnvVar)
+  const db = getDb()
 
   // Retry getBlockNumber on startup
   let tip = 0

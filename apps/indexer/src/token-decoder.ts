@@ -1,6 +1,6 @@
 import { Log, AbiCoder, Contract } from 'ethers'
 import { eq } from 'drizzle-orm'
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { getProvider } from './provider'
 
 const provider = getProvider()

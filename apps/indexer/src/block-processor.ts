@@ -1,5 +1,5 @@
 import { JsonRpcProvider } from 'ethers'
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { processLogs, type NormalizedReceipt } from './log-processor'
 import { notifyWebhooks } from './webhook-notifier'
 

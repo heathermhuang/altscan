@@ -3,7 +3,7 @@
  * Creates all tables and indexes using IF NOT EXISTS so it is safe
  * to call on every startup — either a fresh DB or an existing one.
  */
-import { getDb } from '@bnbscan/db'
+import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 
 export async function ensureSchema(): Promise<void> {

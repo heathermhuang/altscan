@@ -3,7 +3,7 @@
  * Queries active webhooks from DB and delivers HMAC-signed payloads.
  * Called by block-processor after each block is indexed.
  */
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { eq, or, and, inArray } from 'drizzle-orm'
 import crypto from 'crypto'
 
