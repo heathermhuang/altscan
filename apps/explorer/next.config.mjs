@@ -10,7 +10,9 @@ const nextConfig = {
     workerThreads: false,
     cpus: 1,
   },
-  transpilePackages: ['@bnbscan/db', '@bnbscan/types', '@bnbscan/chain-config'],
+  // Skip ESLint during build — reduces memory and time on Render
+  eslint: { ignoreDuringBuilds: true },
+  transpilePackages: ['@bnbscan/db', '@bnbscan/types', '@bnbscan/chain-config', '@bnbscan/explorer-core', '@bnbscan/ui'],
   async headers() {
     return [
       // Security headers for all pages
