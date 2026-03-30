@@ -11,7 +11,8 @@ async function getTableEstimate(tableName: string): Promise<number> {
     const result = await db.execute(
       sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = ${tableName}`
     )
-    return Number(Array.from(result)[0]?.estimate ?? 0)
+    const n = Number(Array.from(result)[0]?.estimate ?? 0)
+    return n < 0 ? 0 : n
   } catch {
     return 0
   }

@@ -27,7 +27,8 @@ export default async function TransactionsPage({
       db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'transactions'`),
     ])
     txs = txsResult
-    total = Number((Array.from(totalResult)[0] as Record<string, unknown>)?.estimate ?? 0)
+    const n = Number((Array.from(totalResult)[0] as Record<string, unknown>)?.estimate ?? 0)
+    total = n < 0 ? 0 : n
   } catch {
     // DB not connected — show empty state
   }

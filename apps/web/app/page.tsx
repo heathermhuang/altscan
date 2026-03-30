@@ -34,7 +34,8 @@ async function fetchTableEstimate(tableName: string): Promise<number> {
       sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = ${tableName}`
     )
     const rows = Array.from(result)
-    return Number((rows[0] as Record<string, unknown>)?.estimate ?? 0)
+    const n = Number((rows[0] as Record<string, unknown>)?.estimate ?? 0)
+    return n < 0 ? 0 : n
   } catch {
     return 0
   }

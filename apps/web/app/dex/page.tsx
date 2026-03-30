@@ -62,7 +62,8 @@ export default async function DexPage({
         }
       } catch { /* token lookup failed — will use defaults */ }
     }
-    totalTrades = Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0)
+    const rawEstimate = Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0)
+    totalTrades = rawEstimate < 0 ? 0 : rawEstimate
     uniqueMakers = Number((Array.from(makerCountResult)[0] as Record<string, unknown>)?.value ?? 0)
     topPairs = (Array.from(topPairsResult) as Record<string, unknown>[]).map(r => ({
       pair_address: String(r.pair_address),
