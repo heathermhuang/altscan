@@ -139,6 +139,10 @@ importers:
         version: 0.22.8
 
   packages/explorer-core:
+    dependencies:
+      ioredis:
+        specifier: 5.9.3
+        version: 5.9.3
     devDependencies:
       typescript:
         specifier: ^5.4.0
