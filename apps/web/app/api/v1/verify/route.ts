@@ -8,7 +8,7 @@ const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function POST(request: Request) {
   // Tighter rate limit for write operations — 10 per minute per IP
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'), 10)) {
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for'), 10))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

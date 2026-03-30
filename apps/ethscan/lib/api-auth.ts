@@ -32,7 +32,7 @@ export async function authRequest(request: Request): Promise<AuthResult> {
 
     if (keyRow) {
       const bucket = `key:${keyHash.slice(0, 16)}`
-      if (!checkRateLimit(bucket, keyRow.requestsPerMinute)) {
+      if (!(await checkRateLimit(bucket, keyRow.requestsPerMinute))) {
         return { ok: false, limited: true, reason: 'rate_limit' }
       }
       db.update(schema.apiKeys)
@@ -46,7 +46,7 @@ export async function authRequest(request: Request): Promise<AuthResult> {
   }
 
   const xForwardedFor = request.headers.get('x-forwarded-for')
-  if (!checkIpRateLimit(xForwardedFor)) {
+  if (!(await checkIpRateLimit(xForwardedFor))) {
     return { ok: false, limited: true, reason: 'rate_limit' }
   }
   return { ok: true, limited: false }

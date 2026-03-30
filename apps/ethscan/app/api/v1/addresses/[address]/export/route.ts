@@ -7,7 +7,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ address: string }> }
 ) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return new Response('Rate limit exceeded', { status: 429 })
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) return new Response('Rate limit exceeded', { status: 429 })
 
   const { address } = await params
   const addr = address.toLowerCase()

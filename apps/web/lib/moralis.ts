@@ -18,27 +18,39 @@ const CHAIN = '0x38' // BSC mainnet
 // Cache strategy: in-memory LRU cache (survives across requests, NOT invalidated by deploys).
 // Each unique address costs CU exactly ONCE until the server process restarts.
 // No background re-fetches. No bot calls. Pure on-demand.
-const memCache = new Map<string, { data: unknown; ts: number }>()
+// NULL_SENTINEL: null results are cached for NULL_TTL to stop repeated Moralis calls
+// for addresses/hashes that don't exist (a common abuse pattern).
+const NULL_SENTINEL = '__null__'
+const NULL_TTL = 5 * 60_000        // 5 minutes for negative results
+const memCache = new Map<string, { data: unknown; ts: number; ttl: number }>()
 const MEM_CACHE_TTL = 4 * 3600_000 // 4 hours — then re-fetch if a real user visits
 const MEM_CACHE_MAX = 500          // max cached addresses — LRU eviction
 
-function getCached<T>(key: string): T | undefined {
+function getCached<T>(key: string): T | null | undefined {
   const entry = memCache.get(key)
   if (!entry) return undefined
-  if (Date.now() - entry.ts > MEM_CACHE_TTL) {
+  if (Date.now() - entry.ts > entry.ttl) {
     memCache.delete(key)
     return undefined
   }
+  if (entry.data === NULL_SENTINEL) return null
   return entry.data as T
 }
 
 function setCache(key: string, data: unknown): void {
-  // Simple LRU: if at capacity, delete oldest entry
   if (memCache.size >= MEM_CACHE_MAX) {
     const oldest = memCache.keys().next().value
     if (oldest) memCache.delete(oldest)
   }
-  memCache.set(key, { data, ts: Date.now() })
+  memCache.set(key, { data, ts: Date.now(), ttl: MEM_CACHE_TTL })
+}
+
+function setNullCache(key: string): void {
+  if (memCache.size >= MEM_CACHE_MAX) {
+    const oldest = memCache.keys().next().value
+    if (oldest) memCache.delete(oldest)
+  }
+  memCache.set(key, { data: NULL_SENTINEL, ts: Date.now(), ttl: NULL_TTL })
 }
 
 export type MoralisTx = {
@@ -154,7 +166,7 @@ export async function getWalletHistory(
 ): Promise<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number } | null> {
   const cacheKey = `history:${address}:${cursor ?? ''}`
   const cached = getCached<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number }>(cacheKey)
-  if (cached) return cached
+  if (cached !== undefined) return cached  // includes null (negative cache hit)
 
   const h = headers()
   if (!h) return null
@@ -170,7 +182,7 @@ export async function getWalletHistory(
       headers: h,
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) { setNullCache(cacheKey); return null }
 
     const data = (await res.json()) as {
       result: Array<{
@@ -239,7 +251,7 @@ export async function getWalletHistory(
 export async function getTokenBalances(address: string): Promise<MoralisToken[]> {
   const cacheKey = `balances:${address}`
   const cached = getCached<MoralisToken[]>(cacheKey)
-  if (cached) return cached
+  if (cached !== undefined) return cached ?? []
   const h = headers()
   if (!h) return []
 
@@ -248,7 +260,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
       { headers: h, cache: 'no-store' },
     )
-    if (!res.ok) return []
+    if (!res.ok) { setNullCache(cacheKey); return [] }
     const data = (await res.json()) as Array<{
       token_address: string
       symbol: string
@@ -308,7 +320,7 @@ export async function getTokenTransfers(
 ): Promise<{ transfers: MoralisTokenTransfer[]; cursor: string | null } | null> {
   const cacheKey = `transfers:${address}:${cursor ?? ''}`
   const cached = getCached<{ transfers: MoralisTokenTransfer[]; cursor: string | null }>(cacheKey)
-  if (cached) return cached
+  if (cached !== undefined) return cached  // includes null (negative cache hit)
 
   const h = headers()
   if (!h) return null
@@ -323,7 +335,7 @@ export async function getTokenTransfers(
       headers: h,
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) { setNullCache(cacheKey); return null }
 
     const data = (await res.json()) as {
       result: Array<{
@@ -371,7 +383,7 @@ export async function getTokenTransfers(
 export async function getNfts(address: string): Promise<MoralisNft[]> {
   const cacheKey = `nfts:${address}`
   const cached = getCached<MoralisNft[]>(cacheKey)
-  if (cached) return cached
+  if (cached !== undefined) return cached ?? []
 
   const h = headers()
   if (!h) return []
@@ -381,7 +393,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
       { headers: h, cache: 'no-store' },
     )
-    if (!res.ok) return []
+    if (!res.ok) { setNullCache(cacheKey); return [] }
     const data = (await res.json()) as {
       result: Array<{
         token_address: string

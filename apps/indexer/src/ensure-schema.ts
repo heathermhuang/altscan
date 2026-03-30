@@ -106,6 +106,15 @@ export async function ensureSchema(): Promise<void> {
   `))
 
   await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS token_balances (
+      token_address  VARCHAR(42) NOT NULL,
+      holder_address VARCHAR(42) NOT NULL,
+      balance        NUMERIC(78,0) NOT NULL DEFAULT 0,
+      UNIQUE (token_address, holder_address)
+    )
+  `))
+
+  await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS contracts (
       address          VARCHAR(42) PRIMARY KEY,
       bytecode         TEXT NOT NULL DEFAULT '0x',
@@ -224,8 +233,12 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
     'CREATE INDEX IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
-    'CREATE INDEX IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
-    'CREATE INDEX IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
+    'CREATE INDEX IF NOT EXISTS tb_holder_idx            ON token_balances(holder_address)',
+    'CREATE INDEX IF NOT EXISTS tx_date_idx              ON transactions(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS tt_date_idx              ON token_transfers(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS gas_date_idx             ON gas_history(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS webhooks_owner_idx       ON webhooks(owner_address)',
+    'CREATE INDEX IF NOT EXISTS api_keys_owner_idx       ON api_keys(owner_address)',
   ]
   for (const idx of indexes) {
     await db.execute(sql.raw(idx))

@@ -5,7 +5,7 @@ import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 
 export async function GET(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

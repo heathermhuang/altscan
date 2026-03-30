@@ -5,9 +5,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
-    "ioredis": "^5.3.0"
-  },
   "devDependencies": {
     "typescript": "^5.4.0"
   }

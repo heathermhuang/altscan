@@ -18,7 +18,7 @@ async function getTableEstimate(tableName: string): Promise<number> {
 }
 
 export async function GET(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

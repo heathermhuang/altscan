@@ -23,7 +23,7 @@ type QueryBody = {
 }
 
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   let body: QueryBody
   try {

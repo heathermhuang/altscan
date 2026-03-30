@@ -7,7 +7,7 @@ import { triggerSourcifyVerification } from '@/lib/verifier'
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function POST(request: Request) {
-  if (!checkIpRateLimit(request.headers.get('x-forwarded-for'))) {
+  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

@@ -79,7 +79,7 @@ export async function authRequest(request: Request): Promise<AuthResult> {
     if (keyRow) {
       // Use the key's own rate limit (keyed by hash prefix for bucket isolation)
       const bucket = `key:${keyHash.slice(0, 16)}`
-      if (!checkRateLimit(bucket, keyRow.requestsPerMinute)) {
+      if (!(await checkRateLimit(bucket, keyRow.requestsPerMinute))) {
         return { ok: false, limited: true, reason: 'rate_limit' }
       }
       // Track usage asynchronously (non-blocking)
@@ -96,7 +96,7 @@ export async function authRequest(request: Request): Promise<AuthResult> {
 
   // No API key — IP-based rate limit
   const xForwardedFor = request.headers.get('x-forwarded-for')
-  if (!checkIpRateLimit(xForwardedFor)) {
+  if (!(await checkIpRateLimit(xForwardedFor))) {
     return { ok: false, limited: true, reason: 'rate_limit' }
   }
   return { ok: true, limited: false }

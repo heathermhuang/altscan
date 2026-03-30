@@ -14,6 +14,7 @@ import { processBlock } from './block-processor'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
+import { checkReorgAtBoundary, unwindFrom } from './reorg-handler'
 import { getDb, schema } from '@bnbscan/db'
 import { desc } from 'drizzle-orm'
 
@@ -87,6 +88,16 @@ async function main() {
 
       const from = lastIndexed + 1
       const to   = Math.min(from + BATCH_SIZE - 1, latest)
+
+      // Reorg check: validate that the first block we're about to index connects
+      // to what we already have in the DB. If not, unwind the orphaned chain and
+      // restart from the fork point.
+      const reorgResult = await checkReorgAtBoundary(from, provider)
+      if (reorgResult.isReorg) {
+        await unwindFrom(reorgResult.forkPoint + 1)
+        lastIndexed = reorgResult.forkPoint
+        continue
+      }
 
       // Process blocks in parallel batches of CONCURRENCY — much faster catchup
       const blockNums: number[] = []

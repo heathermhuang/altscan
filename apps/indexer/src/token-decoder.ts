@@ -1,5 +1,5 @@
 import { Log, AbiCoder, Contract } from 'ethers'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@bnbscan/db'
 import { getProvider } from './provider'
 
@@ -12,6 +12,8 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function totalSupply() view returns (uint256)',
 ]
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 export async function decodeTokenTransfer(
   log: Log,
@@ -44,22 +46,82 @@ export async function decodeTokenTransfer(
     }
 
     const tokenAddress = log.address.toLowerCase()
+    from = from.toLowerCase()
+    to = to.toLowerCase()
+
     await ensureToken(tokenAddress, type)
 
-    await db.insert(schema.tokenTransfers).values({
+    // Only update holder tracking if this is a new transfer (not a replay)
+    const inserted = await db.insert(schema.tokenTransfers).values({
       txHash,
       logIndex: log.index,
       tokenAddress,
-      fromAddress: from.toLowerCase(),
-      toAddress: to.toLowerCase(),
+      fromAddress: from,
+      toAddress: to,
       value: value.toString(),
       tokenId: tokenId?.toString() ?? null,
       blockNumber,
       timestamp,
-    }).onConflictDoNothing()
+    }).onConflictDoNothing().returning({ id: schema.tokenTransfers.id })
+
+    if (inserted.length > 0) {
+      await updateHolderCount(tokenAddress, from, to, value)
+    }
 
   } catch (err) {
     console.warn('[token-decoder] Error decoding transfer:', txHash, err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Maintain token_balances and adjust tokens.holder_count when an address
+ * crosses the zero-balance threshold (entering or exiting holder status).
+ */
+async function updateHolderCount(
+  tokenAddress: string,
+  from: string,
+  to: string,
+  value: bigint,
+): Promise<void> {
+  const db = getDb()
+  const valueStr = value.toString()
+  let delta = 0
+
+  // Recipient: upsert balance, detect 0 → positive crossing
+  if (to !== ZERO_ADDRESS) {
+    const result = await db.execute(sql`
+      INSERT INTO token_balances (token_address, holder_address, balance)
+      VALUES (${tokenAddress}, ${to}, ${valueStr}::numeric)
+      ON CONFLICT (token_address, holder_address)
+      DO UPDATE SET balance = token_balances.balance + EXCLUDED.balance
+      RETURNING balance, balance - ${valueStr}::numeric AS old_balance
+    `)
+    const row = Array.from(result)[0] as { balance: string; old_balance: string } | undefined
+    if (row && BigInt(row.old_balance) === 0n && BigInt(row.balance) > 0n) {
+      delta += 1
+    }
+  }
+
+  // Sender: decrement balance, detect positive → 0 crossing (skip on mints)
+  if (from !== ZERO_ADDRESS) {
+    const result = await db.execute(sql`
+      UPDATE token_balances
+      SET balance = balance - ${valueStr}::numeric
+      WHERE token_address = ${tokenAddress} AND holder_address = ${from}
+      RETURNING balance AS new_balance, (balance + ${valueStr}::numeric) AS old_balance
+    `)
+    const row = Array.from(result)[0] as { new_balance: string; old_balance: string } | undefined
+    if (row && BigInt(row.old_balance) > 0n && BigInt(row.new_balance) <= 0n) {
+      delta -= 1
+    }
+  }
+
+  if (delta !== 0) {
+    await db.execute(sql`
+      UPDATE tokens
+      SET holder_count = GREATEST(0, holder_count + ${delta})
+      WHERE address = ${tokenAddress}
+    `)
   }
 }
 

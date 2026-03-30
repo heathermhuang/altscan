@@ -22,6 +22,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { sql } from 'drizzle-orm'
 import { processLogs, type NormalizedReceipt } from './log-processor'
 import { startRetentionCleanup } from './retention-cleanup'
+import { checkReorgAtBoundary, unwindFrom } from './reorg-handler'
 
 const RPC_URL      = process.env.ETH_RPC_URL      ?? 'https://eth.llamarpc.com'
 const DATABASE_URL = process.env.ETH_DATABASE_URL  ?? 'postgresql://localhost:5432/ethscan'
@@ -98,6 +99,16 @@ async function main() {
 
       const from = lastIndexed + 1
       const to   = Math.min(from + BATCH_SIZE - 1, latest)
+
+      // Reorg check: validate that the first block we're about to index connects
+      // to what we already have in the DB. If not, unwind the orphaned chain and
+      // restart from the fork point.
+      const reorgResult = await checkReorgAtBoundary(from, provider, db)
+      if (reorgResult.isReorg) {
+        await unwindFrom(reorgResult.forkPoint + 1, db)
+        lastIndexed = reorgResult.forkPoint
+        continue
+      }
 
       // Process blocks in parallel batches of CONCURRENCY — much faster catchup
       const blockNums: number[] = []
@@ -176,16 +187,21 @@ async function indexBlock(
 
   // Insert transactions (prefetched with block)
   const txs = block.prefetchedTransactions
+  // Collect (from, to) for newly-inserted transactions to update address rows
+  const newTxAddrs: Array<{ from: string; to: string | null }> = []
+
   for (const tx of txs) {
     const effectiveGasPrice = tx.gasPrice ?? (baseFeePerGas + (tx.maxPriorityFeePerGas ?? 0n))
+    const from = tx.from.toLowerCase()
+    const to   = tx.to?.toLowerCase() ?? null
 
-    await db.execute(sql`
+    const result = await db.execute(sql`
       INSERT INTO transactions (hash, block_number, from_address, to_address, value, gas, gas_price, gas_used, input, status, method_id, tx_index, nonce, tx_type, timestamp)
       VALUES (
         ${tx.hash},
         ${blockNumber},
-        ${tx.from.toLowerCase()},
-        ${tx.to?.toLowerCase() ?? null},
+        ${from},
+        ${to},
         ${tx.value.toString()},
         ${tx.gasLimit.toString()},
         ${effectiveGasPrice.toString()},
@@ -199,6 +215,37 @@ async function indexBlock(
         ${timestamp.toISOString()}
       )
       ON CONFLICT (hash) DO NOTHING
+      RETURNING hash
+    `)
+    // Only track addresses for transactions that were actually inserted (not replays)
+    if (Array.from(result).length > 0) {
+      newTxAddrs.push({ from, to })
+    }
+  }
+
+  // Batch-upsert addresses for newly-inserted transactions.
+  // Uses unnest — one SQL statement regardless of address count.
+  if (newTxAddrs.length > 0) {
+    const counts = new Map<string, number>()
+    for (const { from, to } of newTxAddrs) {
+      counts.set(from, (counts.get(from) ?? 0) + 1)
+      if (to) counts.set(to, (counts.get(to) ?? 0) + 1)
+    }
+    const addrs = Array.from(counts.keys())
+    const cnts  = Array.from(counts.values())
+    const ts    = timestamp.toISOString()
+    await db.execute(sql`
+      INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
+      SELECT
+        unnest(${addrs}::text[])    AS address,
+        '0'::numeric                AS balance,
+        unnest(${cnts}::int[])      AS tx_count,
+        false                       AS is_contract,
+        ${ts}::timestamptz          AS first_seen,
+        ${ts}::timestamptz          AS last_seen
+      ON CONFLICT (address) DO UPDATE SET
+        tx_count  = addresses.tx_count + EXCLUDED.tx_count,
+        last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
     `)
   }
 
@@ -322,6 +369,18 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       total_supply    NUMERIC(78,0) NOT NULL DEFAULT 0,
       holder_count    INTEGER NOT NULL DEFAULT 0
     )
+  `)
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS token_balances (
+      token_address  VARCHAR(42) NOT NULL,
+      holder_address VARCHAR(42) NOT NULL,
+      balance        NUMERIC(78,0) NOT NULL DEFAULT 0,
+      UNIQUE (token_address, holder_address)
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS eth_tb_holder_idx ON token_balances(holder_address)
   `)
 
   await db.execute(sql`
@@ -464,8 +523,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     'CREATE INDEX IF NOT EXISTS eth_dex_block_idx       ON dex_trades(block_number)',
     'CREATE INDEX IF NOT EXISTS eth_gas_ts_idx          ON gas_history(timestamp)',
     'CREATE INDEX IF NOT EXISTS eth_gas_block_idx       ON gas_history(block_number)',
-    'CREATE INDEX IF NOT EXISTS eth_webhooks_owner_idx  ON webhooks(owner_address)',
-    'CREATE INDEX IF NOT EXISTS eth_apikeys_owner_idx   ON api_keys(owner_address)',
+    'CREATE INDEX IF NOT EXISTS eth_tx_date_idx          ON transactions(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS eth_tt_date_idx          ON token_transfers(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS eth_gas_date_idx         ON gas_history(DATE(timestamp AT TIME ZONE \'UTC\'))',
+    'CREATE INDEX IF NOT EXISTS eth_webhooks_owner_idx   ON webhooks(owner_address)',
+    'CREATE INDEX IF NOT EXISTS eth_apikeys_owner_idx    ON api_keys(owner_address)',
   ]
   for (const idx of indexes) {
     await db.execute(sql.raw(idx))

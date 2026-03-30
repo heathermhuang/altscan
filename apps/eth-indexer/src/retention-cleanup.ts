@@ -75,12 +75,22 @@ async function runCleanup(db: any): Promise<void> {
   if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
   totalDeleted += blocksDeleted
 
+  // Prune zero-balance rows from token_balances (former holders)
+  try {
+    const zbResult = await db.execute(sql.raw(`DELETE FROM token_balances WHERE balance <= 0`))
+    const zbCount = zbResult.rowCount ?? zbResult.count ?? 0
+    if (zbCount > 0) console.log(`[retention] token_balances: deleted ${zbCount} zero-balance rows`)
+    totalDeleted += zbCount
+  } catch (err) {
+    console.warn('[retention] token_balances cleanup failed:', err instanceof Error ? err.message : err)
+  }
+
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
 
   // VACUUM reclaims disk space from dead tuples left by the deletes above.
   if (totalDeleted > 0) {
     console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
-    const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history']
+    const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history', 'token_balances']
     for (const t of highVolumeTables) {
       try {
         await db.execute(sql.raw(`VACUUM ANALYZE ${t}`))

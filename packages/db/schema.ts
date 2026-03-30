@@ -103,6 +103,15 @@ export const logs = pgTable('logs', {
   txLogUnique:      unique('logs_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
+export const tokenBalances = pgTable('token_balances', {
+  tokenAddress:   varchar('token_address', { length: 42 }).notNull(),
+  holderAddress:  varchar('holder_address', { length: 42 }).notNull(),
+  balance:        numeric('balance', { precision: 78, scale: 0 }).notNull().default('0'),
+}, (t) => ({
+  holderUnique:   unique('tb_token_holder_unique').on(t.tokenAddress, t.holderAddress),
+  holderIdx:      index('tb_holder_idx').on(t.holderAddress),
+}))
+
 export const contracts = pgTable('contracts', {
   address:        varchar('address', { length: 42 }).primaryKey(),
   bytecode:       text('bytecode').notNull(),

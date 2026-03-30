@@ -1,22 +1,83 @@
 /**
- * In-memory rate limiter shared across all explorer apps.
+ * Rate limiter — Redis sliding window with in-memory fallback.
+ *
+ * Primary: Redis INCR + PEXPIRE sliding window (correct across multiple instances).
+ * Fallback: in-memory Map (used when REDIS_URL is absent or Redis is unreachable).
  *
  * SECURITY: always extract the real client IP from the LAST entry in X-Forwarded-For.
  * Render's load balancer appends the real IP last. The first entries are attacker-controlled
  * and must not be trusted for rate limiting.
- *
- * NOTE (v2): Replace with Redis-backed sliding window when running multiple instances.
- * Redis connection is already in the stack (REDIS_URL env var on bnbscan-web).
  */
 
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+import Redis from 'ioredis'
 
 const DEFAULT_MAX_REQUESTS = 100
 const WINDOW_MS = 60 * 1000
-const MAX_MAP_SIZE = 50_000
-const CLEANUP_INTERVAL_MS = 60_000 // Sweep expired entries every 60s
 
-// Periodic cleanup — prevents unbounded growth from unique IPs that never return
+// ── Redis client (lazy singleton) ────────────────────────────────────────────
+
+let redis: Redis | null = null
+let redisUnavailable = false  // once broken, don't keep retrying
+
+function getRedis(): Redis | null {
+  if (redisUnavailable) return null
+  if (redis) return redis
+
+  const url = process.env.REDIS_URL
+  if (!url) return null  // Redis not configured — use in-memory fallback
+
+  try {
+    redis = new Redis(url, {
+      maxRetriesPerRequest: 1,
+      connectTimeout: 2000,
+      lazyConnect: true,
+      enableOfflineQueue: false,
+    })
+    redis.on('error', (err) => {
+      // Only log once per failure cycle — don't spam logs
+      if (!redisUnavailable) {
+        console.warn('[rate-limit] Redis unavailable, falling back to in-memory:', err.message)
+        redisUnavailable = true
+      }
+    })
+    redis.on('connect', () => {
+      if (redisUnavailable) {
+        console.log('[rate-limit] Redis reconnected — resuming Redis rate limiting')
+        redisUnavailable = false
+      }
+    })
+  } catch {
+    redisUnavailable = true
+  }
+  return redis
+}
+
+// ── Redis sliding window ──────────────────────────────────────────────────────
+
+async function checkRateLimitRedis(key: string, maxRequests: number): Promise<boolean> {
+  const r = getRedis()
+  if (!r || redisUnavailable) return checkRateLimitMemory(key, maxRequests)
+
+  const redisKey = `rl:${key}`
+  try {
+    const count = await r.incr(redisKey)
+    if (count === 1) {
+      // First request in this window — set the expiry
+      await r.pexpire(redisKey, WINDOW_MS)
+    }
+    return count <= maxRequests
+  } catch {
+    // Redis blip — fall through to in-memory
+    return checkRateLimitMemory(key, maxRequests)
+  }
+}
+
+// ── In-memory fallback ────────────────────────────────────────────────────────
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const MAX_MAP_SIZE = 50_000
+const CLEANUP_INTERVAL_MS = 60_000
+
 let cleanupTimer: ReturnType<typeof setInterval> | null = null
 function startCleanupTimer() {
   if (cleanupTimer) return
@@ -24,25 +85,37 @@ function startCleanupTimer() {
     const now = Date.now()
     let swept = 0
     for (const [k, val] of rateLimitMap) {
-      if (now > val.resetAt) {
-        rateLimitMap.delete(k)
-        swept++
-      }
+      if (now > val.resetAt) { rateLimitMap.delete(k); swept++ }
     }
-    if (swept > 0) {
-      // Only log when significant cleanup happens
-      if (swept > 100) console.log(`[rate-limit] Swept ${swept} expired entries (${rateLimitMap.size} remaining)`)
-    }
+    if (swept > 100) console.log(`[rate-limit] Swept ${swept} expired entries (${rateLimitMap.size} remaining)`)
   }, CLEANUP_INTERVAL_MS)
-  // Don't prevent process exit
   if (cleanupTimer.unref) cleanupTimer.unref()
 }
+
+function checkRateLimitMemory(key: string, maxRequests: number): boolean {
+  startCleanupTimer()
+  const now = Date.now()
+  if (rateLimitMap.size > MAX_MAP_SIZE) {
+    for (const [k, val] of rateLimitMap) {
+      if (now > val.resetAt) rateLimitMap.delete(k)
+    }
+  }
+  const entry = rateLimitMap.get(key)
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.delete(key)
+    rateLimitMap.set(key, { count: 1, resetAt: now + WINDOW_MS })
+    return true
+  }
+  if (entry.count >= maxRequests) return false
+  entry.count++
+  return true
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Extract the real client IP from an X-Forwarded-For header.
  * Render's LB appends the real client IP last — use that one.
- * Falls back to 'unknown' which shares a single rate limit bucket
- * (safe because the rate limit is generous at 100 req/min).
  */
 export function extractClientIp(xForwardedFor: string | null): string {
   if (!xForwardedFor) return 'unknown'
@@ -51,40 +124,16 @@ export function extractClientIp(xForwardedFor: string | null): string {
 }
 
 /**
- * Check whether a key (IP address or API key prefix) is within the rate limit.
- * Returns true if the request is allowed, false if rate-limited.
+ * Async rate limit check — uses Redis when available, in-memory otherwise.
+ * Returns true if allowed, false if rate-limited.
  */
-export function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQUESTS): boolean {
-  startCleanupTimer()
-  const now = Date.now()
-
-  // Emergency purge if map somehow exceeds cap despite periodic cleanup
-  if (rateLimitMap.size > MAX_MAP_SIZE) {
-    for (const [k, val] of rateLimitMap) {
-      if (now > val.resetAt) rateLimitMap.delete(k)
-    }
-  }
-
-  const entry = rateLimitMap.get(key)
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.delete(key)
-    rateLimitMap.set(key, { count: 1, resetAt: now + WINDOW_MS })
-    return true
-  }
-
-  if (entry.count >= maxRequests) return false
-  entry.count++
-  return true
+export async function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQUESTS): Promise<boolean> {
+  return checkRateLimitRedis(key, maxRequests)
 }
 
 /**
- * Convenience wrapper: extract client IP from header and check rate limit.
- * Use in Next.js API routes:
- *   const ip = request.headers.get('x-forwarded-for') ?? null
- *   if (!checkIpRateLimit(ip)) return 429 response
+ * Convenience wrapper: extract IP and check rate limit.
  */
-export function checkIpRateLimit(xForwardedFor: string | null, maxRequests = DEFAULT_MAX_REQUESTS): boolean {
-  const ip = extractClientIp(xForwardedFor)
-  return checkRateLimit(ip, maxRequests)
+export async function checkIpRateLimit(xForwardedFor: string | null, maxRequests = DEFAULT_MAX_REQUESTS): Promise<boolean> {
+  return checkRateLimit(extractClientIp(xForwardedFor), maxRequests)
 }

@@ -44,13 +44,25 @@ export default function DeveloperPage() {
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Get an API Key</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Request a key with your Ethereum address
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Step 1 — Sign a message with your wallet (ethers.js / wagmi / cast)
+# Message format:
+#   EthScan API Key Request
+#   Address: 0xyouraddress
+#   Timestamp: <unix_ms>
+
+# Step 2 — Submit the signed request
+TS=$(date +%s000)
+SIG=$(cast wallet sign --account <your-key> \\
+  "EthScan API Key Request\\nAddress: 0xYourAddress\\nTimestamp: $TS")
+
 curl -X POST https://ethscan.io/api/v1/keys \\
   -H "Content-Type: application/json" \\
-  -d '{
-    "ownerAddress": "0xYourAddress",
-    "label": "My App"
-  }'
+  -d "{
+    \\"ownerAddress\\": \\"0xYourAddress\\",
+    \\"label\\": \\"My App\\",
+    \\"signature\\": \\"$SIG\\",
+    \\"timestamp\\": $TS
+  }"
 
 # Response:
 {

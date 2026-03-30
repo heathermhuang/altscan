@@ -1,6 +1,9 @@
 /**
  * RPC fallback utilities for BNBScan.
  * Used when a tx hash or block number is not in the local DB — fetches live from chain.
+ *
+ * Negative cache: null results are cached for NULL_TTL_MS to prevent repeated
+ * RPC calls for the same missing entity within a short window.
  */
 import { getProvider } from './rpc'
 
@@ -39,14 +42,37 @@ export type RpcBlock = {
   _fromRpc: true
 }
 
+// Negative cache — prevents hammering RPC for entities that don't exist
+const NULL_TTL_MS = 5 * 60 * 1000  // 5 minutes
+const NULL_CACHE_MAX = 10_000
+const nullCache = new Map<string, number>()  // key → expiry timestamp
+
+function isNullCached(key: string): boolean {
+  const expiry = nullCache.get(key)
+  if (!expiry) return false
+  if (Date.now() > expiry) { nullCache.delete(key); return false }
+  return true
+}
+
+function setNullCache(key: string): void {
+  if (nullCache.size >= NULL_CACHE_MAX) {
+    // Evict the oldest entry
+    nullCache.delete(nullCache.keys().next().value!)
+  }
+  nullCache.set(key, Date.now() + NULL_TTL_MS)
+}
+
 export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
+  const cacheKey = `tx:${hash.toLowerCase()}`
+  if (isNullCached(cacheKey)) return null
+
   try {
     const provider = getProvider()
     const [tx, receipt] = await Promise.all([
       provider.getTransaction(hash),
       provider.getTransactionReceipt(hash),
     ])
-    if (!tx) return null
+    if (!tx) { setNullCache(cacheKey); return null }
 
     const blockTs = tx.blockNumber
       ? await provider.getBlock(tx.blockNumber).then(b => b ? new Date(b.timestamp * 1000) : new Date())
@@ -76,10 +102,13 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
 }
 
 export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock | null> {
+  const cacheKey = `block:${blockNumber}`
+  if (isNullCached(cacheKey)) return null
+
   try {
     const provider = getProvider()
     const block = await provider.getBlock(blockNumber, false)
-    if (!block) return null
+    if (!block) { setNullCache(cacheKey); return null }
     return {
       number: block.number,
       hash: block.hash ?? '',
