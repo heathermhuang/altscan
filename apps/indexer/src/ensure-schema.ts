@@ -44,6 +44,8 @@ export async function ensureSchema(): Promise<void> {
       status        BOOLEAN NOT NULL DEFAULT true,
       method_id     VARCHAR(10),
       tx_index      INTEGER NOT NULL DEFAULT 0,
+      nonce         INTEGER,
+      tx_type       INTEGER,
       timestamp     TIMESTAMPTZ NOT NULL
     )
   `))
@@ -196,6 +198,10 @@ export async function ensureSchema(): Promise<void> {
       active              BOOLEAN NOT NULL DEFAULT true
     )
   `))
+
+  // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution
+  await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS nonce INTEGER`))
+  await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tx_type INTEGER`))
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
