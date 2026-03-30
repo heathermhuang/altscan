@@ -49,7 +49,14 @@ export default async function TokenListPage({
     }
   } catch { /* DB not connected */ }
 
-  const typeLabels = { BEP20: 'BEP-20 Tokens', BEP721: 'BEP-721 NFTs', BEP1155: 'BEP-1155 Multi-Tokens' }
+  // Use ERC standard names on Ethereum, BEP on BNB Chain
+  const isEth = chainConfig.key === 'eth'
+  const typeLabels = isEth
+    ? { BEP20: 'ERC-20 Tokens', BEP721: 'ERC-721 NFTs', BEP1155: 'ERC-1155 Multi-Tokens' }
+    : { BEP20: 'BEP-20 Tokens', BEP721: 'BEP-721 NFTs', BEP1155: 'BEP-1155 Multi-Tokens' }
+  const tabLabels = isEth
+    ? { BEP20: 'ERC-20', BEP721: 'ERC-721', BEP1155: 'ERC-1155' }
+    : { BEP20: 'BEP20', BEP721: 'BEP721', BEP1155: 'BEP1155' }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -62,11 +69,11 @@ export default async function TokenListPage({
               href={`/token?type=${t}`}
               className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
                 t === tokenType
-                  ? 'bg-yellow-100 border-yellow-400 text-yellow-800 font-semibold'
+                  ? `${chainConfig.theme.border} font-semibold bg-opacity-10`
                   : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}
             >
-              {t}
+              {tabLabels[t]}
             </a>
           ))}
         </div>
