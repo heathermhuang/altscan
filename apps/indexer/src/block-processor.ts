@@ -1,6 +1,5 @@
 import { JsonRpcProvider } from 'ethers'
-import { getDb, schema } from '@bnbscan/db'
-import { sql } from 'drizzle-orm'
+import { getDb, schema } from './db'
 import { processLogs, type NormalizedReceipt } from './log-processor'
 import { notifyWebhooks } from './webhook-notifier'
 
@@ -65,7 +64,8 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   }
 
   // Process logs inline (no queue) — fetch all receipts in ONE RPC call
-  if (!skipLogs && block.prefetchedTransactions.length > 0) {
+  // Skip entirely if batch receipts are disabled to avoid N+1 RPC explosion
+  if (!skipLogs && block.prefetchedTransactions.length > 0 && blockReceiptsSupported) {
     const receiptMap = await fetchBlockReceipts(provider, blockNumber)
     for (const tx of block.prefetchedTransactions) {
       try {
@@ -88,42 +88,8 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   }
 }
 
-/**
- * Batch-upsert address rows after block processing.
- * Counts per-address appearances in newly-inserted transactions so replays
- * don't double-count (we only pass RETURNING rows, which are truly new).
- * Uses unnest to send a single SQL statement regardless of address count.
- */
-async function upsertAddresses(
-  txs: Array<{ fromAddress: string; toAddress: string | null }>,
-  timestamp: Date,
-): Promise<void> {
-  const db = getDb()
-  const counts = new Map<string, number>()
-  for (const tx of txs) {
-    counts.set(tx.fromAddress, (counts.get(tx.fromAddress) ?? 0) + 1)
-    if (tx.toAddress) counts.set(tx.toAddress, (counts.get(tx.toAddress) ?? 0) + 1)
-  }
-  if (counts.size === 0) return
-
-  const addrs = Array.from(counts.keys())
-  const cnts  = Array.from(counts.values())
-  const ts    = timestamp.toISOString()
-
-  await db.execute(sql`
-    INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
-    SELECT
-      unnest(${addrs}::text[])      AS address,
-      '0'::numeric                  AS balance,
-      unnest(${cnts}::int[])        AS tx_count,
-      false                         AS is_contract,
-      ${ts}::timestamptz            AS first_seen,
-      ${ts}::timestamptz            AS last_seen
-    ON CONFLICT (address) DO UPDATE SET
-      tx_count  = addresses.tx_count + EXCLUDED.tx_count,
-      last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
-  `)
-}
+let blockReceiptsSupported = true
+let blockReceiptsWarnCount = 0
 
 /** Fetch all receipts for a block in one RPC call. Falls back to empty map if unsupported. */
 async function fetchBlockReceipts(
@@ -131,6 +97,7 @@ async function fetchBlockReceipts(
   blockNumber: number,
 ): Promise<Map<string, NormalizedReceipt>> {
   const map = new Map<string, NormalizedReceipt>()
+  if (!blockReceiptsSupported) return map
   try {
     const blockHex = '0x' + blockNumber.toString(16)
     const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
@@ -152,8 +119,15 @@ async function fetchBlockReceipts(
         })),
       })
     }
-  } catch {
-    // eth_getBlockReceipts not supported — processLogs will fall back to per-tx fetching
+  } catch (err) {
+    blockReceiptsWarnCount++
+    if (blockReceiptsWarnCount <= 3) {
+      console.warn(`[block-processor] eth_getBlockReceipts failed for block ${blockNumber} (${blockReceiptsWarnCount}/3):`, err instanceof Error ? err.message : err)
+    }
+    if (blockReceiptsWarnCount >= 3) {
+      console.warn('[block-processor] eth_getBlockReceipts failed 3x — disabling batch receipts. Per-tx fallback active (HIGH RPC COST).')
+      blockReceiptsSupported = false
+    }
   }
   return map
 }

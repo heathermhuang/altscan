@@ -8,39 +8,55 @@
  * Delete order respects FK: transactions → blocks (transactions.block_number
  * references blocks.number, so transactions must be deleted first).
  */
-import { getDb } from '@bnbscan/db'
+import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '1', 10)
 const BATCH_SIZE     = 5_000   // rows per delete batch — keeps lock time short
 const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours (was 24h — more frequent on BSC)
 
+/**
+ * Whitelist of allowed table names and timestamp columns.
+ * Using sql.raw() with string interpolation for identifiers is inherently
+ * dangerous — we mitigate by strictly validating against this whitelist.
+ * PostgreSQL parameterized queries ($1) cannot be used for identifiers
+ * (table/column names), only for values.
+ */
+const ALLOWED_TABLES = new Set([
+  'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs',
+])
+const ALLOWED_COLUMNS = new Set(['timestamp', 'block_number'])
+
+function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void {
+  const allowed = kind === 'table' ? ALLOWED_TABLES : ALLOWED_COLUMNS
+  if (!allowed.has(value)) {
+    throw new Error(`[retention] Refused ${kind} identifier: "${value}" — not in whitelist`)
+  }
+  // Defense-in-depth: reject anything that isn't a simple identifier
+  if (!/^[a-z_]+$/.test(value)) {
+    throw new Error(`[retention] Invalid ${kind} identifier: "${value}" — must be lowercase alpha/underscore only`)
+  }
+}
+
 async function deleteBatch(table: string, timestampCol: string, cutoff: Date): Promise<number> {
+  assertAllowedIdentifier(table, 'table')
+  assertAllowedIdentifier(timestampCol, 'column')
   const db = getDb()
-  // Use a subquery with LIMIT to batch-delete without a cursor
-  const result = await db.execute(sql.raw(`
-    DELETE FROM ${table}
-    WHERE ctid IN (
-      SELECT ctid FROM ${table}
-      WHERE ${timestampCol} < '${cutoff.toISOString()}'
-      LIMIT ${BATCH_SIZE}
-    )
-  `))
+  // Use parameterized value for the cutoff timestamp; identifiers are whitelisted above
+  const cutoffStr = cutoff.toISOString()
+  const result = await db.execute(
+    sql`DELETE FROM ${sql.raw(table)} WHERE ctid IN (SELECT ctid FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
+  )
   return (result as any).rowCount ?? 0
 }
 
 async function deleteLogsOlderThan(cutoff: Date): Promise<number> {
   // logs has no timestamp — prune by block_number via correlated subquery
   const db = getDb()
-  const result = await db.execute(sql.raw(`
-    DELETE FROM logs
-    WHERE ctid IN (
-      SELECT l.ctid FROM logs l
-      JOIN blocks b ON b.number = l.block_number
-      WHERE b.timestamp < '${cutoff.toISOString()}'
-      LIMIT ${BATCH_SIZE}
-    )
-  `))
+  const cutoffStr = cutoff.toISOString()
+  const result = await db.execute(
+    sql`DELETE FROM logs WHERE ctid IN (SELECT l.ctid FROM logs l JOIN blocks b ON b.number = l.block_number WHERE b.timestamp < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
+  )
   return (result as any).rowCount ?? 0
 }
 
@@ -111,8 +127,9 @@ async function runCleanup(): Promise<void> {
     const db = getDb()
     const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history', 'token_balances']
     for (const t of highVolumeTables) {
+      assertAllowedIdentifier(t, 'table')
       try {
-        await db.execute(sql.raw(`VACUUM ANALYZE ${t}`))
+        await db.execute(sql`VACUUM ANALYZE ${sql.raw(t)}`)
         console.log(`[retention] VACUUM ANALYZE ${t} done`)
       } catch (err) {
         console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)

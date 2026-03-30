@@ -3,7 +3,7 @@
  * Queries active webhooks from DB and delivers HMAC-signed payloads.
  * Called by block-processor after each block is indexed.
  */
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { eq, or, and, inArray } from 'drizzle-orm'
 import crypto from 'crypto'
 
@@ -13,7 +13,34 @@ type WebhookPayload = {
   data: Record<string, unknown>
 }
 
+/**
+ * Validate a webhook URL is safe to call (SSRF defense at delivery time).
+ * DNS rebinding can cause a domain that pointed to a public IP at registration
+ * to resolve to an internal IP at delivery time. Re-validate before every call.
+ */
+function isUrlSafe(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    const hostname = parsed.hostname.toLowerCase()
+    // Block internal/private networks
+    const blockedHosts = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fe80:|0x|%)/
+    if (blockedHosts.test(hostname)) return false
+    // Block numeric IPs (DNS rebinding defense)
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function deliverWebhook(url: string, secretHash: string, payload: WebhookPayload): Promise<boolean> {
+  // Re-validate URL at delivery time (DNS rebinding defense)
+  if (!isUrlSafe(url)) {
+    console.warn(`[webhook-notifier] Blocked delivery to unsafe URL: ${url}`)
+    return false
+  }
+
   try {
     const body = JSON.stringify(payload)
     // secretHash is the SHA-256 of the original secret — we can't un-hash it for HMAC.
@@ -30,6 +57,8 @@ async function deliverWebhook(url: string, secretHash: string, payload: WebhookP
       },
       body,
       signal: AbortSignal.timeout(10000),
+      // Prevent following redirects to internal URLs
+      redirect: 'error',
     })
     return res.ok
   } catch {
@@ -116,13 +145,17 @@ export async function notifyWebhooks(
             .where(eq(schema.webhooks.id, webhook.id))
         } else {
           // Increment failCount; deactivate after 5 consecutive failures
-          const newFail = (webhook as { failCount?: number }).failCount ?? 0 + 1
+          const currentFail = (webhook as { failCount?: number }).failCount ?? 0
+          const newFail = currentFail + 1
           await db.update(schema.webhooks)
             .set({
               failCount: newFail,
               ...(newFail >= 5 ? { active: false } : {}),
             })
             .where(eq(schema.webhooks.id, webhook.id))
+          if (newFail >= 5) {
+            console.warn(`[webhook-notifier] Deactivated webhook ${webhook.id} after ${newFail} consecutive failures`)
+          }
         }
       } catch { /* non-fatal */ }
     }

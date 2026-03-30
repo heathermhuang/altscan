@@ -2,10 +2,42 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "bnbscan-web",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["next", "dev", "--port", "3000"],
-      "cwd": "/Users/heatherm/Documents/Claude/bnbscan/apps/web",
+      "name": "BNBScan Web (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/web", "dev"],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "BNBScan Indexer (Worker)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/indexer", "dev"],
+      "port": 0
+    },
+    {
+      "name": "Explorer BNB (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "port": 3002,
+      "env": {
+        "CHAIN": "bnb",
+        "NEXT_PUBLIC_CHAIN": "bnb"
+      }
+    },
+    {
+      "name": "Explorer ETH (Next.js)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3003"],
+      "port": 3003,
+      "env": {
+        "CHAIN": "eth",
+        "NEXT_PUBLIC_CHAIN": "eth"
+      }
+    },
+    {
+      "name": "All (Turbo)",
+      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeArgs": ["dev"],
       "port": 3000
     }
   ]

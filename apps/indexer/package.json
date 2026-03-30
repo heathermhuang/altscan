@@ -9,6 +9,7 @@
     "backfill": "tsx src/backfill.ts"
   },
   "dependencies": {
+    "@bnbscan/chain-config": "workspace:*",
     "@bnbscan/db": "workspace:*",
     "@bnbscan/types": "workspace:*",
     "drizzle-orm": "^0.31.0",

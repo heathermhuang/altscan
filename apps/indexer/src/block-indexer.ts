@@ -1,4 +1,4 @@
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 import { desc } from 'drizzle-orm'
 import { blockQueue } from './queue'
 import { getProvider } from './provider'

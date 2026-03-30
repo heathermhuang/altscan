@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from './db'
 
 const rawSourcifyUrl = process.env.SOURCIFY_API ?? 'https://sourcify.dev/server'
 // Enforce HTTPS in production to prevent MITM attacks on verification data
