@@ -6,12 +6,14 @@ services:
     env: node
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
-    rootDir: apps/web
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/web build
+    rootDir: apps/explorer
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     autoDeploy: true
     envVars:
+      - key: CHAIN
+        value: bnb
       - key: DATABASE_URL
         fromDatabase:
           name: bnbscan-db
@@ -36,12 +38,14 @@ services:
     env: node
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
-    rootDir: apps/ethscan
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/ethscan-web build
+    rootDir: apps/explorer
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     autoDeploy: true
     envVars:
+      - key: CHAIN
+        value: eth
       - key: ETH_DATABASE_URL
         fromDatabase:
           name: ethscan-db
@@ -56,16 +60,17 @@ services:
         value: production
 
   # ── BNB Chain Indexer ────────────────────────────────────────────────────────
-  # BullMQ with concurrency 15 — needs 1 GB RAM minimum
   - type: worker
     name: bnbscan-indexer
     env: node
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
     envVars:
+      - key: CHAIN
+        value: bnb
       - key: DATABASE_URL
         fromDatabase:
           name: bnbscan-db
@@ -83,16 +88,17 @@ services:
         value: production
 
   # ── Ethereum Indexer ─────────────────────────────────────────────────────────
-  # Simple polling loop — 512 MB is sufficient
   - type: worker
     name: eth-indexer
     env: node
     plan: starter           # 512 MB RAM / 0.5 CPU — $7/mo
     region: oregon
-    rootDir: apps/eth-indexer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/eth-indexer build
+    rootDir: apps/indexer
+    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
     envVars:
+      - key: CHAIN
+        value: eth
       - key: ETH_DATABASE_URL
         fromDatabase:
           name: ethscan-db
@@ -100,7 +106,7 @@ services:
       - key: ETH_RPC_URL
         sync: false
       - key: START_BLOCK
-        sync: false         # Leave unset to start from chain tip - 1000
+        sync: false         # Leave unset to start from chain tip
       - key: NODE_ENV
         value: production
 
