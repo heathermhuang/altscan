@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq, or, desc, count, sql } from 'drizzle-orm'
+import { eq, or, desc, count, min, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { formatETH, formatNumber, timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
@@ -70,15 +70,21 @@ export default async function AddressPage({
   let addressInfo: typeof schema.addresses.$inferSelect | null = null
   let contractResult: typeof schema.contracts.$inferSelect | null = null
   let txCount = 0
+  let firstTxTimestamp: Date | null = null
 
   try {
-    ;[addressInfo, contractResult, [{ value: txCount }]] = await Promise.all([
+    let firstTxResult: { value: Date | null }[]
+    ;[addressInfo, contractResult, [{ value: txCount }], firstTxResult] = await Promise.all([
       db.select().from(schema.addresses).where(eq(schema.addresses.address, addr)).limit(1).then((r) => r[0] ?? null),
       db.select().from(schema.contracts).where(eq(schema.contracts.address, addr)).limit(1).then((r) => r[0] ?? null),
       db.select({ value: count() }).from(schema.transactions).where(
         or(eq(schema.transactions.fromAddress, addr), eq(schema.transactions.toAddress, addr)),
       ),
+      db.select({ value: min(schema.transactions.timestamp) }).from(schema.transactions).where(
+        or(eq(schema.transactions.fromAddress, addr), eq(schema.transactions.toAddress, addr)),
+      ),
     ])
+    firstTxTimestamp = firstTxResult[0]?.value ?? null
   } catch {
     // DB not connected
   }
@@ -95,7 +101,9 @@ export default async function AddressPage({
     ? liveBalance
     : safeBigInt(addressInfo?.balance)
   const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || 0
-  const displayFirstSeen = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
+  const displayFirstSeen = addressInfo?.firstSeen
+    ? new Date(addressInfo.firstSeen)
+    : firstTxTimestamp ?? (moralisHistory?.txs?.length ? new Date(moralisHistory.txs[moralisHistory.txs.length - 1].blockTimestamp) : null)
 
   const activeTab = tab ?? 'txns'
 

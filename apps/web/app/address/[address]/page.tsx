@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq, or, desc, count, sql } from 'drizzle-orm'
+import { eq, or, desc, count, min, sql } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { formatBNB, formatNumber, timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
@@ -57,9 +57,11 @@ export default async function AddressPage({
   let addressInfo: typeof schema.addresses.$inferSelect | null = null
   let contractResult: typeof schema.contracts.$inferSelect | null = null
   let txCount = 0
+  let firstTxTimestamp: Date | null = null
 
   try {
-    ;[addressInfo, contractResult, [{ value: txCount }]] = await Promise.all([
+    let firstTxResult: { value: Date | null }[]
+    ;[addressInfo, contractResult, [{ value: txCount }], firstTxResult] = await Promise.all([
       db
         .select()
         .from(schema.addresses)
@@ -81,7 +83,17 @@ export default async function AddressPage({
             eq(schema.transactions.toAddress, addr),
           ),
         ),
+      db
+        .select({ value: min(schema.transactions.timestamp) })
+        .from(schema.transactions)
+        .where(
+          or(
+            eq(schema.transactions.fromAddress, addr),
+            eq(schema.transactions.toAddress, addr),
+          ),
+        ),
     ])
+    firstTxTimestamp = firstTxResult[0]?.value ?? null
   } catch {
     // DB not connected
   }
@@ -117,7 +129,7 @@ export default async function AddressPage({
     : null
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
-    : moralisFirstSeen
+    : firstTxTimestamp ?? moralisFirstSeen
   // USD value of BNB balance
   const bnbUsd = bnbPrice && displayBalance
     ? (Number(displayBalance) / 1e18 * bnbPrice)
