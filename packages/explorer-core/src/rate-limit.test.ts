@@ -29,24 +29,24 @@ describe('extractClientIp', () => {
 })
 
 describe('checkRateLimit', () => {
-  it('allows requests up to the limit', () => {
+  it('allows requests up to the limit', async () => {
     const key = `test-bucket-${Math.random()}`
     for (let i = 0; i < 5; i++) {
-      expect(checkRateLimit(key, 5)).toBe(true)
+      expect(await checkRateLimit(key, 5)).toBe(true)
     }
   })
 
-  it('blocks requests that exceed the limit', () => {
+  it('blocks requests that exceed the limit', async () => {
     const key = `test-bucket-${Math.random()}`
-    for (let i = 0; i < 5; i++) checkRateLimit(key, 5) // exhaust
-    expect(checkRateLimit(key, 5)).toBe(false)
+    for (let i = 0; i < 5; i++) await checkRateLimit(key, 5) // exhaust
+    expect(await checkRateLimit(key, 5)).toBe(false)
   })
 
-  it('uses separate buckets for different keys', () => {
+  it('uses separate buckets for different keys', async () => {
     const key1 = `test-bucket-a-${Math.random()}`
     const key2 = `test-bucket-b-${Math.random()}`
-    for (let i = 0; i < 3; i++) checkRateLimit(key1, 3) // exhaust key1
+    for (let i = 0; i < 3; i++) await checkRateLimit(key1, 3) // exhaust key1
     // key2 should still be allowed
-    expect(checkRateLimit(key2, 3)).toBe(true)
+    expect(await checkRateLimit(key2, 3)).toBe(true)
   })
 })
