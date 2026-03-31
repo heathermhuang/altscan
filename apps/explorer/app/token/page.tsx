@@ -20,7 +20,7 @@ function formatSupply(raw: string, decimals: number): string {
   }
 }
 
-export const revalidate = 60
+export const dynamic = 'force-dynamic'
 
 export default async function TokenListPage({
   searchParams,

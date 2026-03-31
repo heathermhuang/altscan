@@ -4,7 +4,7 @@ import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 30
+export const dynamic = 'force-dynamic'
 
 type WhaleTx = {
   hash: string
