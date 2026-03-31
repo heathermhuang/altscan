@@ -202,6 +202,7 @@ export async function ensureSchema(): Promise<void> {
   // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution
   await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS nonce INTEGER`))
   await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tx_type INTEGER`))
+  await db.execute(sql.raw(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS logo_url TEXT`))
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
