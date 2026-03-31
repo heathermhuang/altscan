@@ -5,15 +5,26 @@ export const dynamic = 'force-dynamic'
 
 type DataPoint = { date: string; value: number }
 
+const DB_TIMEOUT_MS = 8000
+
+function withTimeout<T>(promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('query timeout')), DB_TIMEOUT_MS)
+    ),
+  ])
+}
+
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
-    const result = await db.execute(sql`
+    const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date, COUNT(*)::int as value
       FROM transactions
       WHERE timestamp >= (SELECT MAX(timestamp) FROM transactions) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
-    `)
+    `))
     return Array.from(result).map((row) => ({
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
@@ -25,14 +36,14 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
 
 async function fetchDailyGasHistory(): Promise<DataPoint[]> {
   try {
-    const result = await db.execute(sql`
+    const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
              AVG(standard::numeric / 1e9)::numeric(18,4) as value
       FROM gas_history
       WHERE timestamp >= (SELECT MAX(timestamp) FROM gas_history) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
-    `)
+    `))
     return Array.from(result).map((row) => ({
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
@@ -47,14 +58,14 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
 // as a useful proxy metric. Rename chart accordingly.
 async function fetchDailyBlockCount(): Promise<DataPoint[]> {
   try {
-    const result = await db.execute(sql`
+    const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
              COUNT(*)::int as value
       FROM blocks
       WHERE timestamp >= (SELECT MAX(timestamp) FROM blocks) - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
-    `)
+    `))
     return Array.from(result).map((row) => ({
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
