@@ -6,7 +6,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 10
+export const dynamic = 'force-dynamic'
 
 const PAGE_SIZE = 25
 

@@ -3,7 +3,7 @@ import { desc, sql } from 'drizzle-orm'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
 
-export const revalidate = 5
+export const dynamic = 'force-dynamic'
 
 const PER_PAGE = 25
 
