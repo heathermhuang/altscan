@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 120
+export const dynamic = 'force-dynamic'
 
 export default async function ValidatorsPage() {
   if (!chainConfig.features.hasValidators) return notFound()

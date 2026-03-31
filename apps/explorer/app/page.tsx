@@ -7,7 +7,7 @@ import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 10
+export const dynamic = 'force-dynamic'
 
 async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
   // Try CoinGecko first (longer cache to avoid rate limits)

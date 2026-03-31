@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 type DataPoint = { date: string; value: number }
 

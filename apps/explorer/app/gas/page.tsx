@@ -2,7 +2,7 @@ import { getProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 15
+export const dynamic = 'force-dynamic'
 
 export default async function GasPage() {
   const provider = getProvider()
