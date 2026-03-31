@@ -1,4 +1,5 @@
 'use client'
+import { chainConfig } from '@/lib/chain-client'
 
 export default function Error({
   error,
@@ -15,7 +16,6 @@ export default function Error({
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-      <p className="text-4xl mb-4">{isDbError ? '🗄️' : '⚠️'}</p>
       <h2 className="text-xl font-bold mb-3">
         {isDbError ? 'Database not connected' : 'Something went wrong'}
       </h2>
@@ -26,7 +26,7 @@ export default function Error({
       </p>
       <button
         onClick={reset}
-        className="bg-yellow-500 hover:bg-yellow-400 text-black font-semibold px-4 py-2 rounded-lg text-sm"
+        className={`${chainConfig.theme.buttonBg} hover:opacity-90 ${chainConfig.theme.buttonText} font-semibold px-4 py-2 rounded-lg text-sm`}
       >
         Try again
       </button>

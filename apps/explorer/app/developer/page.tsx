@@ -278,7 +278,7 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
         <p className="text-gray-600 mb-4">Get your API key and start querying {chainConfig.name} in minutes.</p>
         <a
           href="/api-docs"
-          className="inline-block px-6 py-2.5 bg-yellow-400 hover:bg-yellow-500 rounded-lg font-semibold transition-colors"
+          className={`inline-block px-6 py-2.5 ${chainConfig.theme.buttonBg} hover:opacity-90 rounded-lg font-semibold transition-colors ${chainConfig.theme.buttonText}`}
         >
           View Full API Reference →
         </a>

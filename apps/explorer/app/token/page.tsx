@@ -84,9 +84,9 @@ export default async function TokenListPage({
             name="q"
             placeholder="Search by name, symbol, or address..."
             defaultValue={searchQuery ?? ''}
-            className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 outline-none w-64 transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg border border-gray-200 ${chainConfig.theme.focusRing} outline-none w-64 transition-colors`}
           />
-          <button type="submit" className="px-3 py-1.5 text-sm rounded-lg bg-yellow-500 text-black font-medium hover:bg-yellow-400 transition-colors">
+          <button type="submit" className={`px-3 py-1.5 text-sm rounded-lg ${chainConfig.theme.buttonBg} ${chainConfig.theme.buttonText} font-medium hover:opacity-90 transition-colors`}>
             Search
           </button>
           {searchQuery && (
