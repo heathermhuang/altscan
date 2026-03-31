@@ -28,17 +28,17 @@ const NETWORKS = [
     id: 'eth',
     label: 'Ethereum',
     short: 'ETH',
-    dot: 'bg-indigo-400',
+    dot: 'bg-blue-400',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true">
         <path d="M12 2L19 12L12 16.5L5 12L12 2Z" fill="white" fillOpacity="0.9" />
         <path d="M12 16.5L19 12L12 22L5 12L12 16.5Z" fill="white" fillOpacity="0.6" />
       </svg>
     ),
-    bgActive: 'bg-indigo-600',
-    highlightBg: 'bg-indigo-50',
-    highlightText: 'text-indigo-600',
-    highlightCheck: 'text-indigo-500',
+    bgActive: 'bg-blue-900',
+    highlightBg: 'bg-blue-50',
+    highlightText: 'text-blue-700',
+    highlightCheck: 'text-blue-600',
   },
 ]
 
