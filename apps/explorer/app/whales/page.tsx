@@ -97,8 +97,8 @@ export default async function WhalesPage({
             href={`/whales?period=${key}`}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
               period === key
-                ? 'bg-yellow-500 border-yellow-500 text-black'
-                : 'bg-white border-gray-200 text-gray-600 hover:border-yellow-400 hover:text-yellow-700'
+                ? `${chainConfig.theme.headerBg} ${chainConfig.theme.border} ${chainConfig.theme.headerText}`
+                : `bg-white border-gray-200 text-gray-600 ${chainConfig.theme.border.replace('border-', 'hover:border-')} ${chainConfig.theme.linkHover}`
             }`}
           >
             {label}
