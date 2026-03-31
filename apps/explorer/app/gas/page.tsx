@@ -27,9 +27,9 @@ export default async function GasPage() {
       <h1 className="text-2xl font-bold mb-8">Gas Tracker</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <GasCard label="🐢 Slow"     gwei={formatGwei(slow)}     est="~30s" color="green" />
-        <GasCard label="🚗 Standard" gwei={formatGwei(standard)} est="~15s" color="yellow" />
-        <GasCard label="🚀 Fast"     gwei={formatGwei(fast)}     est="~5s"  color="orange" />
+        <GasCard label="Slow"     gwei={formatGwei(slow)}     est="~30s" color="green" />
+        <GasCard label="Standard" gwei={formatGwei(standard)} est="~15s" color="yellow" />
+        <GasCard label="Fast"     gwei={formatGwei(fast)}     est="~5s"  color="orange" />
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm p-6 mb-8">
