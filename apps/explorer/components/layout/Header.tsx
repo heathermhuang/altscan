@@ -32,7 +32,7 @@ const DESKTOP_NAV = [
   { href: '/gas',        label: 'Gas' },
   ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators' }] : []),
   ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking' }] : []),
-  { href: '/watchlist',  label: '⭐' },
+  { href: '/watchlist',  label: 'Watch' },
   { href: '/api-docs',   label: 'API' },
   { href: '/developer',  label: 'Dev' },
   { href: '/verify',     label: 'Verify' },
