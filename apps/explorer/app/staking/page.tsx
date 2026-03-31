@@ -52,7 +52,6 @@ export default async function StakingPage() {
           label="Active Validators"
           value={stats?.validatorCount ? formatNumber(stats.validatorCount) : '—'}
           note="Approx. based on deposit contract balance"
-          icon="🔐"
         />
         <StatCard
           label="Total ETH Staked"
@@ -60,13 +59,11 @@ export default async function StakingPage() {
             ? `${(stats.totalStaked / 1e6).toFixed(2)}M ETH`
             : '—'}
           note="Balance of ETH2 Deposit Contract"
-          icon="💎"
         />
         <StatCard
           label="Current Staking APY"
           value="~3-4%"
           note="Varies with total staked ETH"
-          icon="📈"
         />
       </div>
 
@@ -75,50 +72,14 @@ export default async function StakingPage() {
         <h2 className="font-semibold text-gray-800 mb-4">How Ethereum Staking Works</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700">
           <div className="space-y-3">
-            <div className="flex gap-3">
-              <span className="text-2xl">1️⃣</span>
-              <div>
-                <p className="font-medium">Deposit 32 ETH</p>
-                <p className="text-gray-500">Send 32 ETH to the deposit contract to activate a validator</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-2xl">2️⃣</span>
-              <div>
-                <p className="font-medium">Run a Validator Node</p>
-                <p className="text-gray-500">Run execution + consensus clients (e.g., Geth + Lighthouse)</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-2xl">3️⃣</span>
-              <div>
-                <p className="font-medium">Propose & Attest Blocks</p>
-                <p className="text-gray-500">Earn rewards for correctly proposing and attesting to blocks</p>
-              </div>
-            </div>
+            <Step n={1} title="Deposit 32 ETH" detail="Send 32 ETH to the deposit contract to activate a validator" />
+            <Step n={2} title="Run a Validator Node" detail="Run execution + consensus clients (e.g., Geth + Lighthouse)" />
+            <Step n={3} title="Propose & Attest Blocks" detail="Earn rewards for correctly proposing and attesting to blocks" />
           </div>
           <div className="space-y-3">
-            <div className="flex gap-3">
-              <span className="text-2xl">⚡</span>
-              <div>
-                <p className="font-medium">Slashing Risk</p>
-                <p className="text-gray-500">Malicious or faulty validators lose part of their stake</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-2xl">🔄</span>
-              <div>
-                <p className="font-medium">Liquid Staking</p>
-                <p className="text-gray-500">Use Lido (stETH) or Rocket Pool (rETH) to stake without 32 ETH</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-2xl">📤</span>
-              <div>
-                <p className="font-medium">Withdrawals</p>
-                <p className="text-gray-500">Available since the Shanghai upgrade (April 2023)</p>
-              </div>
-            </div>
+            <InfoRow title="Slashing Risk" detail="Malicious or faulty validators lose part of their stake" />
+            <InfoRow title="Liquid Staking" detail="Use Lido (stETH) or Rocket Pool (rETH) to stake without 32 ETH" />
+            <InfoRow title="Withdrawals" detail="Available since the Shanghai upgrade (April 2023)" />
           </div>
         </div>
       </div>
@@ -144,20 +105,42 @@ export default async function StakingPage() {
   )
 }
 
-function StatCard({ label, value, note, icon }: {
+function StatCard({ label, value, note }: {
   label: string
   value: string
   note: string
-  icon: string
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-3">
-        <span className="text-3xl">{icon}</span>
-        <p className="text-sm text-gray-500">{label}</p>
-      </div>
+      <p className="text-sm text-gray-500 mb-2">{label}</p>
       <p className="text-2xl font-bold mb-1">{value}</p>
       <p className="text-xs text-gray-400">{note}</p>
+    </div>
+  )
+}
+
+function Step({ n, title, detail }: { n: number; title: string; detail: string }) {
+  return (
+    <div className="flex gap-3">
+      <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600 mt-0.5">
+        {n}
+      </span>
+      <div>
+        <p className="font-medium">{title}</p>
+        <p className="text-gray-500">{detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function InfoRow({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="flex gap-3">
+      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-gray-300 mt-2" />
+      <div>
+        <p className="font-medium">{title}</p>
+        <p className="text-gray-500">{detail}</p>
+      </div>
     </div>
   )
 }

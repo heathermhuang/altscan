@@ -16,18 +16,15 @@ export default function DeveloperPage() {
 
       {/* Quick Links */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <a href="/api-docs" className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 hover:bg-yellow-100 transition-colors">
-          <div className="text-2xl mb-2">📖</div>
+        <a href="/api-docs" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
           <div className="font-semibold">API Reference</div>
           <div className="text-sm text-gray-600 mt-1">Full endpoint documentation</div>
         </a>
-        <a href="#api-keys" className="bg-blue-50 border border-blue-200 rounded-xl p-4 hover:bg-blue-100 transition-colors">
-          <div className="text-2xl mb-2">🔑</div>
+        <a href="#api-keys" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
           <div className="font-semibold">API Keys</div>
           <div className="text-sm text-gray-600 mt-1">Higher rate limits with a key</div>
         </a>
-        <a href="#webhooks" className="bg-green-50 border border-green-200 rounded-xl p-4 hover:bg-green-100 transition-colors">
-          <div className="text-2xl mb-2">🔔</div>
+        <a href="#webhooks" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
           <div className="font-semibold">Webhooks</div>
           <div className="text-sm text-gray-600 mt-1">Real-time event notifications</div>
         </a>
@@ -37,7 +34,6 @@ export default function DeveloperPage() {
       <section id="api-keys" className="mb-10">
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <span className="text-2xl">🔑</span>
             <h2 className="text-xl font-bold">API Keys</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
@@ -95,7 +91,6 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</pre>
       <section id="webhooks" className="mb-10">
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <span className="text-2xl">🔔</span>
             <h2 className="text-xl font-bold">Webhooks</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
@@ -176,7 +171,6 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
       <section id="query" className="mb-10">
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <span className="text-2xl">🔍</span>
             <h2 className="text-xl font-bold">Flexible Query API</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
