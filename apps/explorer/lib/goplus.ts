@@ -35,7 +35,7 @@ export async function getAddressRisk(address: string): Promise<AddressRisk | nul
   try {
     const res = await fetch(
       `${BASE}/address_security/${address}`,
-      { next: { revalidate: 3600 } },
+      { signal: AbortSignal.timeout(5000), next: { revalidate: 3600 } },
     )
     if (!res.ok) return null
     const data = (await res.json()) as {
@@ -70,7 +70,7 @@ export async function getTokenSecurity(contractAddress: string): Promise<TokenSe
   try {
     const res = await fetch(
       `${BASE}/token_security/${CHAIN_ID}?contract_addresses=${contractAddress}`,
-      { next: { revalidate: 3600 } },
+      { signal: AbortSignal.timeout(5000), next: { revalidate: 3600 } },
     )
     if (!res.ok) return null
     const data = (await res.json()) as {

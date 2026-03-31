@@ -16,7 +16,8 @@ export async function resolveEns(address: string): Promise<string | null> {
 
   try {
     const provider = getProvider()
-    const name = await provider.lookupAddress(address)
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
+    const name = await Promise.race([provider.lookupAddress(address), timeout])
     cache.set(key, { name, ts: Date.now() })
     return name
   } catch {

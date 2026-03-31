@@ -114,7 +114,7 @@ export default async function AddressPage({
     provider.getBalance(addr).catch(() => null),
     provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
     needsMoralis ? getWalletHistory(addr) : Promise.resolve(null),
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { next: { revalidate: 300 } })
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
       .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
   ])
 
