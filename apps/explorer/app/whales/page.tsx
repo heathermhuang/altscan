@@ -144,13 +144,13 @@ export default async function WhalesPage({
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${w.fromAddress}`} className="text-blue-600 hover:underline">
+                    <Link href={`/address/${w.fromAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                       {formatAddress(w.fromAddress)}
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
                     {w.toAddress ? (
-                      <Link href={`/address/${w.toAddress}`} className="text-blue-600 hover:underline">
+                      <Link href={`/address/${w.toAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                         {formatAddress(w.toAddress)}
                       </Link>
                     ) : (

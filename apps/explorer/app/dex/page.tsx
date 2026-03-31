@@ -112,7 +112,7 @@ export default async function DexPage({
                 <tr key={pair.pair_address} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-gray-400">{i + 1}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${pair.pair_address}`} className="text-blue-600 hover:underline">
+                    <Link href={`/address/${pair.pair_address}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                       {pair.pair_address.slice(0, 14)}…
                     </Link>
                   </td>
@@ -160,7 +160,7 @@ export default async function DexPage({
                   </td>
                   <td className="px-4 py-2 text-gray-700">{t.dex}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.pairAddress}`} className="text-blue-600 hover:underline">
+                    <Link href={`/address/${t.pairAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                       {t.pairAddress.slice(0, 12)}…
                     </Link>
                   </td>
@@ -173,7 +173,7 @@ export default async function DexPage({
                     {outSymbol && <span className="text-gray-400 ml-1 text-xs">{outSymbol}</span>}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.maker}`} className="text-blue-600 hover:underline">
+                    <Link href={`/address/${t.maker}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                       {t.maker.slice(0, 12)}…
                     </Link>
                   </td>

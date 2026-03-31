@@ -453,7 +453,7 @@ async function TxnsTab({
                           ? tx.toAddress ?? addr
                           : tx.fromAddress
                       }`}
-                      className="text-blue-600 hover:underline"
+                      className={`${chainConfig.theme.linkText} hover:underline`}
                     >
                       {(
                         tx.fromAddress.toLowerCase() === addr
@@ -573,7 +573,7 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                     <td className="px-4 py-2 font-mono text-xs">
                       <Link
                         href={`/address/${t.fromAddress}`}
-                        className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : 'text-blue-600 hover:underline'}
+                        className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
                       >
                         {formatAddress(t.fromAddress)}
                       </Link>
@@ -581,7 +581,7 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                     <td className="px-4 py-2 font-mono text-xs">
                       <Link
                         href={`/address/${t.toAddress}`}
-                        className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : 'text-blue-600 hover:underline'}
+                        className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
                       >
                         {formatAddress(t.toAddress)}
                       </Link>
@@ -634,7 +634,7 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                     className={
                       t.fromAddress.toLowerCase() === addr
                         ? 'text-gray-800 font-semibold'
-                        : 'text-blue-600 hover:underline'
+                        : `${chainConfig.theme.linkText} hover:underline`
                     }
                   >
                     {formatAddress(t.fromAddress)}
@@ -646,7 +646,7 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                     className={
                       t.toAddress.toLowerCase() === addr
                         ? 'text-gray-800 font-semibold'
-                        : 'text-blue-600 hover:underline'
+                        : `${chainConfig.theme.linkText} hover:underline`
                     }
                   >
                     {formatAddress(t.toAddress)}

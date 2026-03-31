@@ -283,7 +283,7 @@ export default async function TxDetailPage({
             <tr>
               <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Block</td>
               <td className="px-6 py-3">
-                <Link href={`/blocks/${tx.blockNumber}`} className="text-blue-600 hover:underline">
+                <Link href={`/blocks/${tx.blockNumber}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                   {String(tx.blockNumber)}
                 </Link>
                 {confirmations != null && confirmations > 0 && (
@@ -408,11 +408,11 @@ export default async function TxDetailPage({
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-gray-500">From</span>
-                  <Link href={`/address/${t.fromAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
+                  <Link href={`/address/${t.fromAddress}`} className={`${chainConfig.theme.linkText} font-mono text-xs hover:underline`}>
                     {t.fromAddress.slice(0, 12)}...
                   </Link>
                   <span className="text-gray-500">To</span>
-                  <Link href={`/address/${t.toAddress}`} className="text-blue-600 font-mono text-xs hover:underline">
+                  <Link href={`/address/${t.toAddress}`} className={`${chainConfig.theme.linkText} font-mono text-xs hover:underline`}>
                     {t.toAddress.slice(0, 12)}...
                   </Link>
                   <span className="text-gray-500">For</span>
@@ -440,7 +440,7 @@ export default async function TxDetailPage({
                 <div key={i} className="bg-gray-50 rounded p-3 text-xs overflow-auto">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-gray-400 font-mono">#{i}</span>
-                    <Link href={`/address/${log.address}`} className="text-blue-600 hover:underline font-mono">
+                    <Link href={`/address/${log.address}`} className={`${chainConfig.theme.linkText} hover:underline font-mono`}>
                       {log.address}
                     </Link>
                     {decoded && (
@@ -512,7 +512,7 @@ function Row({
       <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">{label}</td>
       <td className={`px-6 py-3 break-all ${mono ? 'font-mono text-xs' : ''}`}>
         {link ? (
-          <Link href={link} className="text-blue-600 hover:underline">{value}</Link>
+          <Link href={link} className={`${chainConfig.theme.linkText} hover:underline`}>{value}</Link>
         ) : (
           value
         )}

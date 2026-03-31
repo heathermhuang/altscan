@@ -282,7 +282,7 @@ export default async function TokenDetailPage({
                     <td className="px-4 py-2 font-mono text-xs">
                       <Link
                         href={`/address/${holder.addr}`}
-                        className="text-blue-600 hover:underline"
+                        className={`${chainConfig.theme.linkText} hover:underline`}
                       >
                         {holder.addr}
                       </Link>
@@ -371,7 +371,7 @@ export default async function TokenDetailPage({
                   <td className="px-4 py-2 font-mono text-xs">
                     <Link
                       href={`/address/${t.fromAddress}`}
-                      className="text-blue-600 hover:underline"
+                      className={`${chainConfig.theme.linkText} hover:underline`}
                     >
                       {formatAddress(t.fromAddress)}
                     </Link>
@@ -379,7 +379,7 @@ export default async function TokenDetailPage({
                   <td className="px-4 py-2 font-mono text-xs">
                     <Link
                       href={`/address/${t.toAddress}`}
-                      className="text-blue-600 hover:underline"
+                      className={`${chainConfig.theme.linkText} hover:underline`}
                     >
                       {formatAddress(t.toAddress)}
                     </Link>
