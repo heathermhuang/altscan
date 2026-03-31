@@ -66,7 +66,7 @@ export default async function SearchPage({
                       <td className="px-4 py-2 text-gray-700">{token.symbol}</td>
                       <td className="px-4 py-2 text-gray-500">{token.type}</td>
                       <td className="px-4 py-2 font-mono text-xs">
-                        <Link href={`/token/${token.address}`} className="text-blue-600 hover:underline">
+                        <Link href={`/token/${token.address}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                           {token.address.slice(0, 14)}…
                         </Link>
                       </td>
@@ -86,7 +86,6 @@ export default async function SearchPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-16 text-center">
-      <p className="text-5xl mb-6">🔍</p>
       <h1 className="text-2xl font-bold mb-3">No results found</h1>
       {query ? (
         <p className="text-gray-500 mb-6">

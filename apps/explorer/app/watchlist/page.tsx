@@ -22,12 +22,11 @@ export default function WatchlistPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">⭐ Watchlist</h1>
+      <h1 className="text-2xl font-bold mb-6">Watchlist</h1>
       {addresses.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-5xl mb-4">☆</p>
           <p className="text-lg">Your watchlist is empty.</p>
-          <p className="text-sm mt-2">Click the star ☆ on any address page to add it here.</p>
+          <p className="text-sm mt-2">Click the star on any address page to add it here.</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">

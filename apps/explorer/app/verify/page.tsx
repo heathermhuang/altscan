@@ -71,7 +71,7 @@ export default function VerifyPage() {
             value={address}
             onChange={e => setAddress(e.target.value)}
             placeholder="0x..."
-            className="w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+            className={`w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none ${chainConfig.theme.focusRing}`}
             required
           />
         </div>
@@ -81,7 +81,7 @@ export default function VerifyPage() {
           <input
             value={compiler}
             onChange={e => setCompiler(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+            className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${chainConfig.theme.focusRing}`}
           />
           <p className="text-xs text-gray-400 mt-1">e.g. v0.8.19+commit.7dd6d404</p>
         </div>
@@ -95,7 +95,7 @@ export default function VerifyPage() {
         <button
           type="submit"
           disabled={status === 'loading'}
-          className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black font-semibold py-2.5 px-4 rounded-lg transition-colors"
+          className={`w-full ${chainConfig.theme.buttonBg} hover:opacity-90 disabled:opacity-50 ${chainConfig.theme.buttonText} font-semibold py-2.5 px-4 rounded-lg transition-colors`}
         >
           {status === 'loading' ? 'Verifying…' : 'Verify & Publish'}
         </button>
