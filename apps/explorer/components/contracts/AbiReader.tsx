@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { chainConfig } from '@/lib/chain-client'
 
 type AbiFunction = {
   name: string
@@ -83,7 +84,7 @@ function FunctionCard({ address, fn }: { address: string; fn: AbiFunction }) {
           <button
             onClick={call}
             disabled={loading}
-            className="px-4 py-1.5 bg-yellow-400 hover:bg-yellow-500 rounded text-sm font-medium disabled:opacity-50"
+            className={`px-4 py-1.5 ${chainConfig.theme.buttonBg} hover:opacity-90 ${chainConfig.theme.buttonText} rounded text-sm font-medium disabled:opacity-50`}
           >
             {loading ? 'Querying...' : 'Query'}
           </button>
