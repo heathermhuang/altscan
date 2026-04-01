@@ -84,6 +84,8 @@ services:
         sync: false
       - key: START_BLOCK
         sync: false         # Leave unset to resume from DB max (default 38000000)
+      - key: DB_POOL_SIZE
+        value: "3"          # Keep well under basic-1gb's ~25 max_connections
       - key: NODE_ENV
         value: production
 
@@ -107,6 +109,8 @@ services:
         sync: false
       - key: START_BLOCK
         sync: false         # Leave unset to start from chain tip
+      - key: DB_POOL_SIZE
+        value: "3"          # Keep well under basic-1gb's ~25 max_connections
       - key: NODE_ENV
         value: production
 
