@@ -222,34 +222,44 @@ export async function ensureSchema(): Promise<void> {
     console.warn('[indexer] Could not check for invalid indexes:', err instanceof Error ? err.message : err)
   }
 
-  // Indexes (all idempotent)
-  const indexes = [
-    'CREATE INDEX IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
-    'CREATE INDEX IF NOT EXISTS blocks_timestamp_idx    ON blocks(timestamp)',
-    'CREATE INDEX IF NOT EXISTS tx_from_idx             ON transactions(from_address)',
-    'CREATE INDEX IF NOT EXISTS tx_to_idx               ON transactions(to_address)',
-    'CREATE INDEX IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
-    'CREATE INDEX IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
-    'CREATE INDEX IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
-    'CREATE INDEX IF NOT EXISTS tt_from_idx             ON token_transfers(from_address)',
-    'CREATE INDEX IF NOT EXISTS tt_to_idx               ON token_transfers(to_address)',
-    'CREATE INDEX IF NOT EXISTS tt_tx_idx               ON token_transfers(tx_hash)',
-    'CREATE INDEX IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
-    'CREATE INDEX IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
-    'CREATE INDEX IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
-    'CREATE INDEX IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
-    'CREATE INDEX IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
-    'CREATE INDEX IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
-    'CREATE INDEX IF NOT EXISTS tb_holder_idx            ON token_balances(holder_address)',
-    'CREATE INDEX IF NOT EXISTS tx_date_idx              ON transactions(DATE(timestamp AT TIME ZONE \'UTC\'))',
-    'CREATE INDEX IF NOT EXISTS tt_date_idx              ON token_transfers(DATE(timestamp AT TIME ZONE \'UTC\'))',
-    'CREATE INDEX IF NOT EXISTS gas_date_idx             ON gas_history(DATE(timestamp AT TIME ZONE \'UTC\'))',
-    'CREATE INDEX IF NOT EXISTS webhooks_owner_idx       ON webhooks(owner_address)',
-    'CREATE INDEX IF NOT EXISTS api_keys_owner_idx       ON api_keys(owner_address)',
-  ]
-  for (const idx of indexes) {
-    await db.execute(sql.raw(idx))
-  }
-
   console.log('[indexer] Schema ready.')
+
+  // Build indexes in background using CONCURRENTLY so startup is never blocked.
+  // CONCURRENTLY allows reads/writes during build — safe to run while indexing.
+  // Each index is tried individually so a failure on one doesn't block the rest.
+  const indexes = [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_timestamp_idx    ON blocks(timestamp)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_idx             ON transactions(from_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_idx               ON transactions(to_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_idx             ON token_transfers(from_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_idx               ON token_transfers(to_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_tx_idx               ON token_transfers(tx_hash)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx            ON token_balances(holder_address)',
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_date_idx              ON transactions(DATE(timestamp AT TIME ZONE 'UTC'))`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_date_idx              ON token_transfers(DATE(timestamp AT TIME ZONE 'UTC'))`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS gas_date_idx             ON gas_history(DATE(timestamp AT TIME ZONE 'UTC'))`,
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx       ON webhooks(owner_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx       ON api_keys(owner_address)',
+  ]
+
+  // Fire-and-forget: index builds run after ensureSchema() returns.
+  // The main indexing loop starts immediately; indexes complete in the background.
+  Promise.all(
+    indexes.map(idx =>
+      db.execute(sql.raw(idx)).catch(err =>
+        console.warn(`[indexer] Index build warning (${idx.match(/EXISTS (\S+)/)?.[1] ?? '?'}):`, err instanceof Error ? err.message : err)
+      )
+    )
+  ).then(() => console.log('[indexer] All indexes ready.'))
+    .catch(() => { /* individual errors already logged above */ })
 }
