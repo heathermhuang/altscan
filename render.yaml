@@ -7,7 +7,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/explorer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     autoDeploy: true
@@ -39,7 +39,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/explorer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
     healthCheckPath: /api/v1/stats
     autoDeploy: true
@@ -66,7 +66,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -94,7 +94,7 @@ services:
     plan: starter           # 512 MB RAM / 0.5 CPU — $7/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
