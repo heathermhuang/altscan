@@ -252,14 +252,18 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx       ON api_keys(owner_address)',
   ]
 
-  // Fire-and-forget: index builds run after ensureSchema() returns.
+  // Fire-and-forget: index builds run sequentially after ensureSchema() returns.
+  // Sequential (not parallel) to avoid exhausting DB connection slots.
   // The main indexing loop starts immediately; indexes complete in the background.
-  Promise.all(
-    indexes.map(idx =>
-      db.execute(sql.raw(idx)).catch(err =>
-        console.warn(`[indexer] Index build warning (${idx.match(/EXISTS (\S+)/)?.[1] ?? '?'}):`, err instanceof Error ? err.message : err)
-      )
-    )
-  ).then(() => console.log('[indexer] All indexes ready.'))
-    .catch(() => { /* individual errors already logged above */ })
+  ;(async () => {
+    for (const idx of indexes) {
+      const name = idx.match(/EXISTS (\S+)/)?.[1] ?? '?'
+      try {
+        await db.execute(sql.raw(idx))
+      } catch (err) {
+        console.warn(`[indexer] Index build warning (${name}):`, err instanceof Error ? err.message : err)
+      }
+    }
+    console.log('[indexer] All indexes ready.')
+  })().catch(() => { /* individual errors already logged */ })
 }
