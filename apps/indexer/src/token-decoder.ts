@@ -1,5 +1,5 @@
 import { Log, AbiCoder, Contract } from 'ethers'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { getDb, schema } from './db'
 import { getProvider } from './provider'
 

@@ -106,7 +106,7 @@ importers:
         specifier: ^6.11.0
         version: 6.16.0
       ioredis:
-        specifier: 5.9.3
+        specifier: ^5.3.0
         version: 5.9.3
     devDependencies:
       '@types/node':
@@ -141,7 +141,7 @@ importers:
   packages/explorer-core:
     dependencies:
       ioredis:
-        specifier: 5.9.3
+        specifier: ^5.3.0
         version: 5.9.3
     devDependencies:
       typescript:

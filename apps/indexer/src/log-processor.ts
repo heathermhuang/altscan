@@ -45,7 +45,7 @@ export async function processLogs(
 
   // Update tx status + gasUsed
   await db.update(schema.transactions)
-    .set({ status: receipt.status, gasUsed: receipt.gasUsed.toString() })
+    .set({ status: receipt.status, gasUsed: receipt.gasUsed })
     .where(eq(schema.transactions.hash, txHash))
 
   // NOTE: Raw logs are NOT stored in the logs table for BNB Chain.
