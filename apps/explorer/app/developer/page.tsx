@@ -44,7 +44,21 @@ export default function DeveloperPage() {
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Get an API Key</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Request a key with your ${chainConfig.currency} address
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Step 1 — sign a message with your wallet to prove ownership
+# Message format (sign this exact string with eth_sign or personal_sign):
+#   BNBScan API Key Request
+#   Address: 0xyouraddress
+#   Timestamp: <unix ms>
+#
+# Example using ethers.js:
+#   const ts = Date.now()
+#   const msg = \`BNBScan API Key Request\\nAddress: \${addr.toLowerCase()}\\nTimestamp: \${ts}\`
+#   const sig = await signer.signMessage(msg)
+
+# Step 2 — submit the signed request
+TS=$(date +%s000)  # current time in milliseconds
+SIG="0xYourSignatureHere"
+
 curl -X POST ${BASE_URL}/api/v1/keys \\
   -H "Content-Type: application/json" \\
   -d "{
