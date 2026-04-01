@@ -45,7 +45,26 @@ async function main() {
   console.log(`${TAG} Starting ${chain.name} indexer...`)
   console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPC: ${RPC_URL.replace(/\/\/.*@/, '//***@')}`)
 
-  await ensureSchema()
+  // Retry ensureSchema on DB connection errors (e.g. max_connections exceeded).
+  // Retrying instead of crashing prevents Render restart loops from piling up
+  // connections and making the situation worse.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await ensureSchema()
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const isConnErr = msg.includes('53300') || msg.includes('connection') || msg.includes('ECONNREFUSED')
+      if (isConnErr && attempt <= 20) {
+        const wait = Math.min(30000, 5000 * attempt)
+        console.warn(`${TAG} DB not ready (attempt ${attempt}/20), retrying in ${wait / 1000}s: ${msg}`)
+        await sleep(wait)
+      } else {
+        throw err
+      }
+    }
+  }
+
   startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
 
   const provider = new JsonRpcProvider(RPC_URL)
