@@ -108,11 +108,12 @@ async function upsertAddresses(
   if (counts.size === 0) return
 
   const rows = Array.from(counts.entries())
+  const ts = timestamp.toISOString()
 
   await db.execute(sql`
     INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
     VALUES ${sql.join(
-      rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${timestamp}, ${timestamp})`),
+      rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
       sql`, `
     )}
     ON CONFLICT (address) DO UPDATE SET
