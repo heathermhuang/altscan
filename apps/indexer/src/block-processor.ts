@@ -107,19 +107,14 @@ async function upsertAddresses(
   }
   if (counts.size === 0) return
 
-  const addrs = Array.from(counts.keys())
-  const cnts  = Array.from(counts.values())
-  const ts    = timestamp.toISOString()
+  const rows = Array.from(counts.entries())
 
   await db.execute(sql`
     INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
-    SELECT
-      unnest(${addrs}::text[])      AS address,
-      '0'::numeric                  AS balance,
-      unnest(${cnts}::int[])        AS tx_count,
-      false                         AS is_contract,
-      ${ts}::timestamptz            AS first_seen,
-      ${ts}::timestamptz            AS last_seen
+    VALUES ${sql.join(
+      rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${timestamp}, ${timestamp})`),
+      sql`, `
+    )}
     ON CONFLICT (address) DO UPDATE SET
       tx_count  = addresses.tx_count + EXCLUDED.tx_count,
       last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
