@@ -54,9 +54,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 
-  // Verify the requesting API key belongs to the ownerAddress — prevents
-  // creating keys for arbitrary addresses using someone else's API key.
-  // Exception: if no keys exist yet for this address, allow first key creation.
+  // Verify wallet ownership via signature — prevents creating keys for arbitrary addresses.
+  // Required for all key creation (first key and subsequent keys).
+  if (!signature || !timestamp) {
+    return NextResponse.json({ error: 'signature and timestamp required' }, { status: 400 })
+  }
+  if (Date.now() - timestamp > SIG_MAX_AGE_MS) {
+    return NextResponse.json({ error: 'Signature expired' }, { status: 400 })
+  }
+  const message = expectedMessage(ownerAddress, timestamp)
+  try {
+    const signer = verifyMessage(message, signature)
+    if (signer.toLowerCase() !== ownerAddress.toLowerCase()) {
+      return NextResponse.json({ error: 'Signature does not match ownerAddress' }, { status: 403 })
+    }
+  } catch {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
+  }
+
+  // For subsequent keys, also verify the requesting API key belongs to the ownerAddress
   const existingKeys = await db.select({ id: schema.apiKeys.id })
     .from(schema.apiKeys)
     .where(eq(schema.apiKeys.ownerAddress, ownerAddress.toLowerCase()))
