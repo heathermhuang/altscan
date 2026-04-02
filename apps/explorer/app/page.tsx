@@ -14,7 +14,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_24hr_change=true`,
-      { next: { revalidate: 300 } }
+      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -33,7 +33,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
     try {
       const res = await fetch(
         'https://api.coincap.io/v2/assets/binance-coin',
-        { next: { revalidate: 300 } }
+        { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) }
       )
       if (res.ok) {
         const data = await res.json()
@@ -46,7 +46,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
     try {
       const res = await fetch(
         'https://api.coincap.io/v2/assets/ethereum',
-        { next: { revalidate: 300 } }
+        { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) }
       )
       if (res.ok) {
         const data = await res.json()
@@ -82,7 +82,7 @@ async function fetchExternalTotalTxCount(): Promise<number | null> {
   try {
     const res = await fetch(
       'https://api.bscscan.com/api?module=stats&action=txcount',
-      { next: { revalidate: 3600 } },
+      { next: { revalidate: 3600 }, signal: AbortSignal.timeout(5000) },
     )
     if (!res.ok) return null
     const data = (await res.json()) as { status: string; result?: string }
@@ -104,7 +104,7 @@ export default async function HomePage() {
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
     fetchTableEstimate('transactions'),
-    db.select({ value: sql<number>`count(*)::int` }).from(schema.tokens).then(([r]) => r?.value ?? 0).catch(() => 0),
+    fetchTableEstimate('tokens'),
     fetchNativePrice(),
     fetchExternalTotalTxCount(),
   ])
