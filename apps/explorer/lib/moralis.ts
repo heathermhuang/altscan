@@ -196,6 +196,7 @@ export async function getWalletHistory(
     const res = await fetch(url.toString(), {
       headers: h,
       cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) { setNullCache(cacheKey); return null }
 
@@ -273,7 +274,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   try {
     const res = await fetch(
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
-      { headers: h, cache: 'no-store' },
+      { headers: h, cache: 'no-store', signal: AbortSignal.timeout(10000) },
     )
     if (!res.ok) { setNullCache(cacheKey); return [] }
     const data = (await res.json()) as Array<{
@@ -349,6 +350,7 @@ export async function getTokenTransfers(
     const res = await fetch(url.toString(), {
       headers: h,
       cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) { setNullCache(cacheKey); return null }
 
@@ -406,7 +408,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
   try {
     const res = await fetch(
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
-      { headers: h, cache: 'no-store' },
+      { headers: h, cache: 'no-store', signal: AbortSignal.timeout(10000) },
     )
     if (!res.ok) { setNullCache(cacheKey); return [] }
     const data = (await res.json()) as {
