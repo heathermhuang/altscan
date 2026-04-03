@@ -9,12 +9,26 @@ import { chainConfig } from '@/lib/chain'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: `${chainConfig.brandDomain} — ${chainConfig.tagline}`,
+  metadataBase: new URL(`https://${chainConfig.domain}`),
+  title: {
+    default: `${chainConfig.brandDomain} — ${chainConfig.tagline}`,
+    template: `%s — ${chainConfig.brandDomain}`,
+  },
   description: `${chainConfig.brandDomain} is an alternative ${chainConfig.name} block explorer maintained by Measurable Data Token (MDT). Explore blocks, transactions, tokens, DEX trades, and more.`,
   openGraph: {
     title: `${chainConfig.brandDomain} — ${chainConfig.tagline}`,
     description: `An open, independent ${chainConfig.name} explorer maintained by Measurable Data Token (MDT).`,
     siteName: `${chainConfig.brandDomain} by MDT`,
+    type: 'website',
+    url: `https://${chainConfig.domain}`,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `${chainConfig.brandDomain} — ${chainConfig.tagline}`,
+    description: `An open, independent ${chainConfig.name} explorer maintained by Measurable Data Token (MDT).`,
+  },
+  alternates: {
+    canonical: '/',
   },
 }
 

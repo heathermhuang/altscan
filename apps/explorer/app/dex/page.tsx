@@ -5,6 +5,13 @@ import { formatUnits } from 'ethers'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: `DEX Trades`,
+  description: `Live decentralized exchange trades on ${chainConfig.name}. View recent swaps, pairs, and amounts on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/dex' },
+}
 
 export const dynamic = 'force-dynamic'
 

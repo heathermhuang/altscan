@@ -1,7 +1,15 @@
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
+import type { Metadata } from 'next'
+import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: `Network Charts`,
+  description: `${chainConfig.name} network statistics and charts — daily transactions, gas prices, and more on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/charts' },
+}
 
 type DataPoint = { date: string; value: number }
 

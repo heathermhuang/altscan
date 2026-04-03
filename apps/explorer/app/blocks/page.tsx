@@ -2,8 +2,16 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
+import type { Metadata } from 'next'
+import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: `Recent Blocks`,
+  description: `Browse the latest ${chainConfig.name} blocks on ${chainConfig.brandDomain}. View block height, miner, gas used, and transaction count.`,
+  alternates: { canonical: '/blocks' },
+}
 
 const PER_PAGE = 25
 

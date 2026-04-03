@@ -1,6 +1,13 @@
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
 
 export const revalidate = false
+
+export const metadata: Metadata = {
+  title: `API Documentation`,
+  description: `${chainConfig.brandDomain} REST API documentation. Query blocks, transactions, tokens, and addresses on ${chainConfig.name} programmatically.`,
+  alternates: { canonical: '/api-docs' },
+}
 
 type Param = {
   name: string

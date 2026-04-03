@@ -5,6 +5,13 @@ import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: `Validators`,
+  description: `${chainConfig.name} validator set — view active validators, voting power, commission rates, and uptime on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/validators' },
+}
 
 export const dynamic = 'force-dynamic'
 

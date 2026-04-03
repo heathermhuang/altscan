@@ -2,8 +2,16 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
+import type { Metadata } from 'next'
+import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: `Recent Transactions`,
+  description: `Browse the latest ${chainConfig.name} transactions on ${chainConfig.brandDomain}. Filter by block, address, and more.`,
+  alternates: { canonical: '/txs' },
+}
 
 const PER_PAGE = 25
 

@@ -3,8 +3,15 @@ import { desc, sql } from 'drizzle-orm'
 import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: `Whale Tracker`,
+  description: `Track large ${chainConfig.currency} transfers on ${chainConfig.name}. Monitor whale movements and high-value transactions on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/whales' },
+}
 
 type WhaleTx = {
   hash: string

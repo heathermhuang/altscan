@@ -3,6 +3,13 @@ import { desc, eq, sql } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatNumber, safeBigInt } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: `${chainConfig.key === 'eth' ? 'ERC-20' : 'BEP-20'} Tokens`,
+  description: `Explore ${chainConfig.key === 'eth' ? 'ERC-20' : 'BEP-20'} tokens on ${chainConfig.name}. View token supply, holder count, and contract details on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/token' },
+}
 
 /** Format a raw token supply string into a human-readable number by dividing by 10^decimals. */
 function formatSupply(raw: string, decimals: number): string {

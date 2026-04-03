@@ -9,6 +9,34 @@ import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `https://${chainConfig.domain}/#website`,
+      url: `https://${chainConfig.domain}`,
+      name: `${chainConfig.brandDomain} by MDT`,
+      description: `An open, independent ${chainConfig.name} block explorer maintained by Measurable Data Token (MDT).`,
+      potentialAction: {
+        '@type': 'SearchAction',
+        target: {
+          '@type': 'EntryPoint',
+          urlTemplate: `https://${chainConfig.domain}/search?q={search_term_string}`,
+        },
+        'query-input': 'required name=search_term_string',
+      },
+    },
+    {
+      '@type': 'Organization',
+      '@id': `https://${chainConfig.domain}/#organization`,
+      name: 'Measurable Data Token (MDT)',
+      url: 'https://mdt.io',
+      sameAs: ['https://mdt.io'],
+    },
+  ],
+}
+
 async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
   // Try CoinGecko first (longer cache to avoid rate limits)
   try {
@@ -127,6 +155,10 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <AutoRefresh intervalMs={10000} />
 
       {/* Hero tagline */}

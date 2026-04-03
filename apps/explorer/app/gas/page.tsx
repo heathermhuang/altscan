@@ -1,8 +1,15 @@
 import { getProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: `Gas Tracker`,
+  description: `Live ${chainConfig.name} gas price tracker. Check current slow, standard, and fast gas fees in Gwei on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/gas' },
+}
 
 export default async function GasPage() {
   const provider = getProvider()
