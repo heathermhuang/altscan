@@ -31,6 +31,8 @@ services:
         value: https://ethscan.io
       - key: NODE_ENV
         value: production
+      - key: DB_POOL_SIZE
+        value: "3"            # Limit pool to reduce connection pressure during traffic spikes
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
@@ -58,6 +60,8 @@ services:
         value: https://bnbscan.com
       - key: NODE_ENV
         value: production
+      - key: DB_POOL_SIZE
+        value: "3"            # Limit pool to reduce connection pressure during traffic spikes
 
   # ── BNB Chain Indexer ────────────────────────────────────────────────────────
   - type: worker

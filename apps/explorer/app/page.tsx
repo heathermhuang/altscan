@@ -7,7 +7,10 @@ import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 
-export const dynamic = 'force-dynamic'
+// Shared ISR cache: one server render per 30s, served to all users from cache in between.
+// This replaces force-dynamic (which rendered fresh for every request) — the primary cause
+// of OOM crashes under load. AutoRefresh is set to 30s to match this window.
+export const revalidate = 30
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -159,7 +162,7 @@ export default async function HomePage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <AutoRefresh intervalMs={10000} />
+      <AutoRefresh intervalMs={30000} />
 
       {/* Hero tagline */}
       <div className="mb-8">
