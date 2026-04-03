@@ -215,11 +215,11 @@ export default async function HomePage() {
 
       {/* Two-column layout */}
       <div className="grid md:grid-cols-2 gap-6">
-        <section>
+        <section className="min-w-0">
           <SectionHeader title="Latest Blocks" href="/blocks" />
           <BlockTable blocks={latestBlocks} compact />
         </section>
-        <section>
+        <section className="min-w-0">
           <SectionHeader title="Latest Transactions" href="/txs" />
           <TxTable txs={latestTxs} compact />
         </section>

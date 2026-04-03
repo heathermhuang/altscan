@@ -247,7 +247,7 @@ export default async function AddressPage({
       )}
 
       {/* Tab bar */}
-      <div className="flex border-b border-gray-200 mb-6">
+      <div className="flex overflow-x-auto border-b border-gray-200 mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
         <TabLink
           href={`/address/${addr}?tab=txns`}
           active={activeTab === 'txns'}
@@ -339,36 +339,38 @@ async function TxnsTab({
             </span>
           </div>
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Summary</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Value ({chainConfig.currency})</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Summary</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value ({chainConfig.currency})</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {moralis.txs.map(tx => (
                   <tr key={tx.hash} className={`hover:bg-gray-50 ${tx.possibleSpam ? 'opacity-50' : ''}`}>
-                    <td className="px-4 py-2 font-mono text-xs">
+                    <td className="px-3 sm:px-4 py-2 font-mono text-xs">
                       <Link href={`/tx/${tx.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                         {tx.hash.slice(0, 14)}…
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-gray-500 text-xs">
+                    <td className="px-3 sm:px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">
                       {timeAgo(new Date(tx.blockTimestamp))}
                     </td>
-                    <td className="px-4 py-2 text-gray-700 text-xs max-w-xs truncate">
+                    <td className="px-3 sm:px-4 py-2 text-gray-700 text-xs max-w-xs truncate">
                       {tx.summary || tx.category}
                     </td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-3 sm:px-4 py-2 text-xs">
                       {(Number(tx.value) / 1e18).toFixed(6)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           {/* Moralis cursor pagination */}
           <div className="flex justify-center gap-4 mt-4">
@@ -422,27 +424,28 @@ async function TxnsTab({
         </a>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">From / To</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Value</th>
+              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
+              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From / To</th>
+              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {txs.map((tx) => (
               <tr key={tx.hash} className="hover:bg-gray-50">
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-xs">
                   <Link href={`/tx/${tx.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                     {tx.hash.slice(0, 14)}...
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-500">
+                <td className="px-3 sm:px-4 py-2 text-gray-500 hidden sm:table-cell">
                   {timeAgo(new Date(tx.timestamp))}
                 </td>
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-xs">
                   <div>
                     <span className="text-gray-400 text-xs">
                       {tx.fromAddress.toLowerCase() === addr ? 'OUT' : 'IN'}{' '}
@@ -464,13 +467,14 @@ async function TxnsTab({
                     </Link>
                   </div>
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-3 sm:px-4 py-2">
                   {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       <Pagination
         page={page}
@@ -548,29 +552,30 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
             <span>Showing token transfer history from Moralis.</span>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Age</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">From</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">To</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Amount</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">From</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Token</th>
+                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {moralisTransfers.map((t) => (
                   <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 font-mono text-xs">
+                    <td className="px-3 sm:px-4 py-2 font-mono text-xs">
                       <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                         {t.txHash.slice(0, 14)}…
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-gray-500 text-xs">
+                    <td className="px-3 sm:px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">
                       {timeAgo(new Date(t.blockTimestamp))}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs">
+                    <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
                       <Link
                         href={`/address/${t.fromAddress}`}
                         className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
@@ -578,7 +583,7 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                         {formatAddress(t.fromAddress)}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs">
+                    <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
                       <Link
                         href={`/address/${t.toAddress}`}
                         className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
@@ -586,18 +591,19 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
                         {formatAddress(t.toAddress)}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-3 sm:px-4 py-2 text-xs">
                       <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                         {t.tokenSymbol || formatAddress(t.tokenAddress)}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-3 sm:px-4 py-2 text-xs">
                       {parseFloat(t.valueFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })} {t.tokenSymbol}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )
@@ -1065,7 +1071,7 @@ function TabLink({
   return (
     <Link
       href={href}
-      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
         active
           ? `${chainConfig.theme.border} ${chainConfig.theme.linkText}`
           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
