@@ -32,9 +32,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DB_POOL_SIZE
-        value: "3"            # Limit pool to reduce connection pressure during traffic spikes
+        value: "2"            # Fewer parallel renders = lower peak memory
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=1536"  # GC before 2GB OOM kill
+        value: "--max-old-space-size=1024"  # Lower heap forces earlier GC, prevents OOM on 2GB pro plan
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
