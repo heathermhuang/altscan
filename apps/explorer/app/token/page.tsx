@@ -27,7 +27,7 @@ function formatSupply(raw: string, decimals: number): string {
   }
 }
 
-export const revalidate = 30
+export const revalidate = 60
 
 export default async function TokenListPage({
   searchParams,

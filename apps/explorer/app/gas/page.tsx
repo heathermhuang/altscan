@@ -3,7 +3,7 @@ import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 
-export const revalidate = 30
+export const revalidate = 45
 
 export const metadata: Metadata = {
   title: `Gas Tracker`,
