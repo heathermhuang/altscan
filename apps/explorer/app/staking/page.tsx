@@ -3,7 +3,7 @@ import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 30
+export const revalidate = 300
 
 if (!chainConfig.features.hasStaking) {
   // Static guard -- will 404 at build time for non-staking chains

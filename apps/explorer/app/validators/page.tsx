@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/validators' },
 }
 
-export const revalidate = 30
+export const revalidate = 300
 
 export default async function ValidatorsPage() {
   if (!chainConfig.features.hasValidators) return notFound()

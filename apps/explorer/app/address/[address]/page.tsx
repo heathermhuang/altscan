@@ -11,13 +11,14 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import dynamic from 'next/dynamic'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
-import { headers as nextHeaders } from 'next/headers'
 import { chainConfig } from '@/lib/chain'
 
 const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
 const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
+
+export const revalidate = 30
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -99,21 +100,16 @@ export default async function AddressPage({
     // DB not connected
   }
 
-  // Skip expensive Moralis calls for bots — they drain CU budget
-  const reqHeaders = await nextHeaders()
-  const isBot = isBotRequest(reqHeaders.get('user-agent'))
-
   // Enrich with external data — all fire in parallel, failures are silent
+  // Skip Moralis for addresses not in our index (saves CU + memory)
   const noLocalData = txCount === 0 && !addressInfo
-  const needsMoralis = noLocalData && !isBot
-  // Fetch all enrichment data in parallel — RPC calls are free
   const provider = getProvider()
   const [resolvedName, riskData, liveBalance, rpcTxCount, moralisHistory, nativePrice] = await Promise.all([
     resolveName(addr),
-    isBot ? Promise.resolve(null) : getAddressRisk(addr),
+    getAddressRisk(addr),
     provider.getBalance(addr).catch(() => null),
     provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
-    needsMoralis ? getWalletHistory(addr) : Promise.resolve(null),
+    noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
     fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
       .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
   ])

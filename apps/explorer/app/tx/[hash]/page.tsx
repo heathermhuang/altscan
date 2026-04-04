@@ -12,6 +12,8 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 
+export const revalidate = 30
+
 async function fetchNativePrice(): Promise<number | null> {
   try {
     const res = await fetch(

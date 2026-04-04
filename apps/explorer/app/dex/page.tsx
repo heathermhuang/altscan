@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/dex' },
 }
 
-export const revalidate = 30
+export const revalidate = 300
 
 const PAGE_SIZE = 25
 
