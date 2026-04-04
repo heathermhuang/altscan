@@ -34,7 +34,7 @@ services:
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=900"  # Force GC before Render's 1GB OOM kill
+        value: "--max-old-space-size=700"  # Force GC well before Render's 1GB OOM kill
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
@@ -65,7 +65,7 @@ services:
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=900"  # Force GC before Render's 1GB OOM kill
+        value: "--max-old-space-size=700"  # Force GC well before Render's 1GB OOM kill
 
   # ── BNB Chain Indexer ────────────────────────────────────────────────────────
   - type: worker

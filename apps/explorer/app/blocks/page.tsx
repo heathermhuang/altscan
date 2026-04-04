@@ -5,7 +5,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 export const metadata: Metadata = {
   title: `Recent Blocks`,

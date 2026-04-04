@@ -78,7 +78,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   }
 }
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 const PAGE_SIZE = 25
 

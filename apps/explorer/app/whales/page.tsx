@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 export const metadata: Metadata = {
   title: `Whale Tracker`,

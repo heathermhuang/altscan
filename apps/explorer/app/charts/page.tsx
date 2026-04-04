@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 export const metadata: Metadata = {
   title: `Network Charts`,
