@@ -9,10 +9,10 @@ const nextConfig = {
   experimental: {
     workerThreads: false,
     cpus: 1,
-    // Cap ISR in-memory cache to ~50 MB. Without this, every unique
+    // Cap ISR in-memory cache to ~25 MB. Without this, every unique
     // /address/[addr] and /tx/[hash] visit is cached in RAM indefinitely,
     // growing until OOM on BNB chain's high-cardinality traffic.
-    isrMemoryCacheSize: 50,
+    isrMemoryCacheSize: 25,
   },
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },

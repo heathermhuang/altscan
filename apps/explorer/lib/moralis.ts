@@ -25,8 +25,8 @@ const CHAIN = chainConfig.moralisChain
 const NULL_SENTINEL = '__null__'
 const NULL_TTL = 5 * 60_000        // 5 minutes for negative results
 const memCache = new Map<string, { data: unknown; ts: number; ttl: number }>()
-const MEM_CACHE_TTL = 4 * 3600_000 // 4 hours — then re-fetch if a real user visits
-const MEM_CACHE_MAX = 500          // max cached addresses — LRU eviction
+const MEM_CACHE_TTL = 1 * 3600_000 // 1 hour — shorter TTL to reduce memory pressure
+const MEM_CACHE_MAX = 100          // max cached addresses — reduced from 500 to prevent OOM
 
 function getCached<T>(key: string): T | null | undefined {
   const entry = memCache.get(key)
