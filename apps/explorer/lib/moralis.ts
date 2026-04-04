@@ -25,8 +25,8 @@ const CHAIN = chainConfig.moralisChain
 const NULL_SENTINEL = '__null__'
 const NULL_TTL = 5 * 60_000        // 5 minutes for negative results
 const memCache = new Map<string, { data: unknown; ts: number; ttl: number }>()
-const MEM_CACHE_TTL = 1 * 3600_000 // 1 hour — shorter TTL to reduce memory pressure
-const MEM_CACHE_MAX = 100          // max cached addresses — reduced from 500 to prevent OOM
+const MEM_CACHE_TTL = 30 * 60_000  // 30 min — short TTL to limit memory growth
+const MEM_CACHE_MAX = 50           // max cached addresses — keep small to prevent OOM on 2GB plans
 
 function getCached<T>(key: string): T | null | undefined {
   const entry = memCache.get(key)
