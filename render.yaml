@@ -4,7 +4,7 @@ services:
   - type: web
     name: bnbscan-web
     env: node
-    plan: standard          # 1 GB RAM / 1 CPU — $25/mo
+    plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
@@ -34,13 +34,13 @@ services:
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=700"  # Force GC well before Render's 1GB OOM kill
+        value: "--max-old-space-size=1536"  # GC before 2GB OOM kill
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
     name: ethscan-web
     env: node
-    plan: standard          # 1 GB RAM / 1 CPU — $25/mo
+    plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
@@ -65,7 +65,7 @@ services:
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=700"  # Force GC well before Render's 1GB OOM kill
+        value: "--max-old-space-size=1536"  # GC before 2GB OOM kill
 
   # ── BNB Chain Indexer ────────────────────────────────────────────────────────
   - type: worker
