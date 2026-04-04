@@ -9,7 +9,7 @@ services:
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
-    healthCheckPath: /api/v1/stats
+    healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
       - key: CHAIN
@@ -45,7 +45,7 @@ services:
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
     startCommand: pnpm start
-    healthCheckPath: /api/v1/stats
+    healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
       - key: CHAIN
@@ -101,7 +101,7 @@ services:
   - type: worker
     name: eth-indexer
     env: node
-    plan: starter           # 512 MB RAM / 0.5 CPU — $7/mo
+    plan: standard          # 1 GB RAM / 1 CPU — $25/mo (upgraded from starter after OOM crashes, exit 134)
     region: oregon
     rootDir: apps/indexer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
@@ -121,6 +121,8 @@ services:
         value: "3"          # Keep well under basic-1gb's ~25 max_connections
       - key: NODE_ENV
         value: production
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=768"  # GC before 1GB OOM kill
 
   # ── Redis (shared BullMQ queue for BNB indexer) ───────────────────────────
   - type: redis
