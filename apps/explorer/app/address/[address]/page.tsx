@@ -102,6 +102,8 @@ export default async function AddressPage({
 
   // Enrich with external data — all fire in parallel, failures are silent
   // Skip Moralis for addresses not in our index (saves CU + memory)
+  // Bot detection removed to enable ISR caching (headers() forces dynamic rendering)
+  const isBot = false
   const noLocalData = txCount === 0 && !addressInfo
   const provider = getProvider()
   const [resolvedName, riskData, liveBalance, rpcTxCount, moralisHistory, nativePrice] = await Promise.all([
