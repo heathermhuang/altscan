@@ -9,8 +9,8 @@ import { chainConfig } from '@/lib/chain'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
-// of OOM crashes under load. AutoRefresh is set to 30s to match this window.
-export const revalidate = 30
+// Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
+export const revalidate = 60
 
 const jsonLd = {
   '@context': 'https://schema.org',

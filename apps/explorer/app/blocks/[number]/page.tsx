@@ -9,7 +9,7 @@ import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 30
+export const revalidate = 300
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const { number } = await params
