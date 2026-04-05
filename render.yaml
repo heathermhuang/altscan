@@ -32,9 +32,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DB_POOL_SIZE
-        value: "2"            # Fewer parallel renders = lower peak memory
+        value: "3"
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=1024"  # Lower heap forces earlier GC, prevents OOM on 2GB pro plan
+        value: "--max-old-space-size=1536"  # With ISR cache disabled + Moralis off, 1536 is safe
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
