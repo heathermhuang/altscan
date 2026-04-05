@@ -5,14 +5,15 @@ const DOMAIN = CHAIN === 'eth' ? 'ethscan.io' : 'bnbscan.com'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Disable in-memory ISR cache entirely — use disk cache only.
+  // Every unique /address/[addr] and /tx/[hash] page was being kept in RAM,
+  // growing monotonically until OOM on the 2GB pro plan.
+  // In Next.js 14.2+ this is a top-level config, NOT under experimental.
+  isrMemoryCacheSize: 0,
   // Limit build workers to prevent OOM on Render Standard (2GB RAM)
   experimental: {
     workerThreads: false,
     cpus: 1,
-    // Cap ISR in-memory cache to ~25 MB. Without this, every unique
-    // /address/[addr] and /tx/[hash] visit is cached in RAM indefinitely,
-    // growing until OOM on BNB chain's high-cardinality traffic.
-    isrMemoryCacheSize: 25,
   },
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },
