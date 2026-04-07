@@ -64,8 +64,7 @@ export function Footer() {
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />
           <p className="text-xs text-gray-600">
-            &copy; {new Date().getFullYear()} {chainConfig.brandDomain} &middot; Powered by{' '}
-            <a href={chainConfig.poweredByUrl} target="_blank" rel="noopener noreferrer" className={`${theme.footerPoweredBy} hover:underline`}>{chainConfig.poweredBy}</a>
+            &copy; {new Date().getFullYear()} {chainConfig.brandDomain} &middot; Not affiliated with {chainConfig.notAffiliatedWith}
           </p>
         </div>
       </div>

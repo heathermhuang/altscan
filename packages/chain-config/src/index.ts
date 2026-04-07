@@ -25,8 +25,6 @@ export type ChainTheme = {
   searchFocusRing: string
   /** Footer accent link color, e.g. "text-yellow-400" */
   footerAccent: string
-  /** Footer powered-by link color, e.g. "text-yellow-500" */
-  footerPoweredBy: string
   /** Network switcher hover bg in header, e.g. "bg-black/25" */
   switcherHoverBg: string
   /** Network switcher border in header, e.g. "border-black/15" */
@@ -91,10 +89,8 @@ export type ChainConfig = {
   externalExplorer: string
   /** External block explorer base URL */
   externalExplorerUrl: string
-  /** L1 chain name for "Powered by" in footer */
-  poweredBy: string
-  /** L1 chain URL for "Powered by" link */
-  poweredByUrl: string
+  /** Disclaimer text for footer — not affiliated with */
+  notAffiliatedWith: string
   /** Moralis chain identifier */
   moralisChain: string
   /** Visual theme tokens */
@@ -124,8 +120,7 @@ export const BSC: ChainConfig = {
   peerDevUrl: 'http://localhost:3001',
   externalExplorer: 'BscScan',
   externalExplorerUrl: 'https://bscscan.com',
-  poweredBy: 'BNB Chain',
-  poweredByUrl: 'https://www.bnbchain.org',
+  notAffiliatedWith: 'BscScan or Binance',
   moralisChain: '0x38',
   theme: {
     headerBg: 'bg-yellow-400',
@@ -141,7 +136,6 @@ export const BSC: ChainConfig = {
     searchBorder: 'border-yellow-200',
     searchFocusRing: 'focus:ring-yellow-500',
     footerAccent: 'text-yellow-400',
-    footerPoweredBy: 'text-yellow-500',
     switcherHoverBg: 'bg-black/25',
     switcherBorder: 'border-black/15',
     positiveChange: 'text-green-600',
@@ -177,8 +171,7 @@ export const ETH: ChainConfig = {
   peerDevUrl: 'http://localhost:3000',
   externalExplorer: 'Etherscan',
   externalExplorerUrl: 'https://etherscan.io',
-  poweredBy: 'Ethereum',
-  poweredByUrl: 'https://ethereum.org',
+  notAffiliatedWith: 'Etherscan or the Ethereum Foundation',
   moralisChain: '0x1',
   theme: {
     headerBg: 'bg-blue-900',
@@ -194,7 +187,6 @@ export const ETH: ChainConfig = {
     searchBorder: 'border-blue-200',
     searchFocusRing: 'focus:ring-blue-400',
     footerAccent: 'text-blue-400',
-    footerPoweredBy: 'text-blue-300',
     switcherHoverBg: 'bg-white/25',
     switcherBorder: 'border-white/20',
     positiveChange: 'text-green-600',
