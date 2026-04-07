@@ -50,14 +50,9 @@ export function register() {
 
       // Hard limit — graceful exit before SIGABRT
       if (heapMB > HEAP_LIMIT_MB) {
-        console.error(`[mem] CRITICAL: heap ${heapMB}MB exceeds ${HEAP_LIMIT_MB}MB — graceful restart to avoid SIGABRT`)
-        import('./lib/cache-registry').then(({ getCacheSizes }) => {
-          console.error(`[mem] Final cache sizes: ${JSON.stringify(getCacheSizes())}`)
-        }).catch(() => { /* ignore */ }).finally(() => {
-          process.exit(0)
-        })
-        // Safety: exit even if import fails after 1s
-        setTimeout(() => process.exit(0), 1000).unref()
+        console.error(`[mem] CRITICAL: heap ${heapMB}MB exceeds ${HEAP_LIMIT_MB}MB — exiting NOW to avoid SIGABRT`)
+        // Exit synchronously — async chains can fail under memory pressure
+        process.exit(0)
       }
     }, CHECK_INTERVAL_MS)
   }
