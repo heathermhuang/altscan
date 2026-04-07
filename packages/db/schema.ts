@@ -39,6 +39,8 @@ export const transactions = pgTable('transactions', {
 }, (t) => ({
   fromIdx:      index('tx_from_idx').on(t.fromAddress),
   toIdx:        index('tx_to_idx').on(t.toAddress),
+  fromTsIdx:    index('tx_from_ts_idx').on(t.fromAddress, t.timestamp),
+  toTsIdx:      index('tx_to_ts_idx').on(t.toAddress, t.timestamp),
   blockIdx:     index('tx_block_idx').on(t.blockNumber),
   timestampIdx: index('tx_timestamp_idx').on(t.timestamp),
 }))
@@ -68,6 +70,8 @@ export const tokenTransfers = pgTable('token_transfers', {
   tokenIdx:     index('tt_token_idx').on(t.tokenAddress),
   fromIdx:      index('tt_from_idx').on(t.fromAddress),
   toIdx:        index('tt_to_idx').on(t.toAddress),
+  fromTsIdx:    index('tt_from_ts_idx').on(t.fromAddress, t.timestamp),
+  toTsIdx:      index('tt_to_ts_idx').on(t.toAddress, t.timestamp),
   txIdx:        index('tt_tx_idx').on(t.txHash),
   blockIdx:     index('tt_block_idx').on(t.blockNumber),
   // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay

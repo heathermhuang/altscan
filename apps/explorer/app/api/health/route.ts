@@ -23,17 +23,22 @@ export async function GET() {
             .limit(1),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
         ]),
+        // pg_database_size is slow on large DBs — use pg_stat for an estimate instead
         Promise.race([
           db.execute(sql`
             SELECT
-              pg_database_size(current_database()) as db_bytes,
+              (SELECT pg_total_relation_size('transactions') +
+                      pg_total_relation_size('token_transfers') +
+                      pg_total_relation_size('blocks') +
+                      pg_total_relation_size('logs')) as est_bytes,
               (SELECT reltuples::bigint FROM pg_class WHERE relname = 'transactions') as tx_rows,
               (SELECT reltuples::bigint FROM pg_class WHERE relname = 'token_transfers') as tt_rows,
               (SELECT reltuples::bigint FROM pg_class WHERE relname = 'blocks') as block_rows,
+              (SELECT reltuples::bigint FROM pg_class WHERE relname = 'logs') as log_rows,
               (SELECT COUNT(*)::int FROM pg_stat_activity WHERE state = 'active') as active_conns,
               (SELECT COUNT(*)::int FROM pg_stat_activity) as total_conns
           `),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
         ]).catch(() => null),
       ])
 
@@ -46,10 +51,11 @@ export async function GET() {
       if (dbSizeResult) {
         const row = Array.from(dbSizeResult)[0] as Record<string, unknown>
         database = {
-          sizeMB: Math.round(Number(row.db_bytes) / 1024 / 1024),
+          sizeMB: Math.round(Number(row.est_bytes) / 1024 / 1024),
           txRows: Number(row.tx_rows),
           tokenTransferRows: Number(row.tt_rows),
           blockRows: Number(row.block_rows),
+          logRows: Number(row.log_rows),
           activeConns: Number(row.active_conns),
           totalConns: Number(row.total_conns),
         }
