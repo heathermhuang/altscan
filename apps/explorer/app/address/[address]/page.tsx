@@ -8,15 +8,13 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
-import dynamic from 'next/dynamic'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
-
-const WatchlistButton = dynamic(() => import('@/components/ui/WatchlistButton').then(m => ({ default: m.WatchlistButton })), { ssr: false })
-const AbiReader = dynamic(() => import('@/components/contracts/AbiReader').then(m => ({ default: m.AbiReader })), { ssr: false })
+import { WatchlistButton } from '@/components/ui/WatchlistButton'
+import { AbiReader } from '@/components/contracts/AbiReader'
 
 export const revalidate = 300
 

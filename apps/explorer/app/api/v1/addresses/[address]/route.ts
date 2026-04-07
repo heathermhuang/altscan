@@ -4,6 +4,8 @@ import { eq, desc, or } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 
+export const dynamic = 'force-dynamic'
+
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 export async function GET(

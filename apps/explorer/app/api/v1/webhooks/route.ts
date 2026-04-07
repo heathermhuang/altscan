@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm'
 import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 
+export const dynamic = 'force-dynamic'
+
 // GET: list webhooks for an owner — requires X-API-Key matching ownerAddress
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)

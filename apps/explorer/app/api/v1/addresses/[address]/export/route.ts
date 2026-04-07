@@ -2,6 +2,8 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * Sanitize a CSV field to prevent formula injection.
  * Excel/Sheets interpret cells starting with =, +, -, @, \t, \r as formulas.

@@ -8,11 +8,6 @@ const nextConfig = {
   // Standalone output — produces a minimal self-contained server (~80MB vs ~500MB).
   // Dramatically reduces base memory footprint on Render's 2GB pro plan.
   output: 'standalone',
-  // Disable in-memory ISR cache entirely — use disk cache only.
-  // Every unique /address/[addr] and /tx/[hash] page was being kept in RAM,
-  // growing monotonically until OOM on the 2GB pro plan.
-  // In Next.js 14.2+ this is a top-level config, NOT under experimental.
-  isrMemoryCacheSize: 0,
   // Limit build workers to prevent OOM on Render Standard (2GB RAM)
   experimental: {
     workerThreads: false,

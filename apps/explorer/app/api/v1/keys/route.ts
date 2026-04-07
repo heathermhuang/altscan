@@ -5,6 +5,8 @@ import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 
+export const dynamic = 'force-dynamic'
+
 /** Message the client must sign: deterministic, timestamped, non-replayable. */
 function expectedMessage(ownerAddress: string, timestamp: number): string {
   return `BNBScan API Key Request\nAddress: ${ownerAddress.toLowerCase()}\nTimestamp: ${timestamp}`

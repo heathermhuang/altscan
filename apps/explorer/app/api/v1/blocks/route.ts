@@ -4,6 +4,8 @@ import { desc, sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: Request) {
   if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
