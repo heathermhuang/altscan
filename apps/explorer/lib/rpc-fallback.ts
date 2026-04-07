@@ -6,6 +6,7 @@
  * RPC calls for the same missing entity within a short window.
  */
 import { getProvider } from './rpc'
+import { registerCache } from './cache-registry'
 
 // Shapes that satisfy what the tx and block detail pages render
 export type RpcTx = {
@@ -43,9 +44,19 @@ export type RpcBlock = {
 }
 
 // Negative cache — prevents hammering RPC for entities that don't exist
-const NULL_TTL_MS = 5 * 60 * 1000  // 5 minutes
-const NULL_CACHE_MAX = 10_000
+const NULL_TTL_MS = 2 * 60 * 1000  // 2 minutes (reduced from 5)
+const NULL_CACHE_MAX = 5_000       // reduced from 10K to limit memory
 const nullCache = new Map<string, number>()  // key → expiry timestamp
+
+// Background cleanup — evict expired entries every 30s
+const _rpcNullCleanup = setInterval(() => {
+  const now = Date.now()
+  for (const [k, v] of nullCache) {
+    if (now > v) nullCache.delete(k)
+  }
+}, 30_000)
+if (_rpcNullCleanup.unref) _rpcNullCleanup.unref()
+registerCache('rpc-null', () => nullCache.size)
 
 function isNullCached(key: string): boolean {
   const expiry = nullCache.get(key)

@@ -37,7 +37,7 @@ export async function GET(
     txs = await db.select().from(schema.transactions)
       .where(or(eq(schema.transactions.fromAddress, addr), eq(schema.transactions.toAddress, addr)))
       .orderBy(desc(schema.transactions.timestamp))
-      .limit(10000)
+      .limit(1000)
   } catch {
     return new Response('Database error', { status: 500 })
   }

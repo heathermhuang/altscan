@@ -75,8 +75,8 @@ async function checkRateLimitRedis(key: string, maxRequests: number): Promise<bo
 // ── In-memory fallback ────────────────────────────────────────────────────────
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
-const MAX_MAP_SIZE = 50_000
-const CLEANUP_INTERVAL_MS = 60_000
+const MAX_MAP_SIZE = 10_000        // reduced from 50K to limit memory
+const CLEANUP_INTERVAL_MS = 30_000 // reduced from 60s to 30s for faster eviction
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null
 function startCleanupTimer() {
@@ -136,4 +136,9 @@ export async function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQU
  */
 export async function checkIpRateLimit(xForwardedFor: string | null, maxRequests = DEFAULT_MAX_REQUESTS): Promise<boolean> {
   return checkRateLimit(extractClientIp(xForwardedFor), maxRequests)
+}
+
+/** Expose in-memory rate limit map size for monitoring */
+export function getRateLimitMapSize(): number {
+  return rateLimitMap.size
 }

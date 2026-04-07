@@ -13,6 +13,7 @@
  *   - Bot detection skips Moralis entirely for crawlers
  */
 import { chainConfig } from './chain'
+import { registerCache } from './cache-registry'
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = chainConfig.moralisChain
@@ -25,8 +26,18 @@ const CHAIN = chainConfig.moralisChain
 const NULL_SENTINEL = '__null__'
 const NULL_TTL = 5 * 60_000        // 5 minutes for negative results
 const memCache = new Map<string, { data: unknown; ts: number; ttl: number }>()
-const MEM_CACHE_TTL = 30 * 60_000  // 30 min — short TTL to limit memory growth
-const MEM_CACHE_MAX = 50           // max cached addresses — keep small to prevent OOM on 2GB plans
+const MEM_CACHE_TTL = 15 * 60_000  // 15 min — reduced from 30 min to limit memory growth
+const MEM_CACHE_MAX = 30           // max cached entries — reduced from 50 to prevent OOM
+
+// Background cleanup — evict expired entries every 30s instead of only on insertion
+const _moralisCacheCleanup = setInterval(() => {
+  const now = Date.now()
+  for (const [k, v] of memCache) {
+    if (now - v.ts > v.ttl) memCache.delete(k)
+  }
+}, 30_000)
+if (_moralisCacheCleanup.unref) _moralisCacheCleanup.unref()
+registerCache('moralis', () => memCache.size)
 
 function getCached<T>(key: string): T | null | undefined {
   const entry = memCache.get(key)

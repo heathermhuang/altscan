@@ -5,10 +5,21 @@
  * Results are cached for 10 minutes to avoid hammering the provider.
  */
 import { getProvider } from '../rpc'
+import { registerCache } from '../cache-registry'
 
 const cache = new Map<string, { name: string | null; ts: number }>()
-const TTL_MS = 10 * 60 * 1000
-const MAX_CACHE = 5000
+const TTL_MS = 5 * 60 * 1000     // reduced from 10 min to 5 min
+const MAX_CACHE = 1000            // reduced from 5000 to limit memory
+
+// Background cleanup — evict expired entries every 30s
+const _ensCleanup = setInterval(() => {
+  const now = Date.now()
+  for (const [k, v] of cache) {
+    if (now - v.ts > TTL_MS) cache.delete(k)
+  }
+}, 30_000)
+if (_ensCleanup.unref) _ensCleanup.unref()
+registerCache('ens', () => cache.size)
 
 function setCacheEntry(key: string, name: string | null): void {
   if (cache.size >= MAX_CACHE) {
