@@ -8,7 +8,7 @@ services:
     region: oregon
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
-    startCommand: cd .next/standalone/apps/explorer && node server.js
+    startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
@@ -33,8 +33,8 @@ services:
         value: production
       - key: DB_POOL_SIZE
         value: "3"
-      - key: NODE_OPTIONS
-        value: "--max-old-space-size=1280"  # Lowered from 1536 — forces V8 GC earlier to prevent SIGABRT
+      # NOTE: --max-old-space-size is set in startCommand (not NODE_OPTIONS)
+      # so it only applies at runtime, not during build (which needs full RAM)
       - key: HOSTNAME
         value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 
@@ -46,7 +46,7 @@ services:
     region: oregon
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
-    startCommand: cd .next/standalone/apps/explorer && node server.js
+    startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
@@ -66,8 +66,7 @@ services:
         value: production
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
-      - key: NODE_OPTIONS
-        value: "--max-old-space-size=1280"  # Lowered from 1536 — forces V8 GC earlier to prevent SIGABRT
+      # NOTE: --max-old-space-size is set in startCommand (not NODE_OPTIONS)
       - key: HOSTNAME
         value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 
