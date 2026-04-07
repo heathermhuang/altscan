@@ -7,6 +7,7 @@
 const SPACE_ID_API = 'https://api.prd.space.id/v1'
 const cache = new Map<string, { name: string | null; ts: number }>()
 const TTL_MS = 10 * 60 * 1000
+const MAX_CACHE = 5000
 
 export async function resolveSpaceId(address: string): Promise<string | null> {
   const key = address.toLowerCase()
@@ -19,15 +20,23 @@ export async function resolveSpaceId(address: string): Promise<string | null> {
       { signal: AbortSignal.timeout(5000), next: { revalidate: 600 } },
     )
     if (!res.ok) {
-      cache.set(key, { name: null, ts: Date.now() })
+      setCacheEntry(key, null)
       return null
     }
     const data = (await res.json()) as { code: number; name?: string }
     const name = data.code === 0 && data.name ? data.name : null
-    cache.set(key, { name, ts: Date.now() })
+    setCacheEntry(key, name)
     return name
   } catch {
-    cache.set(key, { name: null, ts: Date.now() })
+    setCacheEntry(key, null)
     return null
   }
+}
+
+function setCacheEntry(key: string, name: string | null): void {
+  if (cache.size >= MAX_CACHE) {
+    const oldest = cache.keys().next().value
+    if (oldest) cache.delete(oldest)
+  }
+  cache.set(key, { name, ts: Date.now() })
 }

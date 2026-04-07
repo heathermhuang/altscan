@@ -8,6 +8,15 @@ import { getProvider } from '../rpc'
 
 const cache = new Map<string, { name: string | null; ts: number }>()
 const TTL_MS = 10 * 60 * 1000
+const MAX_CACHE = 5000
+
+function setCacheEntry(key: string, name: string | null): void {
+  if (cache.size >= MAX_CACHE) {
+    const oldest = cache.keys().next().value
+    if (oldest) cache.delete(oldest)
+  }
+  cache.set(key, { name, ts: Date.now() })
+}
 
 export async function resolveEns(address: string): Promise<string | null> {
   const key = address.toLowerCase()
@@ -18,10 +27,10 @@ export async function resolveEns(address: string): Promise<string | null> {
     const provider = getProvider()
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
     const name = await Promise.race([provider.lookupAddress(address), timeout])
-    cache.set(key, { name, ts: Date.now() })
+    setCacheEntry(key, name)
     return name
   } catch {
-    cache.set(key, { name: null, ts: Date.now() })
+    setCacheEntry(key, null)
     return null
   }
 }

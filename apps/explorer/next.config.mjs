@@ -5,6 +5,9 @@ const DOMAIN = CHAIN === 'eth' ? 'ethscan.io' : 'bnbscan.com'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Standalone output — produces a minimal self-contained server (~80MB vs ~500MB).
+  // Dramatically reduces base memory footprint on Render's 2GB pro plan.
+  output: 'standalone',
   // Disable in-memory ISR cache entirely — use disk cache only.
   // Every unique /address/[addr] and /tx/[hash] page was being kept in RAM,
   // growing monotonically until OOM on the 2GB pro plan.

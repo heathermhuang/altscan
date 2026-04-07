@@ -7,8 +7,8 @@ services:
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
-    startCommand: pnpm start
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    startCommand: cd .next/standalone/apps/explorer && node server.js
     healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
@@ -35,6 +35,8 @@ services:
         value: "3"
       - key: NODE_OPTIONS
         value: "--max-old-space-size=1536"  # With ISR cache disabled + Moralis off, 1536 is safe
+      - key: HOSTNAME
+        value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 
   # ── EthScan.io — Next.js frontend ───────────────────────────────────────────
   - type: web
@@ -43,8 +45,8 @@ services:
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build
-    startCommand: pnpm start
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    startCommand: cd .next/standalone/apps/explorer && node server.js
     healthCheckPath: /api/ping
     autoDeploy: true
     envVars:
@@ -66,6 +68,8 @@ services:
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
         value: "--max-old-space-size=1536"  # GC before 2GB OOM kill
+      - key: HOSTNAME
+        value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 
   # ── BNB Chain Indexer ────────────────────────────────────────────────────────
   - type: worker
