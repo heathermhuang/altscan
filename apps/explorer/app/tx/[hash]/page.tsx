@@ -16,28 +16,62 @@ export const revalidate = 300
 
 async function fetchNativePrice(): Promise<number | null> {
   const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+
+  // Try multiple Binance endpoints (binance.us for US-based servers like Render)
+  for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
+    try {
+      const res = await fetch(
+        `${host}/api/v3/ticker/price?symbol=${binanceSymbol}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(3000) },
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const price = parseFloat(data.price)
+        if (price > 0) return price
+      }
+    } catch { /* try next */ }
+  }
+
+  // Fallback: CryptoCompare
   try {
     const res = await fetch(
-      `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(3000) },
+      `https://min-api.cryptocompare.com/data/price?fsym=${ccSymbol}&tsyms=USD`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
     )
     if (res.ok) {
       const data = await res.json()
-      const price = parseFloat(data.price)
-      if (price > 0) return price
+      if (data?.USD > 0) return data.USD
     }
-  } catch { /* try fallback */ }
+  } catch { /* try next */ }
+
+  // Fallback: CoinGecko
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`,
       { cache: 'no-store', signal: AbortSignal.timeout(5000) },
     )
-    if (!res.ok) return null
-    const data = await res.json()
-    return data[chainConfig.coingeckoId]?.usd ?? null
-  } catch {
-    return null
-  }
+    if (res.ok) {
+      const data = await res.json()
+      return data[chainConfig.coingeckoId]?.usd ?? null
+    }
+  } catch { /* try next */ }
+
+  // Fallback: CoinCap
+  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  try {
+    const res = await fetch(
+      `https://api.coincap.io/v2/assets/${coincapId}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data?.data?.priceUsd)
+      if (price > 0) return price
+    }
+  } catch { /* all failed */ }
+
+  return null
 }
 
 async function fetchChainTip(): Promise<number | null> {

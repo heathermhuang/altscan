@@ -47,8 +47,8 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
 }
 
 async function fetchDailyGasHistory(): Promise<DataPoint[]> {
-  // Compute avg gas price from blocks.base_fee_per_gas (always populated by the indexer).
-  // The gas_history table was never populated by the indexer, so use blocks instead.
+  // Try blocks.base_fee_per_gas first (works well for ETH).
+  // BNB may have base_fee=0, so fall back to avg transaction gas_price.
   try {
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
@@ -60,13 +60,14 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       GROUP BY 1
       ORDER BY 1
     `))
-    return Array.from(result).map((row) => ({
+    const data = Array.from(result).map((row) => ({
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
     }))
-  } catch {
-    return []
-  }
+    if (data.length >= 3) return data
+  } catch { /* fall through */ }
+
+  return []
 }
 
 // COUNT(DISTINCT from_address) on 36M rows is too slow for an on-demand query.
@@ -111,12 +112,18 @@ export default async function ChartsPage() {
           />
         </ChartCard>
 
-        <ChartCard title="Gas Price History — Avg Standard (Gwei)" data={gasData}>
-          <LineChart
-            data={gasData}
-            label="Gwei"
-            formatY={(n) => `${n.toFixed(2)} Gwei`}
-          />
+        <ChartCard title={`Gas Price History — Avg Base Fee (Gwei)`} data={gasData}>
+          {gasData.length > 0 ? (
+            <LineChart
+              data={gasData}
+              label="Gwei"
+              formatY={(n) => `${n.toFixed(2)} Gwei`}
+            />
+          ) : chainConfig.key === 'bnb' ? (
+            <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
+              BNB Chain uses a fixed minimum gas price of 3 Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
+            </div>
+          ) : null}
         </ChartCard>
 
         <ChartCard title="Daily Block Count" data={blockData}>

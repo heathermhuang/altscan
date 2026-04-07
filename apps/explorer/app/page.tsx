@@ -42,22 +42,38 @@ const jsonLd = {
 
 async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
   const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
 
-  // Try Binance API first (most reliable from server environments, no API key needed)
+  // Try multiple Binance endpoints (binance.us for US-based servers like Render)
+  for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
+    try {
+      const res = await fetch(
+        `${host}/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(3000) }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const price = parseFloat(data.lastPrice)
+        const change = parseFloat(data.priceChangePercent)
+        if (price > 0) return { usd: price, change24h: change || 0 }
+      }
+    } catch { /* try next */ }
+  }
+
+  // Fallback: CryptoCompare (no API key needed, works from US)
   try {
     const res = await fetch(
-      `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(3000) }
+      `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
-      const price = parseFloat(data.lastPrice)
-      const change = parseFloat(data.priceChangePercent)
-      if (price > 0) return { usd: price, change24h: change || 0 }
+      const raw = data?.RAW?.[ccSymbol]?.USD
+      if (raw?.PRICE > 0) return { usd: raw.PRICE, change24h: raw.CHANGEPCT24HOUR ?? 0 }
     }
-  } catch { /* Binance failed, try CoinGecko */ }
+  } catch { /* try next */ }
 
-  // Fallback 1: CoinGecko
+  // Fallback: CoinGecko
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_24hr_change=true`,
@@ -73,9 +89,9 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
         }
       }
     }
-  } catch { /* CoinGecko failed, try CoinCap */ }
+  } catch { /* try next */ }
 
-  // Fallback 2: CoinCap
+  // Fallback: CoinCap
   const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
   try {
     const res = await fetch(

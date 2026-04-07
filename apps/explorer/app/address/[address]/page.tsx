@@ -96,14 +96,31 @@ export default async function AddressPage({
     getAddressRisk(addr),
     (async () => {
       const sym = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+      const ccSym = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+      // Try Binance US first (Render servers are US-based), then Binance global
+      for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
+        try {
+          const r = await fetch(`${host}/api/v3/ticker/price?symbol=${sym}`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+          if (r.ok) { const d = await r.json(); const p = parseFloat(d.price); if (p > 0) return p }
+        } catch { /* try next */ }
+      }
+      // Fallback: CryptoCompare
       try {
-        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
-        if (r.ok) { const d = await r.json(); const p = parseFloat(d.price); if (p > 0) return p }
-      } catch { /* try fallback */ }
+        const r = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${ccSym}&tsyms=USD`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
+        if (r.ok) { const d = await r.json(); if (d?.USD > 0) return d.USD }
+      } catch { /* try next */ }
+      // Fallback: CoinGecko
       try {
         const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
-        const d = await r.json(); return d[chainConfig.coingeckoId]?.usd ?? null
-      } catch { return null }
+        if (r.ok) { const d = await r.json(); return d[chainConfig.coingeckoId]?.usd ?? null }
+      } catch { /* try next */ }
+      // Fallback: CoinCap
+      const ccId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+      try {
+        const r = await fetch(`https://api.coincap.io/v2/assets/${ccId}`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
+        if (r.ok) { const d = await r.json(); const p = parseFloat(d?.data?.priceUsd); if (p > 0) return p }
+      } catch { /* all failed */ }
+      return null
     })(),
   ])
 
