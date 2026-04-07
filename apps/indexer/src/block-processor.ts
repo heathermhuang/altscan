@@ -107,19 +107,33 @@ async function upsertAddresses(
   }
   if (counts.size === 0) return
 
-  const rows = Array.from(counts.entries())
+  // Sort addresses alphabetically to acquire row locks in a consistent order,
+  // preventing deadlocks when concurrent block processors touch overlapping addresses.
+  const rows = Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   const ts = timestamp.toISOString()
 
-  await db.execute(sql`
-    INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
-    VALUES ${sql.join(
-      rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
-      sql`, `
-    )}
-    ON CONFLICT (address) DO UPDATE SET
-      tx_count  = addresses.tx_count + EXCLUDED.tx_count,
-      last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
-  `)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await db.execute(sql`
+        INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
+        VALUES ${sql.join(
+          rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
+          sql`, `
+        )}
+        ON CONFLICT (address) DO UPDATE SET
+          tx_count  = addresses.tx_count + EXCLUDED.tx_count,
+          last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
+      `)
+      return
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('deadlock') && attempt < 3) {
+        await new Promise(r => setTimeout(r, 50 * attempt))
+        continue
+      }
+      throw err
+    }
+  }
 }
 
 let blockReceiptsSupported = true

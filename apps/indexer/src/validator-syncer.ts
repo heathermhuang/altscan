@@ -17,6 +17,8 @@ const STAKE_HUB_ABI = [
   'function getValidatorElectionInfo(uint256 offset, uint256 limit) view returns (address[] consensusAddrs, uint256[] votingPowers, bytes[] voteAddrs, uint256 totalLength)',
   'function getValidatorDescription(address operatorAddress) view returns (string moniker, string identity, string website, string details)',
   'function getValidatorCommission(address operatorAddress) view returns (uint64 rate, uint64 maxRate, uint64 maxChangeRate)',
+  'function getValidatorConsensusKeyByOperator(address operatorAddress) view returns (address consensusAddr)',
+  'function getOperatorAddressByConsensusAddress(address consensusAddr) view returns (address operatorAddr)',
 ]
 
 // Known validator names as fallback (top BSC validators by consensus address)
@@ -42,17 +44,23 @@ const KNOWN_VALIDATORS: Record<string, string> = {
  * Try StakeHub first (has voting power), fall back to ValidatorSet (active list only)
  */
 export async function syncValidators(): Promise<void> {
+  console.log('[validator-syncer] Starting sync...')
   const db = getDb()
 
   // Attempt 1: StakeHub with election info (has voting power data)
   try {
     const stakeHub = new Contract(STAKE_HUB_ADDRESS, STAKE_HUB_ABI, provider)
     const result = await stakeHub.getValidatorElectionInfo(0, 100)
-    const validators: string[] = Array.from(result[0])
+    const consensusAddrs: string[] = Array.from(result[0])
     const votingPowers: bigint[] = Array.from(result[1])
 
-    if (validators.length > 0) {
-      await upsertValidators(db, stakeHub, validators, votingPowers)
+    console.log(`[validator-syncer] StakeHub returned ${consensusAddrs.length} validators`)
+
+    if (consensusAddrs.length > 0) {
+      // StakeHub returns consensus addresses, but getValidatorDescription needs
+      // operator addresses. Resolve the mapping first.
+      const operatorMap = await resolveOperatorAddresses(stakeHub, consensusAddrs)
+      await upsertValidators(db, stakeHub, consensusAddrs, votingPowers, operatorMap)
       return
     }
     console.warn('[validator-syncer] StakeHub returned 0 validators, falling back to ValidatorSet')
@@ -64,18 +72,52 @@ export async function syncValidators(): Promise<void> {
   try {
     const validatorSet = new Contract(VALIDATOR_SET_ADDRESS, VALIDATOR_SET_ABI, provider)
     const validators: string[] = Array.from(await validatorSet.getValidators())
+    console.log(`[validator-syncer] ValidatorSet returned ${validators.length} validators`)
 
     if (validators.length === 0) {
-      console.warn('[validator-syncer] ValidatorSet returned 0 validators')
+      console.warn('[validator-syncer] ValidatorSet returned 0 validators — nothing to sync')
       return
     }
 
     // No voting power from this contract — use equal weight
     const equalPower = Array(validators.length).fill(0n) as bigint[]
-    await upsertValidators(db, null, validators, equalPower)
+    await upsertValidators(db, null, validators, equalPower, new Map())
   } catch (err) {
     console.error('[validator-syncer] Both methods failed:', err instanceof Error ? err.message : err)
   }
+}
+
+/**
+ * Resolve consensus addresses → operator addresses via StakeHub.
+ * The description/commission RPC calls require operator addresses, not consensus.
+ */
+async function resolveOperatorAddresses(
+  stakeHub: Contract,
+  consensusAddrs: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  let resolved = 0
+  let failed = 0
+
+  // Batch in groups of 10 to avoid RPC rate limits
+  for (let i = 0; i < consensusAddrs.length; i += 10) {
+    const batch = consensusAddrs.slice(i, i + 10)
+    const results = await Promise.allSettled(
+      batch.map(addr => stakeHub.getOperatorAddressByConsensusAddress(addr))
+    )
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j]
+      if (r.status === 'fulfilled' && r.value && r.value !== '0x0000000000000000000000000000000000000000') {
+        map.set(batch[j].toLowerCase(), (r.value as string).toLowerCase())
+        resolved++
+      } else {
+        failed++
+      }
+    }
+  }
+
+  console.log(`[validator-syncer] Resolved ${resolved}/${consensusAddrs.length} operator addresses (${failed} failed)`)
+  return map
 }
 
 async function upsertValidators(
@@ -83,31 +125,38 @@ async function upsertValidators(
   stakeHub: Contract | null,
   validators: string[],
   votingPowers: bigint[],
+  operatorMap: Map<string, string>,
 ): Promise<void> {
   const totalPower = votingPowers.reduce((sum, vp) => sum + vp, 0n)
   const now = new Date()
+  let upserted = 0
+  let descResolved = 0
 
   for (let i = 0; i < validators.length; i++) {
     const addr = validators[i].toLowerCase()
     const vp = votingPowers[i] ?? 0n
 
-    // Try to get on-chain moniker, fall back to known list
+    // Try to get on-chain moniker via operator address, fall back to known list
     let moniker = KNOWN_VALIDATORS[addr] ?? `Validator ${i + 1}`
     let commission = '0.1' // default 10%
 
     if (stakeHub) {
-      try {
-        const desc = await stakeHub.getValidatorDescription(addr)
-        if (desc.moniker && desc.moniker.length > 0) moniker = desc.moniker
-      } catch { /* description not available */ }
+      const operatorAddr = operatorMap.get(addr)
+      if (operatorAddr) {
+        try {
+          const desc = await stakeHub.getValidatorDescription(operatorAddr)
+          if (desc.moniker && desc.moniker.length > 0) {
+            moniker = desc.moniker
+            descResolved++
+          }
+        } catch { /* description not available for this operator */ }
 
-      try {
-        const comm = await stakeHub.getValidatorCommission(addr)
-        commission = (Number(comm.rate) / 1e18).toFixed(4)
-      } catch { /* commission not available */ }
+        try {
+          const comm = await stakeHub.getValidatorCommission(operatorAddr)
+          commission = (Number(comm.rate) / 1e18).toFixed(4)
+        } catch { /* commission not available */ }
+      }
     }
-
-    const vpPct = totalPower > 0n ? Number((vp * 10000n) / totalPower) / 100 : 0
 
     try {
       await db.insert(schema.validators).values({
@@ -128,10 +177,11 @@ async function upsertValidators(
           updatedAt: now,
         },
       })
+      upserted++
     } catch (err) {
       console.warn('[validator-syncer] Failed to upsert validator:', addr, err instanceof Error ? err.message : err)
     }
   }
 
-  console.log(`[validator-syncer] Synced ${validators.length} validators${totalPower > 0n ? ` (total voting power: ${formatEther(totalPower)} BNB)` : ''}`)
+  console.log(`[validator-syncer] Synced ${upserted}/${validators.length} validators (${descResolved} monikers from chain)${totalPower > 0n ? ` — total voting power: ${formatEther(totalPower)} BNB` : ''}`)
 }
