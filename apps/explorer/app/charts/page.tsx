@@ -26,11 +26,14 @@ function withTimeout<T>(promise: Promise<T>): Promise<T> {
 
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
-    // Use NOW() - 30 days instead of subquery MAX(timestamp) to avoid double full-table scan
+    // Use blocks table (272K rows) joined with tx_count per block instead of
+    // scanning the 36M-row transactions table directly. Much faster and avoids
+    // queries that run for 8+ minutes and consume DB connections.
     const result = await withTimeout(db.execute(sql`
-      SELECT DATE(timestamp AT TIME ZONE 'UTC') as date, COUNT(*)::int as value
-      FROM transactions
-      WHERE timestamp >= NOW() - INTERVAL '30 days'
+      SELECT DATE(b.timestamp AT TIME ZONE 'UTC') as date,
+             SUM(b.tx_count)::int as value
+      FROM blocks b
+      WHERE b.timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
