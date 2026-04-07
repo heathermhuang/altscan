@@ -42,7 +42,11 @@ check_endpoint() {
   local url="$1"
   local label="$2"
   local code
-  code=$(curl -s --max-time "$TIMEOUT" -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+  local raw
+  raw=$(curl -s --max-time "$TIMEOUT" -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+  # Extract last 3 digits — handles 103 Early Hints prefixing the status
+  code="${raw: -3}"
+  [[ -z "$code" || ! "$code" =~ ^[0-9]+$ ]] && code="000"
   if [[ "$code" == "200" ]]; then
     log_ok "$label ($url) -> $code"
     return 0
