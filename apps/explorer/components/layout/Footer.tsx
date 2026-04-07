@@ -41,7 +41,7 @@ export function Footer() {
               href="https://mdt.io"
               target="_blank"
               rel="noopener noreferrer"
-              className={`${theme.footerAccent} hover:opacity-80 font-semibold transition-colors`}
+              className={`${theme.footerAccent} hover:opacity-80 font-semibold transition-colors py-1 inline-block`}
             >
               Measurable Data Token (MDT)
             </a>
@@ -51,15 +51,15 @@ export function Footer() {
 
       {/* Links + network switcher + copyright */}
       <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex flex-wrap justify-center md:justify-start gap-x-5 gap-y-2 text-sm">
-          <Link href="/blocks" className="hover:text-gray-200 transition-colors">Blocks</Link>
-          <Link href="/txs" className="hover:text-gray-200 transition-colors">Transactions</Link>
-          <Link href="/token" className="hover:text-gray-200 transition-colors">Tokens</Link>
-          <Link href="/charts" className="hover:text-gray-200 transition-colors">Charts</Link>
-          <Link href="/api-docs" className="hover:text-gray-200 transition-colors">API</Link>
-          <Link href="/developer" className="hover:text-gray-200 transition-colors">Developer</Link>
-          <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">MDT Website ↗</a>
-          <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors">GitHub ↗</a>
+        <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-1 text-sm">
+          <Link href="/blocks" className="hover:text-gray-200 transition-colors py-2">Blocks</Link>
+          <Link href="/txs" className="hover:text-gray-200 transition-colors py-2">Transactions</Link>
+          <Link href="/token" className="hover:text-gray-200 transition-colors py-2">Tokens</Link>
+          <Link href="/charts" className="hover:text-gray-200 transition-colors py-2">Charts</Link>
+          <Link href="/api-docs" className="hover:text-gray-200 transition-colors py-2">API</Link>
+          <Link href="/developer" className="hover:text-gray-200 transition-colors py-2">Developer</Link>
+          <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">MDT Website ↗</a>
+          <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
         </div>
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />
