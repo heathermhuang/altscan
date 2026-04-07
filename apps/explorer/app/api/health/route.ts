@@ -8,15 +8,26 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const [latest] = await db
-      .select({ number: schema.blocks.number, timestamp: schema.blocks.timestamp })
-      .from(schema.blocks)
-      .orderBy(desc(schema.blocks.number))
-      .limit(1)
-
-    const lagSeconds = latest
-      ? Math.floor((Date.now() - new Date(latest.timestamp).getTime()) / 1000)
-      : null
+    // Use a lightweight query with a timeout — avoid blocking the health check
+    // if the DB is under pressure. The blocks table has an index on number (PK).
+    let lagSeconds: number | null = null
+    let latestBlockNumber: number | null = null
+    try {
+      const [latest] = await Promise.race([
+        db
+          .select({ number: schema.blocks.number, timestamp: schema.blocks.timestamp })
+          .from(schema.blocks)
+          .orderBy(desc(schema.blocks.number))
+          .limit(1),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('db timeout')), 3000)),
+      ])
+      latestBlockNumber = latest?.number ?? null
+      lagSeconds = latest
+        ? Math.floor((Date.now() - new Date(latest.timestamp).getTime()) / 1000)
+        : null
+    } catch {
+      // DB slow or down — still report memory health
+    }
 
     // Memory diagnostics
     const mem = process.memoryUsage()
@@ -39,7 +50,7 @@ export async function GET() {
 
     return NextResponse.json({
       status: memoryStatus === 'critical' ? 'degraded' : 'ok',
-      latestBlock: latest?.number ?? null,
+      latestBlock: latestBlockNumber,
       lagSeconds,
       memory: {
         status: memoryStatus,

@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq, or, desc, count, sql, inArray, min } from 'drizzle-orm'
+import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { formatNativeToken, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbol } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
@@ -55,15 +55,14 @@ export default async function AddressPage({
 
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) notFound()
 
-  // Always fetch address info and contract info
+  // Always fetch address info and contract info.
+  // txCount and firstSeen come from the addresses table (instant PK lookup)
+  // instead of COUNT(*)/MIN(timestamp) on 36M-row transactions table (OOM risk).
   let addressInfo: typeof schema.addresses.$inferSelect | null = null
   let contractResult: typeof schema.contracts.$inferSelect | null = null
-  let txCount = 0
-  let firstTxTimestamp: Date | null = null
 
   try {
-    let firstTxResult: { value: Date | null }[]
-    ;[addressInfo, contractResult, [{ value: txCount }], firstTxResult] = await Promise.all([
+    ;[addressInfo, contractResult] = await Promise.all([
       db
         .select()
         .from(schema.addresses)
@@ -76,29 +75,13 @@ export default async function AddressPage({
         .where(eq(schema.contracts.address, addr))
         .limit(1)
         .then((r) => r[0] ?? null),
-      db
-        .select({ value: count() })
-        .from(schema.transactions)
-        .where(
-          or(
-            eq(schema.transactions.fromAddress, addr),
-            eq(schema.transactions.toAddress, addr),
-          ),
-        ),
-      db
-        .select({ value: min(schema.transactions.timestamp) })
-        .from(schema.transactions)
-        .where(
-          or(
-            eq(schema.transactions.fromAddress, addr),
-            eq(schema.transactions.toAddress, addr),
-          ),
-        ),
     ])
-    firstTxTimestamp = firstTxResult[0]?.value ?? null
   } catch {
     // DB not connected
   }
+
+  const txCount = addressInfo?.txCount ?? 0
+  const firstTxTimestamp = addressInfo?.firstSeen ?? null
 
   // Enrich with external data — split into two batches to reduce peak memory.
   // Batch 1: lightweight lookups. Batch 2: heavier RPC + Moralis calls.
@@ -498,29 +481,23 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
   let total = 0
 
   try {
-    ;[transfers, [{ value: total }]] = await Promise.all([
-      db
-        .select()
-        .from(schema.tokenTransfers)
-        .where(
-          or(
-            eq(schema.tokenTransfers.fromAddress, addr),
-            eq(schema.tokenTransfers.toAddress, addr),
-          ),
-        )
-        .orderBy(desc(schema.tokenTransfers.blockNumber))
-        .limit(PAGE_SIZE)
-        .offset(offset),
-      db
-        .select({ value: count() })
-        .from(schema.tokenTransfers)
-        .where(
-          or(
-            eq(schema.tokenTransfers.fromAddress, addr),
-            eq(schema.tokenTransfers.toAddress, addr),
-          ),
+    // Fetch one extra row to detect "has next page" — avoids COUNT(*) on token_transfers
+    // which is a full table scan with OR across two columns on millions of rows.
+    const rows = await db
+      .select()
+      .from(schema.tokenTransfers)
+      .where(
+        or(
+          eq(schema.tokenTransfers.fromAddress, addr),
+          eq(schema.tokenTransfers.toAddress, addr),
         ),
-    ])
+      )
+      .orderBy(desc(schema.tokenTransfers.blockNumber))
+      .limit(PAGE_SIZE + 1)
+      .offset(offset)
+    transfers = rows.slice(0, PAGE_SIZE)
+    // Estimate total for pagination: if we got more than PAGE_SIZE, there are more pages
+    total = rows.length > PAGE_SIZE ? offset + PAGE_SIZE + 1 : offset + rows.length
   } catch {
     // DB error
   }
@@ -711,37 +688,17 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   let holdings: HoldingRow[] = []
 
   try {
-    // First find the distinct tokens this address interacts with (cheap index scan)
-    // then aggregate only those — avoids full table scans on token_transfers
+    // Use pre-computed token_balances table (indexed, instant) instead of
+    // scanning token_transfers with SUM aggregation (millions of rows, OOM risk).
     const result = await db.execute(sql`
-      WITH addr_tokens AS (
-        SELECT DISTINCT token_address FROM token_transfers
-        WHERE to_address = ${addr} OR from_address = ${addr}
-        LIMIT 200
-      ),
-      inflows AS (
-        SELECT token_address, SUM(value::numeric) as total
-        FROM token_transfers
-        WHERE to_address = ${addr} AND token_address IN (SELECT token_address FROM addr_tokens)
-        GROUP BY token_address
-      ),
-      outflows AS (
-        SELECT token_address, SUM(value::numeric) as total
-        FROM token_transfers
-        WHERE from_address = ${addr} AND token_address IN (SELECT token_address FROM addr_tokens)
-        GROUP BY token_address
-      )
-      SELECT i.token_address,
-             (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
-      FROM inflows i
-      LEFT JOIN outflows o ON i.token_address = o.token_address
-      WHERE (COALESCE(i.total, 0) - COALESCE(o.total, 0)) > 0
-      ORDER BY (COALESCE(i.total, 0) - COALESCE(o.total, 0)) DESC
+      SELECT tb.token_address, tb.balance::text as balance
+      FROM token_balances tb
+      WHERE tb.holder_address = ${addr} AND tb.balance::numeric > 0
+      ORDER BY tb.balance::numeric DESC
       LIMIT 50
     `)
 
     const rows = Array.from(result) as Record<string, unknown>[]
-    // Batch-fetch token info in a single query instead of N+1
     const tokenAddresses = rows.map(r => String(r.token_address))
     const tokenInfos = tokenAddresses.length > 0
       ? await db.select({
@@ -902,13 +859,20 @@ async function AnalyticsTab({
       (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
     )
 
-    // If firstSeen/lastSeen not in addresses table, use quick index lookups
+    // If firstSeen/lastSeen not in addresses table, use separate single-column
+    // index lookups. OR across from/to forces a merge scan on 36M rows.
     if (!firstSeen || !lastSeen) {
       const [seenResult] = await Promise.all([
         db.execute(sql`
           SELECT
-            (SELECT timestamp FROM transactions WHERE from_address = ${addr} OR to_address = ${addr} ORDER BY timestamp ASC LIMIT 1) as first_seen,
-            (SELECT timestamp FROM transactions WHERE from_address = ${addr} OR to_address = ${addr} ORDER BY timestamp DESC LIMIT 1) as last_seen
+            LEAST(
+              (SELECT timestamp FROM transactions WHERE from_address = ${addr} ORDER BY timestamp ASC LIMIT 1),
+              (SELECT timestamp FROM transactions WHERE to_address = ${addr} ORDER BY timestamp ASC LIMIT 1)
+            ) as first_seen,
+            GREATEST(
+              (SELECT timestamp FROM transactions WHERE from_address = ${addr} ORDER BY timestamp DESC LIMIT 1),
+              (SELECT timestamp FROM transactions WHERE to_address = ${addr} ORDER BY timestamp DESC LIMIT 1)
+            ) as last_seen
         `),
       ])
       const row = Array.from(seenResult)[0] as Record<string, unknown> | undefined
