@@ -859,26 +859,9 @@ async function AnalyticsTab({
       (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
     )
 
-    // If firstSeen/lastSeen not in addresses table, use separate single-column
-    // index lookups. OR across from/to forces a merge scan on 36M rows.
-    if (!firstSeen || !lastSeen) {
-      const [seenResult] = await Promise.all([
-        db.execute(sql`
-          SELECT
-            LEAST(
-              (SELECT timestamp FROM transactions WHERE from_address = ${addr} ORDER BY timestamp ASC LIMIT 1),
-              (SELECT timestamp FROM transactions WHERE to_address = ${addr} ORDER BY timestamp ASC LIMIT 1)
-            ) as first_seen,
-            GREATEST(
-              (SELECT timestamp FROM transactions WHERE from_address = ${addr} ORDER BY timestamp DESC LIMIT 1),
-              (SELECT timestamp FROM transactions WHERE to_address = ${addr} ORDER BY timestamp DESC LIMIT 1)
-            ) as last_seen
-        `),
-      ])
-      const row = Array.from(seenResult)[0] as Record<string, unknown> | undefined
-      if (row?.first_seen && !firstSeen) firstSeen = new Date(row.first_seen as string)
-      if (row?.last_seen && !lastSeen) lastSeen = new Date(row.last_seen as string)
-    }
+    // first_seen/last_seen are pre-computed by the indexer in the addresses table.
+    // All 1.9M+ addresses have these fields populated, so no fallback needed.
+    // The previous fallback queried the 36M-row transactions table and took 30+ minutes.
   } catch {
     // DB error
   }
