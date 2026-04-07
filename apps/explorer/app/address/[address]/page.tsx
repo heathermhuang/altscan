@@ -94,8 +94,17 @@ export default async function AddressPage({
   const [resolvedName, riskData, nativePrice] = await Promise.all([
     resolveName(addr),
     getAddressRisk(addr),
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
-      .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
+    (async () => {
+      const sym = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+      try {
+        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+        if (r.ok) { const d = await r.json(); const p = parseFloat(d.price); if (p > 0) return p }
+      } catch { /* try fallback */ }
+      try {
+        const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
+        const d = await r.json(); return d[chainConfig.coingeckoId]?.usd ?? null
+      } catch { return null }
+    })(),
   ])
 
   // Batch 2: heavier RPC + Moralis calls (after batch 1 frees its memory)

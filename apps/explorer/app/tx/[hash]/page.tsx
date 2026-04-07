@@ -15,6 +15,18 @@ import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 export const revalidate = 300
 
 async function fetchNativePrice(): Promise<number | null> {
+  const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+  try {
+    const res = await fetch(
+      `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(3000) },
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data.price)
+      if (price > 0) return price
+    }
+  } catch { /* try fallback */ }
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`,

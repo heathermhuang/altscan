@@ -37,8 +37,6 @@ export default async function WhalesPage({
   const { period: periodParam } = await searchParams
   const period = ['1h', '24h', '7d', 'all'].includes(periodParam ?? '') ? (periodParam as string) : '24h'
 
-  // Use NOW() instead of MAX(timestamp) subquery to avoid full-table scan.
-  // "All time" is capped to 30 days to prevent unbounded sorts on 36M+ rows.
   const cutoff =
     period === '1h'
       ? sql`NOW() - INTERVAL '1 hour'`
@@ -46,26 +44,39 @@ export default async function WhalesPage({
       ? sql`NOW() - INTERVAL '24 hours'`
       : period === '7d'
       ? sql`NOW() - INTERVAL '7 days'`
-      : sql`NOW() - INTERVAL '30 days'`  // "all" capped to 30d to avoid OOM
+      : sql`NOW() - INTERVAL '30 days'`  // "all" capped to 30d
+
+  // Minimum whale threshold: 10 BNB or 1 ETH (in wei) to skip millions of dust txs.
+  // Without this, Postgres must sort the entire time window (millions of rows).
+  const minValueWei = chainConfig.key === 'bnb' ? '10000000000000000000' : '1000000000000000000'
 
   let whales: WhaleTx[] = []
 
   try {
-    whales = await db
-      .select({
-        hash: schema.transactions.hash,
-        fromAddress: schema.transactions.fromAddress,
-        toAddress: schema.transactions.toAddress,
-        value: schema.transactions.value,
-        blockNumber: schema.transactions.blockNumber,
-        timestamp: schema.transactions.timestamp,
-      })
-      .from(schema.transactions)
-      .where(sql`${schema.transactions.timestamp} >= ${cutoff} AND ${schema.transactions.value}::numeric > 0`)
-      .orderBy(desc(sql`${schema.transactions.value}::numeric`))
-      .limit(50)
-    whales = whales.map(w => ({ ...w, timestamp: new Date(w.timestamp) }))
-  } catch { /* DB not connected */ }
+    const result = await Promise.race([
+      db.execute(sql`
+        SELECT hash, from_address as "fromAddress", to_address as "toAddress",
+               value, block_number as "blockNumber", timestamp
+        FROM transactions
+        WHERE timestamp >= ${cutoff}
+          AND value > ${minValueWei}
+        ORDER BY value DESC
+        LIMIT 50
+      `),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+    ])
+    whales = Array.from(result).map((row) => {
+      const r = row as Record<string, unknown>
+      return {
+        hash: String(r.hash),
+        fromAddress: String(r.fromAddress),
+        toAddress: r.toAddress ? String(r.toAddress) : null,
+        value: String(r.value),
+        blockNumber: Number(r.blockNumber),
+        timestamp: new Date(r.timestamp as string),
+      }
+    })
+  } catch { /* DB not connected or timeout */ }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

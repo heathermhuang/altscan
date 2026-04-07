@@ -41,7 +41,23 @@ const jsonLd = {
 }
 
 async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
-  // Try CoinGecko first (longer cache to avoid rate limits)
+  const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
+
+  // Try Binance API first (most reliable from server environments, no API key needed)
+  try {
+    const res = await fetch(
+      `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(3000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data.lastPrice)
+      const change = parseFloat(data.priceChangePercent)
+      if (price > 0) return { usd: price, change24h: change || 0 }
+    }
+  } catch { /* Binance failed, try CoinGecko */ }
+
+  // Fallback 1: CoinGecko
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_24hr_change=true`,
@@ -57,36 +73,22 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
         }
       }
     }
-  } catch { /* CoinGecko failed, try backup */ }
+  } catch { /* CoinGecko failed, try CoinCap */ }
 
-  // Fallback: CoinCap API (only works well for BNB)
-  if (chainConfig.key === 'bnb') {
-    try {
-      const res = await fetch(
-        'https://api.coincap.io/v2/assets/binance-coin',
-        { cache: 'no-store', signal: AbortSignal.timeout(5000) }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const price = parseFloat(data?.data?.priceUsd)
-        const change = parseFloat(data?.data?.changePercent24Hr)
-        if (price > 0) return { usd: price, change24h: change || 0 }
-      }
-    } catch { /* both failed */ }
-  } else if (chainConfig.key === 'eth') {
-    try {
-      const res = await fetch(
-        'https://api.coincap.io/v2/assets/ethereum',
-        { cache: 'no-store', signal: AbortSignal.timeout(5000) }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const price = parseFloat(data?.data?.priceUsd)
-        const change = parseFloat(data?.data?.changePercent24Hr)
-        if (price > 0) return { usd: price, change24h: change || 0 }
-      }
-    } catch { /* both failed */ }
-  }
+  // Fallback 2: CoinCap
+  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  try {
+    const res = await fetch(
+      `https://api.coincap.io/v2/assets/${coincapId}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const price = parseFloat(data?.data?.priceUsd)
+      const change = parseFloat(data?.data?.changePercent24Hr)
+      if (price > 0) return { usd: price, change24h: change || 0 }
+    }
+  } catch { /* all failed */ }
 
   return null
 }

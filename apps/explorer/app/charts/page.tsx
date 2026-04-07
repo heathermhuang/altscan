@@ -47,12 +47,16 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
 }
 
 async function fetchDailyGasHistory(): Promise<DataPoint[]> {
+  // Compute avg gas price from blocks.base_fee_per_gas (always populated by the indexer).
+  // The gas_history table was never populated by the indexer, so use blocks instead.
   try {
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
-             AVG(standard::numeric / 1e9)::numeric(18,4) as value
-      FROM gas_history
+             AVG(base_fee_per_gas::numeric / 1e9)::numeric(18,4) as value
+      FROM blocks
       WHERE timestamp >= NOW() - INTERVAL '30 days'
+        AND base_fee_per_gas IS NOT NULL
+        AND base_fee_per_gas > 0
       GROUP BY 1
       ORDER BY 1
     `))
