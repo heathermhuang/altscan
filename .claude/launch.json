@@ -16,10 +16,11 @@
     },
     {
       "name": "Explorer BNB (Next.js)",
-      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
-      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/heatherm/.npm-packages/node_modules/.bin/pnpm", "--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
       "port": 3002,
       "env": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
         "CHAIN": "bnb",
         "NEXT_PUBLIC_CHAIN": "bnb"
       }
