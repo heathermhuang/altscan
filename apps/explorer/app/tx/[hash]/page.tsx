@@ -18,7 +18,7 @@ async function fetchNativePrice(): Promise<number | null> {
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`,
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) },
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
     )
     if (!res.ok) return null
     const data = await res.json()
@@ -82,7 +82,7 @@ async function resolveMethodName(methodId: string): Promise<string | null> {
   try {
     const res = await fetch(
       `https://www.4byte.directory/api/v1/signatures/?hex_signature=${methodId}`,
-      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(5000) },
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
     )
     if (!res.ok) return null
     const data = (await res.json()) as { results?: { text_signature: string }[] }

@@ -94,7 +94,7 @@ export default async function AddressPage({
   const [resolvedName, riskData, nativePrice] = await Promise.all([
     resolveName(addr),
     getAddressRisk(addr),
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
       .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
   ])
 
