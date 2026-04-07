@@ -204,7 +204,7 @@ export default async function HomePage() {
       {/* Stats bar */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-gray-500">Network Overview</h2>
+          <h2 className="text-lg font-semibold text-gray-500">Network Overview</h2>
           <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
             <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-pulse" />
             Live
@@ -281,7 +281,7 @@ function StatCard({
 function SectionHeader({ title, href }: { title: string; href: string }) {
   return (
     <div className="flex justify-between items-center mb-3">
-      <h2 className="font-semibold text-gray-800">{title}</h2>
+      <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
       <Link href={href} className={`text-sm ${chainConfig.theme.linkText} hover:underline`}>View all →</Link>
     </div>
   )
