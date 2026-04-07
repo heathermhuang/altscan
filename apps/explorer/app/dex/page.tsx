@@ -36,21 +36,22 @@ export default async function DexPage({
   const tokenSymbolMap = new Map<string, string>()
 
   try {
-    const [tradesResult, tradeCountResult, makerCountResult, topPairsResult] = await Promise.all([
-      db.select().from(schema.dexTrades)
-        .orderBy(desc(schema.dexTrades.blockNumber))
-        .limit(PAGE_SIZE)
-        .offset(offset),
-      db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'dex_trades'`),
-      db.execute(sql`SELECT COUNT(DISTINCT maker)::int as value FROM dex_trades`),
-      db.execute(sql`
-        SELECT pair_address, dex, COUNT(*)::int as trade_count
-        FROM dex_trades
-        GROUP BY pair_address, dex
-        ORDER BY trade_count DESC
-        LIMIT 5
-      `),
-    ])
+    // Run sequentially to avoid concurrent full-table scans.
+    // Replaced COUNT(DISTINCT maker) with reltuples estimate — full scan was causing OOM.
+    const tradesResult = await db.select().from(schema.dexTrades)
+      .orderBy(desc(schema.dexTrades.blockNumber))
+      .limit(PAGE_SIZE)
+      .offset(offset)
+    const tradeCountResult = await db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'dex_trades'`)
+    // Use reltuples as proxy for unique makers — exact COUNT(DISTINCT) is too expensive
+    const makerCountResult = await db.execute(sql`SELECT GREATEST(1, (reltuples / 10)::bigint) AS value FROM pg_class WHERE relname = 'dex_trades'`)
+    const topPairsResult = await db.execute(sql`
+      SELECT pair_address, dex, COUNT(*)::int as trade_count
+      FROM dex_trades
+      GROUP BY pair_address, dex
+      ORDER BY trade_count DESC
+      LIMIT 5
+    `)
 
     trades = tradesResult
     // Fetch token decimals + symbols for all tokens in these trades

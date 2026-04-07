@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { desc, count } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 
@@ -21,15 +21,16 @@ export async function GET(request: Request) {
 
   let blocks, totalResult
   try {
+    // Use reltuples estimate instead of COUNT(*) — full count on 35M+ rows caused OOM
     ;[blocks, totalResult] = await Promise.all([
       db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(limit).offset(offset),
-      db.select({ count: count() }).from(schema.blocks),
+      db.execute(sql`SELECT reltuples::bigint AS count FROM pg_class WHERE relname = 'blocks'`),
     ])
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 
-  const total = Number(totalResult[0]?.count ?? 0)
+  const total = Math.max(0, Number((Array.from(totalResult)[0] as Record<string, unknown>)?.count ?? 0))
 
   return apiJson({ blocks, total, page, limit })
 }

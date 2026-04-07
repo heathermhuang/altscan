@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { desc, count, eq } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 
 export async function GET(request: Request) {
@@ -23,24 +23,21 @@ export async function GET(request: Request) {
   const validTypes = ['BEP20', 'BEP721', 'BEP1155']
 
   let query = db.select().from(schema.tokens).$dynamic()
-  let countQuery = db.select({ count: count() }).from(schema.tokens).$dynamic()
 
   if (type && validTypes.includes(type)) {
     query = query.where(eq(schema.tokens.type, type))
-    countQuery = countQuery.where(eq(schema.tokens.type, type))
   }
 
-  let tokens, totalResult
+  let tokens: typeof schema.tokens.$inferSelect[] = []
+  let total = 0
   try {
-    ;[tokens, totalResult] = await Promise.all([
-      query.orderBy(desc(schema.tokens.holderCount)).limit(limit).offset(offset),
-      countQuery,
-    ])
+    // Use reltuples estimate instead of COUNT(*) to avoid full table scan
+    tokens = await query.orderBy(desc(schema.tokens.holderCount)).limit(limit).offset(offset)
+    const countResult = await db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'tokens'`)
+    total = Math.max(0, Number((Array.from(countResult)[0] as Record<string, unknown>)?.estimate ?? 0))
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-
-  const total = Number(totalResult[0]?.count ?? 0)
 
   return NextResponse.json({ tokens, total }, { status: 200 })
 }

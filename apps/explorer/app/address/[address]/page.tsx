@@ -882,16 +882,16 @@ async function AnalyticsTab({
   let lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
 
   try {
+    // Use a capped sample (last 1000 txs) instead of full-table SUM scans.
+    // Full SUM on 36M+ row transactions table was the #1 cause of OOM crashes.
     const [sentResult, receivedResult] = await Promise.all([
       db.execute(sql`
         SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM transactions
-        WHERE from_address = ${addr}
+        FROM (SELECT value FROM transactions WHERE from_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
       `),
       db.execute(sql`
         SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM transactions
-        WHERE to_address = ${addr}
+        FROM (SELECT value FROM transactions WHERE to_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
       `),
     ])
 
@@ -902,13 +902,13 @@ async function AnalyticsTab({
       (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
     )
 
-    // If firstSeen/lastSeen not in addresses table, compute from transactions
+    // If firstSeen/lastSeen not in addresses table, use quick index lookups
     if (!firstSeen || !lastSeen) {
       const [seenResult] = await Promise.all([
         db.execute(sql`
-          SELECT MIN(timestamp) as first_seen, MAX(timestamp) as last_seen
-          FROM transactions
-          WHERE from_address = ${addr} OR to_address = ${addr}
+          SELECT
+            (SELECT timestamp FROM transactions WHERE from_address = ${addr} OR to_address = ${addr} ORDER BY timestamp ASC LIMIT 1) as first_seen,
+            (SELECT timestamp FROM transactions WHERE from_address = ${addr} OR to_address = ${addr} ORDER BY timestamp DESC LIMIT 1) as last_seen
         `),
       ])
       const row = Array.from(seenResult)[0] as Record<string, unknown> | undefined

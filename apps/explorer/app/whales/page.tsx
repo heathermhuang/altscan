@@ -37,55 +37,33 @@ export default async function WhalesPage({
   const { period: periodParam } = await searchParams
   const period = ['1h', '24h', '7d', 'all'].includes(periodParam ?? '') ? (periodParam as string) : '24h'
 
-  // Compute cutoff relative to the most recently indexed data, not NOW().
-  const maxTimestamp: Date | null = await db
-    .select({ max: sql<Date>`MAX(timestamp)` })
-    .from(schema.transactions)
-    .then(r => r[0]?.max ?? null)
-    .catch(() => null)
-
-  const base = maxTimestamp ? new Date(maxTimestamp) : new Date()
+  // Use NOW() instead of MAX(timestamp) subquery to avoid full-table scan.
+  // "All time" is capped to 30 days to prevent unbounded sorts on 36M+ rows.
   const cutoff =
     period === '1h'
-      ? new Date(base.getTime() - 3600000)
+      ? sql`NOW() - INTERVAL '1 hour'`
       : period === '24h'
-      ? new Date(base.getTime() - 86400000)
+      ? sql`NOW() - INTERVAL '24 hours'`
       : period === '7d'
-      ? new Date(base.getTime() - 7 * 86400000)
-      : null
+      ? sql`NOW() - INTERVAL '7 days'`
+      : sql`NOW() - INTERVAL '30 days'`  // "all" capped to 30d to avoid OOM
 
   let whales: WhaleTx[] = []
 
   try {
-    if (cutoff) {
-      whales = await db
-        .select({
-          hash: schema.transactions.hash,
-          fromAddress: schema.transactions.fromAddress,
-          toAddress: schema.transactions.toAddress,
-          value: schema.transactions.value,
-          blockNumber: schema.transactions.blockNumber,
-          timestamp: schema.transactions.timestamp,
-        })
-        .from(schema.transactions)
-        .where(sql`${schema.transactions.timestamp} >= ${cutoff} AND ${schema.transactions.value}::numeric > 0`)
-        .orderBy(desc(sql`${schema.transactions.value}::numeric`))
-        .limit(50)
-    } else {
-      whales = await db
-        .select({
-          hash: schema.transactions.hash,
-          fromAddress: schema.transactions.fromAddress,
-          toAddress: schema.transactions.toAddress,
-          value: schema.transactions.value,
-          blockNumber: schema.transactions.blockNumber,
-          timestamp: schema.transactions.timestamp,
-        })
-        .from(schema.transactions)
-        .where(sql`${schema.transactions.value}::numeric > 0`)
-        .orderBy(desc(sql`${schema.transactions.value}::numeric`))
-        .limit(50)
-    }
+    whales = await db
+      .select({
+        hash: schema.transactions.hash,
+        fromAddress: schema.transactions.fromAddress,
+        toAddress: schema.transactions.toAddress,
+        value: schema.transactions.value,
+        blockNumber: schema.transactions.blockNumber,
+        timestamp: schema.transactions.timestamp,
+      })
+      .from(schema.transactions)
+      .where(sql`${schema.transactions.timestamp} >= ${cutoff} AND ${schema.transactions.value}::numeric > 0`)
+      .orderBy(desc(sql`${schema.transactions.value}::numeric`))
+      .limit(50)
     whales = whales.map(w => ({ ...w, timestamp: new Date(w.timestamp) }))
   } catch { /* DB not connected */ }
 

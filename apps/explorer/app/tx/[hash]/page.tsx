@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq, sql } from 'drizzle-orm'
+import { eq, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
@@ -189,27 +189,28 @@ export default async function TxDetailPage({
   const nonce = tx.nonce ?? (fromRpc ? (rpcTx as RpcTx).nonce : null)
   const txType = tx.txType ?? (fromRpc ? (rpcTx as RpcTx).txType : null)
 
-  const transferInfos = await Promise.all(
-    transfers.map(async (t) => {
-      let tokenSymbol: string | undefined
-      let tokenDecimals: number | undefined
-      try {
-        const [tok] = await db.select({ symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
-          .from(schema.tokens)
-          .where(eq(schema.tokens.address, t.tokenAddress))
-          .limit(1)
-        if (tok) { tokenSymbol = tok.symbol; tokenDecimals = tok.decimals }
-      } catch { /* ignore */ }
-      return {
-        tokenAddress: t.tokenAddress,
-        fromAddress: t.fromAddress,
-        toAddress: t.toAddress,
-        value: t.value ?? '0',
-        tokenSymbol,
-        tokenDecimals,
-      }
-    })
-  )
+  // Batch token lookups into single query (was N+1: one query per transfer)
+  const uniqueTokenAddrs = [...new Set(transfers.map(t => t.tokenAddress))]
+  const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
+  if (uniqueTokenAddrs.length > 0) {
+    try {
+      const tokens = await db.select({ address: schema.tokens.address, symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
+        .from(schema.tokens)
+        .where(inArray(schema.tokens.address, uniqueTokenAddrs))
+      for (const tok of tokens) tokenLookup.set(tok.address, tok)
+    } catch { /* ignore */ }
+  }
+  const transferInfos = transfers.map((t) => {
+    const tok = tokenLookup.get(t.tokenAddress)
+    return {
+      tokenAddress: t.tokenAddress,
+      fromAddress: t.fromAddress,
+      toAddress: t.toAddress,
+      value: t.value ?? '0',
+      tokenSymbol: tok?.symbol,
+      tokenDecimals: tok?.decimals,
+    }
+  })
 
   // Fallback: decode transfer from input data
   if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {

@@ -26,10 +26,11 @@ function withTimeout<T>(promise: Promise<T>): Promise<T> {
 
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
+    // Use NOW() - 30 days instead of subquery MAX(timestamp) to avoid double full-table scan
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date, COUNT(*)::int as value
       FROM transactions
-      WHERE timestamp >= (SELECT MAX(timestamp) FROM transactions) - INTERVAL '30 days'
+      WHERE timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
@@ -48,7 +49,7 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
              AVG(standard::numeric / 1e9)::numeric(18,4) as value
       FROM gas_history
-      WHERE timestamp >= (SELECT MAX(timestamp) FROM gas_history) - INTERVAL '30 days'
+      WHERE timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
@@ -70,7 +71,7 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
              COUNT(*)::int as value
       FROM blocks
-      WHERE timestamp >= (SELECT MAX(timestamp) FROM blocks) - INTERVAL '30 days'
+      WHERE timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
@@ -84,11 +85,11 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
 }
 
 export default async function ChartsPage() {
-  const [txData, gasData, blockData] = await Promise.all([
-    fetchDailyTxCount(),
-    fetchDailyGasHistory(),
-    fetchDailyBlockCount(),
-  ])
+  // Run sequentially — each query can use 100MB+ on 36M row tables.
+  // Promise.all() on these caused concurrent memory spikes → OOM.
+  const txData = await fetchDailyTxCount()
+  const gasData = await fetchDailyGasHistory()
+  const blockData = await fetchDailyBlockCount()
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
