@@ -100,20 +100,26 @@ export default async function AddressPage({
     // DB not connected
   }
 
-  // Enrich with external data — all fire in parallel, failures are silent
-  // Skip Moralis for addresses not in our index (saves CU + memory)
+  // Enrich with external data — split into two batches to reduce peak memory.
+  // Batch 1: lightweight lookups. Batch 2: heavier RPC + Moralis calls.
   // Bot detection removed to enable ISR caching (headers() forces dynamic rendering)
   const isBot = false
   const noLocalData = txCount === 0 && !addressInfo
   const provider = getProvider()
-  const [resolvedName, riskData, liveBalance, rpcTxCount, moralisHistory, nativePrice] = await Promise.all([
+
+  // Batch 1: lightweight lookups (name resolution, risk check, price)
+  const [resolvedName, riskData, nativePrice] = await Promise.all([
     resolveName(addr),
     getAddressRisk(addr),
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
+      .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
+  ])
+
+  // Batch 2: heavier RPC + Moralis calls (after batch 1 frees its memory)
+  const [liveBalance, rpcTxCount, moralisHistory] = await Promise.all([
     provider.getBalance(addr).catch(() => null),
     provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
     noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
-      .then(r => r.json()).then(d => d[chainConfig.coingeckoId]?.usd ?? null).catch(() => null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet

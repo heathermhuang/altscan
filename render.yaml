@@ -34,7 +34,7 @@ services:
       - key: DB_POOL_SIZE
         value: "3"
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=1536"  # With ISR cache disabled + Moralis off, 1536 is safe
+        value: "--max-old-space-size=1280"  # Lowered from 1536 — forces V8 GC earlier to prevent SIGABRT
       - key: HOSTNAME
         value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 
@@ -67,7 +67,7 @@ services:
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=1536"  # GC before 2GB OOM kill
+        value: "--max-old-space-size=1280"  # Lowered from 1536 — forces V8 GC earlier to prevent SIGABRT
       - key: HOSTNAME
         value: "0.0.0.0"         # Required for standalone output — binds to all interfaces
 

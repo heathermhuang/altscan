@@ -2,8 +2,8 @@ export function register() {
   if (process.env.NODE_ENV === 'production') {
     // Graceful restart threshold: exit cleanly before V8 SIGABRT (exit 134).
     // --max-old-space-size is 1536MB; we bail at ~80% to leave headroom for GC.
-    const HEAP_LIMIT_MB = 1200       // reduced from 1300 — bail earlier to avoid SIGABRT
-    const HEAP_WARN_MB = 900         // warn threshold — log cache sizes for diagnostics
+    const HEAP_LIMIT_MB = 1000       // bail at ~80% of 1280MB max-old-space-size
+    const HEAP_WARN_MB = 800         // warn threshold — log cache sizes for diagnostics
     const CHECK_INTERVAL_MS = 15_000 // check every 15s (was 30s) for faster detection
 
     // Track heap trend — detect sustained growth even below threshold
