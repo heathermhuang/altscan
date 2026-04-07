@@ -711,14 +711,25 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   let holdings: HoldingRow[] = []
 
   try {
+    // First find the distinct tokens this address interacts with (cheap index scan)
+    // then aggregate only those — avoids full table scans on token_transfers
     const result = await db.execute(sql`
-      WITH inflows AS (
+      WITH addr_tokens AS (
+        SELECT DISTINCT token_address FROM token_transfers
+        WHERE to_address = ${addr} OR from_address = ${addr}
+        LIMIT 200
+      ),
+      inflows AS (
         SELECT token_address, SUM(value::numeric) as total
-        FROM token_transfers WHERE to_address = ${addr} GROUP BY token_address
+        FROM token_transfers
+        WHERE to_address = ${addr} AND token_address IN (SELECT token_address FROM addr_tokens)
+        GROUP BY token_address
       ),
       outflows AS (
         SELECT token_address, SUM(value::numeric) as total
-        FROM token_transfers WHERE from_address = ${addr} GROUP BY token_address
+        FROM token_transfers
+        WHERE from_address = ${addr} AND token_address IN (SELECT token_address FROM addr_tokens)
+        GROUP BY token_address
       )
       SELECT i.token_address,
              (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
@@ -730,29 +741,29 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
     `)
 
     const rows = Array.from(result) as Record<string, unknown>[]
-    // Fetch token info for each
-    holdings = await Promise.all(
-      rows.map(async (row) => {
-        const tokenAddress = String(row.token_address)
-        const balance = String(row.balance)
-        try {
-          const [tok] = await db.select({
-            name: schema.tokens.name,
-            symbol: schema.tokens.symbol,
-            decimals: schema.tokens.decimals,
-          }).from(schema.tokens).where(eq(schema.tokens.address, tokenAddress)).limit(1)
-          return {
-            tokenAddress,
-            balance,
-            name: tok?.name ?? null,
-            symbol: tok?.symbol ?? null,
-            decimals: tok?.decimals ?? null,
-          }
-        } catch {
-          return { tokenAddress, balance, name: null, symbol: null, decimals: null }
-        }
-      })
-    )
+    // Batch-fetch token info in a single query instead of N+1
+    const tokenAddresses = rows.map(r => String(r.token_address))
+    const tokenInfos = tokenAddresses.length > 0
+      ? await db.select({
+          address: schema.tokens.address,
+          name: schema.tokens.name,
+          symbol: schema.tokens.symbol,
+          decimals: schema.tokens.decimals,
+        }).from(schema.tokens).where(inArray(schema.tokens.address, tokenAddresses))
+      : []
+    const tokenMap = new Map(tokenInfos.map(t => [t.address, t]))
+    holdings = rows.map((row) => {
+      const tokenAddress = String(row.token_address)
+      const balance = String(row.balance)
+      const tok = tokenMap.get(tokenAddress)
+      return {
+        tokenAddress,
+        balance,
+        name: tok?.name ?? null,
+        symbol: tok?.symbol ?? null,
+        decimals: tok?.decimals ?? null,
+      }
+    })
   } catch {
     // DB error
   }

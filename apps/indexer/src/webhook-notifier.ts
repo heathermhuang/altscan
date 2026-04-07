@@ -4,7 +4,7 @@
  * Called by block-processor after each block is indexed.
  */
 import { getDb, schema } from './db'
-import { eq, or, and, inArray } from 'drizzle-orm'
+import { eq, or, and, inArray, isNull } from 'drizzle-orm'
 import crypto from 'crypto'
 
 type WebhookPayload = {
@@ -100,9 +100,8 @@ export async function notifyWebhooks(
       and(
         eq(schema.webhooks.active, true),
         or(
-          // global webhooks (no address filter)
-          ...(schema.webhooks.watchAddress ? [] : []),
-          inArray(schema.webhooks.watchAddress, addrList),
+          isNull(schema.webhooks.watchAddress),              // global webhooks (no address filter)
+          inArray(schema.webhooks.watchAddress, addrList),   // address-specific webhooks
         ),
       )
     )
@@ -113,6 +112,10 @@ export async function notifyWebhooks(
 
   if (webhooks.length === 0) return
 
+  // Deliver all webhooks, then batch DB updates (instead of one UPDATE per tx per webhook)
+  const succeededIds = new Set<number>()
+  const failedWebhooks = new Map<number, number>() // id → new fail count
+
   for (const webhook of webhooks) {
     if (!webhook.secret) continue
     if (!webhook.eventTypes.includes('tx')) continue
@@ -122,6 +125,7 @@ export async function notifyWebhooks(
       ? txs.filter(tx => tx.fromAddress === webhook.watchAddress || tx.toAddress === webhook.watchAddress)
       : txs
 
+    let anyFailed = false
     for (const tx of relevantTxs) {
       const payload: WebhookPayload = {
         event: 'tx',
@@ -136,28 +140,38 @@ export async function notifyWebhooks(
       }
 
       const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
-
-      // Update lastTriggeredAt and failCount
-      try {
-        if (ok) {
-          await db.update(schema.webhooks)
-            .set({ lastTriggeredAt: new Date(), failCount: 0 })
-            .where(eq(schema.webhooks.id, webhook.id))
-        } else {
-          // Increment failCount; deactivate after 5 consecutive failures
-          const currentFail = (webhook as { failCount?: number }).failCount ?? 0
-          const newFail = currentFail + 1
-          await db.update(schema.webhooks)
-            .set({
-              failCount: newFail,
-              ...(newFail >= 5 ? { active: false } : {}),
-            })
-            .where(eq(schema.webhooks.id, webhook.id))
-          if (newFail >= 5) {
-            console.warn(`[webhook-notifier] Deactivated webhook ${webhook.id} after ${newFail} consecutive failures`)
-          }
-        }
-      } catch { /* non-fatal */ }
+      if (!ok) anyFailed = true
     }
+
+    if (!anyFailed && relevantTxs.length > 0) {
+      succeededIds.add(webhook.id)
+    } else if (anyFailed) {
+      const currentFail = (webhook as { failCount?: number }).failCount ?? 0
+      failedWebhooks.set(webhook.id, currentFail + 1)
+    }
+  }
+
+  // Batch update succeeded webhooks
+  if (succeededIds.size > 0) {
+    try {
+      await db.update(schema.webhooks)
+        .set({ lastTriggeredAt: new Date(), failCount: 0 })
+        .where(inArray(schema.webhooks.id, [...succeededIds]))
+    } catch { /* non-fatal */ }
+  }
+
+  // Update failed webhooks individually (need different failCount per webhook)
+  for (const [id, newFail] of failedWebhooks) {
+    try {
+      await db.update(schema.webhooks)
+        .set({
+          failCount: newFail,
+          ...(newFail >= 5 ? { active: false } : {}),
+        })
+        .where(eq(schema.webhooks.id, id))
+      if (newFail >= 5) {
+        console.warn(`[webhook-notifier] Deactivated webhook ${id} after ${newFail} consecutive failures`)
+      }
+    } catch { /* non-fatal */ }
   }
 }
