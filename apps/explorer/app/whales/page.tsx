@@ -66,22 +66,22 @@ export default async function WhalesPage({
       ? sql`NOW() - INTERVAL '7 days'`
       : sql`NOW() - INTERVAL '30 days'`  // "all" capped to 30d
 
-  // Minimum whale threshold in wei: 10 BNB / 1 ETH for native, equivalent for wrapped
-  const minNativeWei = chainConfig.key === 'bnb' ? '10000000000000000000' : '1000000000000000000'
+  // Minimum whale threshold in wei: 1 BNB / 0.5 ETH for native
+  const minNativeWei = chainConfig.key === 'bnb' ? '1000000000000000000' : '500000000000000000'
 
   // Wrapped token config
   const wrapped = WRAPPED_TOKENS[chainConfig.key]
   const stables = STABLECOINS[chainConfig.key] ?? []
 
   // Build token addresses and thresholds for token_transfers query
-  // WBNB/WETH: same threshold as native (10 BNB / 1 ETH in 18-decimal wei)
-  // Stablecoins: $10,000 minimum
+  // WBNB/WETH: same threshold as native (1 BNB / 0.5 ETH in 18-decimal wei)
+  // Stablecoins: $1,000 minimum
   const tokenFilters = [
     { address: wrapped.address, minValue: minNativeWei, symbol: wrapped.symbol, decimals: wrapped.decimals },
     ...stables.map(s => ({
       address: s.address,
-      // $10,000 threshold
-      minValue: (10000n * (10n ** BigInt(s.decimals))).toString(),
+      // $1,000 threshold
+      minValue: (1000n * (10n ** BigInt(s.decimals))).toString(),
       symbol: s.symbol,
       decimals: s.decimals,
     })),
@@ -98,7 +98,7 @@ export default async function WhalesPage({
       FROM transactions
       WHERE timestamp >= ${cutoff}
         AND value > ${minNativeWei}
-      ORDER BY CAST(value AS numeric) DESC
+      ORDER BY value DESC
       LIMIT 25
     `)
 
@@ -127,7 +127,7 @@ export default async function WhalesPage({
 
     const [nativeResult, tokenResult] = await Promise.race([
       Promise.all([nativePromise, tokenPromise]),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('whales query timeout (15s)')), 15000)),
     ])
 
     const nativeWhales = Array.from(nativeResult).map(parseRow)
@@ -142,13 +142,17 @@ export default async function WhalesPage({
         return bVal > aVal ? 1 : bVal < aVal ? -1 : 0
       })
       .slice(0, 50)
-  } catch { /* DB not connected or timeout */ }
+  } catch (err) {
+    console.error('[whales] query failed:', err instanceof Error ? err.message : err)
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">Whale Tracker</h1>
-        <p className="text-gray-500 text-sm">Large native and token transfers on {chainConfig.name}</p>
+        <p className="text-gray-500 text-sm">
+          Large transfers on {chainConfig.name} — native ({chainConfig.key === 'bnb' ? '≥1 BNB' : '≥0.5 ETH'}), {chainConfig.key === 'bnb' ? 'WBNB' : 'WETH'}, and stablecoins (≥$1,000)
+        </p>
       </div>
 
       {/* Period filter */}

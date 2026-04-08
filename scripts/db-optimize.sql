@@ -25,6 +25,17 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx
   ON token_transfers (to_address, "timestamp" DESC);
 
 -----------------------------------------------------------------------
+-- 1b. Indexes for whale tracker page
+--     Speeds up: WHERE timestamp >= X AND value > Y ORDER BY value DESC
+-----------------------------------------------------------------------
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx
+  ON transactions ("timestamp" DESC, value DESC);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_ts_idx
+  ON token_transfers (token_address, "timestamp" DESC);
+
+-----------------------------------------------------------------------
 -- 2. Data retention: prune old low-value data
 --    These tables grow fast but old rows are rarely queried
 --    Uses batched deletes to avoid long locks
