@@ -38,24 +38,15 @@ function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void 
   }
 }
 
-async function deleteBatch(table: string, timestampCol: string, cutoff: Date): Promise<number> {
+async function deleteAll(table: string, timestampCol: string, cutoff: Date): Promise<number> {
   assertAllowedIdentifier(table, 'table')
   assertAllowedIdentifier(timestampCol, 'column')
   const db = getDb()
-  // Use parameterized value for the cutoff timestamp; identifiers are whitelisted above
   const cutoffStr = cutoff.toISOString()
+  // Direct DELETE — faster than ctid batching for large backlogs.
+  // Single query lets Postgres plan the delete optimally.
   const result = await db.execute(
-    sql`DELETE FROM ${sql.raw(table)} WHERE ctid IN (SELECT ctid FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
-  )
-  return (result as any).rowCount ?? 0
-}
-
-async function deleteLogsOlderThan(cutoff: Date): Promise<number> {
-  // logs has no timestamp — prune by block_number via correlated subquery
-  const db = getDb()
-  const cutoffStr = cutoff.toISOString()
-  const result = await db.execute(
-    sql`DELETE FROM logs WHERE ctid IN (SELECT l.ctid FROM logs l JOIN blocks b ON b.number = l.block_number WHERE b.timestamp < ${cutoffStr}::timestamptz LIMIT ${BATCH_SIZE})`
+    sql`DELETE FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz`
   )
   return (result as any).rowCount ?? 0
 }
@@ -64,45 +55,59 @@ async function runCleanup(): Promise<void> {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)
   console.log(`[retention] Running cleanup — pruning rows older than ${cutoff.toISOString()} (${RETENTION_DAYS}d)`)
 
+  // Delete order: children first, then parents (FK: transactions → blocks)
   const tables: Array<{ table: string; col: string }> = [
     { table: 'dex_trades',      col: 'timestamp' },
     { table: 'token_transfers', col: 'timestamp' },
-    { table: 'transactions',    col: 'timestamp' },
     { table: 'gas_history',     col: 'timestamp' },
+    { table: 'transactions',    col: 'timestamp' },
   ]
 
   let totalDeleted = 0
 
   for (const { table, col } of tables) {
-    let deleted = 0
-    let batchTotal = 0
-    do {
-      deleted = await deleteBatch(table, col, cutoff)
-      batchTotal += deleted
-    } while (deleted === BATCH_SIZE)   // keep going until a partial batch
-    if (batchTotal > 0) console.log(`[retention] ${table}: deleted ${batchTotal} rows`)
-    totalDeleted += batchTotal
+    try {
+      console.log(`[retention] Deleting old rows from ${table}...`)
+      const deleted = await deleteAll(table, col, cutoff)
+      if (deleted > 0) console.log(`[retention] ${table}: deleted ${deleted} rows`)
+      totalDeleted += deleted
+    } catch (err) {
+      console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
+    }
   }
 
-  // logs: no timestamp, join via blocks
-  let logsDeleted = 0
-  let batch = 0
-  do {
-    batch = await deleteLogsOlderThan(cutoff)
-    logsDeleted += batch
-  } while (batch === BATCH_SIZE)
-  if (logsDeleted > 0) console.log(`[retention] logs: deleted ${logsDeleted} rows`)
-  totalDeleted += logsDeleted
+  // logs: no timestamp — delete by block_number via subquery
+  try {
+    const db = getDb()
+    const cutoffStr = cutoff.toISOString()
+    console.log('[retention] Deleting old rows from logs...')
+    const logsResult = await db.execute(
+      sql`DELETE FROM logs WHERE block_number < (
+        SELECT COALESCE(MIN(number), 0) FROM blocks WHERE timestamp >= ${cutoffStr}::timestamptz
+      )`
+    )
+    const logsDeleted = (logsResult as any).rowCount ?? 0
+    if (logsDeleted > 0) console.log(`[retention] logs: deleted ${logsDeleted} rows`)
+    totalDeleted += logsDeleted
+  } catch (err) {
+    console.error('[retention] logs delete failed:', err instanceof Error ? err.message : err)
+  }
 
-  // blocks: delete last — transactions must already be gone
-  let blocksDeleted = 0
-  batch = 0
-  do {
-    batch = await deleteBatch('blocks', 'timestamp', cutoff)
-    blocksDeleted += batch
-  } while (batch === BATCH_SIZE)
-  if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
-  totalDeleted += blocksDeleted
+  // blocks last — only those with no remaining transactions
+  try {
+    const db = getDb()
+    const cutoffStr = cutoff.toISOString()
+    console.log('[retention] Deleting old rows from blocks...')
+    const blockResult = await db.execute(
+      sql`DELETE FROM blocks WHERE timestamp < ${cutoffStr}::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
+    )
+    const blocksDeleted = (blockResult as any).rowCount ?? 0
+    if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
+    totalDeleted += blocksDeleted
+  } catch (err) {
+    console.error('[retention] blocks delete failed:', err instanceof Error ? err.message : err)
+  }
 
   // Prune zero-balance rows from token_balances — these are former holders whose
   // balance has dropped to zero. They accumulate over time and are safe to delete.
