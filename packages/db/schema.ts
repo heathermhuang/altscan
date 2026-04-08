@@ -37,8 +37,8 @@ export const transactions = pgTable('transactions', {
   txType:       integer('tx_type'),
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 }, (t) => ({
-  fromIdx:      index('tx_from_idx').on(t.fromAddress),
-  toIdx:        index('tx_to_idx').on(t.toAddress),
+  // Composite indexes on (address, timestamp) also cover single-address lookups,
+  // so we don't need separate single-column indexes on fromAddress/toAddress.
   fromTsIdx:    index('tx_from_ts_idx').on(t.fromAddress, t.timestamp),
   toTsIdx:      index('tx_to_ts_idx').on(t.toAddress, t.timestamp),
   blockIdx:     index('tx_block_idx').on(t.blockNumber),
@@ -68,8 +68,7 @@ export const tokenTransfers = pgTable('token_transfers', {
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 }, (t) => ({
   tokenIdx:     index('tt_token_idx').on(t.tokenAddress),
-  fromIdx:      index('tt_from_idx').on(t.fromAddress),
-  toIdx:        index('tt_to_idx').on(t.toAddress),
+  // Composite indexes on (address, timestamp) also cover single-address lookups
   fromTsIdx:    index('tt_from_ts_idx').on(t.fromAddress, t.timestamp),
   toTsIdx:      index('tt_to_ts_idx').on(t.toAddress, t.timestamp),
   txIdx:        index('tt_tx_idx').on(t.txHash),

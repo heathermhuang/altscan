@@ -1,15 +1,23 @@
 -- Database optimization for BNBScan / EthScan
 -- Run against each database: psql $DATABASE_URL -f scripts/db-optimize.sql
 --
--- Safe to run multiple times (all statements are IF NOT EXISTS / idempotent)
+-- Safe to run multiple times (all statements are idempotent)
 -- NOTE: CREATE INDEX CONCURRENTLY cannot run inside a transaction,
 -- so this script must NOT be wrapped in BEGIN/COMMIT.
 
 -----------------------------------------------------------------------
--- 1. Composite indexes for address page queries
---    These turn (index scan + sort) into direct index range scans
---    for queries like: WHERE from_address = $1 ORDER BY timestamp DESC
---    CONCURRENTLY = no table lock, safe on live databases
+-- 1. Drop redundant single-column indexes
+--    Composite indexes (address, timestamp) already cover single-address
+--    lookups. Each redundant index wastes ~2-4GB on 40M+ row tables.
+-----------------------------------------------------------------------
+
+DROP INDEX CONCURRENTLY IF EXISTS tx_from_idx;
+DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx;
+DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx;
+DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx;
+
+-----------------------------------------------------------------------
+-- 2. Ensure composite indexes exist (idempotent)
 -----------------------------------------------------------------------
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_ts_idx
@@ -24,11 +32,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx
 CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx
   ON token_transfers (to_address, "timestamp" DESC);
 
------------------------------------------------------------------------
--- 1b. Indexes for whale tracker page
---     Speeds up: WHERE timestamp >= X AND value > Y ORDER BY value DESC
------------------------------------------------------------------------
-
 CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx
   ON transactions ("timestamp" DESC, value DESC);
 
@@ -36,36 +39,47 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_ts_idx
   ON token_transfers (token_address, "timestamp" DESC);
 
 -----------------------------------------------------------------------
--- 2. Data retention: prune old low-value data
---    These tables grow fast but old rows are rarely queried
---    Uses batched deletes to avoid long locks
+-- 3. Data retention: keep 7 days of high-volume data
+--    The indexer retention-cleanup runs every 6h, but if it falls behind
+--    (e.g. after a DB outage), this script catches up.
+--    Delete order: token_transfers → transactions → blocks (FK order)
 -----------------------------------------------------------------------
 
--- gas_history: keep last 30 days (used only for gas tracker page)
-DELETE FROM gas_history
-WHERE "timestamp" < NOW() - INTERVAL '30 days';
+DELETE FROM token_transfers
+WHERE "timestamp" < NOW() - INTERVAL '7 days';
 
--- logs: keep last 60 days (used for contract event lookups)
--- This is typically the largest table after transactions/token_transfers
+DELETE FROM dex_trades
+WHERE "timestamp" < NOW() - INTERVAL '7 days';
+
+DELETE FROM gas_history
+WHERE "timestamp" < NOW() - INTERVAL '7 days';
+
 DELETE FROM logs
 WHERE block_number < (
   SELECT COALESCE(MIN(number), 0) FROM blocks
-  WHERE "timestamp" > NOW() - INTERVAL '60 days'
+  WHERE "timestamp" > NOW() - INTERVAL '7 days'
 );
 
--- dex_trades: keep last 60 days (used for DEX analytics)
-DELETE FROM dex_trades
-WHERE "timestamp" < NOW() - INTERVAL '60 days';
+DELETE FROM transactions
+WHERE "timestamp" < NOW() - INTERVAL '7 days';
+
+DELETE FROM blocks
+WHERE "timestamp" < NOW() - INTERVAL '7 days';
+
+-- Clean up zero-balance token holders
+DELETE FROM token_balances WHERE balance <= 0;
 
 -----------------------------------------------------------------------
--- 3. Reclaim space from deleted rows
+-- 4. Reclaim disk space
+--    VACUUM FULL rewrites the table and returns space to the OS.
+--    It locks the table, so only use during maintenance windows.
+--    Use plain VACUUM ANALYZE for routine runs.
 -----------------------------------------------------------------------
 
-VACUUM ANALYZE gas_history;
+VACUUM ANALYZE token_transfers;
+VACUUM ANALYZE transactions;
+VACUUM ANALYZE blocks;
 VACUUM ANALYZE logs;
 VACUUM ANALYZE dex_trades;
-
--- Update statistics on the big tables (no space reclaim, just planner stats)
-ANALYZE transactions;
-ANALYZE token_transfers;
-ANALYZE blocks;
+VACUUM ANALYZE gas_history;
+VACUUM ANALYZE token_balances;

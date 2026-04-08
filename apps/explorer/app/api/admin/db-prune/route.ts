@@ -9,108 +9,155 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
 
 /**
  * POST /api/admin/db-prune
- * Prunes old low-value data to reclaim disk space.
+ * Prunes old data to reclaim disk space. Now covers ALL high-volume tables.
  * Requires Authorization: Bearer <ADMIN_SECRET> header.
  *
  * Query params:
- *   ?dry=true   — report what would be deleted without deleting
+ *   ?dry=true        — report what would be deleted without deleting
+ *   ?days=7          — retention period in days (default: 7)
+ *   ?vacuum=full     — run VACUUM FULL instead of plain VACUUM (reclaims disk to OS, but locks table)
  */
 export async function POST(request: NextRequest) {
-  // Auth check
   const auth = request.headers.get('authorization')
   if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
   const dry = request.nextUrl.searchParams.get('dry') === 'true'
+  const days = parseInt(request.nextUrl.searchParams.get('days') ?? '7', 10)
+  const vacuumMode = request.nextUrl.searchParams.get('vacuum') ?? 'regular'
+
+  if (days < 1 || days > 365) {
+    return NextResponse.json({ error: 'days must be between 1 and 365' }, { status: 400 })
+  }
 
   try {
-    const results: Record<string, unknown> = {}
+    const results: Record<string, unknown> = { retentionDays: days }
+    const mb = (b: unknown) => Math.round(Number(b) / 1024 / 1024)
+    const interval = `${days} days`
 
-    // 1. Check current table sizes
+    // 1. Current table sizes (all high-volume tables)
     const sizeResult = await db.execute(sql`
       SELECT
         (SELECT pg_total_relation_size('transactions')) as tx_bytes,
         (SELECT pg_total_relation_size('token_transfers')) as tt_bytes,
+        (SELECT pg_total_relation_size('blocks')) as blocks_bytes,
         (SELECT pg_total_relation_size('logs')) as logs_bytes,
         (SELECT pg_total_relation_size('gas_history')) as gas_bytes,
         (SELECT pg_total_relation_size('dex_trades')) as dex_bytes,
-        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'logs') as log_rows,
-        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'gas_history') as gas_rows,
-        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'dex_trades') as dex_rows
+        (SELECT pg_size_pretty(pg_database_size(current_database()))) as db_size,
+        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'transactions') as tx_rows,
+        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'token_transfers') as tt_rows,
+        (SELECT reltuples::bigint FROM pg_class WHERE relname = 'blocks') as block_rows
     `)
     const sizes = Array.from(sizeResult)[0] as Record<string, unknown>
-    const mb = (b: unknown) => Math.round(Number(b) / 1024 / 1024)
 
     results.before = {
+      totalDB: sizes.db_size,
       transactionsMB: mb(sizes.tx_bytes),
       tokenTransfersMB: mb(sizes.tt_bytes),
+      blocksMB: mb(sizes.blocks_bytes),
       logsMB: mb(sizes.logs_bytes),
       gasHistoryMB: mb(sizes.gas_bytes),
       dexTradesMB: mb(sizes.dex_bytes),
-      logRows: Number(sizes.log_rows),
-      gasRows: Number(sizes.gas_rows),
-      dexRows: Number(sizes.dex_rows),
+      txRows: Number(sizes.tx_rows),
+      ttRows: Number(sizes.tt_rows),
+      blockRows: Number(sizes.block_rows),
     }
 
     if (dry) {
-      // Count what would be deleted
-      const [gasCount, logsCount, dexCount] = await Promise.all([
-        db.execute(sql`SELECT COUNT(*)::int as c FROM gas_history WHERE "timestamp" < NOW() - INTERVAL '30 days'`),
-        db.execute(sql`SELECT COUNT(*)::int as c FROM logs WHERE block_number < (
-          SELECT COALESCE(MIN(number), 0) FROM blocks WHERE "timestamp" > NOW() - INTERVAL '60 days'
-        )`),
-        db.execute(sql`SELECT COUNT(*)::int as c FROM dex_trades WHERE "timestamp" < NOW() - INTERVAL '60 days'`),
+      // Estimate rows that would be deleted from the big tables
+      const [txCount, ttCount, blockCount] = await Promise.all([
+        db.execute(sql.raw(`SELECT COUNT(*)::bigint as c FROM transactions WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)),
+        db.execute(sql.raw(`SELECT COUNT(*)::bigint as c FROM token_transfers WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)),
+        db.execute(sql.raw(`SELECT COUNT(*)::bigint as c FROM blocks WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)),
       ])
 
       results.wouldDelete = {
-        gasHistory: Number((Array.from(gasCount)[0] as Record<string, unknown>).c),
-        logs: Number((Array.from(logsCount)[0] as Record<string, unknown>).c),
-        dexTrades: Number((Array.from(dexCount)[0] as Record<string, unknown>).c),
+        transactions: Number((Array.from(txCount)[0] as Record<string, unknown>).c),
+        tokenTransfers: Number((Array.from(ttCount)[0] as Record<string, unknown>).c),
+        blocks: Number((Array.from(blockCount)[0] as Record<string, unknown>).c),
       }
       results.mode = 'dry-run'
       return NextResponse.json(results)
     }
 
-    // 2. Prune gas_history older than 30 days
-    const gasResult = await db.execute(sql`
-      DELETE FROM gas_history WHERE "timestamp" < NOW() - INTERVAL '30 days'
-    `)
-    results.gasHistoryDeleted = gasResult.length ?? 'done'
+    // 2. Bulk delete in order: token_transfers → transactions → blocks (FK order)
+    //    Using direct DELETE for speed — the indexer retention uses slow ctid batching
+    //    which can't catch up when millions of rows are behind.
+    const deleted: Record<string, number> = {}
 
-    // 3. Prune logs older than 60 days (biggest space saver)
-    const logsResult = await db.execute(sql`
+    // token_transfers first (no FK to transactions, just block_number)
+    const ttResult = await db.execute(
+      sql.raw(`DELETE FROM token_transfers WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    )
+    deleted.tokenTransfers = (ttResult as any).rowCount ?? 0
+    console.log(`[db-prune] token_transfers: deleted ${deleted.tokenTransfers} rows`)
+
+    // dex_trades
+    const dexResult = await db.execute(
+      sql.raw(`DELETE FROM dex_trades WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    )
+    deleted.dexTrades = (dexResult as any).rowCount ?? 0
+
+    // gas_history
+    const gasResult = await db.execute(
+      sql.raw(`DELETE FROM gas_history WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    )
+    deleted.gasHistory = (gasResult as any).rowCount ?? 0
+
+    // logs (via block_number join)
+    const logsResult = await db.execute(sql.raw(`
       DELETE FROM logs WHERE block_number < (
         SELECT COALESCE(MIN(number), 0) FROM blocks
-        WHERE "timestamp" > NOW() - INTERVAL '60 days'
+        WHERE "timestamp" > NOW() - INTERVAL '${interval}'
       )
-    `)
-    results.logsDeleted = logsResult.length ?? 'done'
+    `))
+    deleted.logs = (logsResult as any).rowCount ?? 0
 
-    // 4. Prune dex_trades older than 60 days
-    const dexResult = await db.execute(sql`
-      DELETE FROM dex_trades WHERE "timestamp" < NOW() - INTERVAL '60 days'
-    `)
-    results.dexTradesDeleted = dexResult.length ?? 'done'
+    // transactions (references blocks)
+    const txResult = await db.execute(
+      sql.raw(`DELETE FROM transactions WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    )
+    deleted.transactions = (txResult as any).rowCount ?? 0
+    console.log(`[db-prune] transactions: deleted ${deleted.transactions} rows`)
 
-    // 5. VACUUM ANALYZE to reclaim space
-    await db.execute(sql`VACUUM ANALYZE gas_history`)
-    await db.execute(sql`VACUUM ANALYZE logs`)
-    await db.execute(sql`VACUUM ANALYZE dex_trades`)
-    results.vacuumed = true
+    // blocks last (referenced by transactions)
+    const blockResult = await db.execute(
+      sql.raw(`DELETE FROM blocks WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    )
+    deleted.blocks = (blockResult as any).rowCount ?? 0
+    console.log(`[db-prune] blocks: deleted ${deleted.blocks} rows`)
 
-    // 6. Check sizes after
+    results.deleted = deleted
+
+    // 3. VACUUM to reclaim space
+    const tablesToVacuum = ['token_transfers', 'transactions', 'blocks', 'logs', 'dex_trades', 'gas_history']
+    const vacuumCmd = vacuumMode === 'full' ? 'VACUUM FULL ANALYZE' : 'VACUUM ANALYZE'
+    for (const t of tablesToVacuum) {
+      try {
+        await db.execute(sql.raw(`${vacuumCmd} ${t}`))
+        console.log(`[db-prune] ${vacuumCmd} ${t} done`)
+      } catch (err) {
+        console.warn(`[db-prune] ${vacuumCmd} ${t} failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+    results.vacuumed = vacuumMode
+
+    // 4. Sizes after
     const afterResult = await db.execute(sql`
       SELECT
-        (SELECT pg_total_relation_size('logs')) as logs_bytes,
-        (SELECT pg_total_relation_size('gas_history')) as gas_bytes,
-        (SELECT pg_total_relation_size('dex_trades')) as dex_bytes
+        (SELECT pg_total_relation_size('transactions')) as tx_bytes,
+        (SELECT pg_total_relation_size('token_transfers')) as tt_bytes,
+        (SELECT pg_total_relation_size('blocks')) as blocks_bytes,
+        (SELECT pg_size_pretty(pg_database_size(current_database()))) as db_size
     `)
     const after = Array.from(afterResult)[0] as Record<string, unknown>
     results.after = {
-      logsMB: mb(after.logs_bytes),
-      gasHistoryMB: mb(after.gas_bytes),
-      dexTradesMB: mb(after.dex_bytes),
+      totalDB: after.db_size,
+      transactionsMB: mb(after.tx_bytes),
+      tokenTransfersMB: mb(after.tt_bytes),
+      blocksMB: mb(after.blocks_bytes),
     }
 
     results.mode = 'pruned'

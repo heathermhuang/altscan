@@ -11,9 +11,9 @@
 import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '1', 10)
-const BATCH_SIZE     = 5_000   // rows per delete batch — keeps lock time short
-const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours (was 24h — more frequent on BSC)
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
+const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
+const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
 
 /**
  * Whitelist of allowed table names and timestamp columns.
@@ -23,7 +23,7 @@ const RUN_EVERY_MS   = 12 * 60 * 60 * 1000   // 12 hours (was 24h — more frequ
  * (table/column names), only for values.
  */
 const ALLOWED_TABLES = new Set([
-  'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs',
+  'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs', 'token_balances',
 ])
 const ALLOWED_COLUMNS = new Set(['timestamp', 'block_number'])
 
