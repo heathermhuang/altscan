@@ -138,9 +138,33 @@ async function runCleanup(): Promise<void> {
   }
 }
 
+async function runVacuumFull(): Promise<void> {
+  const db = getDb()
+  const tables = ['token_transfers', 'transactions', 'blocks', 'logs', 'dex_trades', 'gas_history', 'token_balances']
+  console.log('[retention] VACUUM FULL requested — this will lock tables and take several minutes')
+  for (const t of tables) {
+    assertAllowedIdentifier(t, 'table')
+    try {
+      console.log(`[retention] VACUUM FULL ANALYZE ${t} starting...`)
+      await db.execute(sql`VACUUM FULL ANALYZE ${sql.raw(t)}`)
+      console.log(`[retention] VACUUM FULL ANALYZE ${t} done`)
+    } catch (err) {
+      console.warn(`[retention] VACUUM FULL ${t} failed:`, err instanceof Error ? err.message : err)
+    }
+  }
+  console.log('[retention] VACUUM FULL complete')
+}
+
 export async function startRetentionCleanup(): Promise<void> {
   // Await first run so getLastIndexedBlock sees the clean state
   await runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+
+  // One-time VACUUM FULL to reclaim disk space after bulk deletes.
+  // Set VACUUM_FULL=1 in env vars, then remove it after the indexer restarts.
+  if (process.env.VACUUM_FULL === '1') {
+    runVacuumFull().catch(err => console.error('[retention] VACUUM FULL error:', err))
+  }
+
   setInterval(() => {
     runCleanup().catch(err => console.error('[retention] cleanup error:', err))
   }, RUN_EVERY_MS)

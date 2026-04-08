@@ -227,16 +227,29 @@ export async function ensureSchema(): Promise<void> {
   // Build indexes in background using CONCURRENTLY so startup is never blocked.
   // CONCURRENTLY allows reads/writes during build — safe to run while indexing.
   // Each index is tried individually so a failure on one doesn't block the rest.
+  // Drop redundant single-column indexes — composite (address, timestamp) indexes cover these.
+  // Each saves ~2-4GB on 10M+ row tables.
+  const dropIndexes = [
+    'DROP INDEX CONCURRENTLY IF EXISTS tx_from_idx',
+    'DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx',
+    'DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx',
+    'DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx',
+  ]
+  for (const stmt of dropIndexes) {
+    try { await db.execute(sql.raw(stmt)) } catch { /* already dropped */ }
+  }
+
   const indexes = [
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_timestamp_idx    ON blocks(timestamp)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_idx             ON transactions(from_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_idx               ON transactions(to_address)',
+    // Composite indexes: cover both point lookups and address+time range queries
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_ts_idx          ON transactions(from_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_ts_idx            ON transactions(to_address, timestamp DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_idx             ON token_transfers(from_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_idx               ON token_transfers(to_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_tx_idx               ON token_transfers(tx_hash)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
@@ -244,12 +257,9 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx            ON token_balances(holder_address)',
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_date_idx              ON transactions(DATE(timestamp AT TIME ZONE 'UTC'))`,
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_date_idx              ON token_transfers(DATE(timestamp AT TIME ZONE 'UTC'))`,
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS gas_date_idx             ON gas_history(DATE(timestamp AT TIME ZONE 'UTC'))`,
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx       ON webhooks(owner_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx       ON api_keys(owner_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]
 
   // Fire-and-forget: index builds run sequentially after ensureSchema() returns.
