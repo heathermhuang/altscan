@@ -17,6 +17,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...(chainConfig.features.hasValidators ? [{ url: `${BASE}/validators`, changeFrequency: 'hourly' as const, priority: 0.5 }] : []),
     ...(chainConfig.features.hasStaking ? [{ url: `${BASE}/staking`, changeFrequency: 'hourly' as const, priority: 0.5 }] : []),
     { url: `${BASE}/api-docs`, changeFrequency: 'weekly', priority: 0.5 },
+    { url: `${BASE}/about`, changeFrequency: 'monthly', priority: 0.4 },
     { url: `${BASE}/whales`, changeFrequency: 'always', priority: 0.7 },
   ]
 
