@@ -83,51 +83,41 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Bulk delete in order: token_transfers → transactions → blocks (FK order)
-    //    Using direct DELETE for speed — the indexer retention uses slow ctid batching
-    //    which can't catch up when millions of rows are behind.
-    const deleted: Record<string, number> = {}
+    //    Each wrapped in try/catch so one failure doesn't abort the rest.
+    const deleted: Record<string, number | string> = {}
+    const errors: string[] = []
 
-    // token_transfers first (no FK to transactions, just block_number)
-    const ttResult = await db.execute(
-      sql.raw(`DELETE FROM token_transfers WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
-    )
-    deleted.tokenTransfers = (ttResult as any).rowCount ?? 0
-    console.log(`[db-prune] token_transfers: deleted ${deleted.tokenTransfers} rows`)
+    const safeDelete = async (name: string, query: string) => {
+      try {
+        const result = await db.execute(sql.raw(query))
+        const count = (result as any).rowCount ?? 0
+        deleted[name] = count
+        console.log(`[db-prune] ${name}: deleted ${count} rows`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        deleted[name] = `error: ${msg.slice(0, 100)}`
+        errors.push(`${name}: ${msg.slice(0, 100)}`)
+        console.error(`[db-prune] ${name} failed:`, msg)
+      }
+    }
 
-    // dex_trades
-    const dexResult = await db.execute(
-      sql.raw(`DELETE FROM dex_trades WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
-    )
-    deleted.dexTrades = (dexResult as any).rowCount ?? 0
-
-    // gas_history
-    const gasResult = await db.execute(
-      sql.raw(`DELETE FROM gas_history WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
-    )
-    deleted.gasHistory = (gasResult as any).rowCount ?? 0
-
-    // logs (via block_number join)
-    const logsResult = await db.execute(sql.raw(`
-      DELETE FROM logs WHERE block_number < (
+    await safeDelete('tokenTransfers',
+      `DELETE FROM token_transfers WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    await safeDelete('dexTrades',
+      `DELETE FROM dex_trades WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    await safeDelete('gasHistory',
+      `DELETE FROM gas_history WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    await safeDelete('logs',
+      `DELETE FROM logs WHERE block_number < (
         SELECT COALESCE(MIN(number), 0) FROM blocks
-        WHERE "timestamp" > NOW() - INTERVAL '${interval}'
-      )
-    `))
-    deleted.logs = (logsResult as any).rowCount ?? 0
+        WHERE "timestamp" > NOW() - INTERVAL '${interval}')`)
+    await safeDelete('transactions',
+      `DELETE FROM transactions WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
+    await safeDelete('blocks',
+      `DELETE FROM blocks WHERE "timestamp" < NOW() - INTERVAL '${interval}'
+        AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`)
 
-    // transactions (references blocks)
-    const txResult = await db.execute(
-      sql.raw(`DELETE FROM transactions WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
-    )
-    deleted.transactions = (txResult as any).rowCount ?? 0
-    console.log(`[db-prune] transactions: deleted ${deleted.transactions} rows`)
-
-    // blocks last (referenced by transactions)
-    const blockResult = await db.execute(
-      sql.raw(`DELETE FROM blocks WHERE "timestamp" < NOW() - INTERVAL '${interval}'`)
-    )
-    deleted.blocks = (blockResult as any).rowCount ?? 0
-    console.log(`[db-prune] blocks: deleted ${deleted.blocks} rows`)
+    if (errors.length > 0) results.errors = errors
 
     results.deleted = deleted
 
