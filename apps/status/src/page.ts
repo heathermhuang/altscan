@@ -72,7 +72,7 @@ function renderTimeline(entries: HistoryEntry[]): { bars: string; rangeLabel: st
 
   // Adaptive range: use time since first entry, minimum 10 min, max 24h
   const oldest = entries.length > 0 ? entries[0].ts : now
-  const spanMs = Math.min(Math.max(now - oldest, 10 * 60_000), 24 * 3600_000)
+  const spanMs = Math.min(Math.max(now - oldest, 45 * 60_000), 24 * 3600_000)
   const bucketMs = spanMs / BARS
   const bars: string[] = []
 
