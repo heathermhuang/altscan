@@ -129,7 +129,10 @@ async function main() {
       const blockNums: number[] = []
       for (let n = from; n <= to; n++) blockNums.push(n)
 
-      let chunkStart = Date.now()
+      // Track blocks processed since last log line so blk/s reflects
+      // true throughput across multiple chunks, not just the final chunk.
+      let windowStart = Date.now()
+      let windowBlocks = 0
       for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
         const chunk = blockNums.slice(i, i + CONCURRENCY)
         const results = await Promise.allSettled(chunk.map(num => processBlock(num, provider)))
@@ -146,17 +149,22 @@ async function main() {
 
         if (firstFailureIdx >= 0) {
           // Advance only up to block before first failure; retry from there next iteration
-          if (firstFailureIdx > 0) lastIndexed = chunk[firstFailureIdx - 1]
+          if (firstFailureIdx > 0) {
+            lastIndexed = chunk[firstFailureIdx - 1]
+            windowBlocks += firstFailureIdx
+          }
           await sleep(1000)
           break
         }
 
         lastIndexed = chunk[chunk.length - 1]
+        windowBlocks += chunk.length
         if (lastIndexed % LOG_EVERY === 0 || i + CONCURRENCY >= blockNums.length) {
-          const elapsed = Date.now() - chunkStart
-          const bps = (chunk.length / (elapsed / 1000)).toFixed(1)
+          const elapsed = Date.now() - windowStart
+          const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
           console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
-          chunkStart = Date.now()
+          windowStart = Date.now()
+          windowBlocks = 0
         }
       }
 

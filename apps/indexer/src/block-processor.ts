@@ -68,7 +68,16 @@ const PAIR_CACHE_MAX = 10_000
 // ── Main entry ──────────────────────────────────────────────────────
 export async function processBlock(blockNumber: number, provider: JsonRpcProvider, skipLogs = false) {
   const db = getDb()
-  const block = await provider.getBlock(blockNumber, true)
+
+  // Fire both RPC calls in parallel — they're independent and together
+  // account for most of the wall-clock time on ETH (where receipts can be >1MB).
+  const wantReceipts = !skipLogs && blockReceiptsSupported
+  const blockPromise = provider.getBlock(blockNumber, true)
+  const receiptsPromise = wantReceipts
+    ? fetchBlockReceipts(provider, blockNumber)
+    : Promise.resolve([] as Array<{ txHash: string; receipt: NormalizedReceipt }>)
+
+  const block = await blockPromise
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
 
@@ -122,12 +131,15 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     }
   }
 
-  // ── 3. Fetch receipts + decode all logs in ONE pass ────────────
-  if (!skipLogs && block.prefetchedTransactions.length > 0 && blockReceiptsSupported) {
-    const receipts = await fetchBlockReceipts(provider, blockNumber)
+  // ── 3. Await receipts (kicked off in parallel above) + decode ──
+  if (wantReceipts && block.prefetchedTransactions.length > 0) {
+    const receipts = await receiptsPromise
     if (receipts.length > 0) {
       await processReceiptsBatch(receipts, blockNumber, timestamp, provider)
     }
+  } else if (wantReceipts) {
+    // Drain the promise so we don't leak an unhandled rejection on empty blocks
+    receiptsPromise.catch(() => {})
   }
 
   // ── 4. Webhooks (non-blocking) ─────────────────────────────────
