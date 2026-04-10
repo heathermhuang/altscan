@@ -1,0 +1,19 @@
+{
+  "name": "@bnbscan/status",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "hono": "^4.4.0",
+    "@hono/node-server": "^1.11.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
