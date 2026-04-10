@@ -26,8 +26,11 @@ const TAG = `[${chain.brandName}-indexer]`
 
 const RPC_URL     = process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl
 const POLL_MS     = chain.pollMs
-const BATCH_SIZE  = 20
-const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? '3', 10)
+const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
+// BNB produces a block every 3s — needs higher concurrency to keep up.
+// ETH at 12s can run lower. Default = 8 for BNB, 4 for ETH.
+const DEFAULT_CONCURRENCY = chain.key === 'bnb' ? 8 : 4
+const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10)
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 
 let running = true
@@ -119,15 +122,41 @@ async function main() {
       const from = lastIndexed + 1
       const to   = Math.min(from + BATCH_SIZE - 1, latest)
 
+      // Concurrency window — keep CONCURRENCY blocks in flight at a time.
+      // Each processBlock is ~1 RPC (getBlock) + 1 RPC (getBlockReceipts) + bulk DB writes.
+      // Running them in parallel overlaps RPC wait time with DB write time,
+      // so throughput scales near-linearly with CONCURRENCY until the DB pool saturates.
       const blockNums: number[] = []
       for (let n = from; n <= to; n++) blockNums.push(n)
 
+      let chunkStart = Date.now()
       for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
         const chunk = blockNums.slice(i, i + CONCURRENCY)
-        await Promise.all(chunk.map(num => processBlock(num, provider)))
+        const results = await Promise.allSettled(chunk.map(num => processBlock(num, provider)))
+
+        // Surface failures but don't advance past the first error
+        let firstFailureIdx = -1
+        for (let j = 0; j < results.length; j++) {
+          if (results[j].status === 'rejected') {
+            const reason = (results[j] as PromiseRejectedResult).reason
+            console.error(`${TAG} Block ${chunk[j]} failed:`, reason instanceof Error ? reason.message : reason)
+            if (firstFailureIdx === -1) firstFailureIdx = j
+          }
+        }
+
+        if (firstFailureIdx >= 0) {
+          // Advance only up to block before first failure; retry from there next iteration
+          if (firstFailureIdx > 0) lastIndexed = chunk[firstFailureIdx - 1]
+          await sleep(1000)
+          break
+        }
+
         lastIndexed = chunk[chunk.length - 1]
-        if (lastIndexed % LOG_EVERY === 0) {
-          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed})`)
+        if (lastIndexed % LOG_EVERY === 0 || i + CONCURRENCY >= blockNums.length) {
+          const elapsed = Date.now() - chunkStart
+          const bps = (chunk.length / (elapsed / 1000)).toFixed(1)
+          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
+          chunkStart = Date.now()
         }
       }
 

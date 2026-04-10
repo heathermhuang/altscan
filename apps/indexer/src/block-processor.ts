@@ -1,18 +1,80 @@
-import { JsonRpcProvider } from 'ethers'
-import { getDb, schema } from './db'
+import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
-import { processLogs, type NormalizedReceipt } from './log-processor'
+import { getDb, schema } from './db'
 import { notifyWebhooks } from './webhook-notifier'
+import { getProvider } from './provider'
 
+// ── Topic signatures ────────────────────────────────────────────────
+const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
+const TRANSFER_SINGLE_TOPIC = keccak256id('TransferSingle(address,address,address,uint256,uint256)')
+const SWAP_V2_TOPIC = keccak256id('Swap(address,uint256,uint256,uint256,uint256,address)')
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const abi = AbiCoder.defaultAbiCoder()
+
+// ── Types ───────────────────────────────────────────────────────────
+export type NormalizedLog = {
+  address: string
+  topics: string[]
+  data: string
+  index: number
+}
+
+export type NormalizedReceipt = {
+  status: boolean
+  gasUsed: bigint
+  logs: NormalizedLog[]
+}
+
+type TokenTransferRow = {
+  txHash: string
+  logIndex: number
+  tokenAddress: string
+  fromAddress: string
+  toAddress: string
+  value: string
+  tokenId: string | null
+  blockNumber: number
+  timestamp: Date
+  tokenType: 'BEP20' | 'BEP721' | 'BEP1155'
+}
+
+type DexTradeRow = {
+  txHash: string
+  dex: string
+  pairAddress: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  maker: string
+  blockNumber: number
+  timestamp: Date
+}
+
+type TxStatusUpdate = {
+  hash: string
+  status: boolean
+  gasUsed: bigint
+}
+
+// ── Caches ──────────────────────────────────────────────────────────
+const tokenCache = new Set<string>()
+const TOKEN_CACHE_MAX = 50_000
+
+const pairCache = new Map<string, [string, string]>()
+const PAIR_CACHE_MAX = 10_000
+
+// ── Main entry ──────────────────────────────────────────────────────
 export async function processBlock(blockNumber: number, provider: JsonRpcProvider, skipLogs = false) {
   const db = getDb()
-  const block = await provider.getBlock(blockNumber, true)  // true = include txs
+  const block = await provider.getBlock(blockNumber, true)
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
 
-  // Insert block
+  // ── 1. Insert block ────────────────────────────────────────────
   await db.insert(schema.blocks).values({
     number: block.number,
     hash: block.hash,
@@ -26,7 +88,7 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     size: 0,
   }).onConflictDoNothing()
 
-  // Insert transactions — use RETURNING to get newly-inserted rows for address tracking
+  // ── 2. Bulk insert transactions ────────────────────────────────
   const txValues = block.prefetchedTransactions.map((tx, idx) => ({
     hash: tx.hash,
     blockNumber: block.number,
@@ -36,9 +98,6 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     gas: tx.gasLimit,
     gasPrice: tx.gasPrice?.toString() ?? '0',
     gasUsed: 0n,
-    // Truncate calldata to 500 chars — saves ~95% of input storage.
-    // Method ID (first 10 chars) + ~245 bytes is enough for ERC-20/swap decoding.
-    // Full calldata is rarely needed on a block explorer.
     input: tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data,
     status: true,
     methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
@@ -48,8 +107,9 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     timestamp,
   }))
 
+  let insertedAddrs: Array<{ fromAddress: string; toAddress: string | null }> = []
   if (txValues.length > 0) {
-    const inserted = await db.insert(schema.transactions)
+    insertedAddrs = await db.insert(schema.transactions)
       .values(txValues)
       .onConflictDoNothing()
       .returning({
@@ -57,29 +117,20 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
         toAddress: schema.transactions.toAddress,
       })
 
-    // Batch-upsert addresses for newly-inserted transactions only.
-    // Using unnest avoids N queries — one SQL call regardless of address count.
-    if (inserted.length > 0) {
-      await upsertAddresses(inserted, timestamp)
+    if (insertedAddrs.length > 0) {
+      await upsertAddresses(insertedAddrs, timestamp)
     }
   }
 
-  // Process logs inline (no queue) — fetch all receipts in ONE RPC call
-  // Skip entirely if batch receipts are disabled to avoid N+1 RPC explosion
+  // ── 3. Fetch receipts + decode all logs in ONE pass ────────────
   if (!skipLogs && block.prefetchedTransactions.length > 0 && blockReceiptsSupported) {
-    const receiptMap = await fetchBlockReceipts(provider, blockNumber)
-    for (const tx of block.prefetchedTransactions) {
-      try {
-        await processLogs(tx.hash, blockNumber, timestamp, provider, receiptMap.get(tx.hash.toLowerCase()))
-      } catch (err) {
-        console.warn(`[block-processor] Log processing failed for ${tx.hash}:`, err instanceof Error ? err.message : err)
-      }
+    const receipts = await fetchBlockReceipts(provider, blockNumber)
+    if (receipts.length > 0) {
+      await processReceiptsBatch(receipts, blockNumber, timestamp, provider)
     }
   }
 
-  console.log(`[block-processor] Block ${block.number} — ${block.prefetchedTransactions.length} txs`)
-
-  // Deliver webhooks (non-blocking)
+  // ── 4. Webhooks (non-blocking) ─────────────────────────────────
   if (!skipLogs && txValues.length > 0) {
     notifyWebhooks(
       txValues.map(tx => ({ hash: tx.hash, fromAddress: tx.fromAddress, toAddress: tx.toAddress ?? null, value: tx.value })),
@@ -89,12 +140,217 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   }
 }
 
+// ── Receipt batch processing ────────────────────────────────────────
 /**
- * Batch-upsert address rows after block processing.
- * Counts per-address appearances in newly-inserted transactions so replays
- * don't double-count (we only pass RETURNING rows, which are truly new).
- * Uses unnest to send a single SQL statement regardless of address count.
+ * Process all receipts for a block in bulk:
+ *   - Batched tx status/gasUsed UPDATE via unnest
+ *   - Batched token_transfers INSERT
+ *   - Batched dex_trades INSERT
+ *   - Pre-filtered logs by topic to avoid wasted work
  */
+async function processReceiptsBatch(
+  receipts: Array<{ txHash: string; receipt: NormalizedReceipt }>,
+  blockNumber: number,
+  timestamp: Date,
+  provider: JsonRpcProvider,
+) {
+  const db = getDb()
+
+  // ── A. Batch update tx status + gasUsed ─────────────────────────
+  const statusUpdates: TxStatusUpdate[] = receipts.map(r => ({
+    hash: r.txHash,
+    status: r.receipt.status,
+    gasUsed: r.receipt.gasUsed,
+  }))
+  await batchUpdateTxStatus(statusUpdates)
+
+  // ── B. Pre-filter logs by topic ─────────────────────────────────
+  const transferLogs: Array<{ txHash: string; log: NormalizedLog }> = []
+  const dexSwapLogs: Array<{ txHash: string; log: NormalizedLog }> = []
+
+  for (const { txHash, receipt } of receipts) {
+    for (const log of receipt.logs) {
+      const topic0 = log.topics[0]
+      if (topic0 === TRANSFER_TOPIC || topic0 === TRANSFER_SINGLE_TOPIC) {
+        transferLogs.push({ txHash, log })
+      } else if (topic0 === SWAP_V2_TOPIC) {
+        dexSwapLogs.push({ txHash, log })
+      }
+    }
+  }
+
+  // ── C. Decode & bulk-insert token transfers ─────────────────────
+  if (transferLogs.length > 0) {
+    const rows: TokenTransferRow[] = []
+    const tokensToEnsure = new Map<string, 'BEP20' | 'BEP721' | 'BEP1155'>()
+
+    for (const { txHash, log } of transferLogs) {
+      try {
+        const topic0 = log.topics[0]
+        let from: string, to: string, value: bigint, tokenId: bigint | null = null
+        let tokenType: 'BEP20' | 'BEP721' | 'BEP1155'
+
+        if (topic0 === TRANSFER_TOPIC && log.topics.length === 3) {
+          tokenType = 'BEP20'
+          from = '0x' + log.topics[1].slice(26)
+          to = '0x' + log.topics[2].slice(26)
+          value = abi.decode(['uint256'], log.data)[0] as bigint
+        } else if (topic0 === TRANSFER_TOPIC && log.topics.length === 4) {
+          tokenType = 'BEP721'
+          from = '0x' + log.topics[1].slice(26)
+          to = '0x' + log.topics[2].slice(26)
+          tokenId = BigInt(log.topics[3])
+          value = 1n
+        } else if (topic0 === TRANSFER_SINGLE_TOPIC) {
+          tokenType = 'BEP1155'
+          from = '0x' + log.topics[2].slice(26)
+          to = '0x' + log.topics[3].slice(26)
+          const decoded = abi.decode(['uint256', 'uint256'], log.data)
+          tokenId = decoded[0] as bigint
+          value = decoded[1] as bigint
+        } else {
+          continue
+        }
+
+        const tokenAddress = log.address.toLowerCase()
+        rows.push({
+          txHash,
+          logIndex: log.index,
+          tokenAddress,
+          fromAddress: from.toLowerCase(),
+          toAddress: to.toLowerCase(),
+          value: value.toString(),
+          tokenId: tokenId?.toString() ?? null,
+          blockNumber,
+          timestamp,
+          tokenType,
+        })
+
+        if (!tokenCache.has(tokenAddress) && !tokensToEnsure.has(tokenAddress)) {
+          tokensToEnsure.set(tokenAddress, tokenType)
+        }
+      } catch {
+        // Skip malformed logs
+      }
+    }
+
+    // Ensure unknown tokens exist (batched RPC lookups)
+    if (tokensToEnsure.size > 0) {
+      await ensureTokensBatch(tokensToEnsure, provider)
+    }
+
+    // Bulk insert token transfers
+    if (rows.length > 0) {
+      const inserted = await db.insert(schema.tokenTransfers)
+        .values(rows.map(r => ({
+          txHash: r.txHash,
+          logIndex: r.logIndex,
+          tokenAddress: r.tokenAddress,
+          fromAddress: r.fromAddress,
+          toAddress: r.toAddress,
+          value: r.value,
+          tokenId: r.tokenId,
+          blockNumber: r.blockNumber,
+          timestamp: r.timestamp,
+        })))
+        .onConflictDoNothing()
+        .returning({ id: schema.tokenTransfers.id })
+
+      // Only update holder counts if rows were actually inserted (not a replay)
+      if (inserted.length > 0) {
+        await batchUpdateHolderBalances(rows)
+      }
+    }
+  }
+
+  // ── D. Decode & bulk-insert DEX trades ──────────────────────────
+  if (dexSwapLogs.length > 0) {
+    const dexRows: DexTradeRow[] = []
+
+    // Collect unknown pairs and fetch their tokens in parallel
+    const unknownPairs = new Set<string>()
+    for (const { log } of dexSwapLogs) {
+      const pairAddress = log.address.toLowerCase()
+      if (!pairCache.has(pairAddress)) unknownPairs.add(pairAddress)
+    }
+    if (unknownPairs.size > 0) {
+      await Promise.all(Array.from(unknownPairs).map(pair => fetchPairTokens(pair, provider)))
+    }
+
+    for (const { txHash, log } of dexSwapLogs) {
+      try {
+        const pairAddress = log.address.toLowerCase()
+        const isV2 = log.topics.length === 3 && log.data.length >= 514
+        if (!isV2) continue
+
+        const tokens = pairCache.get(pairAddress)
+        if (!tokens) continue
+
+        const [token0, token1] = tokens
+        const [a0In, a1In, a0Out, a1Out] = abi.decode(
+          ['uint256', 'uint256', 'uint256', 'uint256'], log.data
+        ) as bigint[]
+
+        let tokenIn: string, tokenOut: string, amountIn: bigint, amountOut: bigint
+        if (a0In > 0n) {
+          tokenIn = token0; tokenOut = token1
+          amountIn = a0In; amountOut = a1Out
+        } else {
+          tokenIn = token1; tokenOut = token0
+          amountIn = a1In; amountOut = a0Out
+        }
+
+        const maker = ('0x' + log.topics[2].slice(26)).toLowerCase()
+
+        dexRows.push({
+          txHash,
+          dex: 'PancakeSwap V2',
+          pairAddress,
+          tokenIn,
+          tokenOut,
+          amountIn: amountIn.toString(),
+          amountOut: amountOut.toString(),
+          maker,
+          blockNumber,
+          timestamp,
+        })
+      } catch {
+        // Skip malformed swaps
+      }
+    }
+
+    if (dexRows.length > 0) {
+      await db.insert(schema.dexTrades).values(dexRows).onConflictDoNothing()
+    }
+  }
+}
+
+// ── Batched tx status update ────────────────────────────────────────
+/**
+ * Update status + gasUsed for N transactions in a single SQL call
+ * using unnest() arrays. Previously this was N sequential UPDATEs.
+ */
+async function batchUpdateTxStatus(updates: TxStatusUpdate[]): Promise<void> {
+  if (updates.length === 0) return
+  const db = getDb()
+
+  const hashes = updates.map(u => u.hash)
+  const statuses = updates.map(u => u.status)
+  const gasUsed = updates.map(u => u.gasUsed.toString())
+
+  await db.execute(sql`
+    UPDATE transactions AS t
+    SET status = u.status, gas_used = u.gas_used::bigint
+    FROM unnest(
+      ${hashes}::text[],
+      ${statuses}::boolean[],
+      ${gasUsed}::text[]
+    ) AS u(hash, status, gas_used)
+    WHERE t.hash = u.hash
+  `)
+}
+
+// ── Batched addresses upsert ────────────────────────────────────────
 async function upsertAddresses(
   txs: Array<{ fromAddress: string; toAddress: string | null }>,
   timestamp: Date,
@@ -107,8 +363,6 @@ async function upsertAddresses(
   }
   if (counts.size === 0) return
 
-  // Sort addresses alphabetically to acquire row locks in a consistent order,
-  // preventing deadlocks when concurrent block processors touch overlapping addresses.
   const rows = Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   const ts = timestamp.toISOString()
 
@@ -136,16 +390,198 @@ async function upsertAddresses(
   }
 }
 
+// ── Batched holder balance update ───────────────────────────────────
+/**
+ * Aggregate per-(token, holder) deltas across all transfers in the block,
+ * then apply a single batched upsert to token_balances and a single
+ * tokens.holder_count adjustment per token.
+ */
+async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void> {
+  const db = getDb()
+
+  // Aggregate net deltas: (token, holder) → bigint
+  const deltas = new Map<string, bigint>()
+  const key = (token: string, holder: string) => `${token}|${holder}`
+
+  for (const r of rows) {
+    // Skip NFT holder tracking — BEP721/1155 balances aren't aggregated the same way
+    if (r.tokenType !== 'BEP20') continue
+
+    const v = BigInt(r.value)
+    if (r.toAddress !== ZERO_ADDRESS) {
+      const k = key(r.tokenAddress, r.toAddress)
+      deltas.set(k, (deltas.get(k) ?? 0n) + v)
+    }
+    if (r.fromAddress !== ZERO_ADDRESS) {
+      const k = key(r.tokenAddress, r.fromAddress)
+      deltas.set(k, (deltas.get(k) ?? 0n) - v)
+    }
+  }
+
+  if (deltas.size === 0) return
+
+  // Build arrays for unnest — sort to avoid deadlocks
+  const entries = Array.from(deltas.entries())
+    .map(([k, delta]) => {
+      const [token, holder] = k.split('|')
+      return { token, holder, delta }
+    })
+    .sort((a, b) => (a.token + a.holder).localeCompare(b.token + b.holder))
+
+  const tokens_ = entries.map(e => e.token)
+  const holders = entries.map(e => e.holder)
+  const deltaStrs = entries.map(e => e.delta.toString())
+
+  // Single upsert: apply all deltas at once, capture holder count transitions
+  const result = await db.execute(sql`
+    WITH input AS (
+      SELECT * FROM unnest(
+        ${tokens_}::text[],
+        ${holders}::text[],
+        ${deltaStrs}::text[]
+      ) AS t(token_address, holder_address, delta)
+    ),
+    upserted AS (
+      INSERT INTO token_balances (token_address, holder_address, balance)
+      SELECT token_address, holder_address, delta::numeric FROM input
+      ON CONFLICT (token_address, holder_address) DO UPDATE
+        SET balance = token_balances.balance + EXCLUDED.balance
+      RETURNING token_address, holder_address, balance,
+                balance - (SELECT delta::numeric FROM input i
+                           WHERE i.token_address = token_balances.token_address
+                             AND i.holder_address = token_balances.holder_address
+                           LIMIT 1) AS old_balance
+    )
+    SELECT token_address,
+           SUM(
+             CASE
+               WHEN old_balance <= 0 AND balance > 0 THEN 1
+               WHEN old_balance > 0 AND balance <= 0 THEN -1
+               ELSE 0
+             END
+           )::int AS holder_delta
+    FROM upserted
+    GROUP BY token_address
+    HAVING SUM(
+             CASE
+               WHEN old_balance <= 0 AND balance > 0 THEN 1
+               WHEN old_balance > 0 AND balance <= 0 THEN -1
+               ELSE 0
+             END
+           ) <> 0
+  `)
+
+  // Apply per-token holder_count deltas
+  const holderDeltas = Array.from(result) as Array<{ token_address: string; holder_delta: number }>
+  if (holderDeltas.length > 0) {
+    const tokAddrs = holderDeltas.map(h => h.token_address)
+    const deltaVals = holderDeltas.map(h => h.holder_delta)
+    await db.execute(sql`
+      UPDATE tokens AS t
+      SET holder_count = GREATEST(0, t.holder_count + u.delta)
+      FROM unnest(${tokAddrs}::text[], ${deltaVals}::int[]) AS u(address, delta)
+      WHERE t.address = u.address
+    `)
+  }
+}
+
+// ── Token metadata lookup ───────────────────────────────────────────
+const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function totalSupply() view returns (uint256)',
+]
+
+async function ensureTokensBatch(
+  tokensToEnsure: Map<string, 'BEP20' | 'BEP721' | 'BEP1155'>,
+  provider: JsonRpcProvider,
+): Promise<void> {
+  const db = getDb()
+  const addresses = Array.from(tokensToEnsure.keys())
+
+  // Check which already exist in DB (single query)
+  const existing = await db.execute(sql`
+    SELECT address FROM tokens WHERE address = ANY(${addresses}::text[])
+  `)
+  const existingSet = new Set(
+    (Array.from(existing) as Array<{ address: string }>).map(r => r.address)
+  )
+
+  const toFetch = addresses.filter(a => !existingSet.has(a))
+  for (const a of existingSet) {
+    tokenCache.add(a)
+    if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()
+  }
+
+  if (toFetch.length === 0) return
+
+  // Fetch metadata in parallel
+  const results = await Promise.all(
+    toFetch.map(async (addr) => {
+      try {
+        const contract = new Contract(addr, ERC20_ABI, provider)
+        const [name, symbol, decimals, totalSupply] = await Promise.all([
+          contract.name().catch(() => 'Unknown'),
+          contract.symbol().catch(() => '???'),
+          contract.decimals().catch(() => 18),
+          contract.totalSupply().catch(() => 0n),
+        ])
+        return {
+          address: addr,
+          name: String(name).slice(0, 255),
+          symbol: String(symbol).slice(0, 50),
+          decimals: Number(decimals),
+          type: tokensToEnsure.get(addr)!,
+          totalSupply: BigInt(totalSupply).toString(),
+          holderCount: 0,
+        }
+      } catch {
+        return null
+      }
+    })
+  )
+
+  const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
+  if (valid.length > 0) {
+    await db.insert(schema.tokens).values(valid).onConflictDoNothing()
+    for (const v of valid) {
+      tokenCache.add(v.address)
+      if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()
+    }
+  }
+}
+
+// ── DEX pair token lookup ───────────────────────────────────────────
+const PAIR_ABI = [
+  'function token0() view returns (address)',
+  'function token1() view returns (address)',
+]
+
+async function fetchPairTokens(pairAddress: string, provider: JsonRpcProvider): Promise<void> {
+  try {
+    const pair = new Contract(pairAddress, PAIR_ABI, provider)
+    const [t0, t1] = await Promise.all([pair.token0(), pair.token1()])
+    if (pairCache.size >= PAIR_CACHE_MAX) {
+      pairCache.delete(pairCache.keys().next().value!)
+    }
+    pairCache.set(pairAddress, [String(t0).toLowerCase(), String(t1).toLowerCase()])
+  } catch {
+    // Not a valid pair, skip
+  }
+}
+
+// ── eth_getBlockReceipts ─────────────────────────────────────────────
 let blockReceiptsSupported = true
 let blockReceiptsWarnCount = 0
 
-/** Fetch all receipts for a block in one RPC call. Falls back to empty map if unsupported. */
 async function fetchBlockReceipts(
   provider: JsonRpcProvider,
   blockNumber: number,
-): Promise<Map<string, NormalizedReceipt>> {
-  const map = new Map<string, NormalizedReceipt>()
-  if (!blockReceiptsSupported) return map
+): Promise<Array<{ txHash: string; receipt: NormalizedReceipt }>> {
+  const result: Array<{ txHash: string; receipt: NormalizedReceipt }> = []
+  if (!blockReceiptsSupported) return result
+
   try {
     const blockHex = '0x' + blockNumber.toString(16)
     const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
@@ -156,15 +592,18 @@ async function fetchBlockReceipts(
     }> | null
 
     for (const r of raw ?? []) {
-      map.set(r.transactionHash.toLowerCase(), {
-        status: r.status === '0x1',
-        gasUsed: BigInt(r.gasUsed),
-        logs: r.logs.map(l => ({
-          address: l.address.toLowerCase(),
-          topics: l.topics,
-          data: l.data,
-          index: parseInt(l.logIndex, 16),
-        })),
+      result.push({
+        txHash: r.transactionHash,
+        receipt: {
+          status: r.status === '0x1',
+          gasUsed: BigInt(r.gasUsed),
+          logs: r.logs.map(l => ({
+            address: l.address.toLowerCase(),
+            topics: l.topics,
+            data: l.data,
+            index: parseInt(l.logIndex, 16),
+          })),
+        },
       })
     }
   } catch (err) {
@@ -177,5 +616,5 @@ async function fetchBlockReceipts(
       blockReceiptsSupported = false
     }
   }
-  return map
+  return result
 }
