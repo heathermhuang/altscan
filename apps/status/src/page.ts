@@ -66,11 +66,14 @@ function overallStatus(services: Record<string, ServiceHealth>): { label: string
   return { label: 'Checking Systems...', color: '#6b7280', bg: '#1f2937' }
 }
 
-function renderTimeline(entries: HistoryEntry[]): string {
-  // Show last 90 bars (each ~16 min if polling every 30s — covers ~24h)
+function renderTimeline(entries: HistoryEntry[]): { bars: string; rangeLabel: string } {
   const BARS = 90
   const now = Date.now()
-  const bucketMs = (24 * 3600_000) / BARS
+
+  // Adaptive range: use time since first entry, minimum 10 min, max 24h
+  const oldest = entries.length > 0 ? entries[0].ts : now
+  const spanMs = Math.min(Math.max(now - oldest, 10 * 60_000), 24 * 3600_000)
+  const bucketMs = spanMs / BARS
   const bars: string[] = []
 
   for (let i = 0; i < BARS; i++) {
@@ -87,7 +90,14 @@ function renderTimeline(entries: HistoryEntry[]): string {
     bars.push(`<div class="bar" style="background:${color}" title="${new Date(bucketStart).toLocaleTimeString()}"></div>`)
   }
 
-  return bars.join('')
+  // Human-readable range label
+  const spanMin = Math.round(spanMs / 60_000)
+  let rangeLabel: string
+  if (spanMin < 60) rangeLabel = `${spanMin}m ago`
+  else if (spanMin < 1440) rangeLabel = `${Math.round(spanMin / 60)}h ago`
+  else rangeLabel = '24h ago'
+
+  return { bars: bars.join(''), rangeLabel }
 }
 
 function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): string {
@@ -114,12 +124,13 @@ function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): str
       </div>
 
       <div class="timeline-container">
-        <div class="timeline">${renderTimeline(hist)}</div>
+        ${(() => { const tl = renderTimeline(hist); return `
+        <div class="timeline">${tl.bars}</div>
         <div class="timeline-labels">
-          <span>24h ago</span>
+          <span>${tl.rangeLabel}</span>
           <span>${uptimePercent}% uptime</span>
           <span>Now</span>
-        </div>
+        </div>`; })()}
       </div>
 
       <div class="metrics-grid">
