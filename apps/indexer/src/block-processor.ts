@@ -404,8 +404,14 @@ async function upsertAddresses(
 // ── Batched holder balance update ───────────────────────────────────
 /**
  * Aggregate per-(token, holder) deltas across all transfers in the block,
- * then apply a single batched upsert to token_balances and a single
- * tokens.holder_count adjustment per token.
+ * then apply a single batched upsert to token_balances.
+ *
+ * Previously this also maintained tokens.holder_count inline via a
+ * two-phase CTE (old_state → upsert → aggregate). Under production load
+ * on ETH (1000+ deltas per block) that CTE became the dominant bottleneck,
+ * scaling negatively with concurrency because of row-lock contention and
+ * deadlocks. holder_count is now recomputed periodically by the retention
+ * job instead — see recomputeHolderCounts().
  */
 async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void> {
   const db = getDb()
@@ -432,7 +438,7 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
   if (deltas.size === 0) return
 
   // Sort by (token, holder) so row locks are acquired in a consistent order,
-  // preventing deadlocks when concurrent block processors touch overlapping balances.
+  // reducing (but not eliminating) deadlocks under concurrent block processors.
   const entries = Array.from(deltas.entries())
     .map(([k, delta]) => {
       const [token, holder] = k.split('|')
@@ -440,68 +446,27 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
     })
     .sort((a, b) => (a.token + a.holder).localeCompare(b.token + b.holder))
 
-  // Two-phase CTE: snapshot old balances, then upsert, then compute deltas.
-  // Avoids relying on EXCLUDED inside RETURNING (inconsistent Postgres behavior).
-  // Postgres CTE snapshot semantics guarantee `old_state` sees pre-modification values
-  // even though the INSERT runs in the same statement.
-  const result = await db.execute(sql`
-    WITH input(token_address, holder_address, delta) AS (
-      VALUES ${sql.join(
-        entries.map(e => sql`(${e.token}::varchar(42), ${e.holder}::varchar(42), ${e.delta.toString()}::numeric)`),
-        sql`, `
-      )}
-    ),
-    old_state AS (
-      SELECT i.token_address, i.holder_address, i.delta,
-             COALESCE(tb.balance, 0) AS old_balance
-      FROM input i
-      LEFT JOIN token_balances tb
-        ON tb.token_address = i.token_address
-       AND tb.holder_address = i.holder_address
-    ),
-    upserted AS (
-      INSERT INTO token_balances (token_address, holder_address, balance)
-      SELECT token_address, holder_address, delta FROM old_state
-      ON CONFLICT (token_address, holder_address) DO UPDATE
-        SET balance = token_balances.balance + EXCLUDED.balance
-      RETURNING token_balances.token_address,
-                token_balances.holder_address,
-                token_balances.balance AS new_balance
-    )
-    SELECT u.token_address,
-           SUM(
-             CASE
-               WHEN os.old_balance <= 0 AND u.new_balance > 0 THEN 1
-               WHEN os.old_balance > 0 AND u.new_balance <= 0 THEN -1
-               ELSE 0
-             END
-           )::int AS holder_delta
-    FROM upserted u
-    JOIN old_state os
-      ON os.token_address = u.token_address
-     AND os.holder_address = u.holder_address
-    GROUP BY u.token_address
-    HAVING SUM(
-             CASE
-               WHEN os.old_balance <= 0 AND u.new_balance > 0 THEN 1
-               WHEN os.old_balance > 0 AND u.new_balance <= 0 THEN -1
-               ELSE 0
-             END
-           ) <> 0
-  `)
-
-  // Apply per-token holder_count deltas via VALUES clause
-  const holderDeltas = Array.from(result) as Array<{ token_address: string; holder_delta: number }>
-  if (holderDeltas.length > 0) {
-    await db.execute(sql`
-      UPDATE tokens AS t
-      SET holder_count = GREATEST(0, t.holder_count + u.delta)
-      FROM (VALUES ${sql.join(
-        holderDeltas.map(h => sql`(${h.token_address}::varchar(42), ${h.holder_delta}::int)`),
-        sql`, `
-      )}) AS u(address, delta)
-      WHERE t.address = u.address
-    `)
+  // Simple upsert, with deadlock retry. No CTE, no holder_count tracking.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await db.execute(sql`
+        INSERT INTO token_balances (token_address, holder_address, balance)
+        VALUES ${sql.join(
+          entries.map(e => sql`(${e.token}::varchar(42), ${e.holder}::varchar(42), ${e.delta.toString()}::numeric)`),
+          sql`, `
+        )}
+        ON CONFLICT (token_address, holder_address) DO UPDATE
+          SET balance = token_balances.balance + EXCLUDED.balance
+      `)
+      return
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('deadlock') && attempt < 3) {
+        await new Promise(r => setTimeout(r, 50 * attempt))
+        continue
+      }
+      throw err
+    }
   }
 }
 

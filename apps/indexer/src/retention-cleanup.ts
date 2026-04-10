@@ -14,6 +14,7 @@ import { sql } from 'drizzle-orm'
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
+const HOLDER_COUNT_EVERY_MS = 5 * 60 * 1000   // 5 minutes
 
 /**
  * Whitelist of allowed table names and timestamp columns.
@@ -160,6 +161,44 @@ async function runVacuumFull(): Promise<void> {
   console.log('[retention] VACUUM FULL complete')
 }
 
+/**
+ * Recompute tokens.holder_count from current token_balances.
+ *
+ * Runs as a single SQL statement — much cheaper than tracking deltas
+ * per block because it scans token_balances once and groups by token,
+ * whereas the per-block CTE re-locked 1000+ rows every block and was
+ * the primary throughput ceiling on ETH.
+ *
+ * Runs every few minutes; eventual consistency is fine for holder counts.
+ */
+async function recomputeHolderCounts(): Promise<void> {
+  const db = getDb()
+  try {
+    const start = Date.now()
+    // Only touch rows that will actually change — GREATEST(...,0) so zero-balance
+    // tokens without any balance rows drop to 0.
+    await db.execute(sql`
+      WITH new_counts AS (
+        SELECT token_address, COUNT(*)::int AS cnt
+        FROM token_balances
+        WHERE balance > 0
+        GROUP BY token_address
+      )
+      UPDATE tokens t
+      SET holder_count = COALESCE(nc.cnt, 0)
+      FROM (
+        SELECT address FROM tokens
+      ) all_t
+      LEFT JOIN new_counts nc ON nc.token_address = all_t.address
+      WHERE t.address = all_t.address
+        AND t.holder_count IS DISTINCT FROM COALESCE(nc.cnt, 0)
+    `)
+    console.log(`[holder-count] recompute done in ${Date.now() - start}ms`)
+  } catch (err) {
+    console.warn('[holder-count] recompute failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 export async function startRetentionCleanup(): Promise<void> {
   // Await first run so getLastIndexedBlock sees the clean state
   await runCleanup().catch(err => console.error('[retention] cleanup error:', err))
@@ -173,4 +212,13 @@ export async function startRetentionCleanup(): Promise<void> {
   setInterval(() => {
     runCleanup().catch(err => console.error('[retention] cleanup error:', err))
   }, RUN_EVERY_MS)
+
+  // Recompute holder_count periodically (replaces per-block inline tracking).
+  // First run is delayed so it doesn't collide with the retention job above.
+  setTimeout(() => {
+    recomputeHolderCounts().catch(err => console.error('[holder-count] initial error:', err))
+    setInterval(() => {
+      recomputeHolderCounts().catch(err => console.error('[holder-count] interval error:', err))
+    }, HOLDER_COUNT_EVERY_MS)
+  }, 60_000)
 }
