@@ -59,8 +59,9 @@ export function Footer() {
           <Link href="/api-docs" className="hover:text-gray-200 transition-colors py-2">API</Link>
           <Link href="/developer" className="hover:text-gray-200 transition-colors py-2">Developer</Link>
           <Link href="/about" className="hover:text-gray-200 transition-colors py-2">About</Link>
-          <a href="https://mdt.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">MDT Website ↗</a>
+
           <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
+          <a href="https://status-page-6ez4.onrender.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">Status ↗</a>
         </div>
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />

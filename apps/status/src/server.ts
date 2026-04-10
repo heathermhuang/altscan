@@ -39,7 +39,7 @@ interface HistoryEntry {
 // ── State ───────────────────────────────────────────────────────────
 const services: Record<string, ServiceHealth> = {
   ethscan: {
-    name: 'EthScan',
+    name: 'ethscan.io',
     url: 'https://ethscan.io',
     healthUrl: 'https://ethscan.io/api/health',
     status: 'unknown',
@@ -49,7 +49,7 @@ const services: Record<string, ServiceHealth> = {
     uptime: null, lastChecked: null, error: null,
   },
   bnbscan: {
-    name: 'BNBScan',
+    name: 'bnbscan.com',
     url: 'https://bnbscan.io',
     healthUrl: 'https://bnbscan.com/api/health',
     status: 'unknown',

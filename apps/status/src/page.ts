@@ -178,7 +178,7 @@ export function html(services: Record<string, ServiceHealth>, history: Record<st
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Status — BNBScan & EthScan</title>
+  <title>Status — bnbscan.com & ethscan.io</title>
   <meta http-equiv="refresh" content="30">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
