@@ -112,8 +112,8 @@ async function checkService(key: string) {
       if (mem) svc.heapUsedMB = (mem.heapUsedMB as number) ?? null
       svc.uptime = (data.uptime as number) ?? null
 
-      // Lag > 5 min = degraded
-      svc.status = (svc.lagSeconds !== null && svc.lagSeconds > 300) ? 'degraded' : 'operational'
+      // Lag > 2 min = degraded
+      svc.status = (svc.lagSeconds !== null && svc.lagSeconds > 120) ? 'degraded' : 'operational'
     } else {
       svc.status = 'degraded'
     }
