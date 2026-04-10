@@ -50,7 +50,7 @@ const services: Record<string, ServiceHealth> = {
   },
   bnbscan: {
     name: 'bnbscan.com',
-    url: 'https://bnbscan.io',
+    url: 'https://bnbscan.com',
     healthUrl: 'https://bnbscan.com/api/health',
     status: 'unknown',
     latestBlock: null, lagSeconds: null, responseTimeMs: null,
