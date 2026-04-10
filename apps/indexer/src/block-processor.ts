@@ -328,24 +328,23 @@ async function processReceiptsBatch(
 // ── Batched tx status update ────────────────────────────────────────
 /**
  * Update status + gasUsed for N transactions in a single SQL call
- * using unnest() arrays. Previously this was N sequential UPDATEs.
+ * using a VALUES clause. Previously this was N sequential UPDATEs.
+ *
+ * Uses VALUES instead of unnest(arr) because Drizzle's sql template
+ * serializes JS arrays as record literals (a, b, c) which cannot be
+ * cast to text[] at the postgres layer.
  */
 async function batchUpdateTxStatus(updates: TxStatusUpdate[]): Promise<void> {
   if (updates.length === 0) return
   const db = getDb()
 
-  const hashes = updates.map(u => u.hash)
-  const statuses = updates.map(u => u.status)
-  const gasUsed = updates.map(u => u.gasUsed.toString())
-
   await db.execute(sql`
     UPDATE transactions AS t
-    SET status = u.status, gas_used = u.gas_used::bigint
-    FROM unnest(
-      ${hashes}::text[],
-      ${statuses}::boolean[],
-      ${gasUsed}::text[]
-    ) AS u(hash, status, gas_used)
+    SET status = u.status, gas_used = u.gas_used
+    FROM (VALUES ${sql.join(
+      updates.map(u => sql`(${u.hash}, ${u.status}::boolean, ${u.gasUsed.toString()}::bigint)`),
+      sql`, `
+    )}) AS u(hash, status, gas_used)
     WHERE t.hash = u.hash
   `)
 }
@@ -420,7 +419,8 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
 
   if (deltas.size === 0) return
 
-  // Build arrays for unnest — sort to avoid deadlocks
+  // Sort by (token, holder) so row locks are acquired in a consistent order,
+  // preventing deadlocks when concurrent block processors touch overlapping balances.
   const entries = Array.from(deltas.entries())
     .map(([k, delta]) => {
       const [token, holder] = k.split('|')
@@ -428,58 +428,66 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
     })
     .sort((a, b) => (a.token + a.holder).localeCompare(b.token + b.holder))
 
-  const tokens_ = entries.map(e => e.token)
-  const holders = entries.map(e => e.holder)
-  const deltaStrs = entries.map(e => e.delta.toString())
-
-  // Single upsert: apply all deltas at once, capture holder count transitions
+  // Two-phase CTE: snapshot old balances, then upsert, then compute deltas.
+  // Avoids relying on EXCLUDED inside RETURNING (inconsistent Postgres behavior).
+  // Postgres CTE snapshot semantics guarantee `old_state` sees pre-modification values
+  // even though the INSERT runs in the same statement.
   const result = await db.execute(sql`
-    WITH input AS (
-      SELECT * FROM unnest(
-        ${tokens_}::text[],
-        ${holders}::text[],
-        ${deltaStrs}::text[]
-      ) AS t(token_address, holder_address, delta)
+    WITH input(token_address, holder_address, delta) AS (
+      VALUES ${sql.join(
+        entries.map(e => sql`(${e.token}::varchar(42), ${e.holder}::varchar(42), ${e.delta.toString()}::numeric)`),
+        sql`, `
+      )}
+    ),
+    old_state AS (
+      SELECT i.token_address, i.holder_address, i.delta,
+             COALESCE(tb.balance, 0) AS old_balance
+      FROM input i
+      LEFT JOIN token_balances tb
+        ON tb.token_address = i.token_address
+       AND tb.holder_address = i.holder_address
     ),
     upserted AS (
       INSERT INTO token_balances (token_address, holder_address, balance)
-      SELECT token_address, holder_address, delta::numeric FROM input
+      SELECT token_address, holder_address, delta FROM old_state
       ON CONFLICT (token_address, holder_address) DO UPDATE
         SET balance = token_balances.balance + EXCLUDED.balance
-      RETURNING token_address, holder_address, balance,
-                balance - (SELECT delta::numeric FROM input i
-                           WHERE i.token_address = token_balances.token_address
-                             AND i.holder_address = token_balances.holder_address
-                           LIMIT 1) AS old_balance
+      RETURNING token_balances.token_address,
+                token_balances.holder_address,
+                token_balances.balance AS new_balance
     )
-    SELECT token_address,
+    SELECT u.token_address,
            SUM(
              CASE
-               WHEN old_balance <= 0 AND balance > 0 THEN 1
-               WHEN old_balance > 0 AND balance <= 0 THEN -1
+               WHEN os.old_balance <= 0 AND u.new_balance > 0 THEN 1
+               WHEN os.old_balance > 0 AND u.new_balance <= 0 THEN -1
                ELSE 0
              END
            )::int AS holder_delta
-    FROM upserted
-    GROUP BY token_address
+    FROM upserted u
+    JOIN old_state os
+      ON os.token_address = u.token_address
+     AND os.holder_address = u.holder_address
+    GROUP BY u.token_address
     HAVING SUM(
              CASE
-               WHEN old_balance <= 0 AND balance > 0 THEN 1
-               WHEN old_balance > 0 AND balance <= 0 THEN -1
+               WHEN os.old_balance <= 0 AND u.new_balance > 0 THEN 1
+               WHEN os.old_balance > 0 AND u.new_balance <= 0 THEN -1
                ELSE 0
              END
            ) <> 0
   `)
 
-  // Apply per-token holder_count deltas
+  // Apply per-token holder_count deltas via VALUES clause
   const holderDeltas = Array.from(result) as Array<{ token_address: string; holder_delta: number }>
   if (holderDeltas.length > 0) {
-    const tokAddrs = holderDeltas.map(h => h.token_address)
-    const deltaVals = holderDeltas.map(h => h.holder_delta)
     await db.execute(sql`
       UPDATE tokens AS t
       SET holder_count = GREATEST(0, t.holder_count + u.delta)
-      FROM unnest(${tokAddrs}::text[], ${deltaVals}::int[]) AS u(address, delta)
+      FROM (VALUES ${sql.join(
+        holderDeltas.map(h => sql`(${h.token_address}::varchar(42), ${h.holder_delta}::int)`),
+        sql`, `
+      )}) AS u(address, delta)
       WHERE t.address = u.address
     `)
   }
@@ -499,10 +507,16 @@ async function ensureTokensBatch(
 ): Promise<void> {
   const db = getDb()
   const addresses = Array.from(tokensToEnsure.keys())
+  if (addresses.length === 0) return
 
-  // Check which already exist in DB (single query)
+  // Check which already exist in DB (single query).
+  // Uses IN (literal list) instead of ANY(arr) because Drizzle serializes JS arrays
+  // as record literals which fail the ::text[] cast.
   const existing = await db.execute(sql`
-    SELECT address FROM tokens WHERE address = ANY(${addresses}::text[])
+    SELECT address FROM tokens WHERE address IN (${sql.join(
+      addresses.map(a => sql`${a}`),
+      sql`, `
+    )})
   `)
   const existingSet = new Set(
     (Array.from(existing) as Array<{ address: string }>).map(r => r.address)
