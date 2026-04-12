@@ -121,11 +121,11 @@ async function fetchTxCount24h(): Promise<number> {
   }
 }
 
-/** Fetch market cap for the native currency. */
-async function fetchMarketCap(): Promise<number | null> {
+/** Fetch market cap and 24h change for the native currency. */
+async function fetchMarketCap(): Promise<{ value: number; change24h: number } | null> {
   const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
 
-  // Try CryptoCompare (has MKTCAP in RAW data)
+  // Try CryptoCompare (has MKTCAP + CHANGEPCT24HOUR in RAW data)
   try {
     const res = await fetch(
       `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
@@ -133,21 +133,21 @@ async function fetchMarketCap(): Promise<number | null> {
     )
     if (res.ok) {
       const data = await res.json()
-      const mktcap = data?.RAW?.[ccSymbol]?.USD?.MKTCAP
-      if (mktcap > 0) return mktcap
+      const raw = data?.RAW?.[ccSymbol]?.USD
+      if (raw?.MKTCAP > 0) return { value: raw.MKTCAP, change24h: raw.CHANGEPCT24HOUR ?? 0 }
     }
   } catch { /* try next */ }
 
   // Try CoinGecko
   try {
     const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_market_cap=true`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`,
       { cache: 'no-store', signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
-      const mktcap = data[chainConfig.coingeckoId]?.usd_market_cap
-      if (mktcap > 0) return mktcap
+      const coin = data[chainConfig.coingeckoId]
+      if (coin?.usd_market_cap > 0) return { value: coin.usd_market_cap, change24h: coin.usd_24h_change ?? 0 }
     }
   } catch { /* try next */ }
 
@@ -161,7 +161,8 @@ async function fetchMarketCap(): Promise<number | null> {
     if (res.ok) {
       const data = await res.json()
       const mktcap = parseFloat(data?.data?.marketCapUsd)
-      if (mktcap > 0) return mktcap
+      const change = parseFloat(data?.data?.changePercent24Hr)
+      if (mktcap > 0) return { value: mktcap, change24h: change || 0 }
     }
   } catch { /* all failed */ }
 
@@ -246,7 +247,12 @@ export default async function HomePage() {
           value={txCount24h > 0 ? formatNumber(txCount24h) : '—'}
           subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
         />
-        <StatCard label={`${chainConfig.currency} Market Cap`} value={marketCap ? formatMarketCap(marketCap) : '—'} />
+        <StatCard
+          label={`${chainConfig.currency} Market Cap`}
+          value={marketCap ? formatMarketCap(marketCap.value) : '—'}
+          subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
+          subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
+        />
         <StatCard
           label={`${chainConfig.currency} Price`}
           value={priceDisplay}
