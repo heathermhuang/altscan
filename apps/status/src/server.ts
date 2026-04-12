@@ -36,6 +36,14 @@ interface HistoryEntry {
   lagSeconds: number | null
 }
 
+interface DailySummary {
+  date: string
+  total: number
+  operational: number
+  degraded: number
+  down: number
+}
+
 // ── State ───────────────────────────────────────────────────────────
 const services: Record<string, ServiceHealth> = {
   ethscan: {
@@ -61,6 +69,11 @@ const services: Record<string, ServiceHealth> = {
 }
 
 const history: Record<string, HistoryEntry[]> = {
+  ethscan: [],
+  bnbscan: [],
+}
+
+const dailyHistory: Record<string, DailySummary[]> = {
   ethscan: [],
   bnbscan: [],
 }
@@ -132,6 +145,18 @@ function pushHistory(key: string, status: HistoryEntry['status'], responseTimeMs
   const arr = history[key]
   arr.push({ ts: Date.now(), status, responseTimeMs, lagSeconds })
   while (arr.length > MAX_HISTORY) arr.shift()
+
+  // Update daily summary
+  const today = new Date().toISOString().slice(0, 10)
+  const dailyArr = dailyHistory[key]
+  let todaySummary = dailyArr[dailyArr.length - 1]
+  if (!todaySummary || todaySummary.date !== today) {
+    todaySummary = { date: today, total: 0, operational: 0, degraded: 0, down: 0 }
+    dailyArr.push(todaySummary)
+    while (dailyArr.length > 90) dailyArr.shift()
+  }
+  todaySummary.total++
+  todaySummary[status]++
 }
 
 async function pollAll() {
@@ -143,11 +168,11 @@ const app = new Hono()
 app.use('*', cors())
 
 app.get('/', (c) => {
-  return c.html(html(services, history))
+  return c.html(html(services, history, dailyHistory))
 })
 
 app.get('/api/status', (c) => {
-  return c.json({ services, history, checkedAt: new Date().toISOString() })
+  return c.json({ services, history, dailyHistory, checkedAt: new Date().toISOString() })
 })
 
 // ── Start ───────────────────────────────────────────────────────────

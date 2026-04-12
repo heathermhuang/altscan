@@ -23,6 +23,14 @@ interface HistoryEntry {
   lagSeconds: number | null
 }
 
+interface DailySummary {
+  date: string
+  total: number
+  operational: number
+  degraded: number
+  down: number
+}
+
 function statusColor(s: string) {
   if (s === 'operational') return '#10b981'
   if (s === 'degraded') return '#f59e0b'
@@ -37,13 +45,36 @@ function statusLabel(s: string) {
   return 'Checking...'
 }
 
-function formatUptime(seconds: number | null): string {
-  if (seconds === null) return '—'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 24) return `${Math.floor(h / 24)}d ${h % 24}h`
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
+function renderDailyTimeline(entries: DailySummary[]): { bars: string; uptimePercent: string } {
+  const DAYS = 30
+  const now = new Date()
+  const bars: string[] = []
+  let totalChecks = 0
+  let totalOp = 0
+
+  for (let i = DAYS - 1; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    const dateStr = d.toISOString().slice(0, 10)
+    const entry = entries.find(e => e.date === dateStr)
+
+    let color = '#374151'
+    let title = `${dateStr}: No data`
+    if (entry && entry.total > 0) {
+      const pct = ((entry.operational / entry.total) * 100).toFixed(1)
+      if (entry.down > 0) color = '#ef4444'
+      else if (entry.degraded > 0) color = '#f59e0b'
+      else color = '#10b981'
+      title = `${dateStr}: ${pct}% uptime`
+      totalChecks += entry.total
+      totalOp += entry.operational
+    }
+
+    bars.push(`<div class="bar daily-bar" style="background:${color}" title="${title}"></div>`)
+  }
+
+  const uptimePercent = totalChecks > 0 ? ((totalOp / totalChecks) * 100).toFixed(2) : '—'
+  return { bars: bars.join(''), uptimePercent }
 }
 
 function formatNumber(n: number | null): string {
@@ -100,7 +131,7 @@ function renderTimeline(entries: HistoryEntry[]): { bars: string; rangeLabel: st
   return { bars: bars.join(''), rangeLabel }
 }
 
-function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): string {
+function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[], dailyHist: DailySummary[]): string {
   const color = statusColor(svc.status)
   const label = statusLabel(svc.status)
   const uptimePercent = hist.length > 0
@@ -124,12 +155,24 @@ function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): str
       </div>
 
       <div class="timeline-container">
+        <div class="timeline-section-label">24-Hour History</div>
         ${(() => { const tl = renderTimeline(hist); return `
         <div class="timeline">${tl.bars}</div>
         <div class="timeline-labels">
           <span>${tl.rangeLabel}</span>
           <span>${uptimePercent}% uptime</span>
           <span>Now</span>
+        </div>`; })()}
+      </div>
+
+      <div class="timeline-container">
+        <div class="timeline-section-label">30-Day History</div>
+        ${(() => { const dl = renderDailyTimeline(dailyHist); return `
+        <div class="timeline daily-timeline">${dl.bars}</div>
+        <div class="timeline-labels">
+          <span>30d ago</span>
+          <span>${dl.uptimePercent !== '—' ? dl.uptimePercent + '% uptime' : 'No data'}</span>
+          <span>Today</span>
         </div>`; })()}
       </div>
 
@@ -147,8 +190,8 @@ function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): str
           <div class="metric-value">${svc.responseTimeMs !== null ? svc.responseTimeMs + 'ms' : '—'}</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Uptime</div>
-          <div class="metric-value">${formatUptime(svc.uptime)}</div>
+          <div class="metric-label">Uptime (24h)</div>
+          <div class="metric-value">${uptimePercent === '—' ? '—' : uptimePercent + '%'}</div>
         </div>
         ${svc.dbSizeMB !== null ? `
         <div class="metric">
@@ -180,9 +223,9 @@ function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[]): str
   `
 }
 
-export function html(services: Record<string, ServiceHealth>, history: Record<string, HistoryEntry[]>): string {
+export function html(services: Record<string, ServiceHealth>, history: Record<string, HistoryEntry[]>, dailyHistory: Record<string, DailySummary[]>): string {
   const overall = overallStatus(services)
-  const cards = Object.entries(services).map(([k, svc]) => serviceCard(k, svc, history[k] || [])).join('')
+  const cards = Object.entries(services).map(([k, svc]) => serviceCard(k, svc, history[k] || [], dailyHistory[k] || [])).join('')
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -242,6 +285,9 @@ export function html(services: Record<string, ServiceHealth>, history: Record<st
     .bar { flex: 1; border-radius: 2px; min-width: 2px; transition: opacity 0.15s; }
     .bar:hover { opacity: 0.7; }
     .timeline-labels { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 4px; }
+    .timeline-section-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+    .daily-timeline { height: 24px; }
+    .daily-bar { border-radius: 3px; }
 
     .metrics-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
