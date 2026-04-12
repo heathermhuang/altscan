@@ -95,6 +95,7 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
   return {
     title: `Tx ${hash.slice(0, 18)}… — ${chainConfig.brandName}`,
     description: `${chainConfig.name} transaction: ${val} ${chainConfig.currency} from ${tx.fromAddress.slice(0, 12)}… to ${(tx.toAddress ?? 'contract creation').slice(0, 12)}…`,
+    alternates: { canonical: `/tx/${hash}` },
     openGraph: {
       title: `Transaction ${hash.slice(0, 18)}…`,
       description: `${val} ${chainConfig.currency} · Block #${tx.blockNumber} · ${tx.status ? 'Success' : 'Failed'}`,

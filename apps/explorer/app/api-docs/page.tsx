@@ -1,4 +1,5 @@
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -307,6 +308,7 @@ const endpoints: Endpoint[] = [
 export default function ApiDocsPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'API Documentation' }]} />
       <div className="mb-8">
         <h1 className="text-2xl font-bold mb-2">API Reference</h1>
         <p className="text-gray-600">

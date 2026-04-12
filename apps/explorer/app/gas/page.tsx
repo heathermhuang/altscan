@@ -1,6 +1,7 @@
 import { getProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const revalidate = 45
@@ -31,7 +32,27 @@ export default async function GasPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-8">Gas Tracker</h1>
+      <BreadcrumbJsonLd items={[{ name: 'Gas Tracker' }]} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: [
+            { '@type': 'Question', name: `What is gas on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `Gas is the unit that measures the computational effort required to execute transactions on ${chainConfig.name}. Every transaction — from a simple transfer to a complex smart contract call — requires gas. Gas prices are denominated in Gwei (1 Gwei = 0.000000001 ${chainConfig.currency}).` } },
+            { '@type': 'Question', name: `How are ${chainConfig.name} gas fees calculated?`, acceptedAnswer: { '@type': 'Answer', text: `Gas fees = Gas Used × Gas Price (in Gwei). The base fee is set by the network based on demand. During high-traffic periods, gas prices increase. ${chainConfig.key === 'bnb' ? 'BNB Chain has a consensus minimum gas price of 3 Gwei.' : 'Ethereum uses EIP-1559 with a base fee that adjusts dynamically plus an optional priority fee (tip) to validators.'}` } },
+            { '@type': 'Question', name: 'What is the difference between slow, standard, and fast gas?', acceptedAnswer: { '@type': 'Answer', text: 'Slow gas uses the base fee and may take longer to confirm. Standard gas adds a small buffer (10%) for reliable confirmation within a few blocks. Fast gas adds a 30% buffer for near-instant confirmation. Higher gas prices incentivize validators to include your transaction sooner.' } },
+          ],
+        }) }}
+      />
+      <h1 className="text-2xl font-bold mb-2">Gas Tracker</h1>
+      <p className="text-gray-500 text-sm mb-8">
+        Live {chainConfig.name} gas prices updated every block. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
+        {chainConfig.key === 'bnb'
+          ? ' BNB Chain maintains a minimum gas price of 3 Gwei with typical confirmation in 1-3 seconds.'
+          : ' Ethereum gas fluctuates with network demand, using EIP-1559 base fee mechanics.'
+        }
+      </p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <GasCard label="Slow"     gwei={formatGwei(slow)}     est="~30s" color="green" />

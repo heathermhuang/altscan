@@ -1,12 +1,21 @@
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import type { Metadata } from 'next'
 
 export const revalidate = false
+
+export const metadata: Metadata = {
+  title: 'Developer Platform',
+  description: `Build on ${chainConfig.name} with ${chainConfig.brandDomain}'s REST API, webhooks, and flexible query interface. Free API keys, real-time webhooks, and comprehensive documentation.`,
+  alternates: { canonical: '/developer' },
+}
 
 const BASE_URL = `https://${chainConfig.domain}`
 
 export default function DeveloperPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Developer Platform' }]} />
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Developer Platform</h1>
         <p className="text-gray-600 text-lg">

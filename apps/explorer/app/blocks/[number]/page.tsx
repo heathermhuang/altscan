@@ -24,6 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
   return {
     title: `Block #${formatNumber(blockNumber)} — ${chainConfig.brandName}`,
     description: `${chainConfig.name} block #${formatNumber(blockNumber)} validated by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
+    alternates: { canonical: `/blocks/${blockNumber}` },
     openGraph: {
       title: `Block #${formatNumber(blockNumber)}`,
       description: `${block.txCount} transactions · Validator: ${block.miner.slice(0, 14)}…`,

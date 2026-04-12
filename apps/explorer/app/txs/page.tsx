@@ -2,6 +2,7 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
@@ -43,6 +44,7 @@ export default async function TransactionsPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Transactions' }]} />
       <h1 className="text-2xl font-bold mb-6">Transactions</h1>
       <TxTable txs={txs} />
       <div className="mt-4 flex justify-end">

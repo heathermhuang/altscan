@@ -1,10 +1,12 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const metadata: Metadata = {
   title: 'About',
   description: `Learn about ${chainConfig.brandDomain}, an independent ${chainConfig.name} block explorer maintained by Measurable Data Token (MDT).`,
+  alternates: { canonical: '/about' },
 }
 
 export const revalidate = 300
@@ -63,6 +65,7 @@ export default function AboutPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
+      <BreadcrumbJsonLd items={[{ name: 'About' }]} />
       {/* About section */}
       <h1 className="text-3xl font-bold mb-4">About {chainConfig.brandDomain}</h1>
       <p className="text-gray-600 mb-3 leading-relaxed">

@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const revalidate = 300
 
@@ -101,6 +102,7 @@ export default async function ChartsPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
       <h1 className="text-2xl font-bold mb-8">Charts</h1>
 
       <div className="space-y-8">

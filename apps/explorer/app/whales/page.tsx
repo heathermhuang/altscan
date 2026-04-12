@@ -3,6 +3,7 @@ import { desc, sql } from 'drizzle-orm'
 import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const revalidate = 300
@@ -148,6 +149,7 @@ export default async function WhalesPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Whale Tracker' }]} />
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">Whale Tracker</h1>
         <p className="text-gray-500 text-sm">

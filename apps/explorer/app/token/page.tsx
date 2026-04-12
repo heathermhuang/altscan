@@ -3,6 +3,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatNumber, safeBigInt } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -67,7 +68,23 @@ export default async function TokenListPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-4">{typeLabels[tokenType]}</h1>
+      <BreadcrumbJsonLd items={[{ name: 'Tokens' }]} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: [
+            { '@type': 'Question', name: `What are ${isEth ? 'ERC-20' : 'BEP-20'} tokens?`, acceptedAnswer: { '@type': 'Answer', text: `${isEth ? 'ERC-20' : 'BEP-20'} is the standard token interface on ${chainConfig.name}. These fungible tokens can represent anything — currencies, utility points, governance votes, or real-world assets. Each token is a smart contract that tracks balances and allows transfers between addresses.` } },
+            { '@type': 'Question', name: `How do I check token holders on ${chainConfig.brandDomain}?`, acceptedAnswer: { '@type': 'Answer', text: `Click on any token in the list to see its detail page, which shows the total supply, holder count, recent transfers, and top holders. You can also search by token name, symbol, or contract address.` } },
+            { '@type': 'Question', name: `What is the difference between ${isEth ? 'ERC-20, ERC-721, and ERC-1155' : 'BEP-20, BEP-721, and BEP-1155'}?`, acceptedAnswer: { '@type': 'Answer', text: `${isEth ? 'ERC-20' : 'BEP-20'} tokens are fungible (interchangeable, like currencies). ${isEth ? 'ERC-721' : 'BEP-721'} tokens are non-fungible (unique, like NFTs). ${isEth ? 'ERC-1155' : 'BEP-1155'} is a multi-token standard that supports both fungible and non-fungible tokens in a single contract.` } },
+          ],
+        }) }}
+      />
+      <h1 className="text-2xl font-bold mb-2">{typeLabels[tokenType]}</h1>
+      <p className="text-gray-500 text-sm mb-4">
+        Browse all indexed {isEth ? 'ERC-20' : 'BEP-20'} tokens on {chainConfig.name}, ranked by holder count. {isEth ? 'ERC-20' : 'BEP-20'} is the standard fungible token interface — each token listed here is a smart contract that tracks balances across all holders.
+      </p>
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex gap-2">
           {validTypes.map(t => (

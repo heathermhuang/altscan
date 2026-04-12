@@ -29,6 +29,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     title: `${type} ${address.slice(0, 14)}… — ${chainConfig.brandName}`,
     description: `${chainConfig.name} ${type.toLowerCase()} ${address} — Balance: ${formatNativeToken(safeBigInt(info?.balance))} ${chainConfig.currency}, ${info?.txCount ?? 0} transactions`,
+    alternates: { canonical: `/address/${address.toLowerCase()}` },
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
       description: `Balance: ${formatNativeToken(safeBigInt(info?.balance))} ${chainConfig.currency}`,

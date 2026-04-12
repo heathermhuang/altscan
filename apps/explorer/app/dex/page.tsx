@@ -5,6 +5,7 @@ import { formatUnits } from 'ethers'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -82,7 +83,22 @@ export default async function DexPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">DEX Trades</h1>
+      <BreadcrumbJsonLd items={[{ name: 'DEX Trades' }]} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: [
+            { '@type': 'Question', name: `What are DEX trades on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `DEX (Decentralized Exchange) trades are token swaps executed directly on ${chainConfig.name} through automated market maker (AMM) protocols like ${chainConfig.key === 'bnb' ? 'PancakeSwap' : 'Uniswap'}. Unlike centralized exchanges, DEX trades happen on-chain — every swap is a blockchain transaction that anyone can verify.` } },
+            { '@type': 'Question', name: `Which DEXes does ${chainConfig.brandDomain} track?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.brandDomain} indexes swap events from all major ${chainConfig.name} DEXes including ${chainConfig.key === 'bnb' ? 'PancakeSwap, BiSwap, and other BNB Chain AMMs' : 'Uniswap V2/V3, SushiSwap, and other Ethereum AMMs'}. Trades are detected by monitoring Swap event logs emitted by pair contracts.` } },
+          ],
+        }) }}
+      />
+      <h1 className="text-2xl font-bold mb-2">DEX Trades</h1>
+      <p className="text-gray-500 text-sm mb-6">
+        Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.key === 'bnb' ? 'PancakeSwap' : 'Uniswap'} and other AMMs is indexed in real-time as on-chain Swap events.
+      </p>
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-4 mb-6">

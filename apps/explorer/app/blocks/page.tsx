@@ -2,6 +2,7 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
@@ -43,6 +44,7 @@ export default async function BlocksPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Blocks' }]} />
       <h1 className="text-2xl font-bold mb-6">Blocks</h1>
       <BlockTable blocks={blocks} />
       <div className="mt-4 flex justify-end">

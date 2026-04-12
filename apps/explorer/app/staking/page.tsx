@@ -2,6 +2,13 @@ import { getProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Ethereum Staking',
+  description: `Ethereum staking dashboard — view active validators, total ETH staked, staking APY, and how Proof of Stake works on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/staking' },
+}
 
 export const revalidate = 300
 
@@ -38,12 +45,27 @@ export default async function StakingPage() {
 
   const stats = await fetchBeaconStats()
 
+  const stakingFaqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Ethereum staking is the process of depositing 32 ETH to activate validator software. Validators are responsible for proposing and attesting to new blocks on the Ethereum beacon chain. In return, validators earn ETH rewards (currently ~3-4% APY). Staking secures the network through Proof of Stake consensus, which replaced Proof of Work after The Merge in September 2022.' } },
+      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires exactly 32 ETH. However, liquid staking protocols like Lido (stETH) and Rocket Pool (rETH) allow you to stake any amount of ETH without running your own node. These protocols pool deposits and distribute rewards proportionally.' } },
+      { '@type': 'Question', name: 'What is slashing in Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Slashing is a penalty mechanism that destroys a portion of a validator\'s staked ETH if they act maliciously or fail to perform their duties (e.g., double-signing blocks or extended downtime). Slashing ensures validators have a financial incentive to behave honestly.' } },
+    ],
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(stakingFaqJsonLd) }}
+      />
       <h1 className="text-2xl font-bold mb-2">Ethereum Staking</h1>
       <p className="text-gray-500 text-sm mb-8">
         Ethereum uses Proof of Stake consensus since The Merge (September 2022).
-        Validators stake 32 ETH to participate in block validation.
+        Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY).
+        This page shows live staking statistics derived from the ETH2 deposit contract.
       </p>
 
       {/* Stats */}

@@ -3,6 +3,13 @@ import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
 import { or, ilike } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Search',
+  description: `Search ${chainConfig.name} blocks, transactions, addresses, and tokens on ${chainConfig.brandDomain}.`,
+  alternates: { canonical: '/search' },
+}
 
 export default async function SearchPage({
   searchParams,

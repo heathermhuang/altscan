@@ -71,6 +71,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     title: `${token.name} (${token.symbol}) — ${chainConfig.brandName}`,
     description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}. ${token.holderCount.toLocaleString()} holders.`,
+    alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
       description: `${token.type} · ${token.holderCount.toLocaleString()} holders`,

@@ -5,20 +5,23 @@ import { chainConfig } from '@/lib/chain'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const BASE = `https://${chainConfig.domain}`
+  const now = new Date()
 
   const staticRoutes: MetadataRoute.Sitemap = [
-    { url: BASE, changeFrequency: 'always', priority: 1 },
-    { url: `${BASE}/blocks`, changeFrequency: 'always', priority: 0.9 },
-    { url: `${BASE}/txs`, changeFrequency: 'always', priority: 0.9 },
-    { url: `${BASE}/token`, changeFrequency: 'hourly', priority: 0.8 },
-    { url: `${BASE}/dex`, changeFrequency: 'always', priority: 0.7 },
-    { url: `${BASE}/charts`, changeFrequency: 'daily', priority: 0.6 },
-    { url: `${BASE}/gas`, changeFrequency: 'always', priority: 0.6 },
-    ...(chainConfig.features.hasValidators ? [{ url: `${BASE}/validators`, changeFrequency: 'hourly' as const, priority: 0.5 }] : []),
-    ...(chainConfig.features.hasStaking ? [{ url: `${BASE}/staking`, changeFrequency: 'hourly' as const, priority: 0.5 }] : []),
-    { url: `${BASE}/api-docs`, changeFrequency: 'weekly', priority: 0.5 },
-    { url: `${BASE}/about`, changeFrequency: 'monthly', priority: 0.4 },
-    { url: `${BASE}/whales`, changeFrequency: 'always', priority: 0.7 },
+    { url: BASE, changeFrequency: 'always', priority: 1, lastModified: now },
+    { url: `${BASE}/blocks`, changeFrequency: 'always', priority: 0.9, lastModified: now },
+    { url: `${BASE}/txs`, changeFrequency: 'always', priority: 0.9, lastModified: now },
+    { url: `${BASE}/token`, changeFrequency: 'hourly', priority: 0.8, lastModified: now },
+    { url: `${BASE}/dex`, changeFrequency: 'always', priority: 0.7, lastModified: now },
+    { url: `${BASE}/whales`, changeFrequency: 'always', priority: 0.7, lastModified: now },
+    { url: `${BASE}/charts`, changeFrequency: 'daily', priority: 0.6, lastModified: now },
+    { url: `${BASE}/gas`, changeFrequency: 'always', priority: 0.6, lastModified: now },
+    ...(chainConfig.features.hasValidators ? [{ url: `${BASE}/validators`, changeFrequency: 'hourly' as const, priority: 0.5, lastModified: now }] : []),
+    ...(chainConfig.features.hasStaking ? [{ url: `${BASE}/staking`, changeFrequency: 'hourly' as const, priority: 0.5, lastModified: now }] : []),
+    { url: `${BASE}/developer`, changeFrequency: 'weekly', priority: 0.5, lastModified: now },
+    { url: `${BASE}/api-docs`, changeFrequency: 'weekly', priority: 0.5, lastModified: now },
+    { url: `${BASE}/about`, changeFrequency: 'monthly', priority: 0.4, lastModified: now },
+    { url: `${BASE}/search`, changeFrequency: 'monthly', priority: 0.3, lastModified: now },
   ]
 
   try {
@@ -31,12 +34,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${BASE}/blocks/${b.number}`,
       changeFrequency: 'never' as const,
       priority: 0.4,
+      lastModified: now,
     }))
 
     const tokenRoutes: MetadataRoute.Sitemap = recentTokens.map(t => ({
       url: `${BASE}/token/${t.address}`,
       changeFrequency: 'hourly' as const,
       priority: 0.6,
+      lastModified: now,
     }))
 
     return [...staticRoutes, ...blockRoutes, ...tokenRoutes]

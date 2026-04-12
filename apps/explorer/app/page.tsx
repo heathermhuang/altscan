@@ -35,7 +35,13 @@ const jsonLd = {
       '@id': `https://${chainConfig.domain}/#organization`,
       name: 'Measurable Data Token (MDT)',
       url: 'https://mdt.io',
-      sameAs: ['https://mdt.io'],
+      sameAs: [
+        'https://mdt.io',
+        'https://github.com/nicemdt',
+        'https://twitter.com/nicemdt',
+        'https://bnbscan.com',
+        'https://ethscan.io',
+      ],
     },
   ],
 }
