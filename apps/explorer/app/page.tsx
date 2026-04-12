@@ -125,44 +125,96 @@ async function fetchTableEstimate(tableName: string): Promise<number> {
   }
 }
 
-/** Fetch total chain transaction count from external explorer stats API (cached 1h). BNB only. */
+/** Fetch total chain transaction count from external explorer stats API. */
 async function fetchExternalTotalTxCount(): Promise<number | null> {
-  if (chainConfig.key !== 'bnb') return null
+  const apiUrl = chainConfig.key === 'bnb'
+    ? 'https://api.bscscan.com/api?module=stats&action=txcount'
+    : 'https://api.etherscan.io/api?module=stats&action=txcount'
+
   try {
-    const res = await fetch(
-      'https://api.bscscan.com/api?module=stats&action=txcount',
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
-    )
+    const res = await fetch(apiUrl, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
     if (!res.ok) return null
     const data = (await res.json()) as { status: string; result?: string }
     if (data.status !== '1' || !data.result) return null
-    // result is a hex string e.g. "0x1a2b3c4d"
-    return Number(BigInt(data.result))
+    const result = data.result
+    return result.startsWith('0x') ? Number(BigInt(result)) : Number(result)
   } catch {
     return null
   }
+}
+
+/** Fetch market cap for the native currency. */
+async function fetchMarketCap(): Promise<number | null> {
+  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+
+  // Try CryptoCompare (has MKTCAP in RAW data)
+  try {
+    const res = await fetch(
+      `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const mktcap = data?.RAW?.[ccSymbol]?.USD?.MKTCAP
+      if (mktcap > 0) return mktcap
+    }
+  } catch { /* try next */ }
+
+  // Try CoinGecko
+  try {
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_market_cap=true`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const mktcap = data[chainConfig.coingeckoId]?.usd_market_cap
+      if (mktcap > 0) return mktcap
+    }
+  } catch { /* try next */ }
+
+  // Try CoinCap
+  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  try {
+    const res = await fetch(
+      `https://api.coincap.io/v2/assets/${coincapId}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const mktcap = parseFloat(data?.data?.marketCapUsd)
+      if (mktcap > 0) return mktcap
+    }
+  } catch { /* all failed */ }
+
+  return null
+}
+
+function formatMarketCap(value: number): string {
+  if (value >= 1e12) return `$${(value / 1e12).toFixed(1)}T`
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`
+  return `$${formatNumber(Math.round(value))}`
 }
 
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
   let totalTxCount = 0
-  let totalTokenCount = 0
 
-  const [blocksResult, txsResult, txCountResult, tokenCountResult, nativePrice, externalTxCount] = await Promise.all([
+  const [blocksResult, txsResult, txCountResult, nativePrice, externalTxCount, marketCap] = await Promise.all([
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
     fetchTableEstimate('transactions'),
-    fetchTableEstimate('tokens'),
     fetchNativePrice(),
     fetchExternalTotalTxCount(),
+    fetchMarketCap(),
   ])
 
   latestBlocks = blocksResult
   latestTxs = txsResult
   // Prefer the live external total over our partial local index
   totalTxCount = externalTxCount ?? (typeof txCountResult === 'number' ? txCountResult : 0)
-  totalTokenCount = typeof tokenCountResult === 'number' ? tokenCountResult : 0
 
   const latestBlock = latestBlocks[0]
 
@@ -221,7 +273,7 @@ export default async function HomePage() {
           value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'}
           subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
         />
-        <StatCard label="Total Tokens" value={totalTokenCount > 0 ? formatNumber(totalTokenCount) : '—'} />
+        <StatCard label={`${chainConfig.currency} Market Cap`} value={marketCap ? formatMarketCap(marketCap) : '—'} />
         <StatCard
           label={`${chainConfig.currency} Price`}
           value={priceDisplay}
