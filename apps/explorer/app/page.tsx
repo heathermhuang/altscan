@@ -109,37 +109,15 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   return null
 }
 
-// Use pg_class.reltuples for instant approximate row counts.
-// COUNT(*) on 36M+ rows can take minutes -- reltuples is updated by ANALYZE and
-// is accurate within ~1-2% for large tables. Good enough for a stats bar.
-async function fetchTableEstimate(tableName: string): Promise<number> {
+/** Count transactions indexed in the last 24 hours. */
+async function fetchTxCount24h(): Promise<number> {
   try {
     const result = await db.execute(
-      sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = ${tableName}`
+      sql`SELECT COUNT(*)::int AS cnt FROM transactions WHERE timestamp > NOW() - INTERVAL '24 hours'`
     )
-    const rows = Array.from(result)
-    const n = Number((rows[0] as Record<string, unknown>)?.estimate ?? 0)
-    return n < 0 ? 0 : n
+    return Number(Array.from(result)[0]?.cnt ?? 0)
   } catch {
     return 0
-  }
-}
-
-/** Fetch total chain transaction count from external explorer stats API. */
-async function fetchExternalTotalTxCount(): Promise<number | null> {
-  const apiUrl = chainConfig.key === 'bnb'
-    ? 'https://api.bscscan.com/api?module=stats&action=txcount'
-    : 'https://api.etherscan.io/api?module=stats&action=txcount'
-
-  try {
-    const res = await fetch(apiUrl, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
-    if (!res.ok) return null
-    const data = (await res.json()) as { status: string; result?: string }
-    if (data.status !== '1' || !data.result) return null
-    const result = data.result
-    return result.startsWith('0x') ? Number(BigInt(result)) : Number(result)
-  } catch {
-    return null
   }
 }
 
@@ -200,21 +178,16 @@ function formatMarketCap(value: number): string {
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
-  let totalTxCount = 0
-
-  const [blocksResult, txsResult, txCountResult, nativePrice, externalTxCount, marketCap] = await Promise.all([
+  const [blocksResult, txsResult, txCount24h, nativePrice, marketCap] = await Promise.all([
     db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
     db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
-    fetchTableEstimate('transactions'),
+    fetchTxCount24h(),
     fetchNativePrice(),
-    fetchExternalTotalTxCount(),
     fetchMarketCap(),
   ])
 
   latestBlocks = blocksResult
   latestTxs = txsResult
-  // Prefer the live external total over our partial local index
-  totalTxCount = externalTxCount ?? (typeof txCountResult === 'number' ? txCountResult : 0)
 
   const latestBlock = latestBlocks[0]
 
@@ -269,8 +242,8 @@ export default async function HomePage() {
           subtext={latestBlock ? timeAgo(new Date(latestBlock.timestamp)) : null}
         />
         <StatCard
-          label="Total Transactions"
-          value={totalTxCount > 0 ? formatNumber(totalTxCount) : '—'}
+          label="24H Transactions"
+          value={txCount24h > 0 ? formatNumber(txCount24h) : '—'}
           subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
         />
         <StatCard label={`${chainConfig.currency} Market Cap`} value={marketCap ? formatMarketCap(marketCap) : '—'} />
