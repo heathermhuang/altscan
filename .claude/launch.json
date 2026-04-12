@@ -4,9 +4,13 @@
     {
       "name": "BNBScan Web (Next.js)",
       "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
-      "runtimeArgs": ["--filter", "@bnbscan/web", "dev"],
+      "runtimeArgs": ["--filter", "@bnbscan/explorer", "dev"],
       "port": 3000,
-      "autoPort": false
+      "autoPort": false,
+      "env": {
+        "CHAIN": "bnb",
+        "NEXT_PUBLIC_CHAIN": "bnb"
+      }
     },
     {
       "name": "BNBScan Indexer (Worker)",
@@ -40,6 +44,15 @@
       "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
       "runtimeArgs": ["dev"],
       "port": 3000
+    },
+    {
+      "name": "Status Page",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "apps/status/src/server.ts"],
+      "port": 3090,
+      "env": {
+        "ADMIN_SECRET": "***REMOVED***"
+      }
     }
   ]
 }
