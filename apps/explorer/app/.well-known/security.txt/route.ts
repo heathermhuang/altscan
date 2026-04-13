@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
 
 const SECURITY_TXT = `Contact: mailto:bnbscan@mdt.io
-Contact: https://github.com/nicemdt/bnbscan/security/advisories
+Contact: https://github.com/heathermhuang/bnbscan/security/advisories
 Expires: 2027-12-31T23:59:59.000Z
 Preferred-Languages: en
 Canonical: https://${chainConfig.domain}/.well-known/security.txt
-Policy: https://github.com/nicemdt/bnbscan/security/policy
+Policy: https://github.com/heathermhuang/bnbscan/security/policy
 
 # ${chainConfig.brandDomain} — ${chainConfig.tagline}
 # Maintained by Measurable Data Token (MDT)
