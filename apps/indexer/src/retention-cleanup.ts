@@ -15,6 +15,11 @@ const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
 const HOLDER_COUNT_EVERY_MS = 5 * 60 * 1000   // 5 minutes
+// Disk size of the DB's attached volume in GB (from Render plan). Used to
+// compute disk-% usage in size reports so we catch "DB is 80% full but retention
+// found nothing to delete" situations before the disk-full alert fires.
+// 0 means unknown — size is still reported, percentage is not.
+const DB_DISK_GB     = parseInt(process.env.DB_DISK_GB ?? '0', 10)
 
 /**
  * Whitelist of allowed table names and timestamp columns.
@@ -50,6 +55,50 @@ async function deleteAll(table: string, timestampCol: string, cutoff: Date): Pro
     sql`DELETE FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz`
   )
   return (result as any).rowCount ?? 0
+}
+
+/**
+ * Log the per-table sizes and total DB size at the end of each retention run.
+ * If DB_DISK_GB is set, also logs the disk-% used and WARNs at >70%.
+ *
+ * This is the dead-man-switch for "retention runs but the DB keeps growing" —
+ * a condition that's easy to miss when logs only show "0 rows removed" (which
+ * can legitimately happen on a fresh DB with no data older than the retention
+ * cutoff, but can also hide a disk about to fill up).
+ */
+async function reportSizes(): Promise<void> {
+  const db = getDb()
+  const result = await db.execute(sql`
+    SELECT
+      pg_database_size(current_database())::bigint                           AS db_bytes,
+      COALESCE((SELECT pg_total_relation_size('transactions')), 0)::bigint   AS tx_bytes,
+      COALESCE((SELECT pg_total_relation_size('token_transfers')), 0)::bigint AS tt_bytes,
+      COALESCE((SELECT pg_total_relation_size('blocks')), 0)::bigint         AS bl_bytes,
+      COALESCE((SELECT pg_total_relation_size('logs')), 0)::bigint           AS lg_bytes,
+      COALESCE((SELECT pg_total_relation_size('token_balances')), 0)::bigint AS tb_bytes,
+      COALESCE((SELECT pg_total_relation_size('dex_trades')), 0)::bigint     AS dx_bytes
+  `)
+  const row = Array.from(result)[0] as Record<string, unknown>
+  const mb = (b: unknown) => Math.round(Number(b) / 1024 / 1024)
+  const dbGB = Number(row.db_bytes) / 1024 / 1024 / 1024
+  const parts = [
+    `total=${dbGB.toFixed(2)}GB`,
+    `tx=${mb(row.tx_bytes)}MB`,
+    `tt=${mb(row.tt_bytes)}MB`,
+    `blocks=${mb(row.bl_bytes)}MB`,
+    `logs=${mb(row.lg_bytes)}MB`,
+    `tb=${mb(row.tb_bytes)}MB`,
+    `dex=${mb(row.dx_bytes)}MB`,
+  ]
+  if (DB_DISK_GB > 0) {
+    const pct = (dbGB / DB_DISK_GB) * 100
+    parts.push(`disk=${pct.toFixed(1)}%of${DB_DISK_GB}GB`)
+    if (pct >= 70) {
+      console.warn(`[retention] ⚠ DB at ${pct.toFixed(1)}% of ${DB_DISK_GB}GB disk — sizes: ${parts.join(' ')}`)
+      return
+    }
+  }
+  console.log(`[retention] sizes: ${parts.join(' ')}`)
 }
 
 async function runCleanup(): Promise<void> {
@@ -125,6 +174,13 @@ async function runCleanup(): Promise<void> {
   }
 
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
+
+  // Size report — gives "Done — 0 rows removed" a tail so we can see growth
+  // trajectory from logs alone, without needing to hit the admin endpoint.
+  // Warns loudly at >70% disk usage so we catch trouble before the 90% alert.
+  await reportSizes().catch(err =>
+    console.warn('[retention] size report failed:', err instanceof Error ? err.message : err)
+  )
 
   // VACUUM reclaims disk space from dead tuples left by the deletes above.
   // Must run outside a transaction — postgres.js execute() handles this fine.
