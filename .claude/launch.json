@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "BNBScan Web (Next.js)",
-      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@bnbscan/explorer", "dev"],
       "port": 3000,
       "autoPort": false,
@@ -14,14 +14,14 @@
     },
     {
       "name": "BNBScan Indexer (Worker)",
-      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@bnbscan/indexer", "dev"],
       "port": 0
     },
     {
       "name": "Explorer BNB (Next.js)",
       "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["/Users/heatherm/.npm-packages/node_modules/.bin/pnpm", "--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "runtimeArgs": ["pnpm", "--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
       "port": 3002,
       "env": {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -31,7 +31,7 @@
     },
     {
       "name": "Explorer ETH (Next.js)",
-      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3003"],
       "port": 3003,
       "env": {
@@ -41,7 +41,7 @@
     },
     {
       "name": "All (Turbo)",
-      "runtimeExecutable": "/Users/heatherm/.npm-packages/node_modules/.bin/pnpm",
+      "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev"],
       "port": 3000
     },
@@ -51,7 +51,7 @@
       "runtimeArgs": ["tsx", "apps/status/src/server.ts"],
       "port": 3090,
       "env": {
-        "ADMIN_SECRET": "***REMOVED***"
+        "ADMIN_SECRET": "${ADMIN_SECRET}"
       }
     }
   ]

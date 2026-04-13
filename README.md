@@ -114,7 +114,7 @@ bnbscan/
 
 ```bash
 # Clone the repo
-git clone https://github.com/heathermhuang/bnbscan.git
+git clone https://github.com/nicemdt/bnbscan.git
 cd bnbscan
 
 # Install dependencies

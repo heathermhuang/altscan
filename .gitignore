@@ -8,3 +8,5 @@ dist/
 *.tsbuildinfo
 .gstack/
 .render-api-key
+.claude/worktrees/
+.design-review/

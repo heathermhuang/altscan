@@ -15,8 +15,8 @@ set -euo pipefail
 # ── Config ────────────────────────────────────────────────────────────────────
 
 SITES=(
-  "bnbscan.com|srv-REDACTED"
-  "ethscan.io|srv-REDACTED"
+  "bnbscan.com|${BNBSCAN_SERVICE_ID:-}"
+  "ethscan.io|${ETHSCAN_SERVICE_ID:-}"
 )
 
 TIMEOUT=15

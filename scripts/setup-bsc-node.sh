@@ -6,7 +6,7 @@
 # Cost:    €65/mo — unlimited bandwidth, no egress fees
 #
 # Usage (run as root on the Hetzner server):
-#   curl -sO https://raw.githubusercontent.com/heathermhuang/bnbscan/main/scripts/setup-bsc-node.sh
+#   curl -sO https://raw.githubusercontent.com/nicemdt/bnbscan/main/scripts/setup-bsc-node.sh
 #   bash setup-bsc-node.sh
 #
 # After setup:

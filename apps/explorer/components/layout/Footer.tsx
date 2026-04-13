@@ -60,7 +60,7 @@ export function Footer() {
           <Link href="/developer" className="hover:text-gray-200 transition-colors py-2">Developer</Link>
           <Link href="/about" className="hover:text-gray-200 transition-colors py-2">About</Link>
 
-          <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
+          <a href="https://github.com/nicemdt/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
           <a href="https://status-page-6ez4.onrender.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">Status ↗</a>
         </div>
         <div className="flex items-center gap-4">
