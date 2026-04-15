@@ -1,4 +1,9 @@
 export function register() {
+  // Next.js calls register() once per runtime process. `middleware.ts` spawns
+  // an Edge Runtime worker where process.memoryUsage() throws uncaughtException.
+  // Guard on NEXT_RUNTIME so this only arms in the Node.js server process.
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return
+
   if (process.env.NODE_ENV === 'production') {
     // Graceful restart threshold: exit cleanly before V8 SIGABRT (exit 134).
     // --max-old-space-size is 1536MB; we bail at ~80% to leave headroom for GC.
