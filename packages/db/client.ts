@@ -40,7 +40,20 @@ export function getDb(envVarName = 'DATABASE_URL') {
   // Pool size configurable via DB_POOL_SIZE env var.
   // Default 5 for web app — leaves headroom for the indexer within Render's 25 connections.
   const poolSize = parseInt(process.env.DB_POOL_SIZE ?? '5', 10) || 5
-  const sql = postgres(url, { max: poolSize })
+  const sql = postgres(url, {
+    max: poolSize,
+    // Recycle idle connections — Render's managed Postgres (and network proxies)
+    // can silently close idle TCP connections. Without idle_timeout, the pool
+    // hands out dead connections that hang until OS-level TCP keepalive fires
+    // (minutes). 20s keeps connections fresh without thrashing.
+    idle_timeout: 20,
+    // Cap connection lifetime to prevent long-lived connections from accumulating
+    // stale prepared statements or hitting Postgres backend memory limits.
+    max_lifetime: 300,
+    // Fail fast on connection acquisition — don't wait 30s (default) if all pool
+    // slots are busy or the DB is unreachable.
+    connect_timeout: 10,
+  })
   g.__db_sql.set(envVarName, sql)
   const db = drizzle(sql, { schema })
   g.__db_instances.set(envVarName, db)

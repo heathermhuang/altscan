@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
             .from(schema.blocks)
             .orderBy(desc(schema.blocks.number))
             .limit(1),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
         ]),
       ]
 

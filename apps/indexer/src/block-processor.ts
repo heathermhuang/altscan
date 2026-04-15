@@ -12,6 +12,12 @@ const SWAP_V2_TOPIC = keccak256id('Swap(address,uint256,uint256,uint256,uint256,
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const abi = AbiCoder.defaultAbiCoder()
 
+// Drizzle's sql.join() builds a recursive SQL tree — one level per row.
+// Dense blocks (ETH DeFi) can have 3000+ token transfer deltas, which
+// blows V8's ~10K call stack limit in buildQueryFromSourceParams().
+// Cap all sql.join/insert batches to stay well within the limit.
+const SQL_BATCH_CHUNK = 500
+
 // ── Types ───────────────────────────────────────────────────────────
 export type NormalizedLog = {
   address: string
@@ -251,25 +257,30 @@ async function processReceiptsBatch(
       await ensureTokensBatch(tokensToEnsure, provider)
     }
 
-    // Bulk insert token transfers
+    // Bulk insert token transfers — chunked to avoid stack overflow in Drizzle
     if (rows.length > 0) {
-      const inserted = await db.insert(schema.tokenTransfers)
-        .values(rows.map(r => ({
-          txHash: r.txHash,
-          logIndex: r.logIndex,
-          tokenAddress: r.tokenAddress,
-          fromAddress: r.fromAddress,
-          toAddress: r.toAddress,
-          value: r.value,
-          tokenId: r.tokenId,
-          blockNumber: r.blockNumber,
-          timestamp: r.timestamp,
-        })))
-        .onConflictDoNothing()
-        .returning({ id: schema.tokenTransfers.id })
+      let totalInserted = 0
+      for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
+        const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
+        const inserted = await db.insert(schema.tokenTransfers)
+          .values(chunk.map(r => ({
+            txHash: r.txHash,
+            logIndex: r.logIndex,
+            tokenAddress: r.tokenAddress,
+            fromAddress: r.fromAddress,
+            toAddress: r.toAddress,
+            value: r.value,
+            tokenId: r.tokenId,
+            blockNumber: r.blockNumber,
+            timestamp: r.timestamp,
+          })))
+          .onConflictDoNothing()
+          .returning({ id: schema.tokenTransfers.id })
+        totalInserted += inserted.length
+      }
 
       // Only update holder counts if rows were actually inserted (not a replay)
-      if (inserted.length > 0) {
+      if (totalInserted > 0) {
         await batchUpdateHolderBalances(rows)
       }
     }
@@ -332,7 +343,9 @@ async function processReceiptsBatch(
     }
 
     if (dexRows.length > 0) {
-      await db.insert(schema.dexTrades).values(dexRows).onConflictDoNothing()
+      for (let i = 0; i < dexRows.length; i += SQL_BATCH_CHUNK) {
+        await db.insert(schema.dexTrades).values(dexRows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
+      }
     }
   }
 }
@@ -350,15 +363,18 @@ async function batchUpdateTxStatus(updates: TxStatusUpdate[]): Promise<void> {
   if (updates.length === 0) return
   const db = getDb()
 
-  await db.execute(sql`
-    UPDATE transactions AS t
-    SET status = u.status, gas_used = u.gas_used
-    FROM (VALUES ${sql.join(
-      updates.map(u => sql`(${u.hash}, ${u.status}::boolean, ${u.gasUsed.toString()}::bigint)`),
-      sql`, `
-    )}) AS u(hash, status, gas_used)
-    WHERE t.hash = u.hash
-  `)
+  for (let i = 0; i < updates.length; i += SQL_BATCH_CHUNK) {
+    const chunk = updates.slice(i, i + SQL_BATCH_CHUNK)
+    await db.execute(sql`
+      UPDATE transactions AS t
+      SET status = u.status, gas_used = u.gas_used
+      FROM (VALUES ${sql.join(
+        chunk.map(u => sql`(${u.hash}, ${u.status}::boolean, ${u.gasUsed.toString()}::bigint)`),
+        sql`, `
+      )}) AS u(hash, status, gas_used)
+      WHERE t.hash = u.hash
+    `)
+  }
 }
 
 // ── Batched addresses upsert ────────────────────────────────────────
@@ -377,26 +393,29 @@ async function upsertAddresses(
   const rows = Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   const ts = timestamp.toISOString()
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await db.execute(sql`
-        INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
-        VALUES ${sql.join(
-          rows.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
-          sql`, `
-        )}
-        ON CONFLICT (address) DO UPDATE SET
-          tx_count  = addresses.tx_count + EXCLUDED.tx_count,
-          last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
-      `)
-      return
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('deadlock') && attempt < 3) {
-        await new Promise(r => setTimeout(r, 50 * attempt))
-        continue
+  for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
+    const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await db.execute(sql`
+          INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
+          VALUES ${sql.join(
+            chunk.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
+            sql`, `
+          )}
+          ON CONFLICT (address) DO UPDATE SET
+            tx_count  = addresses.tx_count + EXCLUDED.tx_count,
+            last_seen = GREATEST(addresses.last_seen, EXCLUDED.last_seen)
+        `)
+        break
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('deadlock') && attempt < 3) {
+          await new Promise(r => setTimeout(r, 50 * attempt))
+          continue
+        }
+        throw err
       }
-      throw err
     }
   }
 }
@@ -447,25 +466,29 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
     .sort((a, b) => (a.token + a.holder).localeCompare(b.token + b.holder))
 
   // Simple upsert, with deadlock retry. No CTE, no holder_count tracking.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await db.execute(sql`
-        INSERT INTO token_balances (token_address, holder_address, balance)
-        VALUES ${sql.join(
-          entries.map(e => sql`(${e.token}::varchar(42), ${e.holder}::varchar(42), ${e.delta.toString()}::numeric)`),
-          sql`, `
-        )}
-        ON CONFLICT (token_address, holder_address) DO UPDATE
-          SET balance = token_balances.balance + EXCLUDED.balance
-      `)
-      return
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('deadlock') && attempt < 3) {
-        await new Promise(r => setTimeout(r, 50 * attempt))
-        continue
+  // Chunked to avoid V8 call stack overflow in Drizzle's sql.join() recursion.
+  for (let i = 0; i < entries.length; i += SQL_BATCH_CHUNK) {
+    const chunk = entries.slice(i, i + SQL_BATCH_CHUNK)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await db.execute(sql`
+          INSERT INTO token_balances (token_address, holder_address, balance)
+          VALUES ${sql.join(
+            chunk.map(e => sql`(${e.token}::varchar(42), ${e.holder}::varchar(42), ${e.delta.toString()}::numeric)`),
+            sql`, `
+          )}
+          ON CONFLICT (token_address, holder_address) DO UPDATE
+            SET balance = token_balances.balance + EXCLUDED.balance
+        `)
+        break
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('deadlock') && attempt < 3) {
+          await new Promise(r => setTimeout(r, 50 * attempt))
+          continue
+        }
+        throw err
       }
-      throw err
     }
   }
 }
@@ -486,18 +509,22 @@ async function ensureTokensBatch(
   const addresses = Array.from(tokensToEnsure.keys())
   if (addresses.length === 0) return
 
-  // Check which already exist in DB (single query).
+  // Check which already exist in DB — chunked to avoid stack overflow.
   // Uses IN (literal list) instead of ANY(arr) because Drizzle serializes JS arrays
   // as record literals which fail the ::text[] cast.
-  const existing = await db.execute(sql`
-    SELECT address FROM tokens WHERE address IN (${sql.join(
-      addresses.map(a => sql`${a}`),
-      sql`, `
-    )})
-  `)
-  const existingSet = new Set(
-    (Array.from(existing) as Array<{ address: string }>).map(r => r.address)
-  )
+  const existingResults: Array<{ address: string }> = []
+  for (let i = 0; i < addresses.length; i += SQL_BATCH_CHUNK) {
+    const chunk = addresses.slice(i, i + SQL_BATCH_CHUNK)
+    const result = await db.execute(sql`
+      SELECT address FROM tokens WHERE address IN (${sql.join(
+        chunk.map(a => sql`${a}`),
+        sql`, `
+      )})
+    `)
+    existingResults.push(...(Array.from(result) as Array<{ address: string }>))
+  }
+  const existing = existingResults
+  const existingSet = new Set(existing.map(r => r.address))
 
   const toFetch = addresses.filter(a => !existingSet.has(a))
   for (const a of existingSet) {
