@@ -12,7 +12,7 @@
  *   LOG_EVERY          — Log progress every N blocks (default: 50)
  */
 import 'dotenv/config'
-import { JsonRpcProvider } from 'ethers'
+import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@bnbscan/chain-config'
 import { processBlock } from './block-processor'
 import { syncValidators } from './validator-syncer'
@@ -81,7 +81,16 @@ async function main() {
   // One provider per RPC URL. We round-robin `processBlock` across this pool
   // so 8 concurrent block fetches get distributed across N endpoints instead
   // of all landing on one public RPC's rate-limit bucket.
-  const providers = RPC_URLS.map(url => new JsonRpcProvider(url))
+  //
+  // `staticNetwork` is CRITICAL: without it, ethers v6 runs an eth_chainId
+  // probe before every request and re-enters "detect network" retry loops on
+  // any hiccup. Observed 55 "failed to detect network" errors/minute on the
+  // 2-RPC BNB setup, which collapsed throughput to 0.89 blk/s. Pinning the
+  // network ID up-front eliminates the probe entirely.
+  const network = Network.from(chain.chainId)
+  const providers = RPC_URLS.map(url =>
+    new JsonRpcProvider(url, network, { staticNetwork: network })
+  )
   // Tip queries always use providers[0]; keeps the "tip" cursor consistent
   // and doesn't matter for rate-limits (1 req per poll cycle).
   const tipProvider = providers[0]

@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { JsonRpcProvider } from 'ethers'
+import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@bnbscan/chain-config'
 import { processBlock } from './block-processor'
 
@@ -11,7 +11,13 @@ const END = Number(process.argv[3] ?? String(chain.defaultStartBlock + 1000))
 const SKIP_LOGS = process.argv.includes('--skip-logs')
 const CONCURRENCY = 3
 
-const provider = new JsonRpcProvider(process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
+// staticNetwork: pin chain ID so ethers skips eth_chainId auto-detection.
+const network = Network.from(chain.chainId)
+const provider = new JsonRpcProvider(
+  process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl,
+  network,
+  { staticNetwork: network },
+)
 
 async function backfill() {
   console.log(`[backfill] Processing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS}, concurrency=${CONCURRENCY})`)
