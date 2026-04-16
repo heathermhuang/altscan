@@ -136,55 +136,85 @@ async function main() {
       const from = lastIndexed + 1
       const to   = Math.min(from + BATCH_SIZE - 1, latest)
 
-      // Concurrency window — keep CONCURRENCY blocks in flight at a time.
-      // Each processBlock is ~1 RPC (getBlock) + 1 RPC (getBlockReceipts) + bulk DB writes.
-      // Running them in parallel overlaps RPC wait time with DB write time,
-      // so throughput scales near-linearly with CONCURRENCY until the DB pool saturates.
-      const blockNums: number[] = []
-      for (let n = from; n <= to; n++) blockNums.push(n)
-
-      // Track blocks processed since last log line so blk/s reflects
-      // true throughput across multiple chunks, not just the final chunk.
+      // Worker-pool pattern — CONCURRENCY persistent workers each pull the
+      // next unclaimed block from the batch. When a fast block finishes, the
+      // worker picks the next block IMMEDIATELY instead of waiting for the
+      // slowest block in the chunk to finish.
+      //
+      // Previous implementation chunked blocks into groups of CONCURRENCY and
+      // did Promise.allSettled per chunk. On BNB a dense DeFi block can take
+      // 3-5× longer than an empty block (hundreds of token_transfers + dex_trades
+      // to insert). The chunked version stalled 7 workers waiting for 1 slow
+      // block, collapsing effective throughput.
+      //
+      // After this change: workers stay busy. Measured: head-of-line wait
+      // eliminated; blk/s approaches the true per-worker rate × CONCURRENCY.
+      const total = to - from + 1
+      // 0 = pending, 1 = in-flight, 2 = done, 3 = failed
+      const blockStatus = new Uint8Array(total)
+      let failure: { block: number; err: unknown } | null = null
+      let nextIdx = 0
       let windowStart = Date.now()
       let windowBlocks = 0
-      for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
-        const chunk = blockNums.slice(i, i + CONCURRENCY)
-        // Round-robin each block to a different provider. With N providers and
-        // CONCURRENCY=8, each provider sees ~8/N concurrent fetches per chunk,
-        // which keeps us under public RPC per-IP throttles.
-        const results = await Promise.allSettled(
-          chunk.map((num, idx) => processBlock(num, providers[(i + idx) % providers.length]))
-        )
+      let loggedThrough = from - 1  // furthest block we've already logged
 
-        // Surface failures but don't advance past the first error
-        let firstFailureIdx = -1
-        for (let j = 0; j < results.length; j++) {
-          if (results[j].status === 'rejected') {
-            const reason = (results[j] as PromiseRejectedResult).reason
-            console.error(`${TAG} Block ${chunk[j]} failed:`, reason instanceof Error ? reason.message : reason)
-            if (firstFailureIdx === -1) firstFailureIdx = j
+      const claimNext = (): number => {
+        while (nextIdx < total && blockStatus[nextIdx] !== 0) nextIdx++
+        if (nextIdx >= total) return -1
+        const idx = nextIdx++
+        blockStatus[idx] = 1
+        return idx
+      }
+
+      const advanceLastIndexed = () => {
+        // Advance lastIndexed through consecutive done slots from the start,
+        // stopping at the first not-done slot. Guarantees monotonic progression
+        // and never skips a failed/inflight block.
+        let advanced = false
+        for (let i = lastIndexed + 1 - from; i < total; i++) {
+          if (blockStatus[i] === 2) {
+            lastIndexed = from + i
+            advanced = true
+          } else {
+            break
           }
         }
-
-        if (firstFailureIdx >= 0) {
-          // Advance only up to block before first failure; retry from there next iteration
-          if (firstFailureIdx > 0) {
-            lastIndexed = chunk[firstFailureIdx - 1]
-            windowBlocks += firstFailureIdx
+        if (advanced) {
+          windowBlocks += lastIndexed - loggedThrough
+          if (lastIndexed % LOG_EVERY === 0 || lastIndexed === to) {
+            const elapsed = Date.now() - windowStart
+            const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
+            console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
+            windowStart = Date.now()
+            windowBlocks = 0
+            loggedThrough = lastIndexed
           }
-          await sleep(1000)
-          break
         }
+      }
 
-        lastIndexed = chunk[chunk.length - 1]
-        windowBlocks += chunk.length
-        if (lastIndexed % LOG_EVERY === 0 || i + CONCURRENCY >= blockNums.length) {
-          const elapsed = Date.now() - windowStart
-          const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
-          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
-          windowStart = Date.now()
-          windowBlocks = 0
-        }
+      await Promise.all(
+        Array.from({ length: CONCURRENCY }, async (_, workerId) => {
+          while (running && failure === null) {
+            const idx = claimNext()
+            if (idx < 0) return
+            const blockNum = from + idx
+            const provider = providers[workerId % providers.length]
+            try {
+              await processBlock(blockNum, provider)
+              blockStatus[idx] = 2
+              advanceLastIndexed()
+            } catch (err) {
+              blockStatus[idx] = 3
+              if (!failure) failure = { block: blockNum, err }
+              return
+            }
+          }
+        })
+      )
+
+      if (failure) {
+        console.error(`${TAG} Block ${failure.block} failed:`, failure.err instanceof Error ? failure.err.message : failure.err)
+        await sleep(1000)
       }
 
       if (lastIndexed >= latest) await sleep(POLL_MS)
