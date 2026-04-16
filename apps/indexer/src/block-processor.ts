@@ -183,7 +183,7 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
 
   // Fire both RPC calls in parallel — they're independent and together
   // account for most of the wall-clock time on ETH (where receipts can be >1MB).
-  const wantReceipts = !skipLogs && blockReceiptsSupported
+  const wantReceipts = !skipLogs
   const rpcStart = PROFILE_ENABLED ? performance.now() : 0
   const blockPromise = provider.getBlock(blockNumber, true)
   const receiptsPromise = wantReceipts
@@ -728,49 +728,39 @@ async function fetchPairTokens(pairAddress: string, provider: JsonRpcProvider): 
 }
 
 // ── eth_getBlockReceipts ─────────────────────────────────────────────
-let blockReceiptsSupported = true
-let blockReceiptsWarnCount = 0
-
-async function fetchBlockReceipts(
+// No auto-disable: all target chains (BSC, ETH mainnet) support this method on
+// every RPC we use. A failure here means a transient issue (rate-limit 429,
+// network blip) — we throw so the worker-pool catches it, marks the block
+// failed, sleeps 1s, and retries. Previously we auto-disabled after 3 failures
+// and silently dropped receipts for the rest of the process lifetime, which
+// meant token_transfers/dex_trades/tx_status stopped being recorded entirely.
+export async function fetchBlockReceipts(
   provider: JsonRpcProvider,
   blockNumber: number,
 ): Promise<Array<{ txHash: string; receipt: NormalizedReceipt }>> {
+  const blockHex = '0x' + blockNumber.toString(16)
+  const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
+    transactionHash: string
+    status: string
+    gasUsed: string
+    logs: Array<{ address: string; topics: string[]; data: string; logIndex: string }>
+  }> | null
+
   const result: Array<{ txHash: string; receipt: NormalizedReceipt }> = []
-  if (!blockReceiptsSupported) return result
-
-  try {
-    const blockHex = '0x' + blockNumber.toString(16)
-    const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
-      transactionHash: string
-      status: string
-      gasUsed: string
-      logs: Array<{ address: string; topics: string[]; data: string; logIndex: string }>
-    }> | null
-
-    for (const r of raw ?? []) {
-      result.push({
-        txHash: r.transactionHash,
-        receipt: {
-          status: r.status === '0x1',
-          gasUsed: BigInt(r.gasUsed),
-          logs: r.logs.map(l => ({
-            address: l.address.toLowerCase(),
-            topics: l.topics,
-            data: l.data,
-            index: parseInt(l.logIndex, 16),
-          })),
-        },
-      })
-    }
-  } catch (err) {
-    blockReceiptsWarnCount++
-    if (blockReceiptsWarnCount <= 3) {
-      console.warn(`[block-processor] eth_getBlockReceipts failed for block ${blockNumber} (${blockReceiptsWarnCount}/3):`, err instanceof Error ? err.message : err)
-    }
-    if (blockReceiptsWarnCount >= 3) {
-      console.warn('[block-processor] eth_getBlockReceipts failed 3x — disabling batch receipts. Per-tx fallback active (HIGH RPC COST).')
-      blockReceiptsSupported = false
-    }
+  for (const r of raw ?? []) {
+    result.push({
+      txHash: r.transactionHash,
+      receipt: {
+        status: r.status === '0x1',
+        gasUsed: BigInt(r.gasUsed),
+        logs: r.logs.map(l => ({
+          address: l.address.toLowerCase(),
+          topics: l.topics,
+          data: l.data,
+          index: parseInt(l.logIndex, 16),
+        })),
+      },
+    })
   }
   return result
 }
