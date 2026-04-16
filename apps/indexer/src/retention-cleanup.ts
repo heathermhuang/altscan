@@ -14,7 +14,13 @@ import { sql } from 'drizzle-orm'
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
-const HOLDER_COUNT_EVERY_MS = 5 * 60 * 1000   // 5 minutes
+// Holder-count recompute scans token_balances and updates tokens — takes
+// 10-20s on BNB under load and holds DB-pool slots while running, which
+// starves the block indexer and web queries. Every 15min is a reasonable
+// default (token-page holder counts are eventually consistent anyway).
+// Override with HOLDER_COUNT_INTERVAL_MIN env var if you want faster freshness.
+const HOLDER_COUNT_EVERY_MS =
+  parseInt(process.env.HOLDER_COUNT_INTERVAL_MIN ?? '15', 10) * 60 * 1000
 // Disk size of the DB's attached volume in GB (from Render plan). Used to
 // compute disk-% usage in size reports so we catch "DB is 80% full but retention
 // found nothing to delete" situations before the disk-full alert fires.
@@ -271,6 +277,7 @@ export async function startRetentionCleanup(): Promise<void> {
 
   // Recompute holder_count periodically (replaces per-block inline tracking).
   // First run is delayed so it doesn't collide with the retention job above.
+  console.log(`[holder-count] recompute every ${HOLDER_COUNT_EVERY_MS / 60_000}min`)
   setTimeout(() => {
     recomputeHolderCounts().catch(err => console.error('[holder-count] initial error:', err))
     setInterval(() => {
