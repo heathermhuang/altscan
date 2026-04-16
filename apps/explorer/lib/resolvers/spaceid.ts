@@ -29,7 +29,7 @@ export async function resolveSpaceId(address: string): Promise<string | null> {
   try {
     const res = await fetch(
       `${SPACE_ID_API}/getName?tld=bnb&address=${address}`,
-      { signal: AbortSignal.timeout(5000), cache: 'no-store' },
+      { signal: AbortSignal.timeout(5000), next: { revalidate: 3600 } },
     )
     if (!res.ok) {
       setCacheEntry(key, null)

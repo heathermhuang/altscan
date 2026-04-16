@@ -23,7 +23,7 @@ async function fetchNativePrice(): Promise<number | null> {
     try {
       const res = await fetch(
         `${host}/api/v3/ticker/price?symbol=${binanceSymbol}`,
-        { cache: 'no-store', signal: AbortSignal.timeout(3000) },
+        { next: { revalidate: 300 }, signal: AbortSignal.timeout(3000) },
       )
       if (res.ok) {
         const data = await res.json()
@@ -37,7 +37,7 @@ async function fetchNativePrice(): Promise<number | null> {
   try {
     const res = await fetch(
       `https://min-api.cryptocompare.com/data/price?fsym=${ccSymbol}&tsyms=USD`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
+      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
     )
     if (res.ok) {
       const data = await res.json()
@@ -49,7 +49,7 @@ async function fetchNativePrice(): Promise<number | null> {
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
+      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
     )
     if (res.ok) {
       const data = await res.json()
@@ -62,7 +62,7 @@ async function fetchNativePrice(): Promise<number | null> {
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
+      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
     )
     if (res.ok) {
       const data = await res.json()
@@ -129,7 +129,7 @@ async function resolveMethodName(methodId: string): Promise<string | null> {
   try {
     const res = await fetch(
       `https://www.4byte.directory/api/v1/signatures/?hex_signature=${methodId}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) },
+      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
     )
     if (!res.ok) return null
     const data = (await res.json()) as { results?: { text_signature: string }[] }
