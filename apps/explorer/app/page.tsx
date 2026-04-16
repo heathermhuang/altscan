@@ -187,8 +187,9 @@ export default async function HomePage() {
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
   // DB queries get a 15s timeout so build-time SSG doesn't hang when the DB is
   // cold or under heavy indexer load. ISR fills in real data on first visitor.
-  const dbTimeout = <T>(p: Promise<T>, fallback: T) =>
-    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), 15_000))])
+  function dbTimeout<T>(p: Promise<T>, fallback: T): Promise<T> {
+    return Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), 15_000))])
+  }
 
   const [blocksResult, txsResult, txCount24h, nativePrice, marketCap] = await Promise.all([
     dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []), []),
