@@ -55,7 +55,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
     try {
       const res = await fetch(
         `${host}/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
-        { cache: 'no-store', signal: AbortSignal.timeout(3000) }
+        { next: { revalidate: 60 }, signal: AbortSignal.timeout(3000) }
       )
       if (res.ok) {
         const data = await res.json()
@@ -70,7 +70,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -83,7 +83,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_24hr_change=true`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -102,7 +102,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -135,7 +135,7 @@ async function fetchMarketCap(): Promise<{ value: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -148,7 +148,7 @@ async function fetchMarketCap(): Promise<{ value: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
@@ -162,7 +162,7 @@ async function fetchMarketCap(): Promise<{ value: number; change24h: number } | 
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(5000) }
+      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
     )
     if (res.ok) {
       const data = await res.json()
