@@ -18,6 +18,110 @@ const abi = AbiCoder.defaultAbiCoder()
 // Cap all sql.join/insert batches to stay well within the limit.
 const SQL_BATCH_CHUNK = 500
 
+// ── Per-phase profiling (opt-in) ─────────────────────────────────────
+// Enable with PROFILE_BLOCKS=N (e.g. 30) — logs a phase breakdown every
+// N blocks to find the dominant cost center. Zero overhead when disabled.
+const PROFILE_BLOCKS = parseInt(process.env.PROFILE_BLOCKS ?? '0', 10)
+const PROFILE_ENABLED = PROFILE_BLOCKS > 0
+
+type PhaseTimings = {
+  rpcBlockWait: number
+  rpcReceiptsWait: number
+  dbInsertBlock: number
+  dbInsertTxs: number
+  dbUpsertAddresses: number
+  dbUpdateTxStatus: number
+  dbInsertTokenTransfers: number
+  rpcEnsureTokens: number
+  dbUpdateHolderBalances: number
+  rpcPairTokens: number
+  dbInsertDexTrades: number
+  txCount: number
+  transferCount: number
+  dexCount: number
+  totalMs: number
+}
+
+const PROFILE_PHASES = [
+  'rpcBlockWait', 'rpcReceiptsWait', 'dbInsertBlock', 'dbInsertTxs',
+  'dbUpsertAddresses', 'dbUpdateTxStatus', 'dbInsertTokenTransfers',
+  'rpcEnsureTokens', 'dbUpdateHolderBalances', 'rpcPairTokens', 'dbInsertDexTrades',
+] as const
+
+type PhaseKey = typeof PROFILE_PHASES[number]
+
+type PhaseStat = { total: number; count: number; rows: number }
+
+let profileAgg: Record<string, PhaseStat> = {}
+let profileBlocksSinceReport = 0
+let profileWindowStart = Date.now()
+
+function resetProfile() {
+  profileAgg = { __total: { total: 0, count: 0, rows: 0 } }
+  for (const p of PROFILE_PHASES) profileAgg[p] = { total: 0, count: 0, rows: 0 }
+  profileBlocksSinceReport = 0
+  profileWindowStart = Date.now()
+}
+if (PROFILE_ENABLED) {
+  resetProfile()
+  console.log(`[profile] Per-phase timing enabled — reports every ${PROFILE_BLOCKS} blocks`)
+}
+
+function newTimings(): PhaseTimings {
+  return {
+    rpcBlockWait: 0, rpcReceiptsWait: 0, dbInsertBlock: 0, dbInsertTxs: 0,
+    dbUpsertAddresses: 0, dbUpdateTxStatus: 0, dbInsertTokenTransfers: 0,
+    rpcEnsureTokens: 0, dbUpdateHolderBalances: 0, rpcPairTokens: 0, dbInsertDexTrades: 0,
+    txCount: 0, transferCount: 0, dexCount: 0, totalMs: 0,
+  }
+}
+
+function recordTimings(t: PhaseTimings) {
+  profileAgg.__total.total += t.totalMs
+  profileAgg.__total.count += 1
+  profileAgg.__total.rows += t.txCount
+
+  for (const p of PROFILE_PHASES) {
+    const ms = t[p]
+    if (ms > 0) {
+      profileAgg[p].total += ms
+      profileAgg[p].count += 1
+    }
+  }
+  profileAgg.dbInsertTxs.rows += t.txCount
+  profileAgg.dbInsertTokenTransfers.rows += t.transferCount
+  profileAgg.dbUpdateHolderBalances.rows += t.transferCount
+  profileAgg.dbInsertDexTrades.rows += t.dexCount
+
+  profileBlocksSinceReport += 1
+  if (profileBlocksSinceReport >= PROFILE_BLOCKS) {
+    reportProfile()
+    resetProfile()
+  }
+}
+
+function reportProfile() {
+  const windowMs = Date.now() - profileWindowStart
+  const blocks = profileAgg.__total.count
+  if (blocks === 0) return
+  const totalBlockMs = profileAgg.__total.total
+  const wallSec = windowMs / 1000
+  const blkPerSec = (blocks / wallSec).toFixed(2)
+  const avgBlockMs = (totalBlockMs / blocks).toFixed(1)
+
+  const ranked = PROFILE_PHASES
+    .map(p => ({ phase: p as PhaseKey, ...profileAgg[p] }))
+    .sort((a, b) => b.total - a.total)
+
+  console.log(`[profile] === ${blocks} blocks in ${wallSec.toFixed(1)}s wall — ${blkPerSec} blk/s aggregate, avg ${avgBlockMs}ms in-block (sum of phases ≠ wall clock due to parallelism across ${blocks > 0 ? 'workers' : '?'}) ===`)
+  for (const r of ranked) {
+    const pct = totalBlockMs > 0 ? (r.total / totalBlockMs * 100).toFixed(1) : '0.0'
+    const avg = r.count > 0 ? (r.total / r.count).toFixed(1) : '-'
+    const rowsPerBlk = r.count > 0 && r.rows > 0 ? `, ${(r.rows / r.count).toFixed(1)} rows/blk` : ''
+    console.log(`[profile]   ${r.phase.padEnd(26)} ${r.total.toFixed(0).padStart(7)}ms  ${pct.padStart(5)}%  avg ${avg}ms/blk (n=${r.count}${rowsPerBlk})`)
+  }
+}
+
 // ── Types ───────────────────────────────────────────────────────────
 export type NormalizedLog = {
   address: string
@@ -73,23 +177,28 @@ const PAIR_CACHE_MAX = 10_000
 
 // ── Main entry ──────────────────────────────────────────────────────
 export async function processBlock(blockNumber: number, provider: JsonRpcProvider, skipLogs = false) {
+  const t: PhaseTimings | null = PROFILE_ENABLED ? newTimings() : null
+  const blockStart = PROFILE_ENABLED ? performance.now() : 0
   const db = getDb()
 
   // Fire both RPC calls in parallel — they're independent and together
   // account for most of the wall-clock time on ETH (where receipts can be >1MB).
   const wantReceipts = !skipLogs && blockReceiptsSupported
+  const rpcStart = PROFILE_ENABLED ? performance.now() : 0
   const blockPromise = provider.getBlock(blockNumber, true)
   const receiptsPromise = wantReceipts
     ? fetchBlockReceipts(provider, blockNumber)
     : Promise.resolve([] as Array<{ txHash: string; receipt: NormalizedReceipt }>)
 
   const block = await blockPromise
+  if (t) t.rpcBlockWait = performance.now() - rpcStart
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
 
   // ── 1. Insert block ────────────────────────────────────────────
+  const s1 = PROFILE_ENABLED ? performance.now() : 0
   await db.insert(schema.blocks).values({
     number: block.number,
     hash: block.hash,
@@ -102,6 +211,7 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     txCount: block.transactions.length,
     size: 0,
   }).onConflictDoNothing()
+  if (t) t.dbInsertBlock = performance.now() - s1
 
   // ── 2. Bulk insert transactions ────────────────────────────────
   const txValues = block.prefetchedTransactions.map((tx, idx) => ({
@@ -121,9 +231,11 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     txType: tx.type ?? 0,
     timestamp,
   }))
+  if (t) t.txCount = txValues.length
 
   let insertedAddrs: Array<{ fromAddress: string; toAddress: string | null }> = []
   if (txValues.length > 0) {
+    const s2 = PROFILE_ENABLED ? performance.now() : 0
     insertedAddrs = await db.insert(schema.transactions)
       .values(txValues)
       .onConflictDoNothing()
@@ -131,17 +243,22 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
         fromAddress: schema.transactions.fromAddress,
         toAddress: schema.transactions.toAddress,
       })
+    if (t) t.dbInsertTxs = performance.now() - s2
 
     if (insertedAddrs.length > 0) {
+      const s2b = PROFILE_ENABLED ? performance.now() : 0
       await upsertAddresses(insertedAddrs, timestamp)
+      if (t) t.dbUpsertAddresses = performance.now() - s2b
     }
   }
 
   // ── 3. Await receipts (kicked off in parallel above) + decode ──
   if (wantReceipts && block.prefetchedTransactions.length > 0) {
+    const s3 = PROFILE_ENABLED ? performance.now() : 0
     const receipts = await receiptsPromise
+    if (t) t.rpcReceiptsWait = performance.now() - s3
     if (receipts.length > 0) {
-      await processReceiptsBatch(receipts, blockNumber, timestamp, provider)
+      await processReceiptsBatch(receipts, blockNumber, timestamp, provider, t)
     }
   } else if (wantReceipts) {
     // Drain the promise so we don't leak an unhandled rejection on empty blocks
@@ -155,6 +272,11 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
       block.number,
       timestamp,
     ).catch(err => console.error('[webhook-notifier] delivery error:', err))
+  }
+
+  if (t) {
+    t.totalMs = performance.now() - blockStart
+    recordTimings(t)
   }
 }
 
@@ -171,6 +293,7 @@ async function processReceiptsBatch(
   blockNumber: number,
   timestamp: Date,
   provider: JsonRpcProvider,
+  t: PhaseTimings | null = null,
 ) {
   const db = getDb()
 
@@ -180,7 +303,9 @@ async function processReceiptsBatch(
     status: r.receipt.status,
     gasUsed: r.receipt.gasUsed,
   }))
+  const sA = PROFILE_ENABLED ? performance.now() : 0
   await batchUpdateTxStatus(statusUpdates)
+  if (t) t.dbUpdateTxStatus = performance.now() - sA
 
   // ── B. Pre-filter logs by topic ─────────────────────────────────
   const transferLogs: Array<{ txHash: string; log: NormalizedLog }> = []
@@ -252,13 +377,18 @@ async function processReceiptsBatch(
       }
     }
 
+    if (t) t.transferCount = rows.length
+
     // Ensure unknown tokens exist (batched RPC lookups)
     if (tokensToEnsure.size > 0) {
+      const sT = PROFILE_ENABLED ? performance.now() : 0
       await ensureTokensBatch(tokensToEnsure, provider)
+      if (t) t.rpcEnsureTokens = performance.now() - sT
     }
 
     // Bulk insert token transfers — chunked to avoid stack overflow in Drizzle
     if (rows.length > 0) {
+      const sI = PROFILE_ENABLED ? performance.now() : 0
       let totalInserted = 0
       for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
         const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
@@ -278,10 +408,13 @@ async function processReceiptsBatch(
           .returning({ id: schema.tokenTransfers.id })
         totalInserted += inserted.length
       }
+      if (t) t.dbInsertTokenTransfers = performance.now() - sI
 
       // Only update holder counts if rows were actually inserted (not a replay)
       if (totalInserted > 0) {
+        const sH = PROFILE_ENABLED ? performance.now() : 0
         await batchUpdateHolderBalances(rows)
+        if (t) t.dbUpdateHolderBalances = performance.now() - sH
       }
     }
   }
@@ -297,7 +430,9 @@ async function processReceiptsBatch(
       if (!pairCache.has(pairAddress)) unknownPairs.add(pairAddress)
     }
     if (unknownPairs.size > 0) {
+      const sP = PROFILE_ENABLED ? performance.now() : 0
       await Promise.all(Array.from(unknownPairs).map(pair => fetchPairTokens(pair, provider)))
+      if (t) t.rpcPairTokens = performance.now() - sP
     }
 
     for (const { txHash, log } of dexSwapLogs) {
@@ -342,10 +477,13 @@ async function processReceiptsBatch(
       }
     }
 
+    if (t) t.dexCount = dexRows.length
     if (dexRows.length > 0) {
+      const sD = PROFILE_ENABLED ? performance.now() : 0
       for (let i = 0; i < dexRows.length; i += SQL_BATCH_CHUNK) {
         await db.insert(schema.dexTrades).values(dexRows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
       }
+      if (t) t.dbInsertDexTrades = performance.now() - sD
     }
   }
 }
