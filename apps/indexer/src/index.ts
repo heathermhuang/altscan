@@ -24,7 +24,14 @@ import { desc } from 'drizzle-orm'
 const chain = getChainConfig()
 const TAG = `[${chain.brandName}-indexer]`
 
-const RPC_URL     = process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl
+// BNB_RPC_URL / ETH_RPC_URL may be a single URL or a comma-separated list.
+// When multiple URLs are given, block fetches are round-robined across them,
+// which distributes per-IP rate-limit pressure across several public endpoints.
+// This is the real fix for "indexer falls behind because one public RPC throttles us".
+const RPC_URLS = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
 const POLL_MS     = chain.pollMs
 const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 // BNB produces a block every 3s — needs higher concurrency to keep up.
@@ -46,7 +53,8 @@ process.on('uncaughtException', (err) => {
 
 async function main() {
   console.log(`${TAG} Starting ${chain.name} indexer...`)
-  console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPC: ${RPC_URL.replace(/\/\/.*@/, '//***@')}`)
+  const redactedRpcs = RPC_URLS.map(u => u.replace(/\/\/.*@/, '//***@'))
+  console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPCs (${RPC_URLS.length}): ${redactedRpcs.join(', ')}`)
 
   // Retry ensureSchema on DB connection errors (e.g. max_connections exceeded).
   // Retrying instead of crashing prevents Render restart loops from piling up
@@ -70,13 +78,19 @@ async function main() {
 
   startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
 
-  const provider = new JsonRpcProvider(RPC_URL)
+  // One provider per RPC URL. We round-robin `processBlock` across this pool
+  // so 8 concurrent block fetches get distributed across N endpoints instead
+  // of all landing on one public RPC's rate-limit bucket.
+  const providers = RPC_URLS.map(url => new JsonRpcProvider(url))
+  // Tip queries always use providers[0]; keeps the "tip" cursor consistent
+  // and doesn't matter for rate-limits (1 req per poll cycle).
+  const tipProvider = providers[0]
   const db = getDb()
 
   // Retry getBlockNumber on startup
   let tip = 0
   for (let attempt = 1; attempt <= 5; attempt++) {
-    try { tip = await provider.getBlockNumber(); break }
+    try { tip = await tipProvider.getBlockNumber(); break }
     catch (err) {
       console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, err instanceof Error ? err.message : err)
       if (attempt < 5) await sleep(5000 * attempt)
@@ -107,7 +121,7 @@ async function main() {
 
   while (running) {
     try {
-      const latest = await provider.getBlockNumber()
+      const latest = await tipProvider.getBlockNumber()
 
       if (latest <= lastIndexed) {
         await sleep(POLL_MS)
@@ -135,7 +149,12 @@ async function main() {
       let windowBlocks = 0
       for (let i = 0; i < blockNums.length && running; i += CONCURRENCY) {
         const chunk = blockNums.slice(i, i + CONCURRENCY)
-        const results = await Promise.allSettled(chunk.map(num => processBlock(num, provider)))
+        // Round-robin each block to a different provider. With N providers and
+        // CONCURRENCY=8, each provider sees ~8/N concurrent fetches per chunk,
+        // which keeps us under public RPC per-IP throttles.
+        const results = await Promise.allSettled(
+          chunk.map((num, idx) => processBlock(num, providers[(i + idx) % providers.length]))
+        )
 
         // Surface failures but don't advance past the first error
         let firstFailureIdx = -1
