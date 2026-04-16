@@ -185,10 +185,15 @@ function formatMarketCap(value: number): string {
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
+  // DB queries get a 15s timeout so build-time SSG doesn't hang when the DB is
+  // cold or under heavy indexer load. ISR fills in real data on first visitor.
+  const dbTimeout = <T>(p: Promise<T>, fallback: T) =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), 15_000))])
+
   const [blocksResult, txsResult, txCount24h, nativePrice, marketCap] = await Promise.all([
-    db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []),
-    db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []),
-    fetchTxCount24h(),
+    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []), []),
+    dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []), []),
+    dbTimeout(fetchTxCount24h(), 0),
     fetchNativePrice(),
     fetchMarketCap(),
   ])
