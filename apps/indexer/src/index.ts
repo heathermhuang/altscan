@@ -156,7 +156,6 @@ async function main() {
       let nextIdx = 0
       let windowStart = Date.now()
       let windowBlocks = 0
-      let loggedThrough = from - 1  // furthest block we've already logged
 
       const claimNext = (): number => {
         while (nextIdx < total && blockStatus[nextIdx] !== 0) nextIdx++
@@ -170,25 +169,23 @@ async function main() {
         // Advance lastIndexed through consecutive done slots from the start,
         // stopping at the first not-done slot. Guarantees monotonic progression
         // and never skips a failed/inflight block.
-        let advanced = false
+        const before = lastIndexed
         for (let i = lastIndexed + 1 - from; i < total; i++) {
           if (blockStatus[i] === 2) {
             lastIndexed = from + i
-            advanced = true
           } else {
             break
           }
         }
-        if (advanced) {
-          windowBlocks += lastIndexed - loggedThrough
-          if (lastIndexed % LOG_EVERY === 0 || lastIndexed === to) {
-            const elapsed = Date.now() - windowStart
-            const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
-            console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
-            windowStart = Date.now()
-            windowBlocks = 0
-            loggedThrough = lastIndexed
-          }
+        const delta = lastIndexed - before
+        if (delta === 0) return
+        windowBlocks += delta
+        if (lastIndexed % LOG_EVERY === 0 || lastIndexed === to) {
+          const elapsed = Date.now() - windowStart
+          const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
+          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
+          windowStart = Date.now()
+          windowBlocks = 0
         }
       }
 
