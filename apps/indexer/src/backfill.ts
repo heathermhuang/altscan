@@ -11,13 +11,15 @@ const END = Number(process.argv[3] ?? String(chain.defaultStartBlock + 1000))
 const SKIP_LOGS = process.argv.includes('--skip-logs')
 const CONCURRENCY = 3
 
-// staticNetwork: pin chain ID so ethers skips eth_chainId auto-detection.
+// BNB_RPC_URL / ETH_RPC_URL may be comma-separated — backfill only needs one
+// endpoint so we pick the first. staticNetwork: pin chain ID so ethers skips
+// eth_chainId auto-detection.
+const rpcUrl = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)[0] ?? chain.defaultRpcUrl
 const network = Network.from(chain.chainId)
-const provider = new JsonRpcProvider(
-  process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl,
-  network,
-  { staticNetwork: network },
-)
+const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
 
 async function backfill() {
   console.log(`[backfill] Processing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS}, concurrency=${CONCURRENCY})`)
