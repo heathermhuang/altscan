@@ -612,15 +612,24 @@ function enqueueHolderBalanceUpdate(rows: TokenTransferRow[]): void {
 function runHolderWorker(): void {
   if (holderWorkerRunning) return
   holderWorkerRunning = true
-  // Fire-and-forget; errors logged per-batch, loop continues.
+  // Fire-and-forget; errors logged per-drain, loop continues.
+  // Each drain coalesces the ENTIRE current queue into one merged UPSERT:
+  // delta aggregation is commutative, so N batches of deltas can be summed
+  // per (token, holder) and applied as a single SQL round-trip. This
+  // amortizes per-statement overhead — a queue of 500 batches drains in
+  // roughly the same time as 1, bounded only by the merged row count.
   ;(async () => {
     try {
       while (holderQueue.length > 0) {
-        const batch = holderQueue.shift()!
+        const drained = holderQueue.splice(0, holderQueue.length)
+        const merged: TokenTransferRow[] = []
+        for (const batch of drained) {
+          for (const r of batch) merged.push(r)
+        }
         try {
-          await batchUpdateHolderBalances(batch)
+          await batchUpdateHolderBalances(merged)
         } catch (err) {
-          console.warn('[holder-queue] batch failed:', err instanceof Error ? err.message : err)
+          console.warn(`[holder-queue] merged batch of ${drained.length} failed:`, err instanceof Error ? err.message : err)
         }
       }
     } finally {
