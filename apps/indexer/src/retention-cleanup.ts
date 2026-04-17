@@ -72,7 +72,9 @@ async function deleteAll(table: string, timestampCol: string, cutoff: Date): Pro
   const result = await db.execute(
     sql`DELETE FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz`
   )
-  return (result as any).rowCount ?? 0
+  // postgres-js exposes affected-row count as .count, not .rowCount.
+  // Read both to stay compatible if the driver ever changes.
+  return (result as any).count ?? (result as any).rowCount ?? 0
 }
 
 /**
@@ -154,7 +156,7 @@ async function runCleanup(): Promise<void> {
         SELECT COALESCE(MIN(number), 0) FROM blocks WHERE timestamp >= ${cutoffStr}::timestamptz
       )`
     )
-    const logsDeleted = (logsResult as any).rowCount ?? 0
+    const logsDeleted = (logsResult as any).count ?? (logsResult as any).rowCount ?? 0
     if (logsDeleted > 0) console.log(`[retention] logs: deleted ${logsDeleted} rows`)
     totalDeleted += logsDeleted
   } catch (err) {
@@ -170,7 +172,7 @@ async function runCleanup(): Promise<void> {
       sql`DELETE FROM blocks WHERE timestamp < ${cutoffStr}::timestamptz
         AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
     )
-    const blocksDeleted = (blockResult as any).rowCount ?? 0
+    const blocksDeleted = (blockResult as any).count ?? (blockResult as any).rowCount ?? 0
     if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
     totalDeleted += blocksDeleted
   } catch (err) {
@@ -184,7 +186,7 @@ async function runCleanup(): Promise<void> {
     const zbResult = await db.execute(sql.raw(`
       DELETE FROM token_balances WHERE balance <= 0
     `))
-    const zbCount = (zbResult as any).rowCount ?? 0
+    const zbCount = (zbResult as any).count ?? (zbResult as any).rowCount ?? 0
     if (zbCount > 0) console.log(`[retention] token_balances: deleted ${zbCount} zero-balance rows`)
     totalDeleted += zbCount
   } catch (err) {

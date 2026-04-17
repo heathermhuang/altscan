@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     const safeDelete = async (name: string, query: string) => {
       try {
         const result = await db.execute(sql.raw(query))
-        const count = (result as any).rowCount ?? 0
+        const count = (result as any).count ?? (result as any).rowCount ?? 0
         deleted[name] = count
         console.log(`[db-prune] ${name}: deleted ${count} rows`)
       } catch (err) {
