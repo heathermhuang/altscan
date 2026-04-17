@@ -592,8 +592,8 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
 // this inline, which was the dominant per-block cost (~38% / ~2.5s).
 // Serializing through one worker removes cross-worker row-lock contention.
 const HOLDER_QUEUE_WARN_DEPTH = parseInt(process.env.HOLDER_QUEUE_WARN_DEPTH ?? '500', 10)
-const SKIP_HOLDER_BALANCES = process.env.SKIP_HOLDER_BALANCES === '1' || process.env.SKIP_HOLDER_BALANCES === 'true'
-if (SKIP_HOLDER_BALANCES) console.warn('[holder-queue] SKIP_HOLDER_BALANCES=1 — token_balances writes DISABLED')
+const SKIP_HOLDER_BALANCES = true
+console.warn('[holder-queue] HARDCODED SKIP — token_balances writes DISABLED to save DB from write storm')
 const holderQueue: TokenTransferRow[][] = []
 let holderWorkerRunning = false
 let holderQueueLogCounter = 0
