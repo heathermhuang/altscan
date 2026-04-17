@@ -26,6 +26,18 @@ const HOLDER_COUNT_EVERY_MS =
 // found nothing to delete" situations before the disk-full alert fires.
 // 0 means unknown — size is still reported, percentage is not.
 const DB_DISK_GB     = parseInt(process.env.DB_DISK_GB ?? '0', 10)
+// Skip expensive maintenance (holder-count recompute) when the indexer is
+// too far behind the tip. Prevents a 30-60s DB-hogging query from compounding
+// lag when we're already losing the race to catch up.
+const HOLDER_COUNT_LAG_THRESHOLD =
+  parseInt(process.env.HOLDER_COUNT_LAG_THRESHOLD ?? '1000', 10)
+
+// Indexer lag reporter — index.ts pushes lag on every batch advance so
+// recomputeHolderCounts can decide whether to skip this tick.
+let reportedLag = 0
+export function reportIndexerLag(lag: number): void {
+  reportedLag = lag
+}
 
 /**
  * Whitelist of allowed table names and timestamp columns.
@@ -234,6 +246,10 @@ async function runVacuumFull(): Promise<void> {
  * Runs every few minutes; eventual consistency is fine for holder counts.
  */
 async function recomputeHolderCounts(): Promise<void> {
+  if (reportedLag > HOLDER_COUNT_LAG_THRESHOLD) {
+    console.log(`[holder-count] skipping — indexer lag ${reportedLag} > ${HOLDER_COUNT_LAG_THRESHOLD}`)
+    return
+  }
   const db = getDb()
   try {
     const start = Date.now()

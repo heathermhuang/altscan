@@ -16,7 +16,7 @@ import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@bnbscan/chain-config'
 import { processBlock } from './block-processor'
 import { syncValidators } from './validator-syncer'
-import { startRetentionCleanup } from './retention-cleanup'
+import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
 import { getDb, schema } from './db'
 import { desc } from 'drizzle-orm'
@@ -189,6 +189,7 @@ async function main() {
         const delta = lastIndexed - before
         if (delta === 0) return
         windowBlocks += delta
+        reportIndexerLag(latest - lastIndexed)
         if (lastIndexed % LOG_EVERY === 0 || lastIndexed === to) {
           const elapsed = Date.now() - windowStart
           const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'

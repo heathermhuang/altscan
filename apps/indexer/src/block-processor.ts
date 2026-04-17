@@ -162,12 +162,6 @@ type DexTradeRow = {
   timestamp: Date
 }
 
-type TxStatusUpdate = {
-  hash: string
-  status: boolean
-  gasUsed: bigint
-}
-
 // ── Caches ──────────────────────────────────────────────────────────
 const tokenCache = new Set<string>()
 const TOKEN_CACHE_MAX = 50_000
@@ -181,8 +175,10 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   const blockStart = PROFILE_ENABLED ? performance.now() : 0
   const db = getDb()
 
-  // Fire both RPC calls in parallel — they're independent and together
-  // account for most of the wall-clock time on ETH (where receipts can be >1MB).
+  // Fire both RPC calls in parallel and await both up-front so we can merge
+  // receipt data (status, gasUsed) directly into the tx INSERT — avoids a
+  // second UPDATE round-trip that previously ran against freshly-inserted
+  // rows and caused row-lock contention across 8 concurrent block workers.
   const wantReceipts = !skipLogs
   const rpcStart = PROFILE_ENABLED ? performance.now() : 0
   const blockPromise = provider.getBlock(blockNumber, true)
@@ -190,12 +186,20 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     ? fetchBlockReceipts(provider, blockNumber)
     : Promise.resolve([] as Array<{ txHash: string; receipt: NormalizedReceipt }>)
 
-  const block = await blockPromise
-  if (t) t.rpcBlockWait = performance.now() - rpcStart
+  const [block, receipts] = await Promise.all([blockPromise, receiptsPromise])
+  if (t) {
+    t.rpcBlockWait = performance.now() - rpcStart
+    t.rpcReceiptsWait = 0
+  }
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
+
+  // Map tx hash → receipt so we can populate tx.status / tx.gasUsed at INSERT
+  // time instead of via a follow-up UPDATE pass.
+  const receiptByTx = new Map<string, NormalizedReceipt>()
+  for (const r of receipts) receiptByTx.set(r.txHash, r.receipt)
 
   // ── 1. Insert block ────────────────────────────────────────────
   const s1 = PROFILE_ENABLED ? performance.now() : 0
@@ -213,24 +217,27 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   }).onConflictDoNothing()
   if (t) t.dbInsertBlock = performance.now() - s1
 
-  // ── 2. Bulk insert transactions ────────────────────────────────
-  const txValues = block.prefetchedTransactions.map((tx, idx) => ({
-    hash: tx.hash,
-    blockNumber: block.number,
-    fromAddress: tx.from.toLowerCase(),
-    toAddress: tx.to?.toLowerCase() ?? null,
-    value: tx.value.toString(),
-    gas: tx.gasLimit,
-    gasPrice: tx.gasPrice?.toString() ?? '0',
-    gasUsed: 0n,
-    input: tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data,
-    status: true,
-    methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
-    txIndex: idx,
-    nonce: tx.nonce,
-    txType: tx.type ?? 0,
-    timestamp,
-  }))
+  // ── 2. Bulk insert transactions (with receipt data baked in) ───
+  const txValues = block.prefetchedTransactions.map((tx, idx) => {
+    const rec = receiptByTx.get(tx.hash)
+    return {
+      hash: tx.hash,
+      blockNumber: block.number,
+      fromAddress: tx.from.toLowerCase(),
+      toAddress: tx.to?.toLowerCase() ?? null,
+      value: tx.value.toString(),
+      gas: tx.gasLimit,
+      gasPrice: tx.gasPrice?.toString() ?? '0',
+      gasUsed: rec?.gasUsed ?? 0n,
+      input: tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data,
+      status: rec?.status ?? true,
+      methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
+      txIndex: idx,
+      nonce: tx.nonce,
+      txType: tx.type ?? 0,
+      timestamp,
+    }
+  })
   if (t) t.txCount = txValues.length
 
   let insertedAddrs: Array<{ fromAddress: string; toAddress: string | null }> = []
@@ -246,23 +253,16 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
     if (t) t.dbInsertTxs = performance.now() - s2
 
     if (insertedAddrs.length > 0) {
-      const s2b = PROFILE_ENABLED ? performance.now() : 0
-      await upsertAddresses(insertedAddrs, timestamp)
-      if (t) t.dbUpsertAddresses = performance.now() - s2b
+      // Fire-and-forget coalesced flush — see enqueueAddressActivity below.
+      // Keeps hot-path block time bounded; the `addresses` table is metadata
+      // (tx_count / last_seen), eventual consistency across a few seconds is fine.
+      enqueueAddressActivity(insertedAddrs, timestamp)
     }
   }
 
-  // ── 3. Await receipts (kicked off in parallel above) + decode ──
-  if (wantReceipts && block.prefetchedTransactions.length > 0) {
-    const s3 = PROFILE_ENABLED ? performance.now() : 0
-    const receipts = await receiptsPromise
-    if (t) t.rpcReceiptsWait = performance.now() - s3
-    if (receipts.length > 0) {
-      await processReceiptsBatch(receipts, blockNumber, timestamp, provider, t)
-    }
-  } else if (wantReceipts) {
-    // Drain the promise so we don't leak an unhandled rejection on empty blocks
-    receiptsPromise.catch(() => {})
+  // ── 3. Decode receipts (already awaited above) ─────────────────
+  if (wantReceipts && block.prefetchedTransactions.length > 0 && receipts.length > 0) {
+    await processReceiptsBatch(receipts, blockNumber, timestamp, provider, t)
   }
 
   // ── 4. Webhooks (non-blocking) ─────────────────────────────────
@@ -282,11 +282,9 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
 
 // ── Receipt batch processing ────────────────────────────────────────
 /**
- * Process all receipts for a block in bulk:
- *   - Batched tx status/gasUsed UPDATE via unnest
- *   - Batched token_transfers INSERT
- *   - Batched dex_trades INSERT
- *   - Pre-filtered logs by topic to avoid wasted work
+ * Decode receipt logs for a block into token_transfers and dex_trades.
+ * Tx status / gasUsed are populated at INSERT time in processBlock, so this
+ * function no longer runs a separate UPDATE pass.
  */
 async function processReceiptsBatch(
   receipts: Array<{ txHash: string; receipt: NormalizedReceipt }>,
@@ -297,15 +295,9 @@ async function processReceiptsBatch(
 ) {
   const db = getDb()
 
-  // ── A. Batch update tx status + gasUsed ─────────────────────────
-  const statusUpdates: TxStatusUpdate[] = receipts.map(r => ({
-    hash: r.txHash,
-    status: r.receipt.status,
-    gasUsed: r.receipt.gasUsed,
-  }))
-  const sA = PROFILE_ENABLED ? performance.now() : 0
-  await batchUpdateTxStatus(statusUpdates)
-  if (t) t.dbUpdateTxStatus = performance.now() - sA
+  // Note: tx.status / tx.gasUsed are now populated at INSERT time in processBlock
+  // (receipts awaited up-front and merged into txValues). No second UPDATE pass.
+  if (t) t.dbUpdateTxStatus = 0
 
   // ── B. Pre-filter logs by topic ─────────────────────────────────
   const transferLogs: Array<{ txHash: string; log: NormalizedLog }> = []
@@ -488,58 +480,78 @@ async function processReceiptsBatch(
   }
 }
 
-// ── Batched tx status update ────────────────────────────────────────
+// ── Async addresses coalescer ───────────────────────────────────────
 /**
- * Update status + gasUsed for N transactions in a single SQL call
- * using a VALUES clause. Previously this was N sequential UPDATEs.
+ * Accumulates address activity (tx_count delta + last_seen) across blocks
+ * and flushes in coalesced batches. Previously the upsert ran synchronously
+ * per block and was the dominant lock-contention source under 8-worker
+ * concurrency — hot rows (WBNB, PancakeSwap router, stablecoins) serialized
+ * on row locks, and deadlock retries added 50-150ms stalls to random blocks.
  *
- * Uses VALUES instead of unnest(arr) because Drizzle's sql template
- * serializes JS arrays as record literals (a, b, c) which cannot be
- * cast to text[] at the postgres layer.
+ * Coalescing properties:
+ *   - Larger batches → fewer lock acquisition cycles overall
+ *   - Single in-flight flush → bounded memory and DB pool pressure
+ *   - Deduplicated addresses → one row lock per distinct address per flush
+ *   - Fire-and-forget from block loop → block processing never waits on
+ *     addresses-table contention
+ *
+ * The addresses table is metadata (tx_count, last_seen). Eventual consistency
+ * across a few seconds is acceptable; firstSeen still populates correctly
+ * via the INSERT clause of ON CONFLICT.
  */
-async function batchUpdateTxStatus(updates: TxStatusUpdate[]): Promise<void> {
-  if (updates.length === 0) return
-  const db = getDb()
+type AddressPending = { count: number; ts: Date }
+let addressPending = new Map<string, AddressPending>()
+let addressFlushInflight: Promise<void> | null = null
 
-  for (let i = 0; i < updates.length; i += SQL_BATCH_CHUNK) {
-    const chunk = updates.slice(i, i + SQL_BATCH_CHUNK)
-    await db.execute(sql`
-      UPDATE transactions AS t
-      SET status = u.status, gas_used = u.gas_used
-      FROM (VALUES ${sql.join(
-        chunk.map(u => sql`(${u.hash}, ${u.status}::boolean, ${u.gasUsed.toString()}::bigint)`),
-        sql`, `
-      )}) AS u(hash, status, gas_used)
-      WHERE t.hash = u.hash
-    `)
-  }
-}
-
-// ── Batched addresses upsert ────────────────────────────────────────
-async function upsertAddresses(
+function enqueueAddressActivity(
   txs: Array<{ fromAddress: string; toAddress: string | null }>,
   timestamp: Date,
-): Promise<void> {
-  const db = getDb()
-  const counts = new Map<string, number>()
-  for (const tx of txs) {
-    counts.set(tx.fromAddress, (counts.get(tx.fromAddress) ?? 0) + 1)
-    if (tx.toAddress) counts.set(tx.toAddress, (counts.get(tx.toAddress) ?? 0) + 1)
+): void {
+  const bump = (addr: string) => {
+    const prev = addressPending.get(addr)
+    if (prev) {
+      prev.count += 1
+      if (timestamp > prev.ts) prev.ts = timestamp
+    } else {
+      addressPending.set(addr, { count: 1, ts: timestamp })
+    }
   }
-  if (counts.size === 0) return
+  for (const tx of txs) {
+    bump(tx.fromAddress)
+    if (tx.toAddress) bump(tx.toAddress)
+  }
+  kickAddressFlush()
+}
 
-  const rows = Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  const ts = timestamp.toISOString()
+function kickAddressFlush(): void {
+  if (addressFlushInflight) return
+  if (addressPending.size === 0) return
+  const snapshot = addressPending
+  addressPending = new Map()
+  addressFlushInflight = flushAddresses(snapshot)
+    .catch(err => console.warn('[addresses] flush failed:', err instanceof Error ? err.message : err))
+    .finally(() => {
+      addressFlushInflight = null
+      if (addressPending.size > 0) kickAddressFlush()
+    })
+}
 
-  for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
-    const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
+async function flushAddresses(pending: Map<string, AddressPending>): Promise<void> {
+  const db = getDb()
+  // Sort by address → consistent lock order, minimizes deadlocks across flushes.
+  const entries = Array.from(pending.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+
+  for (let i = 0; i < entries.length; i += SQL_BATCH_CHUNK) {
+    const chunk = entries.slice(i, i + SQL_BATCH_CHUNK)
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await db.execute(sql`
           INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
           VALUES ${sql.join(
-            chunk.map(([addr, cnt]) => sql`(${addr}, '0'::numeric, ${cnt}, false, ${ts}::timestamptz, ${ts}::timestamptz)`),
-            sql`, `
+            chunk.map(([addr, d]) =>
+              sql`(${addr}, '0'::numeric, ${d.count}, false, ${d.ts.toISOString()}::timestamptz, ${d.ts.toISOString()}::timestamptz)`,
+            ),
+            sql`, `,
           )}
           ON CONFLICT (address) DO UPDATE SET
             tx_count  = addresses.tx_count + EXCLUDED.tx_count,
