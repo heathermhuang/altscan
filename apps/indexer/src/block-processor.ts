@@ -402,10 +402,15 @@ async function processReceiptsBatch(
       }
       if (t) t.dbInsertTokenTransfers = performance.now() - sI
 
-      // Only update holder counts if rows were actually inserted (not a replay)
+      // Holder balance updates are queued for a single dedicated worker.
+      // Profiling showed inline UPSERTs took ~38% of in-block time (~2.5s/block)
+      // due to row-lock contention across 8 workers hammering the same hot tokens.
+      // Serializing through one worker eliminates cross-worker contention and
+      // unblocks block processing. Eventually consistent — queue drains during
+      // low-activity windows. Order doesn't matter (addition is commutative).
       if (totalInserted > 0) {
         const sH = PROFILE_ENABLED ? performance.now() : 0
-        await batchUpdateHolderBalances(rows)
+        enqueueHolderBalanceUpdate(rows)
         if (t) t.dbUpdateHolderBalances = performance.now() - sH
       }
     }
@@ -582,6 +587,52 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
  * deadlocks. holder_count is now recomputed periodically by the retention
  * job instead — see recomputeHolderCounts().
  */
+// ── Holder balance async queue ──────────────────────────────────────
+// Single-worker drainer for balance UPSERTs. Blocks previously awaited
+// this inline, which was the dominant per-block cost (~38% / ~2.5s).
+// Serializing through one worker removes cross-worker row-lock contention.
+const HOLDER_QUEUE_WARN_DEPTH = parseInt(process.env.HOLDER_QUEUE_WARN_DEPTH ?? '500', 10)
+const holderQueue: TokenTransferRow[][] = []
+let holderWorkerRunning = false
+let holderQueueLogCounter = 0
+
+function enqueueHolderBalanceUpdate(rows: TokenTransferRow[]): void {
+  holderQueue.push(rows)
+  if (++holderQueueLogCounter >= 100) {
+    holderQueueLogCounter = 0
+    if (holderQueue.length >= HOLDER_QUEUE_WARN_DEPTH) {
+      console.warn(`[holder-queue] depth=${holderQueue.length} batches (warn threshold ${HOLDER_QUEUE_WARN_DEPTH})`)
+    } else {
+      console.log(`[holder-queue] depth=${holderQueue.length} batches`)
+    }
+  }
+  runHolderWorker()
+}
+
+function runHolderWorker(): void {
+  if (holderWorkerRunning) return
+  holderWorkerRunning = true
+  // Fire-and-forget; errors logged per-batch, loop continues.
+  ;(async () => {
+    try {
+      while (holderQueue.length > 0) {
+        const batch = holderQueue.shift()!
+        try {
+          await batchUpdateHolderBalances(batch)
+        } catch (err) {
+          console.warn('[holder-queue] batch failed:', err instanceof Error ? err.message : err)
+        }
+      }
+    } finally {
+      holderWorkerRunning = false
+    }
+  })()
+}
+
+export function getHolderQueueDepth(): number {
+  return holderQueue.length
+}
+
 async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void> {
   const db = getDb()
 
