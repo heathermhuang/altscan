@@ -278,8 +278,17 @@ async function recomputeHolderCounts(): Promise<void> {
 }
 
 export async function startRetentionCleanup(): Promise<void> {
-  // Await first run so getLastIndexedBlock sees the clean state
-  await runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+  // Previously awaited runCleanup() here so getLastIndexedBlock saw a clean
+  // state. But with 3-day retention on a 15GB/day DB, the startup DELETE
+  // saturates the 12-connection pool for 30+ minutes — starving the block
+  // workers and the holder-balance queue drainer, causing the queue to grow
+  // unboundedly on every restart. The 6h interval below catches the same
+  // work without blocking startup; the pool stays hot for block processing.
+  const STARTUP_DELAY_MS = 15 * 60 * 1000
+  console.log(`[retention] startup cleanup deferred by ${STARTUP_DELAY_MS / 60_000}min to avoid DB-pool starvation`)
+  setTimeout(() => {
+    runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+  }, STARTUP_DELAY_MS)
 
   // One-time VACUUM FULL to reclaim disk space after bulk deletes.
   // Set VACUUM_FULL=1 in env vars, then remove it after the indexer restarts.
