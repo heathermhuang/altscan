@@ -199,10 +199,21 @@ export async function ensureSchema(): Promise<void> {
     )
   `))
 
-  // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution
-  await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS nonce INTEGER`))
-  await db.execute(sql.raw(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tx_type INTEGER`))
-  await db.execute(sql.raw(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS logo_url TEXT`))
+  // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution.
+  //
+  // CRITICAL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes an
+  // AccessExclusiveLock on the table even when the column already exists.
+  // Under deploy rollover, the old instance's INSERT transactions hold
+  // AccessShareLock on `transactions`, and the new instance's ALTER blocks
+  // behind them. On BNB under backlog that was observed to stall startup
+  // for 9+ minutes before ensureSchema could continue.
+  //
+  // Fix: check pg_attribute first. If the column already exists, skip the
+  // ALTER entirely — no lock acquired, no stall. The ALTER only runs on
+  // the very first deploy that introduces a new column.
+  await addColumnIfMissing('transactions', 'nonce',    'INTEGER')
+  await addColumnIfMissing('transactions', 'tx_type',  'INTEGER')
+  await addColumnIfMissing('tokens',       'logo_url', 'TEXT')
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
@@ -276,4 +287,26 @@ export async function ensureSchema(): Promise<void> {
     }
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
+}
+
+/**
+ * Run `ALTER TABLE ... ADD COLUMN` only if the column is actually missing.
+ *
+ * `ADD COLUMN IF NOT EXISTS` still takes an AccessExclusiveLock when the column
+ * already exists — which stalls the new deploy behind the old instance's
+ * ongoing INSERT transactions. Checking pg_attribute first is a cheap read
+ * that takes no write lock, so the no-op path is truly free.
+ */
+async function addColumnIfMissing(table: string, column: string, type: string): Promise<void> {
+  const db = getDb()
+  const result = await db.execute(sql`
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = ${table}::regclass
+      AND attname  = ${column}
+      AND NOT attisdropped
+    LIMIT 1
+  `)
+  const rows = Array.from(result)
+  if (rows.length > 0) return
+  await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`))
 }
