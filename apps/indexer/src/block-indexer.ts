@@ -53,7 +53,13 @@ async function getLastIndexedBlock(db: ReturnType<typeof getDb>): Promise<number
     .from(schema.blocks)
     .orderBy(desc(schema.blocks.number))
     .limit(1)
-  return result[0]?.number ?? Number(process.env.START_BLOCK ?? '38000000')
+  const dbMax = result[0]?.number ?? Number(process.env.START_BLOCK ?? '38000000')
+  const minStart = process.env.MIN_START_BLOCK ? Number(process.env.MIN_START_BLOCK) : 0
+  if (minStart > dbMax) {
+    console.log(`[block-indexer] DB max ${dbMax} below MIN_START_BLOCK ${minStart} — skipping ahead`)
+    return minStart
+  }
+  return dbMax
 }
 
 function sleep(ms: number) {
