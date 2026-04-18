@@ -115,15 +115,26 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   return null
 }
 
-/** Count transactions indexed in the last 24 hours. */
-async function fetchTxCount24h(): Promise<number> {
+/** Count transactions indexed in the last 24 hours.
+ *
+ * Anchors the cutoff to the indexer tip's wall-clock timestamp (not `NOW()`),
+ * so the window stays exactly 24h even when the indexer is lagging or when
+ * block time varies (ETH missed slots, BSC occasional slow blocks).
+ *
+ * Returns null on error/timeout so the caller can distinguish "unknown" from
+ * a genuine zero — the em-dash bug originally came from a COUNT against the
+ * bloated transactions heap hitting the 15s timeout and falling back to 0.
+ */
+async function fetchTxCount24h(latestBlock: { timestamp: Date } | undefined): Promise<number | null> {
+  if (!latestBlock) return null
+  const cutoff = new Date(latestBlock.timestamp.getTime() - 24 * 60 * 60 * 1000)
   try {
     const result = await db.execute(
-      sql`SELECT COUNT(*)::int AS cnt FROM transactions WHERE timestamp > NOW() - INTERVAL '24 hours'`
+      sql`SELECT COUNT(*)::int AS cnt FROM transactions WHERE timestamp > ${cutoff.toISOString()}`
     )
     return Number(Array.from(result)[0]?.cnt ?? 0)
   } catch {
-    return 0
+    return null
   }
 }
 
@@ -191,10 +202,9 @@ export default async function HomePage() {
     return Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), 15_000))])
   }
 
-  const [blocksResult, txsResult, txCount24h, nativePrice, marketCap] = await Promise.all([
+  const [blocksResult, txsResult, nativePrice, marketCap] = await Promise.all([
     dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []), []),
-    dbTimeout(fetchTxCount24h(), 0),
     fetchNativePrice(),
     fetchMarketCap(),
   ])
@@ -203,6 +213,7 @@ export default async function HomePage() {
   latestTxs = txsResult
 
   const latestBlock = latestBlocks[0]
+  const txCount24h = await dbTimeout(fetchTxCount24h(latestBlock), null)
 
   const priceDisplay = nativePrice
     ? `$${nativePrice.usd.toFixed(2)}`
@@ -256,7 +267,7 @@ export default async function HomePage() {
         />
         <StatCard
           label="24H Transactions"
-          value={txCount24h > 0 ? formatNumber(txCount24h) : '—'}
+          value={txCount24h !== null ? formatNumber(txCount24h) : '—'}
           subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
         />
         <StatCard
