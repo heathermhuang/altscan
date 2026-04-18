@@ -66,7 +66,40 @@ const HOMEPAGE_LINK_HEADER = [
   '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
   '</api-docs>; rel="service-doc"; type="text/html"',
   '</sitemap.xml>; rel="sitemap"; type="application/xml"',
+  '</.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"',
 ].join(', ')
+
+// Pages that have a markdown representation at /md<path>. Keep in sync with
+// the HANDLERS map in app/md/[[...slug]]/route.ts.
+const MARKDOWN_PATHS = new Set<string>(['/', '/about', '/developer', '/api-docs'])
+
+/**
+ * Parse an Accept header and return true if `text/markdown` is preferred over
+ * `text/html` (or HTML is absent). We treat a bare `Accept: text/markdown`
+ * as preferring markdown; `Accept: text/html, text/markdown;q=0.9` as HTML.
+ * This keeps browsers on HTML and lets agents opt in explicitly.
+ */
+function prefersMarkdown(accept: string | null): boolean {
+  if (!accept) return false
+  let mdQ = -1
+  let htmlQ = -1
+  for (const raw of accept.split(',')) {
+    const part = raw.trim()
+    if (!part) continue
+    const [type, ...paramsRaw] = part.split(';').map((s) => s.trim())
+    let q = 1
+    for (const p of paramsRaw) {
+      if (p.startsWith('q=')) {
+        const v = parseFloat(p.slice(2))
+        if (!Number.isNaN(v)) q = v
+      }
+    }
+    if (type === 'text/markdown') mdQ = Math.max(mdQ, q)
+    else if (type === 'text/html') htmlQ = Math.max(htmlQ, q)
+  }
+  if (mdQ < 0) return false
+  return mdQ > htmlQ
+}
 
 export function middleware(request: NextRequest) {
   const ua = request.headers.get('user-agent')
@@ -84,9 +117,24 @@ export function middleware(request: NextRequest) {
     })
   }
 
+  // Markdown content negotiation — rewrite (not redirect) so the URL stays
+  // canonical and caches key on Accept via the Vary header emitted by /md.
+  if (
+    !pathname.startsWith('/md') &&
+    MARKDOWN_PATHS.has(pathname) &&
+    prefersMarkdown(request.headers.get('accept'))
+  ) {
+    const url = request.nextUrl.clone()
+    url.pathname = pathname === '/' ? '/md' : `/md${pathname}`
+    const rewritten = NextResponse.rewrite(url)
+    rewritten.headers.set('Vary', 'Accept')
+    return rewritten
+  }
+
   const response = NextResponse.next()
   if (pathname === '/') {
     response.headers.set('Link', HOMEPAGE_LINK_HEADER)
+    response.headers.append('Vary', 'Accept')
   }
   return response
 }

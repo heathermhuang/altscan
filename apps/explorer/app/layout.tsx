@@ -4,6 +4,7 @@ import Script from 'next/script'
 import './globals.css'
 import { Header } from '@/components/layout/Header'
 import { Footer } from '@/components/layout/Footer'
+import { WebMcpProvider } from '@/components/agent/WebMcpProvider'
 import { chainConfig } from '@/lib/chain'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />
+        <WebMcpProvider />
       </body>
     </html>
   )
