@@ -62,31 +62,80 @@ function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void 
   }
 }
 
-async function deleteAll(table: string, timestampCol: string, cutoff: Date): Promise<number> {
-  assertAllowedIdentifier(table, 'table')
-  assertAllowedIdentifier(timestampCol, 'column')
+/**
+ * Translate a timestamp cutoff into a block_number cutoff via the
+ * `blocks_timestamp_idx` index. Every high-volume table has a
+ * `block_number` index but only some have a `timestamp` index — so
+ * deleting by block_number is universally fast, while deleting by
+ * timestamp forces sequential scans (observed: 12min/0-row DELETE on
+ * the 32GB token_transfers table).
+ *
+ * Returns the minimum block number whose timestamp is >= cutoff. Rows
+ * with block_number strictly less than this are older than the cutoff
+ * and safe to delete.
+ *
+ * If the blocks table is empty or has no block past the cutoff, returns
+ * null — caller should skip the delete rather than wipe the table.
+ */
+async function cutoffBlockNumber(cutoff: Date, days: number): Promise<number | null> {
   const db = getDb()
   const cutoffStr = cutoff.toISOString()
-  // Direct DELETE — faster than ctid batching for large backlogs.
-  // Single query lets Postgres plan the delete optimally.
   const result = await db.execute(
-    sql`DELETE FROM ${sql.raw(table)} WHERE ${sql.raw(timestampCol)} < ${cutoffStr}::timestamptz`
+    sql`SELECT MIN(number)::bigint AS n FROM blocks WHERE timestamp >= ${cutoffStr}::timestamptz`
   )
-  // postgres-js exposes affected-row count as .count, not .rowCount.
-  // Read both to stay compatible if the driver ever changes.
+  const row = Array.from(result)[0] as Record<string, unknown> | undefined
+  if (row && row.n !== null && row.n !== undefined) return Number(row.n)
+
+  // Fallback: indexer is stale — latest indexed block is older than wall-clock
+  // cutoff (e.g. indexer was down > RETENTION_DAYS, or starting from an old
+  // snapshot). Without this, retention becomes a no-op exactly when we need
+  // it most. Anchor the cutoff to MAX(timestamp) - days instead, so we still
+  // keep only the last N days of INDEXED data. Semantics shift from
+  // wall-clock-relative to indexed-data-relative, but retention still makes
+  // progress and disk pressure gets relieved.
+  const rel = await db.execute(
+    sql`SELECT MIN(number)::bigint AS n FROM blocks
+        WHERE timestamp >= (SELECT MAX(timestamp) - (${days} * INTERVAL '1 day') FROM blocks)`
+  )
+  const relRow = Array.from(rel)[0] as Record<string, unknown> | undefined
+  if (!relRow || relRow.n === null || relRow.n === undefined) return null
+  console.warn(
+    `[retention] no blocks past wall-clock cutoff — falling back to ` +
+    `indexed-data-relative cutoff (last ${days}d of indexed blocks)`
+  )
+  return Number(relRow.n)
+}
+
+async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<number> {
+  assertAllowedIdentifier(table, 'table')
+  const db = getDb()
+  const result = await db.execute(
+    sql`DELETE FROM ${sql.raw(table)} WHERE block_number < ${cutoffBlock}`
+  )
   return (result as any).count ?? (result as any).rowCount ?? 0
 }
 
 /**
+ * Disk % threshold above which runCleanup triggers an emergency re-cleanup
+ * with a tighter retention window. Bounded by EMERGENCY_RETENTION_MIN_DAYS
+ * so we never nuke the site's recent-data window entirely.
+ */
+const EMERGENCY_DISK_PCT = 85
+const EMERGENCY_RETENTION_MIN_DAYS = 1
+
+/**
  * Log the per-table sizes and total DB size at the end of each retention run.
  * If DB_DISK_GB is set, also logs the disk-% used and WARNs at >70%.
+ *
+ * Returns the disk-% used (0 if DB_DISK_GB is unset) so callers can take
+ * action — e.g. auto-tightening retention when disk pressure is high.
  *
  * This is the dead-man-switch for "retention runs but the DB keeps growing" —
  * a condition that's easy to miss when logs only show "0 rows removed" (which
  * can legitimately happen on a fresh DB with no data older than the retention
  * cutoff, but can also hide a disk about to fill up).
  */
-async function reportSizes(): Promise<void> {
+async function reportSizes(): Promise<number> {
   const db = getDb()
   const result = await db.execute(sql`
     SELECT
@@ -115,68 +164,76 @@ async function reportSizes(): Promise<void> {
     parts.push(`disk=${pct.toFixed(1)}%of${DB_DISK_GB}GB`)
     if (pct >= 70) {
       console.warn(`[retention] ⚠ DB at ${pct.toFixed(1)}% of ${DB_DISK_GB}GB disk — sizes: ${parts.join(' ')}`)
-      return
+      return pct
     }
+    console.log(`[retention] sizes: ${parts.join(' ')}`)
+    return pct
   }
   console.log(`[retention] sizes: ${parts.join(' ')}`)
+  return 0
 }
 
-async function runCleanup(): Promise<void> {
-  const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)
-  console.log(`[retention] Running cleanup — pruning rows older than ${cutoff.toISOString()} (${RETENTION_DAYS}d)`)
+async function runCleanup(overrideDays?: number): Promise<void> {
+  const days = overrideDays ?? RETENTION_DAYS
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const tag = overrideDays !== undefined ? `${days}d emergency` : `${days}d`
+  console.log(`[retention] Running cleanup — pruning rows older than ${cutoff.toISOString()} (${tag})`)
 
-  // Delete order: children first, then parents (FK: transactions → blocks)
-  const tables: Array<{ table: string; col: string }> = [
-    { table: 'dex_trades',      col: 'timestamp' },
-    { table: 'token_transfers', col: 'timestamp' },
-    { table: 'gas_history',     col: 'timestamp' },
-    { table: 'transactions',    col: 'timestamp' },
-  ]
+  // Translate timestamp cutoff → block_number cutoff ONCE. Every high-volume
+  // table has a block_number index; only some have a timestamp index. Deleting
+  // by block_number is 100-1000x faster on large tables (observed: 12min/0-row
+  // full-scan DELETE on 32GB token_transfers before this change).
+  let cutoffBlock: number | null = null
+  try {
+    cutoffBlock = await cutoffBlockNumber(cutoff, days)
+    console.log(`[retention] cutoff block_number = ${cutoffBlock ?? '(none — all blocks older than cutoff)'}`)
+  } catch (err) {
+    console.error('[retention] cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
+  }
+
+  // Delete order: children first, then parents (FK: transactions → blocks).
+  // All these tables have a block_number column + index, so we delete by
+  // block_number for speed.
+  const blockNumberTables = ['dex_trades', 'token_transfers', 'gas_history', 'transactions', 'logs']
 
   let totalDeleted = 0
 
-  for (const { table, col } of tables) {
-    try {
-      console.log(`[retention] Deleting old rows from ${table}...`)
-      const deleted = await deleteAll(table, col, cutoff)
-      if (deleted > 0) console.log(`[retention] ${table}: deleted ${deleted} rows`)
-      totalDeleted += deleted
-    } catch (err) {
-      console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
+  if (cutoffBlock !== null && cutoffBlock > 0) {
+    for (const table of blockNumberTables) {
+      try {
+        console.log(`[retention] Deleting old rows from ${table} (block_number < ${cutoffBlock})...`)
+        const deleted = await deleteByBlockNumber(table, cutoffBlock)
+        if (deleted > 0) console.log(`[retention] ${table}: deleted ${deleted} rows`)
+        totalDeleted += deleted
+      } catch (err) {
+        console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
+      }
     }
+  } else {
+    console.log('[retention] Skipping block-number deletes — no cutoff block found (blocks table empty or entirely beyond cutoff)')
   }
 
-  // logs: no timestamp — delete by block_number via subquery
-  try {
-    const db = getDb()
-    const cutoffStr = cutoff.toISOString()
-    console.log('[retention] Deleting old rows from logs...')
-    const logsResult = await db.execute(
-      sql`DELETE FROM logs WHERE block_number < (
-        SELECT COALESCE(MIN(number), 0) FROM blocks WHERE timestamp >= ${cutoffStr}::timestamptz
-      )`
-    )
-    const logsDeleted = (logsResult as any).count ?? (logsResult as any).rowCount ?? 0
-    if (logsDeleted > 0) console.log(`[retention] logs: deleted ${logsDeleted} rows`)
-    totalDeleted += logsDeleted
-  } catch (err) {
-    console.error('[retention] logs delete failed:', err instanceof Error ? err.message : err)
-  }
-
-  // blocks last — only those with no remaining transactions
-  try {
-    const db = getDb()
-    const cutoffStr = cutoff.toISOString()
-    console.log('[retention] Deleting old rows from blocks...')
-    const blockResult = await db.execute(
-      sql`DELETE FROM blocks WHERE timestamp < ${cutoffStr}::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
-    )
-    const blocksDeleted = (blockResult as any).count ?? (blockResult as any).rowCount ?? 0
-    if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
-    totalDeleted += blocksDeleted
-  } catch (err) {
-    console.error('[retention] blocks delete failed:', err instanceof Error ? err.message : err)
+  // blocks last — only those with no remaining transactions. Gate on the
+  // same cutoffBlock we used above so the stale-indexer fallback path stays
+  // consistent: if cutoffBlock is null, skip the blocks delete too (can't
+  // safely derive a cutoff). blocks.number is the PK so `< cutoffBlock` is
+  // trivially indexed.
+  if (cutoffBlock !== null && cutoffBlock > 0) {
+    try {
+      const db = getDb()
+      console.log(`[retention] Deleting old rows from blocks (number < ${cutoffBlock})...`)
+      const blockResult = await db.execute(
+        sql`DELETE FROM blocks WHERE number < ${cutoffBlock}
+          AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
+      )
+      const blocksDeleted = (blockResult as any).count ?? (blockResult as any).rowCount ?? 0
+      if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
+      totalDeleted += blocksDeleted
+    } catch (err) {
+      console.error('[retention] blocks delete failed:', err instanceof Error ? err.message : err)
+    }
+  } else {
+    console.log('[retention] Skipping blocks delete — no cutoff block available')
   }
 
   // Prune zero-balance rows from token_balances — these are former holders whose
@@ -198,12 +255,16 @@ async function runCleanup(): Promise<void> {
   // Size report — gives "Done — 0 rows removed" a tail so we can see growth
   // trajectory from logs alone, without needing to hit the admin endpoint.
   // Warns loudly at >70% disk usage so we catch trouble before the 90% alert.
-  await reportSizes().catch(err =>
+  const diskPct = await reportSizes().catch(err => {
     console.warn('[retention] size report failed:', err instanceof Error ? err.message : err)
-  )
+    return 0
+  })
 
-  // VACUUM reclaims disk space from dead tuples left by the deletes above.
-  // Must run outside a transaction — postgres.js execute() handles this fine.
+  // VACUUM reclaims dead-tuple space for reuse inside Postgres. Plain VACUUM
+  // does NOT return space to the OS — only VACUUM FULL does. We run plain
+  // VACUUM on every cleanup to keep bloat bounded; VACUUM FULL is gated on
+  // the VACUUM_FULL env var because it takes AccessExclusiveLock (stalls
+  // indexer + web queries for 10-30min on a 50GB table).
   if (totalDeleted > 0) {
     console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
     const db = getDb()
@@ -217,6 +278,21 @@ async function runCleanup(): Promise<void> {
         console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
       }
     }
+  }
+
+  // Self-heal: if we're still above the emergency threshold AND we have
+  // room to tighten the window further, re-run with a shorter cutoff.
+  // Only recurses once per cycle (overrideDays is always the minimum).
+  if (
+    overrideDays === undefined &&
+    diskPct >= EMERGENCY_DISK_PCT &&
+    days > EMERGENCY_RETENTION_MIN_DAYS
+  ) {
+    console.warn(
+      `[retention] disk at ${diskPct.toFixed(1)}% (>= ${EMERGENCY_DISK_PCT}%) — ` +
+      `emergency re-run with ${EMERGENCY_RETENTION_MIN_DAYS}d window`
+    )
+    await runCleanup(EMERGENCY_RETENTION_MIN_DAYS)
   }
 }
 
