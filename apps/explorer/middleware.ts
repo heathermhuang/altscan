@@ -59,6 +59,15 @@ function isHeavyPath(pathname: string): boolean {
   return false
 }
 
+// Link response headers (RFC 8288) for agent discovery on the homepage.
+// Advertises the API catalog, human API docs, and sitemap so agents can
+// discover capabilities without guessing well-known paths.
+const HOMEPAGE_LINK_HEADER = [
+  '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+  '</api-docs>; rel="service-doc"; type="text/html"',
+  '</sitemap.xml>; rel="sitemap"; type="application/xml"',
+].join(', ')
+
 export function middleware(request: NextRequest) {
   const ua = request.headers.get('user-agent')
   const pathname = request.nextUrl.pathname
@@ -75,7 +84,11 @@ export function middleware(request: NextRequest) {
     })
   }
 
-  return NextResponse.next()
+  const response = NextResponse.next()
+  if (pathname === '/') {
+    response.headers.set('Link', HOMEPAGE_LINK_HEADER)
+  }
+  return response
 }
 
 export const config = {
