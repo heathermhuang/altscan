@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { eq } from 'drizzle-orm'
+import { db, schema } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
+import { formatNativeToken, formatGwei, formatNumber, safeBigInt } from '@/lib/format'
 
 // Markdown-for-Agents (content negotiation).
 // Middleware routes incoming requests with `Accept: text/markdown` here;
-// we emit a markdown representation of a small, curated set of public pages.
-// Dynamic pages (tx/block/address) are intentionally excluded — they'd require
-// per-request DB reads and would bypass ISR. If an agent wants per-entity data
-// it should use the REST API at /api/v1/* (documented at /api-docs).
+// we emit a markdown representation for a curated set of pages.
+//
+// Static pages (/, /about, /developer, /api-docs) — handled by STATIC_HANDLERS.
+// Dynamic pages (/tx/:hash, /block/:n) — handled by dispatchDynamic; PK lookups
+// are sub-millisecond and cache for a year (mined entities are immutable).
+// /address/* is intentionally excluded — fan-out queries against a bloated
+// transactions heap can hang for minutes; agents should use /api/v1/addresses.
 
 type Handler = () => string
 
@@ -33,6 +39,7 @@ function homepageMarkdown(): string {
     `- API catalog (RFC 9727): \`https://${c.domain}/.well-known/api-catalog\`.`,
     `- Agent skills index: \`https://${c.domain}/.well-known/agent-skills/index.json\`.`,
     `- Content negotiation: request this or any markdown-enabled page with \`Accept: text/markdown\`.`,
+    `- Per-entity markdown: \`/tx/{hash}\` and \`/block/{number}\` also support \`Accept: text/markdown\`.`,
     '',
     '## Crawl policy',
     '',
@@ -82,7 +89,13 @@ function developerMarkdown(): string {
     '',
     '## Content negotiation',
     '',
-    'Send `Accept: text/markdown` on supported pages (`/`, `/about`, `/api-docs`, `/developer`) to receive a markdown representation instead of HTML. Browsers and search crawlers continue to receive HTML by default.',
+    'Send `Accept: text/markdown` on supported pages to receive a markdown representation instead of HTML. Browsers and search crawlers continue to receive HTML by default.',
+    '',
+    'Markdown-enabled paths:',
+    '- Static: `/`, `/about`, `/api-docs`, `/developer`',
+    '- Dynamic (PK lookups, immutable): `/tx/{hash}`, `/block/{number}`',
+    '',
+    '`/address/*` is intentionally HTML-only — its fan-out queries are too heavy for ad-hoc requests. Use `/api/v1/addresses/{addr}` for structured access.',
     '',
     '## Rate limiting',
     '',
@@ -91,8 +104,6 @@ function developerMarkdown(): string {
   ].join('\n')
 }
 
-// `/api-docs` is rendered from a long TSX template. Rather than duplicate its
-// endpoint list in markdown and risk drift, we emit a short pointer.
 function apiDocsMarkdown(): string {
   const c = chainConfig
   return [
@@ -116,16 +127,176 @@ function apiDocsMarkdown(): string {
   ].join('\n')
 }
 
-const HANDLERS: Record<string, Handler> = {
+const STATIC_HANDLERS: Record<string, Handler> = {
   '/': homepageMarkdown,
   '/about': aboutMarkdown,
   '/developer': developerMarkdown,
   '/api-docs': apiDocsMarkdown,
 }
 
+const TX_HASH = /^0x[0-9a-fA-F]{64}$/
+const BLOCK_NUMBER = /^\d{1,12}$/
+
+async function txMarkdown(hash: string): Promise<string | null> {
+  const c = chainConfig
+  const rows = await db
+    .select()
+    .from(schema.transactions)
+    .where(eq(schema.transactions.hash, hash.toLowerCase()))
+    .limit(1)
+  const tx = rows[0]
+  if (!tx) return null
+  const value = formatNativeToken(tx.value, 6)
+  const gasPriceGwei = formatGwei(tx.gasPrice)
+  const lines: string[] = [
+    `# Transaction \`${tx.hash}\``,
+    '',
+    `On ${c.name} (chainId ${c.chainId}). Indexed by ${c.brandDomain}.`,
+    '',
+    '## Summary',
+    '',
+    `- Status: ${tx.status ? 'success' : 'failed'}`,
+    `- Block: [${formatNumber(tx.blockNumber)}](https://${c.domain}/block/${tx.blockNumber})`,
+    `- Timestamp: ${tx.timestamp.toISOString()}`,
+    `- From: \`${tx.fromAddress}\``,
+    `- To: ${tx.toAddress ? `\`${tx.toAddress}\`` : '_contract creation_'}`,
+    `- Value: ${value} ${c.currency}`,
+    `- Gas used: ${formatNumber(safeBigInt(tx.gasUsed))} / ${formatNumber(safeBigInt(tx.gas))} limit`,
+    `- Gas price: ${gasPriceGwei} gwei`,
+    `- Nonce: ${tx.nonce ?? 'unknown'}`,
+    `- Tx index in block: ${tx.txIndex}`,
+  ]
+  if (tx.methodId) lines.push(`- Method id: \`${tx.methodId}\``)
+  if (tx.txType !== null && tx.txType !== undefined) lines.push(`- Tx type: ${tx.txType}`)
+  lines.push(
+    '',
+    '## Structured data',
+    '',
+    `For machine-readable JSON, call \`GET https://${c.domain}/api/v1/transactions/${tx.hash}\`.`,
+    '',
+    '## Web view',
+    '',
+    `- HTML: https://${c.domain}/tx/${tx.hash}`,
+    '',
+  )
+  return lines.join('\n')
+}
+
+async function blockMarkdown(num: number): Promise<string | null> {
+  const c = chainConfig
+  const rows = await db
+    .select()
+    .from(schema.blocks)
+    .where(eq(schema.blocks.number, num))
+    .limit(1)
+  const block = rows[0]
+  if (!block) return null
+  const lines: string[] = [
+    `# Block ${formatNumber(block.number)}`,
+    '',
+    `On ${c.name} (chainId ${c.chainId}). Indexed by ${c.brandDomain}.`,
+    '',
+    '## Summary',
+    '',
+    `- Hash: \`${block.hash}\``,
+    `- Parent: \`${block.parentHash}\``,
+    `- Timestamp: ${block.timestamp.toISOString()}`,
+    `- Miner / proposer: \`${block.miner}\``,
+    `- Transaction count: ${formatNumber(block.txCount)}`,
+    `- Gas used: ${formatNumber(safeBigInt(block.gasUsed))} / ${formatNumber(safeBigInt(block.gasLimit))} limit`,
+    `- Size: ${formatNumber(block.size)} bytes`,
+  ]
+  if (block.baseFeePerGas) {
+    lines.push(`- Base fee per gas: ${formatGwei(block.baseFeePerGas)} gwei`)
+  }
+  lines.push(
+    '',
+    '## Structured data',
+    '',
+    `For machine-readable JSON, call \`GET https://${c.domain}/api/v1/blocks/${block.number}\`.`,
+    '',
+    '## Web view',
+    '',
+    `- HTML: https://${c.domain}/block/${block.number}`,
+    '',
+  )
+  return lines.join('\n')
+}
+
+function notFoundMarkdown(kind: 'tx' | 'block', id: string): string {
+  const c = chainConfig
+  return [
+    `# ${kind === 'tx' ? 'Transaction' : 'Block'} not found`,
+    '',
+    `\`${id}\` is not in the ${c.brandDomain} index. Either it has not been indexed yet, or it has fallen outside the retention window. Recent chain state is kept on a rolling window; for full history, query a node RPC directly.`,
+    '',
+    `- Web view: https://${c.domain}/${kind}/${id}`,
+    `- API: https://${c.domain}/api/v1/${kind === 'tx' ? 'transactions' : 'blocks'}/${id}`,
+    '',
+  ].join('\n')
+}
+
+function unsupportedMarkdown(path: string): string {
+  const c = chainConfig
+  return `# Not available as markdown\n\nPath \`${path}\` does not have a markdown representation. HTML is served at https://${c.domain}${path}. For structured data, use the REST API at https://${c.domain}/api/v1/*.\n`
+}
+
 function slugToPath(slug: string[] | undefined): string {
   if (!slug || slug.length === 0) return '/'
   return '/' + slug.join('/')
+}
+
+type RouteResult = { body: string; status: number; cacheControl: string }
+
+async function dispatch(path: string): Promise<RouteResult> {
+  const staticHandler = STATIC_HANDLERS[path]
+  if (staticHandler) {
+    return {
+      body: staticHandler(),
+      status: 200,
+      cacheControl: 'public, max-age=3600',
+    }
+  }
+
+  const txMatch = /^\/tx\/(.+)$/.exec(path)
+  if (txMatch) {
+    const hash = txMatch[1]
+    if (!TX_HASH.test(hash)) {
+      return { body: notFoundMarkdown('tx', hash), status: 404, cacheControl: 'public, max-age=60' }
+    }
+    try {
+      const md = await txMarkdown(hash)
+      if (!md) {
+        return { body: notFoundMarkdown('tx', hash), status: 404, cacheControl: 'public, max-age=60' }
+      }
+      return { body: md, status: 200, cacheControl: 'public, max-age=31536000, immutable' }
+    } catch {
+      return { body: notFoundMarkdown('tx', hash), status: 503, cacheControl: 'no-store' }
+    }
+  }
+
+  const blockMatch = /^\/block\/(.+)$/.exec(path)
+  if (blockMatch) {
+    const raw = blockMatch[1]
+    if (!BLOCK_NUMBER.test(raw)) {
+      return { body: notFoundMarkdown('block', raw), status: 404, cacheControl: 'public, max-age=60' }
+    }
+    const num = Number(raw)
+    if (!Number.isSafeInteger(num)) {
+      return { body: notFoundMarkdown('block', raw), status: 404, cacheControl: 'public, max-age=60' }
+    }
+    try {
+      const md = await blockMarkdown(num)
+      if (!md) {
+        return { body: notFoundMarkdown('block', raw), status: 404, cacheControl: 'public, max-age=60' }
+      }
+      return { body: md, status: 200, cacheControl: 'public, max-age=31536000, immutable' }
+    } catch {
+      return { body: notFoundMarkdown('block', raw), status: 503, cacheControl: 'no-store' }
+    }
+  }
+
+  return { body: unsupportedMarkdown(path), status: 406, cacheControl: 'public, max-age=300' }
 }
 
 export async function GET(
@@ -134,26 +305,12 @@ export async function GET(
 ) {
   const { slug } = await params
   const path = slugToPath(slug)
-  const handler = HANDLERS[path]
-
-  if (!handler) {
-    return new NextResponse(
-      `# Not available as markdown\n\nPath \`${path}\` does not have a markdown representation. HTML is served at https://${chainConfig.domain}${path}. For structured data, use the REST API at https://${chainConfig.domain}/api/v1/*.\n`,
-      {
-        status: 406,
-        headers: {
-          'Content-Type': 'text/markdown; charset=utf-8',
-          'Vary': 'Accept',
-        },
-      },
-    )
-  }
-
-  const body = handler()
+  const { body, status, cacheControl } = await dispatch(path)
   return new NextResponse(body, {
+    status,
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': cacheControl,
       'Vary': 'Accept',
     },
   })

@@ -34,7 +34,12 @@ All \`/api/v1/*\` endpoints are public and require no authentication. There is n
 - \`GET /api/v1/tokens/:contract\` — one token (metadata + holder count)
 - \`GET /api/v1/contracts/:address\` — verified-contract metadata
 
-All responses are JSON. For human-friendly markdown representations of this site's static pages, send \`Accept: text/markdown\` to \`/\`, \`/about\`, \`/api-docs\`, or \`/developer\`.
+All responses are JSON. For human-friendly markdown representations, send \`Accept: text/markdown\` to any of:
+
+- Static pages: \`/\`, \`/about\`, \`/api-docs\`, \`/developer\`
+- Per-entity pages: \`/tx/{hash}\` (0x + 64 hex), \`/block/{number}\`
+
+\`/address/*\` is HTML-only by design — its fan-out queries are too heavy for ad-hoc markdown requests. Use \`/api/v1/addresses/:address\` for structured access.
 
 ## Content policy
 
