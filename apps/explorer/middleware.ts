@@ -17,6 +17,7 @@ import type { NextRequest } from 'next/server'
 const AGGRESSIVE_BOT_UAS = [
   'ClaudeBot',
   'meta-externalagent',
+  'meta-webindexer',
   'GPTBot',
   'Bytespider',
   'Amazonbot',
@@ -27,6 +28,7 @@ const AGGRESSIVE_BOT_UAS = [
   'CCBot',
   'anthropic-ai',
   'FacebookBot',
+  'facebookexternalhit',
   'cohere-ai',
   'Diffbot',
   'omgilibot',
@@ -46,14 +48,20 @@ const HEAVY_PATH_PREFIXES = [
   '/address/',
   '/token/',
   '/block/',
+  '/api/v1/blocks',
+  '/api/v1/transactions',
+  '/api/v1/addresses',
+  '/api/v1/tokens',
+  '/api/v1/contracts',
   '/md/tx/',
   '/md/block/',
 ]
 
 function isAggressiveBot(ua: string | null): boolean {
   if (!ua) return false
+  const normalized = ua.toLowerCase()
   for (const needle of AGGRESSIVE_BOT_UAS) {
-    if (ua.includes(needle)) return true
+    if (normalized.includes(needle.toLowerCase())) return true
   }
   return false
 }
