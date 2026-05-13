@@ -121,16 +121,17 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
  * so the window stays exactly 24h even when the indexer is lagging or when
  * block time varies (ETH missed slots, BSC occasional slow blocks).
  *
+ * Sums blocks.tx_count instead of COUNTing the huge transactions table, which
+ * keeps the homepage cheap even when crawler pressure ties up DB connections.
  * Returns null on error/timeout so the caller can distinguish "unknown" from
- * a genuine zero — the em-dash bug originally came from a COUNT against the
- * bloated transactions heap hitting the 15s timeout and falling back to 0.
+ * a genuine zero.
  */
 async function fetchTxCount24h(latestBlock: { timestamp: Date } | undefined): Promise<number | null> {
   if (!latestBlock) return null
   const cutoff = new Date(latestBlock.timestamp.getTime() - 24 * 60 * 60 * 1000)
   try {
     const result = await db.execute(
-      sql`SELECT COUNT(*)::int AS cnt FROM transactions WHERE timestamp > ${cutoff.toISOString()}`
+      sql`SELECT COALESCE(SUM(tx_count), 0)::int AS cnt FROM blocks WHERE timestamp > ${cutoff.toISOString()}`
     )
     return Number(Array.from(result)[0]?.cnt ?? 0)
   } catch {
