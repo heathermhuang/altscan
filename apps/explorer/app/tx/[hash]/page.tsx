@@ -291,7 +291,8 @@ export default async function TxDetailPage({
       status: tx.status,
       methodName,
     },
-    transferInfos
+    transferInfos,
+    chainConfig.currency
   )
 
   return (

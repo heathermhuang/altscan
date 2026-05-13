@@ -46,31 +46,31 @@ export function decodeTx(tx: {
   methodId: string | null
   status: boolean
   methodName?: string | null
-}, transfers: TxTransferInfo[]): DecodedTx {
+}, transfers: TxTransferInfo[], nativeCurrency = 'BNB'): DecodedTx {
   // Contract deployment
   if (!tx.toAddress) {
     return { summary: 'Deployed a new smart contract', type: 'contract_deploy', emoji: '🏗️' }
   }
 
-  const bnbValue = Number(safeBigInt(tx.value)) / 1e18
+  const nativeValue = Number(safeBigInt(tx.value)) / 1e18
   const toLabel = getAddressLabel(tx.toAddress) ?? null
 
-  // Simple BNB transfer (no input data or 0x method)
+  // Simple native-token transfer (no input data or 0x method)
   if (!tx.methodId || tx.methodId === '0x') {
-    if (bnbValue > 0) {
+    if (nativeValue > 0) {
       const to = toLabel ?? `${tx.toAddress.slice(0, 12)}…`
       // Avoid scientific notation for very small values
-      let bnbStr: string
-      if (bnbValue >= 0.0001) {
-        bnbStr = bnbValue.toFixed(4)
+      let nativeStr: string
+      if (nativeValue >= 0.0001) {
+        nativeStr = nativeValue.toFixed(4)
       } else {
         // Show enough decimals to display significant digits
         const weiStr = safeBigInt(tx.value).toString()
         const decimals = Math.max(18 - weiStr.length + 2, 4)
-        bnbStr = bnbValue.toFixed(Math.min(decimals, 18))
+        nativeStr = nativeValue.toFixed(Math.min(decimals, 18))
       }
       return {
-        summary: `Sent ${bnbStr} BNB to ${to}`,
+        summary: `Sent ${nativeStr} ${nativeCurrency} to ${to}`,
         type: 'transfer',
         emoji: '💸',
       }
