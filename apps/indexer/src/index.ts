@@ -258,7 +258,7 @@ async function getResumeCursor(
   const scanFrom = Math.max(startBlock, maxIndexed - RESUME_GAP_SCAN_BLOCKS)
   const gapResult = await db.execute(sql`
     WITH expected AS (
-      SELECT generate_series(${scanFrom}, ${maxIndexed})::bigint AS number
+      SELECT generate_series(${scanFrom}::bigint, ${maxIndexed}::bigint) AS number
     )
     SELECT MIN(expected.number)::bigint AS missing
     FROM expected
