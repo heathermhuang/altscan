@@ -9,4 +9,6 @@ dist/
 .gstack/
 .render-api-key
 .claude/worktrees/
+.claude/scheduled_tasks.lock
+*.bak
 .design-review/
