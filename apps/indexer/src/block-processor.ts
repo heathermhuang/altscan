@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { getDb, schema } from './db'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider } from './provider'
+import { sanitizeTokenMetadata } from './postgres-text'
 
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
@@ -760,8 +761,8 @@ async function ensureTokensBatch(
         ])
         return {
           address: addr,
-          name: String(name).slice(0, 255),
-          symbol: String(symbol).slice(0, 50),
+          name: sanitizeTokenMetadata(name, 'Unknown', 255),
+          symbol: sanitizeTokenMetadata(symbol, '???', 50),
           decimals: Number(decimals),
           type: tokensToEnsure.get(addr)!,
           totalSupply: BigInt(totalSupply).toString(),

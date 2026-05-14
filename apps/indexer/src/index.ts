@@ -19,7 +19,7 @@ import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
 import { getDb, schema } from './db'
-import { desc } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 
 const chain = getChainConfig()
 const TAG = `[${chain.brandName}-indexer]`
@@ -39,6 +39,7 @@ const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 const DEFAULT_CONCURRENCY = chain.key === 'bnb' ? 8 : 4
 const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10)
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
+const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
 
 let running = true
 process.on('SIGINT',  () => { running = false })
@@ -109,14 +110,16 @@ async function main() {
 
   const forceStart = parseInt(process.env.FORCE_START_BLOCK ?? '0', 10)
   let lastIndexed: number
+  let resumeGapBackfillUntil: number | null = null
 
   if (forceStart > 0) {
     lastIndexed = forceStart - 1
     console.log(`${TAG} FORCE_START_BLOCK=${forceStart} (tip: ${tip})`)
   } else {
-    const row = await db.select({ number: schema.blocks.number })
-      .from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(1)
-    lastIndexed = row[0]?.number ?? (parseInt(process.env.START_BLOCK ?? String(chain.defaultStartBlock), 10) - 1)
+    const startBlock = parseInt(process.env.START_BLOCK ?? String(chain.defaultStartBlock), 10)
+    const resume = await getResumeCursor(db, startBlock)
+    lastIndexed = resume.lastIndexed
+    resumeGapBackfillUntil = resume.backfillUntil
     console.log(`${TAG} Resuming from block ${lastIndexed + 1} (tip: ${tip})`)
   }
 
@@ -137,7 +140,12 @@ async function main() {
         continue
       }
 
-      if (latest - lastIndexed > MAX_LAG) {
+      if (resumeGapBackfillUntil !== null && lastIndexed >= resumeGapBackfillUntil) {
+        console.log(`${TAG} Resume gap backfill complete through block ${resumeGapBackfillUntil}`)
+        resumeGapBackfillUntil = null
+      }
+
+      if (resumeGapBackfillUntil === null && latest - lastIndexed > MAX_LAG) {
         console.log(`${TAG} ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — skipping to block ${latest - 200}`)
         lastIndexed = latest - 200
       }
@@ -236,6 +244,35 @@ async function main() {
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function getResumeCursor(
+  db: ReturnType<typeof getDb>,
+  startBlock: number,
+): Promise<{ lastIndexed: number; backfillUntil: number | null }> {
+  const row = await db.select({ number: schema.blocks.number })
+    .from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(1)
+  const maxIndexed = row[0]?.number
+  if (maxIndexed === undefined) return { lastIndexed: startBlock - 1, backfillUntil: null }
+
+  const scanFrom = Math.max(startBlock, maxIndexed - RESUME_GAP_SCAN_BLOCKS)
+  const gapResult = await db.execute(sql`
+    WITH expected AS (
+      SELECT generate_series(${scanFrom}, ${maxIndexed})::bigint AS number
+    )
+    SELECT MIN(expected.number)::bigint AS missing
+    FROM expected
+    LEFT JOIN blocks ON blocks.number = expected.number
+    WHERE blocks.number IS NULL
+  `)
+  const missingRaw = (Array.from(gapResult)[0] as Record<string, unknown> | undefined)?.missing
+  if (missingRaw !== null && missingRaw !== undefined) {
+    const missing = Number(missingRaw)
+    console.warn(`${TAG} Resume gap detected at block ${missing}; backfilling before tip ${maxIndexed}`)
+    return { lastIndexed: missing - 1, backfillUntil: maxIndexed }
+  }
+
+  return { lastIndexed: maxIndexed, backfillUntil: null }
 }
 
 main().catch(err => {
