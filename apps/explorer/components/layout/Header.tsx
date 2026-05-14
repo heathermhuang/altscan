@@ -9,10 +9,7 @@ import { chainConfig } from '@/lib/chain-client'
 const NAV_LINKS = [
   { href: '/blocks',     label: 'Blocks',            group: 'Explore' },
   { href: '/txs',        label: 'Transactions',      group: 'Explore' },
-  { href: '/token',      label: 'Tokens',            group: 'Explore' },
-  { href: '/dex',        label: 'DEX Trades',        group: 'Explore' },
   { href: '/charts',     label: 'Charts',            group: 'Analytics' },
-  { href: '/whales',     label: 'Whale Tracker',     group: 'Analytics' },
   { href: '/gas',        label: 'Gas Tracker',       group: 'Analytics' },
   ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators', group: 'Analytics' }] : []),
   ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking', group: 'Analytics' }] : []),
@@ -25,10 +22,7 @@ const NAV_LINKS = [
 const DESKTOP_NAV = [
   { href: '/blocks',     label: 'Blocks' },
   { href: '/txs',        label: 'Txns' },
-  { href: '/token',      label: 'Tokens' },
-  { href: '/dex',        label: 'DEX' },
   { href: '/charts',     label: 'Charts' },
-  { href: '/whales',     label: 'Whales' },
   { href: '/gas',        label: 'Gas' },
   ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators' }] : []),
   ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking' }] : []),
