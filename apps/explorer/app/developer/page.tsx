@@ -1,5 +1,6 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -38,6 +39,13 @@ export default function DeveloperPage() {
           <div className="text-sm text-gray-600 mt-1">Real-time event notifications</div>
         </a>
       </div>
+
+      <BinanceReferralAd
+        context="developer"
+        placement="developer_after_links"
+        variant="compact"
+        className="mb-10"
+      />
 
       {/* API Keys Section */}
       <section id="api-keys" className="mb-10">

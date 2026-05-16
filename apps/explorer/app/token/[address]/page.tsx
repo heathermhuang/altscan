@@ -5,12 +5,14 @@ import { formatNumber, formatAddress } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { Contract } from 'ethers'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
+import { isStablecoinToken } from '@/lib/binance-referral'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -187,6 +189,9 @@ export default async function TokenDetailPage({
       return 0n
     }
   })()
+  const tokenReferralContext = isStablecoinToken(token.symbol, token.name)
+    ? 'stablecoin'
+    : 'token_research'
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -235,6 +240,13 @@ export default async function TokenDetailPage({
           )}
         </div>
       </div>
+
+      <BinanceReferralAd
+        context={tokenReferralContext}
+        placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
+        variant="compact"
+        className="mb-6"
+      />
 
       {/* Top Holders */}
       {topHolders.length > 0 && (

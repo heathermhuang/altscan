@@ -1,5 +1,6 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -323,6 +324,13 @@ export default function ApiDocsPage() {
           <code className="font-mono">X-RateLimit-Remaining</code> headers.
         </div>
       </div>
+
+      <BinanceReferralAd
+        context="api_docs"
+        placement="api_docs_intro"
+        variant="compact"
+        className="mb-8"
+      />
 
       <div className="space-y-6">
         {endpoints.map((ep) => (

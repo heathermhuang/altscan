@@ -6,6 +6,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -115,6 +116,13 @@ export default async function DexPage({
           <p className="text-lg font-bold">{topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'}</p>
         </div>
       </div>
+
+      <BinanceReferralAd
+        context="dex"
+        placement="dex_after_stats"
+        variant="compact"
+        className="mb-6"
+      />
 
       {/* Top Pairs */}
       {topPairs.length > 0 && (

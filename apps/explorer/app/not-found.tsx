@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { SearchBar } from '@/components/layout/SearchBar'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 
 export default function NotFound() {
   return (
@@ -13,6 +14,12 @@ export default function NotFound() {
       <div className="max-w-lg mx-auto mb-8">
         <SearchBar />
       </div>
+      <BinanceReferralAd
+        context="not_found"
+        placement="not_found"
+        variant="compact"
+        className="mb-8 text-left"
+      />
       <div className="flex flex-wrap justify-center gap-3 text-sm">
         <Link href="/" className="text-gray-600 hover:underline">Home</Link>
         <span className="text-gray-300">·</span>

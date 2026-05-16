@@ -15,6 +15,7 @@ import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
 import { AbiReader } from '@/components/contracts/AbiReader'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 
 export const revalidate = 300
 
@@ -149,6 +150,14 @@ export default async function AddressPage({
     : null
 
   const activeTab = tab ?? 'txns'
+  const lowGasBalanceWei = chainConfig.key === 'bnb'
+    ? 10_000_000_000_000_000n
+    : 5_000_000_000_000_000n
+  const gasReferralContext = displayBalance === 0n
+    ? 'address_zero_balance'
+    : displayBalance < lowGasBalanceWei
+      ? 'address_low_balance'
+      : null
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -195,7 +204,7 @@ export default async function AddressPage({
       <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
         <div className="font-mono text-sm break-all text-gray-800">
           {addr}
-          <CopyButton text={addr} />
+          <CopyButton text={addr} referralPlacement="address_copy" />
         </div>
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <StatItem
@@ -213,6 +222,15 @@ export default async function AddressPage({
           />
         </div>
       </div>
+
+      {gasReferralContext && (
+        <BinanceReferralAd
+          context={gasReferralContext}
+          placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
+          variant="compact"
+          className="mb-6"
+        />
+      )}
 
       {/* Contract section */}
       {addressInfo?.isContract && (

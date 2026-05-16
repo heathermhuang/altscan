@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
 import { or, ilike } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -18,6 +20,7 @@ export default async function SearchPage({
 }) {
   const { q } = await searchParams
   const query = (q?.trim() ?? '').slice(0, 200) // Cap length to prevent abuse
+  const showReferral = isBinanceIntentQuery(query)
 
   // Server-side redirect for recognized query patterns
   if (query) {
@@ -52,6 +55,14 @@ export default async function SearchPage({
               Found {tokenMatches.length} tokens matching{' '}
               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded">{query}</span>
             </p>
+            {showReferral && (
+              <BinanceReferralAd
+                context="search_intent"
+                placement="search_results"
+                variant="compact"
+                className="mb-6"
+              />
+            )}
             <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
@@ -100,6 +111,14 @@ export default async function SearchPage({
         </p>
       ) : (
         <p className="text-gray-500 mb-6">Enter a block number, transaction hash, address, or token name in the search bar.</p>
+      )}
+      {showReferral && (
+        <BinanceReferralAd
+          context="search_intent"
+          placement="search_no_results"
+          variant="compact"
+          className="mb-6 text-left"
+        />
       )}
       <div className="flex flex-wrap justify-center gap-4 text-sm">
         <div className="bg-white border rounded-lg p-4 text-left max-w-xs">

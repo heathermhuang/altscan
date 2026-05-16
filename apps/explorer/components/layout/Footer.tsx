@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 
 function FooterLogo() {
   return (
@@ -25,6 +26,12 @@ export function Footer() {
 
   return (
     <footer className="bg-gray-900 text-gray-400 text-sm mt-auto">
+      <BinanceReferralAd
+        context="footer"
+        placement="footer_strip"
+        variant="footer"
+      />
+
       {/* MDT attribution bar */}
       <div className="border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">

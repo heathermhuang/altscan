@@ -2,6 +2,7 @@ import { getProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import type { Metadata } from 'next'
 
 export const revalidate = 45
@@ -53,6 +54,12 @@ export default async function GasPage() {
           : ' Ethereum gas fluctuates with network demand, using EIP-1559 base fee mechanics.'
         }
       </p>
+
+      <BinanceReferralAd
+        context="gas"
+        placement="gas_top"
+        className="mb-8"
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <GasCard label="Slow"     gwei={formatGwei(slow)}     est="~30s" color="green" />

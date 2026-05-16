@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { chainConfig } from '@/lib/chain-client'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
@@ -61,6 +62,13 @@ export default function VerifyPage() {
         </a>{' '}
         for existing verifications on {chainConfig.name} (chain ID {chainConfig.chainId}).
       </p>
+
+      <BinanceReferralAd
+        context="verify"
+        placement="verify_intro"
+        variant="compact"
+        className="mb-8"
+      />
 
       <form onSubmit={handleSubmit} className="bg-white rounded-xl border shadow-sm p-6 space-y-5">
         <div>

@@ -2,6 +2,7 @@ import { getProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -88,6 +89,13 @@ export default async function StakingPage() {
           note="Varies with total staked ETH"
         />
       </div>
+
+      <BinanceReferralAd
+        context="staking"
+        placement="staking_after_stats"
+        variant="compact"
+        className="mb-6"
+      />
 
       {/* How staking works */}
       <div className="bg-white rounded-xl border shadow-sm p-6 mb-6">

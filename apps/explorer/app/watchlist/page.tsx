@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 
 const STORAGE_KEY = 'bnbscan_watchlist'
 
@@ -25,40 +26,54 @@ export default function WatchlistPage() {
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">Watchlist</h1>
       {addresses.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
+        <div className="py-16 text-center text-gray-400">
           <p className="text-lg">Your watchlist is empty.</p>
           <p className="text-sm mt-2">Click the star on any address page to add it here.</p>
+          <BinanceReferralAd
+            context="watchlist_empty"
+            placement="watchlist_empty"
+            variant="compact"
+            className="mx-auto mt-8 max-w-2xl text-left"
+          />
         </div>
       ) : (
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-2 text-gray-500">Address</th>
-                <th className="text-left px-4 py-2 text-gray-500">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {addresses.map(addr => (
-                <tr key={addr} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">
-                    <Link href={`/address/${addr}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {addr}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => remove(addr)}
-                      className="text-xs text-red-500 hover:underline"
-                    >
-                      Remove
-                    </button>
-                  </td>
+        <>
+          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2 text-gray-500">Address</th>
+                  <th className="text-left px-4 py-2 text-gray-500">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y">
+                {addresses.map(addr => (
+                  <tr key={addr} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">
+                      <Link href={`/address/${addr}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+                        {addr}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => remove(addr)}
+                        className="text-xs text-red-500 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <BinanceReferralAd
+            context="watchlist_active"
+            placement="watchlist_active"
+            variant="compact"
+            className="mt-6"
+          />
+        </>
       )}
     </div>
   )

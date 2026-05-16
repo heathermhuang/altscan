@@ -5,8 +5,10 @@ import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt } from
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
@@ -326,6 +328,15 @@ export default async function TxDetailPage({
         </div>
       )}
 
+      {(!tx.status || (gasPercent != null && gasPercent >= 95)) && (
+        <BinanceReferralAd
+          context="tx_failed"
+          placement="tx_failed"
+          variant="compact"
+          className="mb-6"
+        />
+      )}
+
       <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
         <table className="w-full text-sm">
           <tbody className="divide-y">
@@ -354,6 +365,7 @@ export default async function TxDetailPage({
               mono copy
               link={`/address/${tx.fromAddress}`}
               addressLabel={getAddressLabel(tx.fromAddress)}
+              copyReferralPlacement="address_copy"
             />
             <Row
               label="To"
@@ -362,6 +374,7 @@ export default async function TxDetailPage({
               copy={!!tx.toAddress}
               link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
               addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
+              copyReferralPlacement={tx.toAddress ? 'address_copy' : undefined}
             />
             <tr>
               <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Value</td>
@@ -549,7 +562,7 @@ export default async function TxDetailPage({
 }
 
 function Row({
-  label, value, mono = false, copy = false, link, addressLabel,
+  label, value, mono = false, copy = false, link, addressLabel, copyReferralPlacement,
 }: {
   label: string
   value: string
@@ -557,6 +570,7 @@ function Row({
   copy?: boolean
   link?: string
   addressLabel?: string | null
+  copyReferralPlacement?: BinanceReferralPlacement
 }) {
   return (
     <tr>
@@ -567,7 +581,7 @@ function Row({
         ) : (
           value
         )}
-        {copy && <CopyButton text={value} />}
+        {copy && <CopyButton text={value} referralPlacement={copyReferralPlacement} />}
         {addressLabel && (
           <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 border border-yellow-200 rounded px-1.5 py-0.5">
             {addressLabel}
