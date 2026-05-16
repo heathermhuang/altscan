@@ -2,18 +2,74 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 /**
- * Minimal middleware — request-level bot throttling.
+ * Minimal middleware — request-level bot throttling + abuse-source IP block.
  *
  * NOTE: Next.js middleware runs in Edge Runtime. process.memoryUsage() and
  * other Node.js APIs are NOT available here. All memory monitoring is handled
  * by instrumentation.ts which runs in the Node.js server process.
  *
- * Bot throttling: aggressive crawlers (Meta, ClaudeBot, GPTBot, etc.) ignore
- * robots.txt and saturate the DB connection pool on heavy list pages like
- * /blocks and /txs during VACUUM or any load spike. We return 429 with a
- * long Retry-After for these UAs on DB-heavy paths. Real users are
- * unaffected — this matches on UA substrings only, not IPs.
+ * Two layers:
+ *   1. IP CIDR denylist — hard 403 for sustained-abuse source networks. Added
+ *      after a 47.79.0.0/16 (Alibaba Cloud HK) botnet OOM-killed bnbscan-web
+ *      in a multi-hour loop while spoofing real Chrome UAs (UA-based throttle
+ *      below could not see it). Short-circuits before any route work.
+ *   2. UA-based throttle — aggressive crawlers (Meta, ClaudeBot, GPTBot, etc.)
+ *      that ignore robots.txt get 429 on heavy list pages.
+ *
+ * Real users on residential IPs and the listed UA families are unaffected.
  */
+function ipToInt(ip: string): number {
+  const parts = ip.split('.')
+  if (parts.length !== 4) return 0
+  let n = 0
+  for (const p of parts) {
+    const x = parseInt(p, 10)
+    if (Number.isNaN(x) || x < 0 || x > 255) return 0
+    n = ((n << 8) | x) >>> 0
+  }
+  return n
+}
+
+function parseCidr(cidr: string): { network: number; mask: number } {
+  const [ip, bitsStr] = cidr.split('/')
+  const bits = parseInt(bitsStr ?? '32', 10)
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0
+  const network = ipToInt(ip ?? '') & mask
+  return { network, mask }
+}
+
+// IPv4 CIDR denylist. Block ranges that have produced sustained, high-volume
+// abuse with no legitimate-user footprint. Keep this list short and targeted.
+const BLOCKED_IPV4_CIDRS = [
+  // Alibaba Cloud HK — sustained Chrome-spoofing scraper, May 2026 incident.
+  '47.79.0.0/16',
+].map(parseCidr)
+
+function getClientIp(request: NextRequest): string | null {
+  // Cloudflare sits in front of Render for bnbscan.com/ethscan.io. Prefer
+  // cf-connecting-ip when present; fall back to x-real-ip / first XFF hop.
+  const cf = request.headers.get('cf-connecting-ip')
+  if (cf) return cf.trim()
+  const real = request.headers.get('x-real-ip')
+  if (real) return real.trim()
+  const xff = request.headers.get('x-forwarded-for')
+  if (xff) {
+    const first = xff.split(',')[0]?.trim()
+    if (first) return first
+  }
+  return null
+}
+
+function isBlockedIp(ip: string | null): boolean {
+  if (!ip) return false
+  const n = ipToInt(ip)
+  if (n === 0) return false
+  for (const { network, mask } of BLOCKED_IPV4_CIDRS) {
+    if ((n & mask) === network) return true
+  }
+  return false
+}
+
 const AGGRESSIVE_BOT_UAS = [
   'ClaudeBot',
   'meta-externalagent',
@@ -134,6 +190,16 @@ function prefersMarkdown(accept: string | null): boolean {
 export function middleware(request: NextRequest) {
   const ua = request.headers.get('user-agent')
   const pathname = request.nextUrl.pathname
+
+  if (isBlockedIp(getClientIp(request))) {
+    return new NextResponse(null, {
+      status: 403,
+      headers: {
+        'Cache-Control': 'no-store',
+        'X-Blocked-Reason': 'abuse-source',
+      },
+    })
+  }
 
   if (isAggressiveBot(ua) && isHeavyPath(pathname)) {
     return new NextResponse('Too Many Requests — this path is rate-limited for crawlers. See /robots.txt.', {
