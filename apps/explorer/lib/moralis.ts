@@ -14,56 +14,46 @@
  */
 import { chainConfig } from './chain'
 import { registerCache } from './cache-registry'
+import { kvGet, kvSet, getKvFallbackSize, getRedis, isRedisUnavailable } from '@bnbscan/explorer-core'
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = chainConfig.moralisChain
 
-// Cache strategy: in-memory LRU cache (survives across requests, NOT invalidated by deploys).
-// Each unique address costs CU exactly ONCE until the server process restarts.
-// No background re-fetches. No bot calls. Pure on-demand.
-// NULL_SENTINEL: null results are cached for NULL_TTL to stop repeated Moralis calls
+// Cache strategy: responses live in Redis (shared across instances, OFF the Node heap),
+// with a small bounded in-memory fallback when Redis is absent (see @bnbscan/explorer-core
+// kv-cache). Moving this cache off the heap is what lets Moralis stay enabled without the
+// OOM crash-loop that the old in-process Map caused on BNBScan.
+// NULL_SENTINEL: negative results are cached for NULL_TTL to stop repeated Moralis calls
 // for addresses that don't exist (a common abuse pattern).
 const NULL_SENTINEL = '__null__'
-const NULL_TTL = 5 * 60_000        // 5 minutes for negative results
-const memCache = new Map<string, { data: unknown; ts: number; ttl: number }>()
-const MEM_CACHE_TTL = 15 * 60_000  // 15 min — reduced from 30 min to limit memory growth
-const MEM_CACHE_MAX = 30           // max cached entries — reduced from 50 to prevent OOM
+const NULL_TTL = 5 * 60_000          // 5 minutes for negative results
+const CACHE_TTL = 30 * 60_000        // 30 minutes for positive results
 
-// Background cleanup — evict expired entries every 30s instead of only on insertion
-const _moralisCacheCleanup = setInterval(() => {
-  const now = Date.now()
-  for (const [k, v] of memCache) {
-    if (now - v.ts > v.ttl) memCache.delete(k)
-  }
-}, 30_000)
-if (_moralisCacheCleanup.unref) _moralisCacheCleanup.unref()
-registerCache('moralis', () => memCache.size)
+// Report the in-memory fallback size to the health endpoint / memory monitor. This is 0
+// whenever Redis is serving the cache (BNBScan), and bounded otherwise (EthScan).
+registerCache('moralis', getKvFallbackSize)
 
-function getCached<T>(key: string): T | null | undefined {
-  const entry = memCache.get(key)
-  if (!entry) return undefined
-  if (Date.now() - entry.ts > entry.ttl) {
-    memCache.delete(key)
+/**
+ * Read a cached JSON value.
+ * Returns: undefined = cache miss, null = cached negative result, T = cached hit.
+ */
+async function cacheGetJson<T>(key: string): Promise<T | null | undefined> {
+  const raw = await kvGet(key)
+  if (raw === null) return undefined          // miss
+  if (raw === NULL_SENTINEL) return null      // cached negative result
+  try {
+    return JSON.parse(raw) as T
+  } catch {
     return undefined
   }
-  if (entry.data === NULL_SENTINEL) return null
-  return entry.data as T
 }
 
-function setCache(key: string, data: unknown): void {
-  if (memCache.size >= MEM_CACHE_MAX) {
-    const oldest = memCache.keys().next().value
-    if (oldest) memCache.delete(oldest)
-  }
-  memCache.set(key, { data, ts: Date.now(), ttl: MEM_CACHE_TTL })
+async function cacheSetJson(key: string, data: unknown): Promise<void> {
+  await kvSet(key, JSON.stringify(data), CACHE_TTL)
 }
 
-function setNullCache(key: string): void {
-  if (memCache.size >= MEM_CACHE_MAX) {
-    const oldest = memCache.keys().next().value
-    if (oldest) memCache.delete(oldest)
-  }
-  memCache.set(key, { data: NULL_SENTINEL, ts: Date.now(), ttl: NULL_TTL })
+async function cacheSetNull(key: string): Promise<void> {
+  await kvSet(key, NULL_SENTINEL, NULL_TTL)
 }
 
 export type MoralisTx = {
@@ -124,12 +114,16 @@ const HOURLY_WINDOW = 3600_000
 const HOURLY_MAX = 10              // 10 calls/hour = ~250 CU/hr
 const DAILY_WINDOW = 86400_000
 const DAILY_MAX = 200              // 200 calls/day = ~5,000 CU/day (12.5% of 40K budget)
+const RL_HOURLY_KEY = 'moralis:rl:hourly'
+const RL_DAILY_KEY = 'moralis:rl:daily'
 let hourlyCounter = 0
 let hourlyWindowStart = Date.now()
 let dailyCounter = 0
 let dailyWindowStart = Date.now()
 
-function isRateLimited(): boolean {
+// In-memory fallback — used only when Redis is unavailable. Per-instance, so with
+// numInstances > 1 the effective cap is N×; acceptable as a degraded fallback.
+function isRateLimitedMemory(): boolean {
   const now = Date.now()
   // Reset hourly window
   if (now - hourlyWindowStart > HOURLY_WINDOW) {
@@ -152,25 +146,50 @@ function isRateLimited(): boolean {
   return false
 }
 
+/**
+ * Redis-backed limiter: counters are shared across instances via INCR/PEXPIRE, so the
+ * hourly/daily CU caps apply FLEET-WIDE. The previous in-process counters allowed N× the
+ * intended Moralis spend with numInstances > 1, and reset on every deploy. Falls back to
+ * the in-memory limiter when Redis is unavailable.
+ */
+async function isRateLimited(): Promise<boolean> {
+  const r = getRedis()
+  if (r && !isRedisUnavailable()) {
+    try {
+      const hourly = await r.incr(RL_HOURLY_KEY)
+      if (hourly === 1) await r.pexpire(RL_HOURLY_KEY, HOURLY_WINDOW)
+      if (hourly > HOURLY_MAX) return true
+      const daily = await r.incr(RL_DAILY_KEY)
+      if (daily === 1) await r.pexpire(RL_DAILY_KEY, DAILY_WINDOW)
+      if (daily > DAILY_MAX) return true
+      return false
+    } catch {
+      // Redis blip — fall through to in-memory
+    }
+  }
+  return isRateLimitedMemory()
+}
+
 /** Known bot user agents — skip Moralis entirely for these */
 const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
 
-function headers(): Record<string, string> | null {
+async function getAuthHeaders(): Promise<Record<string, string> | null> {
   // Moralis is enabled with strict protections:
-  // 1. In-memory cache (4hr per address)
-  // 2. Rate limiter (10 calls/hr + 200 calls/day hard caps)
+  // 1. Redis-backed response cache (off-heap, shared across instances)
+  // 2. Redis-backed rate limiter (10 calls/hr + 200 calls/day, fleet-wide)
   // 3. Bot detection (address page skips Moralis for bots)
   // Set MORALIS_DISABLED=true to kill all calls instantly
   if (process.env.MORALIS_DISABLED === 'true') return null
 
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
-  if (isRateLimited()) return null
+  if (await isRateLimited()) return null
   return { 'X-API-Key': key, 'Accept': 'application/json' }
 }
 
-// ⚠️  TEMPORARY: Set MORALIS_DISABLED=true in Render dashboard to stop CU drain immediately.
-// The in-memory cache + bot blocking above will prevent future drain once this deploy lands.
+// KILL SWITCH: Set MORALIS_DISABLED=true in the Render dashboard to stop all Moralis calls
+// instantly (e.g. CU drain or an upstream incident). With the Redis-backed cache + fleet-wide
+// rate limiter above, leaving Moralis enabled is the normal state — this is the emergency off.
 
 /**
  * Check if the current request is from a bot. Call from address page
@@ -191,10 +210,10 @@ export async function getWalletHistory(
   cursor?: string,
 ): Promise<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number } | null> {
   const cacheKey = `history:${address}:${cursor ?? ''}`
-  const cached = getCached<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number }>(cacheKey)
+  const cached = await cacheGetJson<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number }>(cacheKey)
   if (cached !== undefined) return cached
 
-  const h = headers()
+  const h = await getAuthHeaders()
   if (!h) return null
 
   try {
@@ -209,7 +228,7 @@ export async function getWalletHistory(
       next: { revalidate: 300 },
       signal: AbortSignal.timeout(10000),
     })
-    if (!res.ok) { setNullCache(cacheKey); return null }
+    if (!res.ok) { await cacheSetNull(cacheKey); return null }
 
     const data = (await res.json()) as {
       result: Array<{
@@ -268,7 +287,7 @@ export async function getWalletHistory(
       cursor: data.cursor ?? null,
       totalTxs: data.total ?? data.result.length,
     }
-    setCache(cacheKey, histResult)
+    await cacheSetJson(cacheKey, histResult)
     return histResult
   } catch {
     return null
@@ -277,9 +296,9 @@ export async function getWalletHistory(
 
 export async function getTokenBalances(address: string): Promise<MoralisToken[]> {
   const cacheKey = `balances:${address}`
-  const cached = getCached<MoralisToken[]>(cacheKey)
+  const cached = await cacheGetJson<MoralisToken[]>(cacheKey)
   if (cached !== undefined) return cached ?? []
-  const h = headers()
+  const h = await getAuthHeaders()
   if (!h) return []
 
   try {
@@ -287,7 +306,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
       { headers: h, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) },
     )
-    if (!res.ok) { setNullCache(cacheKey); return [] }
+    if (!res.ok) { await cacheSetNull(cacheKey); return [] }
     const data = (await res.json()) as Array<{
       token_address: string
       symbol: string
@@ -308,7 +327,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
       balanceFormatted: t.balance_formatted ?? null,
       usdValue: t.usd_value,
     }))
-    setCache(cacheKey, balResult)
+    await cacheSetJson(cacheKey, balResult)
     return balResult
   } catch {
     return []
@@ -346,10 +365,10 @@ export async function getTokenTransfers(
   cursor?: string,
 ): Promise<{ transfers: MoralisTokenTransfer[]; cursor: string | null } | null> {
   const cacheKey = `transfers:${address}:${cursor ?? ''}`
-  const cached = getCached<{ transfers: MoralisTokenTransfer[]; cursor: string | null }>(cacheKey)
+  const cached = await cacheGetJson<{ transfers: MoralisTokenTransfer[]; cursor: string | null }>(cacheKey)
   if (cached !== undefined) return cached
 
-  const h = headers()
+  const h = await getAuthHeaders()
   if (!h) return null
 
   try {
@@ -363,7 +382,7 @@ export async function getTokenTransfers(
       next: { revalidate: 300 },
       signal: AbortSignal.timeout(10000),
     })
-    if (!res.ok) { setNullCache(cacheKey); return null }
+    if (!res.ok) { await cacheSetNull(cacheKey); return null }
 
     const data = (await res.json()) as {
       result: Array<{
@@ -398,7 +417,7 @@ export async function getTokenTransfers(
       })),
       cursor: data.cursor ?? null,
     }
-    setCache(cacheKey, txResult)
+    await cacheSetJson(cacheKey, txResult)
     return txResult
   } catch {
     return null
@@ -410,10 +429,10 @@ export async function getTokenTransfers(
  */
 export async function getNfts(address: string): Promise<MoralisNft[]> {
   const cacheKey = `nfts:${address}`
-  const cached = getCached<MoralisNft[]>(cacheKey)
+  const cached = await cacheGetJson<MoralisNft[]>(cacheKey)
   if (cached !== undefined) return cached ?? []
 
-  const h = headers()
+  const h = await getAuthHeaders()
   if (!h) return []
 
   try {
@@ -421,7 +440,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
       `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
       { headers: h, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) },
     )
-    if (!res.ok) { setNullCache(cacheKey); return [] }
+    if (!res.ok) { await cacheSetNull(cacheKey); return [] }
     const data = (await res.json()) as {
       result: Array<{
         token_address: string
@@ -444,7 +463,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
         imageUrl: (metadata?.image as string) ?? n.media?.original_media_url ?? null,
       }
     })
-    setCache(cacheKey, result)
+    await cacheSetJson(cacheKey, result)
     return result
   } catch {
     return []
