@@ -191,7 +191,13 @@ export function middleware(request: NextRequest) {
   const ua = request.headers.get('user-agent')
   const pathname = request.nextUrl.pathname
 
-  if (isBlockedIp(getClientIp(request))) {
+  const clientIp = getClientIp(request)
+  if (isBlockedIp(clientIp)) {
+    // Structured one-line warn so post-incident greps and log shippers can
+    // reconstruct block volume without parsing the access log.
+    console.warn(
+      `[block] ip=${clientIp ?? 'unknown'} ua=${JSON.stringify(ua ?? '')} path=${pathname}`,
+    )
     return new NextResponse(null, {
       status: 403,
       headers: {
