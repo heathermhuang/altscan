@@ -386,7 +386,7 @@ export async function getTokenTransfers(
   if (!h) return null
 
   try {
-    const url = new URL(`${BASE}/wallets/${address}/erc20-transfers`)
+    const url = new URL(`${BASE}/${address}/erc20/transfers`)
     url.searchParams.set('chain', CHAIN)
     url.searchParams.set('limit', '10')  // 10 instead of 25
     if (cursor) url.searchParams.set('cursor', cursor)
@@ -405,12 +405,12 @@ export async function getTokenTransfers(
         block_timestamp: string
         from_address: string
         to_address: string
-        contract_address: string
+        address: string                 // contract address — v2.2 /erc20/transfers names it `address`
         token_name: string
         token_symbol: string
         token_decimals: string
         value: string
-        value_formatted: string
+        value_decimal: string | null    // human-readable amount; there is no `value_formatted` here
       }>
       cursor: string | null
     }
@@ -422,12 +422,12 @@ export async function getTokenTransfers(
         blockTimestamp: t.block_timestamp,
         fromAddress: t.from_address,
         toAddress: t.to_address,
-        tokenAddress: t.contract_address,
+        tokenAddress: t.address,
         tokenName: t.token_name,
         tokenSymbol: t.token_symbol,
         tokenDecimals: t.token_decimals,
         value: t.value,
-        valueFormatted: t.value_formatted,
+        valueFormatted: t.value_decimal ?? '0',
       })),
       cursor: data.cursor ?? null,
     }
