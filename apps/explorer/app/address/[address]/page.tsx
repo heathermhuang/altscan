@@ -135,8 +135,10 @@ export default async function AddressPage({
   const displayBalance = liveBalance !== null
     ? liveBalance
     : safeBigInt(addressInfo?.balance)
-  // Transaction count: prefer DB, then Moralis total, then RPC nonce (outgoing only but better than 0)
-  const displayTxCount = txCount || addressInfo?.txCount || moralisHistory?.totalTxs || rpcTxCount || 0
+  // Transaction count: prefer DB, then RPC nonce, then Moralis. Moralis /history is cursor-paginated
+  // and returns no reliable total (totalTxs is 0/unknown), so fall back to it last — otherwise a
+  // page of 25 would override the nonce and undercount active wallets.
+  const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || moralisHistory?.totalTxs || 0
   // First Seen: prefer DB, fallback to oldest Moralis tx timestamp
   const moralisFirstSeen = moralisHistory?.txs?.length
     ? new Date(moralisHistory.txs[moralisHistory.txs.length - 1].blockTimestamp)

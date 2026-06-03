@@ -111,11 +111,18 @@ export type MoralisNft = {
  * Leaves 87% of the daily budget as headroom.
  */
 const HOURLY_WINDOW = 3600_000
-const HOURLY_MAX = 10              // 10 calls/hour = ~250 CU/hr
+const HOURLY_MAX = 120             // fleet-wide. Was 10 — so low that one user touring a single
+                                   // wallet's tabs (history + transfers + balances + nfts = 4 calls)
+                                   // exhausted it, leaving every other visitor the empty dead-end.
 const DAILY_WINDOW = 86400_000
-const DAILY_MAX = 200              // 200 calls/day = ~5,000 CU/day (12.5% of 40K budget)
-const RL_HOURLY_KEY = 'moralis:rl:hourly'
-const RL_DAILY_KEY = 'moralis:rl:daily'
+const DAILY_MAX = 1000             // ~25,000 CU/day at ~25 CU/call = ~62% of the 40K free budget.
+                                   // Middleware already 429s aggressive crawlers on /address/, and
+                                   // positive responses cache 30 min, so this stays well under budget.
+// v2 keys: the previous counters could be stuck high WITHOUT a TTL — a crash between INCR and the
+// conditional PEXPIRE below leaves a key that never expires, tripping the limiter forever. Bumping
+// the key name gives a clean slate; the TTL re-arming in isRateLimited() stops it recurring.
+const RL_HOURLY_KEY = 'moralis:rl:v2:hourly'
+const RL_DAILY_KEY = 'moralis:rl:v2:daily'
 let hourlyCounter = 0
 let hourlyWindowStart = Date.now()
 let dailyCounter = 0
@@ -157,10 +164,15 @@ async function isRateLimited(): Promise<boolean> {
   if (r && !isRedisUnavailable()) {
     try {
       const hourly = await r.incr(RL_HOURLY_KEY)
+      // Always guarantee a TTL: set it on the first INCR, and re-arm if the key ever lost its
+      // expiry (PTTL < 0 means -1 no-expiry / -2 no-key). Without this a counter could stick
+      // above the cap forever and silently disable Moralis for everyone.
       if (hourly === 1) await r.pexpire(RL_HOURLY_KEY, HOURLY_WINDOW)
+      else if ((await r.pttl(RL_HOURLY_KEY)) < 0) await r.pexpire(RL_HOURLY_KEY, HOURLY_WINDOW)
       if (hourly > HOURLY_MAX) return true
       const daily = await r.incr(RL_DAILY_KEY)
       if (daily === 1) await r.pexpire(RL_DAILY_KEY, DAILY_WINDOW)
+      else if ((await r.pttl(RL_DAILY_KEY)) < 0) await r.pexpire(RL_DAILY_KEY, DAILY_WINDOW)
       if (daily > DAILY_MAX) return true
       return false
     } catch {
@@ -285,7 +297,9 @@ export async function getWalletHistory(
         })),
       })),
       cursor: data.cursor ?? null,
-      totalTxs: data.total ?? data.result.length,
+      // /wallets/{addr}/history is cursor-paginated and returns no `total`; don't pass off the
+      // current page size as the grand total (that showed "25" for wallets with hundreds of txs).
+      totalTxs: data.total ?? 0,
     }
     await cacheSetJson(cacheKey, histResult)
     return histResult
