@@ -5,6 +5,8 @@ services:
     name: bnbscan-web
     env: node
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
+    numInstances: 2         # Horizontal headroom against single-source spikes — $100/mo total
+                            # (bumped from 1 after May 2026 botnet OOM-crashed the sole instance)
     region: oregon
     rootDir: apps/explorer
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
@@ -27,6 +29,10 @@ services:
         sync: false         # Chainstack BSC endpoint — set in Render dashboard
       - key: MORALIS_API_KEY
         sync: false         # moralis.io — free tier sufficient to start
+      - key: MORALIS_DISABLED
+        value: "false"      # Re-enabled: response cache + rate-limiter now live in Redis
+                            # (off-heap), so Moralis no longer drives the OOM crash-loop.
+                            # Flip to "true" here (or in the dashboard) as an emergency kill switch.
       - key: NEXT_PUBLIC_PEER_URL
         value: https://ethscan.io
       - key: NODE_ENV
@@ -127,10 +133,10 @@ services:
       - key: NODE_OPTIONS
         value: "--max-old-space-size=768"  # GC before 1GB OOM kill
 
-  # ── Redis (shared BullMQ queue for BNB indexer) ───────────────────────────
+  # ── Redis (shared API rate limiting) ─────────────────────────────────────
   - type: redis
     name: bnbscan-redis
-    plan: starter           # 25 MB — sufficient for BullMQ job queues — $10/mo
+    plan: starter           # 25 MB — sufficient for rate-limit counters — $10/mo
     ipAllowList: []         # private networking only
 
 databases:

@@ -9,54 +9,16 @@
  * and must not be trusted for rate limiting.
  */
 
-import Redis from 'ioredis'
+import { getRedis, isRedisUnavailable } from './redis-client'
 
 const DEFAULT_MAX_REQUESTS = 100
 const WINDOW_MS = 60 * 1000
-
-// ── Redis client (lazy singleton) ────────────────────────────────────────────
-
-let redis: Redis | null = null
-let redisUnavailable = false  // once broken, don't keep retrying
-
-function getRedis(): Redis | null {
-  if (redisUnavailable) return null
-  if (redis) return redis
-
-  const url = process.env.REDIS_URL
-  if (!url) return null  // Redis not configured — use in-memory fallback
-
-  try {
-    redis = new Redis(url, {
-      maxRetriesPerRequest: 1,
-      connectTimeout: 2000,
-      lazyConnect: true,
-      enableOfflineQueue: false,
-    })
-    redis.on('error', (err) => {
-      // Only log once per failure cycle — don't spam logs
-      if (!redisUnavailable) {
-        console.warn('[rate-limit] Redis unavailable, falling back to in-memory:', err.message)
-        redisUnavailable = true
-      }
-    })
-    redis.on('connect', () => {
-      if (redisUnavailable) {
-        console.log('[rate-limit] Redis reconnected — resuming Redis rate limiting')
-        redisUnavailable = false
-      }
-    })
-  } catch {
-    redisUnavailable = true
-  }
-  return redis
-}
 
 // ── Redis sliding window ──────────────────────────────────────────────────────
 
 async function checkRateLimitRedis(key: string, maxRequests: number): Promise<boolean> {
   const r = getRedis()
-  if (!r || redisUnavailable) return checkRateLimitMemory(key, maxRequests)
+  if (!r || isRedisUnavailable()) return checkRateLimitMemory(key, maxRequests)
 
   const redisKey = `rl:${key}`
   try {

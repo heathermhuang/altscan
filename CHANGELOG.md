@@ -2,11 +2,23 @@
 
 All notable changes to BNBScan / EthScan are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Moralis re-enabled on BNBScan without the OOM**: address pages for wallets idle longer than the 7-day index-retention window were dead-ending ("Transaction history is not available in the local index") because the Moralis fallback had been globally disabled to stop an OOM crash-loop. The crash-loop was driven by the in-process response-cache `Map` growing on the heap. Moved the Moralis response cache and its hourly/daily rate-limiter counters into Redis (off-heap, shared across instances) with a bounded in-memory fallback for environments without Redis (EthScan). Re-enables Transactions, Token Transfers, Holdings, and NFTs for unindexed/pruned addresses on BNBScan.
+
+### Added
+- **`@bnbscan/explorer-core` `redis-client` + `kv-cache`**: shared lazy Redis singleton and a Redis-backed string cache with bounded in-memory fallback, reused by rate limiting and the Moralis cache.
+
+### Changed
+- **Moralis rate limiter is now fleet-wide**: hourly/daily CU caps use Redis `INCR`/`PEXPIRE`, so `numInstances: 2` no longer multiplies the intended Moralis spend, and caps survive deploys.
+- **`MORALIS_DISABLED` documented in `render.yaml`** as the emergency kill switch (set to `"false"` on `bnbscan-web`).
+
 ## [0.1.1.0] - 2026-03-23
 
 ### Security
 - **Webhook management authentication**: `GET /webhooks` and `DELETE /webhooks/:id` now require `X-API-Key` whose `ownerAddress` matches the requested owner — prevents enumeration and unauthorized deletion by anyone who knows an address
-- **`requireApiKeyOwner()` helper**: New middleware in both `apps/web` and `apps/ethscan` enforces ownership proof on sensitive management endpoints
+- **`requireApiKeyOwner()` helper**: API middleware enforces ownership proof on sensitive management endpoints
 - **Remaining API routes hardened**: `keys`, `contracts/call`, and `webhooks POST` now use `authRequest()` middleware instead of raw `checkIpRateLimit`
 
 ### Fixed
@@ -14,8 +26,7 @@ All notable changes to BNBScan / EthScan are documented here.
 - **NFT image lazy loading**: Added `loading="lazy"` to NFT grid images in address page to prevent layout shift
 
 ### Added
-- **`apps/ethscan/lib/api-auth.ts`**: EthScan now has its own `authRequest` + `requireApiKeyOwner` middleware (mirrors BNBScan)
-- **TODOS.md**: Comprehensive post-launch backlog with P0–P3 prioritized items from Codex outside-voice review (reorg handling, idempotency, webhook auth, data quality, storage planning)
+- **Unified explorer auth**: Chain-specific API key handling now lives in the shared explorer app.
 
 ## [0.1.0.0] - 2026-03-23
 
@@ -44,6 +55,6 @@ All notable changes to BNBScan / EthScan are documented here.
 - **DB connection pool**: Reduced web app pool from max:10 to max:5 so total connections (web=5 + indexer=10 = 15) stay within Render Standard's 25-connection limit
 
 ### Infrastructure
-- Turborepo monorepo: `apps/web`, `apps/ethscan`, `apps/indexer`, `apps/eth-indexer`, `packages/db`, `packages/explorer-core`, `packages/ui`
-- BullMQ indexers: concurrency 15 workers (5 block + 10 log) on BNB; parallel ETH indexer
+- Turborepo monorepo: `apps/explorer`, `apps/indexer`, `apps/status`, `packages/db`, `packages/explorer-core`, `packages/ui`
+- Unified indexer: one chain-configurable worker for BNB Chain and Ethereum
 - Render hosting: web service + 2 indexer workers + PostgreSQL + Redis
