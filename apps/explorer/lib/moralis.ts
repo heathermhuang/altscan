@@ -27,7 +27,12 @@ const CHAIN = chainConfig.moralisChain
 // for addresses that don't exist (a common abuse pattern).
 const NULL_SENTINEL = '__null__'
 const NULL_TTL = 5 * 60_000          // 5 minutes for negative results
-const CACHE_TTL = 30 * 60_000        // 30 minutes for positive results
+const CACHE_TTL = 2 * 60 * 60_000    // 2 hours for positive results. Idle wallets (the only ones
+                                     // that hit Moralis — active ones are in the local index) are
+                                     // static, so longer caching is safe and cuts repeat calls ~4x.
+                                     // Capped at 2h (not 24h) because bnbscan-redis is a starter
+                                     // instance with noeviction — an over-full cache would fail the
+                                     // rate-limiter INCR too.
 
 // Report the in-memory fallback size to the health endpoint / memory monitor. This is 0
 // whenever Redis is serving the cache (BNBScan), and bounded otherwise (EthScan).
@@ -111,18 +116,19 @@ export type MoralisNft = {
  * Leaves 87% of the daily budget as headroom.
  */
 const HOURLY_WINDOW = 3600_000
-const HOURLY_MAX = 120             // fleet-wide. Was 10 — so low that one user touring a single
-                                   // wallet's tabs (history + transfers + balances + nfts = 4 calls)
-                                   // exhausted it, leaving every other visitor the empty dead-end.
+const HOURLY_MAX = 200             // fleet-wide burst guard. 10 (orig) and 120 (v2) both got
+                                   // re-exhausted by real traffic — each idle-address view burns
+                                   // 1–2 calls. The daily cap below is the real budget guard.
 const DAILY_WINDOW = 86400_000
-const DAILY_MAX = 1000             // ~25,000 CU/day at ~25 CU/call = ~62% of the 40K free budget.
-                                   // Middleware already 429s aggressive crawlers on /address/, and
-                                   // positive responses cache 30 min, so this stays well under budget.
-// v2 keys: the previous counters could be stuck high WITHOUT a TTL — a crash between INCR and the
-// conditional PEXPIRE below leaves a key that never expires, tripping the limiter forever. Bumping
-// the key name gives a clean slate; the TTL re-arming in isRateLimited() stops it recurring.
-const RL_HOURLY_KEY = 'moralis:rl:v2:hourly'
-const RL_DAILY_KEY = 'moralis:rl:v2:daily'
+const DAILY_MAX = 1200             // ~30,000 CU/day at ~25 CU/call = ~75% of the 40K free budget,
+                                   // leaving headroom for pricier calls. This is a hard ceiling: if
+                                   // real demand exceeds it, idle-wallet pages dead-end until the
+                                   // daily window rolls — the durable fix is paid Moralis or longer
+                                   // local retention (see getMoralisLimiterState in /api/health).
+// v3 keys: v2 sat exhausted (daily window doesn't roll for ~24h), so bump the key name for an
+// immediate clean slate. The TTL re-arming in isRateLimited() prevents a stuck-without-expiry counter.
+const RL_HOURLY_KEY = 'moralis:rl:v3:hourly'
+const RL_DAILY_KEY = 'moralis:rl:v3:daily'
 let hourlyCounter = 0
 let hourlyWindowStart = Date.now()
 let dailyCounter = 0
@@ -180,6 +186,32 @@ async function isRateLimited(): Promise<boolean> {
     }
   }
   return isRateLimitedMemory()
+}
+
+/**
+ * Snapshot of the Moralis limiter for the admin /api/health endpoint. Read-only (plain GETs,
+ * no INCR) so calling it never consumes budget. This is the visibility that was missing when the
+ * limiter silently disabled Moralis fleet-wide: now `limited: true` plus the counter vs. cap makes
+ * the cause obvious instead of guessable.
+ */
+export async function getMoralisLimiterState(): Promise<Record<string, unknown>> {
+  let hourly: number | null = null
+  let daily: number | null = null
+  const r = getRedis()
+  if (r && !isRedisUnavailable()) {
+    try {
+      const [h, d] = await Promise.all([r.get(RL_HOURLY_KEY), r.get(RL_DAILY_KEY)])
+      hourly = h ? Number(h) : 0
+      daily = d ? Number(d) : 0
+    } catch { /* Redis blip — report unknown */ }
+  }
+  return {
+    disabled: process.env.MORALIS_DISABLED === 'true',
+    keyPresent: !!process.env.MORALIS_API_KEY,
+    hourly, hourlyMax: HOURLY_MAX,
+    daily, dailyMax: DAILY_MAX,
+    limited: (hourly !== null && hourly >= HOURLY_MAX) || (daily !== null && daily >= DAILY_MAX),
+  }
 }
 
 /** Known bot user agents — skip Moralis entirely for these */
