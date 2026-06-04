@@ -11,7 +11,8 @@ import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
+import { TxnsLazy } from './TxnsLazy'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
@@ -129,28 +130,24 @@ export default async function AddressPage({
     })(),
   ])
 
-  // Batch 2: heavier RPC + Moralis calls (after batch 1 frees its memory)
-  const [liveBalance, rpcTxCount, moralisHistory] = await Promise.all([
+  // Batch 2: heavier RPC calls (after batch 1 frees its memory).
+  // Moralis txn history is now fetched lazily on the client via TxnsLazy — no SSR prefetch,
+  // so HTML scrapers (fake browser UAs, no JS) never trigger getWalletHistory during render.
+  const [liveBalance, rpcTxCount] = await Promise.all([
     provider.getBalance(addr).catch(() => null),
     provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
-    noLocalData && !isBot ? getWalletHistory(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
   const displayBalance = liveBalance !== null
     ? liveBalance
     : safeBigInt(addressInfo?.balance)
-  // Transaction count: prefer DB, then RPC nonce, then Moralis. Moralis /history is cursor-paginated
-  // and returns no reliable total (totalTxs is 0/unknown), so fall back to it last — otherwise a
-  // page of 25 would override the nonce and undercount active wallets.
-  const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || moralisHistory?.totalTxs || 0
-  // First Seen: prefer DB, fallback to oldest Moralis tx timestamp
-  const moralisFirstSeen = moralisHistory?.txs?.length
-    ? new Date(moralisHistory.txs[moralisHistory.txs.length - 1].blockTimestamp)
-    : null
+  // Transaction count: prefer DB, then RPC nonce. Moralis history is now loaded lazily on the
+  // client, so we no longer have it available here during SSR.
+  const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || 0
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
-    : moralisFirstSeen
+    : null
   // USD value of native token balance
   const nativeUsd = nativePrice && displayBalance
     ? (Number(displayBalance) / 1e18 * nativePrice)
@@ -314,7 +311,7 @@ export default async function AddressPage({
 
       {/* Tab content */}
       {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} cursor={cursor} isBot={isBot} />
+        <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
@@ -330,14 +327,12 @@ async function TxnsTab({
   addr,
   page,
   total,
-  prefetchedHistory,
   cursor,
   isBot,
 }: {
   addr: string
   page: number
   total: number
-  prefetchedHistory: Awaited<ReturnType<typeof getWalletHistory>> | null
   cursor?: string
   isBot: boolean
 }) {
@@ -361,92 +356,26 @@ async function TxnsTab({
     // DB error
   }
 
-  // If DB has no data, use Moralis history with cursor-based pagination (skipped for bots —
-  // crawlers sweeping distinct idle addresses are what exhaust the Moralis CU budget).
-  if (txs.length === 0 && page === 1 && !isBot) {
-    // Use prefetched data for first page, or fetch with cursor for subsequent pages
-    const moralis = cursor
-      ? await getWalletHistory(addr, cursor)
-      : (prefetchedHistory ?? await getWalletHistory(addr))
-    if (moralis && moralis.txs.length > 0) {
+  // If DB has no data, fall back to Moralis — but lazily on the client so that HTML scrapers
+  // (fake browser UAs, no JS) never trigger getWalletHistory during SSR.
+  // Bots keep the local-index "not available" view; real browsers get TxnsLazy.
+  if (txs.length === 0 && page === 1) {
+    if (isBot) {
       return (
         <div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
-            <span>
-              Showing transaction history via Moralis
-              {moralis.totalTxs > 0 && ` — ${formatNumber(moralis.totalTxs)} total transactions`}
-            </span>
-          </div>
-          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Summary</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value ({chainConfig.currency})</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {moralis.txs.map(tx => (
-                  <tr key={tx.hash} className={`hover:bg-gray-50 ${tx.possibleSpam ? 'opacity-50' : ''}`}>
-                    <td className="px-3 sm:px-4 py-2 font-mono text-xs">
-                      <Link href={`/tx/${tx.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                        {tx.hash.slice(0, 14)}…
-                      </Link>
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">
-                      {timeAgo(new Date(tx.blockTimestamp))}
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-gray-700 text-xs max-w-xs truncate">
-                      {tx.summary || tx.category}
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-xs">
-                      {(Number(tx.value) / 1e18).toFixed(6)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          </div>
-          {/* Moralis cursor pagination */}
-          <div className="flex justify-center gap-4 mt-4">
-            {cursor && (
-              <Link
-                href={`/address/${addr}?tab=txns`}
-                className={`text-sm ${chainConfig.theme.linkText} hover:underline border ${chainConfig.theme.border} rounded px-3 py-1`}
-              >
-                ← First Page
-              </Link>
-            )}
-            {moralis.cursor && (
-              <Link
-                href={`/address/${addr}?tab=txns&cursor=${encodeURIComponent(moralis.cursor)}`}
-                className={`text-sm ${chainConfig.theme.linkText} hover:underline border ${chainConfig.theme.border} rounded px-3 py-1`}
-              >
-                Next Page →
-              </Link>
-            )}
-          </div>
+          <p className="text-gray-500 mb-2">Transaction history is not available in the local index for this address.</p>
+          {total > 0 && (
+            <p className="text-sm text-gray-400">
+              This address has {formatNumber(total)} transactions on-chain.{' '}
+              <a href={`${chainConfig.externalExplorerUrl}/address/${addr}`} target="_blank" rel="noopener noreferrer" className={`${chainConfig.theme.linkText} hover:underline`}>
+                View on {chainConfig.externalExplorer} ↗
+              </a>
+            </p>
+          )}
         </div>
       )
     }
-    return (
-      <div>
-        <p className="text-gray-500 mb-2">Transaction history is not available in the local index for this address.</p>
-        {total > 0 && (
-          <p className="text-sm text-gray-400">
-            This address has {formatNumber(total)} transactions on-chain.{' '}
-            <a href={`${chainConfig.externalExplorerUrl}/address/${addr}`} target="_blank" rel="noopener noreferrer" className={`${chainConfig.theme.linkText} hover:underline`}>
-              View on {chainConfig.externalExplorer} ↗
-            </a>
-          </p>
-        )}
-      </div>
-    )
+    return <TxnsLazy addr={addr} />
   }
 
   return (
