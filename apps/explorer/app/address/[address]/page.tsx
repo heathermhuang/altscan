@@ -12,6 +12,7 @@ import { getAddressLabel } from '@/lib/known-addresses'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/moralis'
+import { getRetentionFloor, isLocalHistoryIncomplete } from '@/lib/retention'
 import { TxnsLazy } from './TxnsLazy'
 import { TransfersLazy } from './TransfersLazy'
 import { HoldingsLazy } from './HoldingsLazy'
@@ -314,9 +315,9 @@ export default async function AddressPage({
 
       {/* Tab content */}
       {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} />
+        <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
       )}
-      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} />}
+      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
       {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
@@ -332,12 +333,14 @@ async function TxnsTab({
   total,
   cursor,
   isBot,
+  firstSeen,
 }: {
   addr: string
   page: number
   total: number
   cursor?: string
   isBot: boolean
+  firstSeen: Date | null
 }) {
   const offset = (page - 1) * PAGE_SIZE
   let txs: typeof schema.transactions.$inferSelect[] = []
@@ -359,10 +362,19 @@ async function TxnsTab({
     // DB error
   }
 
-  // If DB has no data, fall back to Moralis — but lazily on the client so that HTML scrapers
-  // (fake browser UAs, no JS) never trigger getWalletHistory during SSR.
-  // Bots keep the local-index "not available" view; real browsers get TxnsLazy.
-  if (txs.length === 0 && page === 1) {
+  // Serve the full Moralis history (TxnsLazy) when local can't show the complete picture:
+  //   - empty local index (page 1), OR
+  //   - retention-pruned wallet — `total` (addresses.tx_count) is the never-pruned lifetime
+  //     count, but the local transactions table holds only the last RETENTION_DAYS, so the
+  //     page-of-N pagination against `total` is bogus (e.g. heatherm.eth: 118 lifetime, 1
+  //     row retained, "Page 1 of 5"). isLocalHistoryIncomplete() detects this in O(1) via
+  //     first_seen < oldest-retained-block. This fires on ANY page so the bogus pagination
+  //     never renders. Fully-indexed active wallets (first_seen within the window) fall
+  //     through to the fast local table with no extra Moralis call.
+  // Either way the fetch is lazy on the client, so HTML scrapers (fake browser UAs, no JS)
+  // never trigger getWalletHistory during SSR — bots keep the local-index "not available" view.
+  const incomplete = isLocalHistoryIncomplete(firstSeen, await getRetentionFloor())
+  if (incomplete || (txs.length === 0 && page === 1)) {
     if (isBot) {
       return (
         <div>
@@ -460,7 +472,7 @@ async function TxnsTab({
 
 // ---- Token Transfers Tab ----
 
-async function TransfersTab({ addr, page, isBot }: { addr: string; page: number; isBot: boolean }) {
+async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; page: number; isBot: boolean; firstSeen: Date | null }) {
   const offset = (page - 1) * PAGE_SIZE
   let transfers: typeof schema.tokenTransfers.$inferSelect[] = []
   let total = 0
@@ -487,6 +499,27 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
     // DB error
   }
 
+  // Serve the full Moralis history (TransfersLazy) when local can't show the complete
+  // picture: empty local index (page 1), or a retention-pruned wallet whose first_seen
+  // predates the oldest retained block — token_transfers is pruned to the same rolling
+  // window as transactions, so the same O(1) signal applies. Fires on any page so the
+  // pagination is never bogus. Lazy on the client, so HTML scrapers never trigger Moralis
+  // during SSR; bots keep the local-index message. Fully-indexed active wallets fall
+  // through to the fast local table below with no extra Moralis call.
+  const incomplete = isLocalHistoryIncomplete(firstSeen, await getRetentionFloor())
+  if (incomplete || (transfers.length === 0 && page === 1)) {
+    if (isBot) {
+      return (
+        <p className="text-gray-500">
+          {transfers.length === 0
+            ? 'No token transfers found for this address.'
+            : 'Full token transfer history is not available in the local index for this address.'}
+        </p>
+      )
+    }
+    return <TransfersLazy addr={addr} />
+  }
+
   // Look up token info (name/symbol/decimals) for DB transfers
   const tokenInfoMap = new Map<string, { name: string; symbol: string; decimals: number }>()
   if (transfers.length > 0) {
@@ -502,13 +535,6 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
         tokenInfoMap.set(tok.address, { name: tok.name, symbol: tok.symbol, decimals: tok.decimals })
       }
     } catch { /* token lookup error */ }
-  }
-
-  if (transfers.length === 0 && page === 1) {
-    if (isBot) {
-      return <p className="text-gray-500">No token transfers found for this address.</p>
-    }
-    return <TransfersLazy addr={addr} />
   }
 
   return (
