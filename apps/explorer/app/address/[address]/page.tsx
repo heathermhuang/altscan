@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
+import { headers } from 'next/headers'
 import { formatNativeToken, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbol } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -10,7 +11,7 @@ import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
-import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, type MoralisTokenTransfer } from '@/lib/moralis'
+import { getWalletHistory, getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
@@ -85,8 +86,12 @@ export default async function AddressPage({
 
   // Enrich with external data — split into two batches to reduce peak memory.
   // Batch 1: lightweight lookups. Batch 2: heavier RPC + Moralis calls.
-  // Bot detection removed to enable ISR caching (headers() forces dynamic rendering)
-  const isBot = false
+  // Bot-gate Moralis: crawlers sweep many DISTINCT idle addresses, and each one is a Moralis cache
+  // miss → a billed API call, which exhausts the free CU budget so real users dead-end. This page
+  // already reads searchParams, so it is dynamically rendered (cache-control: private, no-cache) —
+  // reading headers() forfeits no caching that was actually in effect. Bots get the local-index
+  // view; humans still get the Moralis fallback. (The transfers/holdings/nfts tabs already honor this.)
+  const isBot = isBotRequest((await headers()).get('user-agent'))
   const noLocalData = txCount === 0 && !addressInfo
   const provider = getProvider()
 
@@ -128,7 +133,7 @@ export default async function AddressPage({
   const [liveBalance, rpcTxCount, moralisHistory] = await Promise.all([
     provider.getBalance(addr).catch(() => null),
     provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
-    noLocalData ? getWalletHistory(addr) : Promise.resolve(null),
+    noLocalData && !isBot ? getWalletHistory(addr) : Promise.resolve(null),
   ])
 
   // Use live RPC balance when the address isn't in our index yet
@@ -309,7 +314,7 @@ export default async function AddressPage({
 
       {/* Tab content */}
       {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} cursor={cursor} />
+        <TxnsTab addr={addr} page={page} total={displayTxCount} prefetchedHistory={moralisHistory} cursor={cursor} isBot={isBot} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} />}
       {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
@@ -327,12 +332,14 @@ async function TxnsTab({
   total,
   prefetchedHistory,
   cursor,
+  isBot,
 }: {
   addr: string
   page: number
   total: number
   prefetchedHistory: Awaited<ReturnType<typeof getWalletHistory>> | null
   cursor?: string
+  isBot: boolean
 }) {
   const offset = (page - 1) * PAGE_SIZE
   let txs: typeof schema.transactions.$inferSelect[] = []
@@ -354,8 +361,9 @@ async function TxnsTab({
     // DB error
   }
 
-  // If DB has no data, use Moralis history with cursor-based pagination
-  if (txs.length === 0 && page === 1) {
+  // If DB has no data, use Moralis history with cursor-based pagination (skipped for bots —
+  // crawlers sweeping distinct idle addresses are what exhaust the Moralis CU budget).
+  if (txs.length === 0 && page === 1 && !isBot) {
     // Use prefetched data for first page, or fetch with cursor for subsequent pages
     const moralis = cursor
       ? await getWalletHistory(addr, cursor)

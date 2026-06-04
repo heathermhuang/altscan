@@ -125,10 +125,15 @@ const DAILY_MAX = 1200             // ~30,000 CU/day at ~25 CU/call = ~75% of th
                                    // real demand exceeds it, idle-wallet pages dead-end until the
                                    // daily window rolls — the durable fix is paid Moralis or longer
                                    // local retention (see getMoralisLimiterState in /api/health).
-// v3 keys: v2 sat exhausted (daily window doesn't roll for ~24h), so bump the key name for an
-// immediate clean slate. The TTL re-arming in isRateLimited() prevents a stuck-without-expiry counter.
-const RL_HOURLY_KEY = 'moralis:rl:v3:hourly'
-const RL_DAILY_KEY = 'moralis:rl:v3:daily'
+// v4 keys: bumped together with the address-page bot-gate that now makes crawlers skip Moralis.
+// Earlier version bumps (v1→v2→v3) reset the counter WITHOUT removing what consumed the budget, so
+// bot traffic re-exhausted it within minutes. This bump is different: it's paired with the real fix,
+// so the fresh counter reflects only human demand and should stay under the cap. Bumping the key name
+// is needed because the Redis counter persists across deploys (≤1h TTL) — without it the bot-gate
+// would sit latent, pages dead-ended, until the old v3 window happened to roll. The TTL re-arming in
+// isRateLimited() still prevents a stuck-without-expiry counter.
+const RL_HOURLY_KEY = 'moralis:rl:v4:hourly'
+const RL_DAILY_KEY = 'moralis:rl:v4:daily'
 let hourlyCounter = 0
 let hourlyWindowStart = Date.now()
 let dailyCounter = 0
