@@ -11,8 +11,11 @@ import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
-import { getTokenBalances, getNfts, getTokenTransfers, isBotRequest, type MoralisTokenTransfer } from '@/lib/moralis'
+import { isBotRequest } from '@/lib/moralis'
 import { TxnsLazy } from './TxnsLazy'
+import { TransfersLazy } from './TransfersLazy'
+import { HoldingsLazy } from './HoldingsLazy'
+import { NftsLazy } from './NftsLazy'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
@@ -501,77 +504,11 @@ async function TransfersTab({ addr, page, isBot }: { addr: string; page: number;
     } catch { /* token lookup error */ }
   }
 
-  if (transfers.length === 0 && page === 1 && !isBot) {
-    let moralisTransfers: MoralisTokenTransfer[] = []
-    const moralis = await getTokenTransfers(addr)
-    if (moralis && moralis.transfers.length > 0) {
-      moralisTransfers = moralis.transfers
+  if (transfers.length === 0 && page === 1) {
+    if (isBot) {
+      return <p className="text-gray-500">No token transfers found for this address.</p>
     }
-    if (moralisTransfers.length > 0) {
-      return (
-        <div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
-            <span>Showing token transfer history from Moralis.</span>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">From</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Token</th>
-                  <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {moralisTransfers.map((t) => (
-                  <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-gray-50">
-                    <td className="px-3 sm:px-4 py-2 font-mono text-xs">
-                      <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                        {t.txHash.slice(0, 14)}…
-                      </Link>
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">
-                      {timeAgo(new Date(t.blockTimestamp))}
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
-                      <Link
-                        href={`/address/${t.fromAddress}`}
-                        className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
-                      >
-                        {formatAddress(t.fromAddress)}
-                      </Link>
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
-                      <Link
-                        href={`/address/${t.toAddress}`}
-                        className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
-                      >
-                        {formatAddress(t.toAddress)}
-                      </Link>
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-xs">
-                      <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                        {t.tokenSymbol || formatAddress(t.tokenAddress)}
-                      </Link>
-                    </td>
-                    <td className="px-3 sm:px-4 py-2 text-xs">
-                      {parseFloat(t.valueFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })} {t.tokenSymbol}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        </div>
-      )
-    }
-    return <p className="text-gray-500">No token transfers found for this address.</p>
+    return <TransfersLazy addr={addr} />
   }
 
   return (
@@ -707,57 +644,11 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
     // DB error
   }
 
-  if (holdings.length === 0 && !isBot) {
-    const moralisTokens = await getTokenBalances(addr)
-    if (moralisTokens.length > 0) {
-      return (
-        <div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
-            <span>Showing current token holdings from Moralis.</span>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">Balance</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500">USD Value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {moralisTokens.map((t) => (
-                  <tr key={t.tokenAddress} className="hover:bg-gray-50">
-                    <td className="px-4 py-2">
-                      <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline font-medium`}>
-                        {t.name ?? t.tokenAddress.slice(0, 14) + '…'}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2 text-gray-600">{t.symbol ?? '—'}</td>
-                    <td className="px-4 py-2">
-                      {(() => {
-                        const f = parseFloat(t.balanceFormatted ?? '')
-                        if (!isNaN(f)) return f.toLocaleString(undefined, { maximumFractionDigits: 6 })
-                        try {
-                          const raw = BigInt(t.balance)
-                          const d = 10n ** BigInt(t.decimals)
-                          return (Number(raw / d) + Number(raw % d) / Number(d)).toLocaleString(undefined, { maximumFractionDigits: 6 })
-                        } catch { return '—' }
-                      })()}
-                    </td>
-                    <td className="px-4 py-2">
-                      {t.usdValue ? `$${parseFloat(t.usdValue).toFixed(2)}` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )
+  if (holdings.length === 0) {
+    if (isBot) {
+      return <p className="text-gray-500">No token holdings found for this address.</p>
     }
-    return <p className="text-gray-500">No token holdings found for this address.</p>
+    return <HoldingsLazy addr={addr} />
   }
 
   return (
@@ -927,35 +818,12 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
     })
   } catch { /* DB error */ }
 
-  // Augment with Moralis NFT holdings when DB has no data — skip for bots
-  if (nftTransfers.length === 0 && !isBot) {
-    const moralisNfts = await getNfts(addr)
-    if (moralisNfts.length > 0) {
-      return (
-        <div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
-            <span>Showing current NFT holdings from Moralis.</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {moralisNfts.map(nft => (
-              <div key={`${nft.tokenAddress}-${nft.tokenId}`} className="bg-white rounded-xl border shadow-sm overflow-hidden">
-                {nft.imageUrl ? (
-                  <img src={nft.imageUrl} alt={nft.name} loading="lazy" className="w-full aspect-square object-cover" />
-                ) : (
-                  <div className="w-full aspect-square bg-gray-100 flex items-center justify-center text-3xl">🖼️</div>
-                )}
-                <div className="p-2">
-                  <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
-                  <p className="text-xs text-gray-400">{nft.symbol}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )
+  // Augment with Moralis NFT holdings when DB has no data — lazy on client so bots don't trigger it
+  if (nftTransfers.length === 0) {
+    if (isBot) {
+      return <p className="text-gray-500 py-8 text-center">No NFT activity found for this address.</p>
     }
-    return <p className="text-gray-500 py-8 text-center">No NFT activity found for this address.</p>
+    return <NftsLazy addr={addr} />
   }
 
   return (

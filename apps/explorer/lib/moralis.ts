@@ -125,12 +125,11 @@ const DAILY_MAX = 1200             // ~30,000 CU/day at ~25 CU/call = ~75% of th
                                    // real demand exceeds it, idle-wallet pages dead-end until the
                                    // daily window rolls — the durable fix is paid Moralis or longer
                                    // local retention (see getMoralisLimiterState in /api/health).
-// v5 keys: bumped together with the lazy-load refactor that moves getWalletHistory out of SSR
-// entirely. HTML scrapers (fake browser UAs, no JS) can no longer trigger Moralis calls during
-// server render — only real browsers executing JS will hit the /api/internal/.../history route.
-// Earlier bumps (v1→v4) reset the counter without fixing the root cause; this one does both.
-const RL_HOURLY_KEY = 'moralis:rl:v5:hourly'
-const RL_DAILY_KEY = 'moralis:rl:v5:daily'
+// v6 keys: bumped together with lazy-loading transfers/holdings/nfts tabs. All three tabs now
+// defer Moralis fetches to the client (HTML scrapers / bots with no JS never trigger them).
+// v5 was exhausted by the residential botnet hitting ?tab=transfers/holdings/nfts SSR paths.
+const RL_HOURLY_KEY = 'moralis:rl:v6:hourly'
+const RL_DAILY_KEY = 'moralis:rl:v6:daily'
 let hourlyCounter = 0
 let hourlyWindowStart = Date.now()
 let dailyCounter = 0
