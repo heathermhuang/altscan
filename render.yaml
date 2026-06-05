@@ -44,6 +44,10 @@ services:
         value: production
       - key: DB_POOL_SIZE
         value: "3"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"          # Cancel runaway queries (e.g. mega-token aggregations)
+                                # server-side so they don't hang requests / hold pool slots.
+                                # Web-only — indexer workers omit this (long batch jobs).
       # NOTE: --max-old-space-size is set in startCommand (not NODE_OPTIONS)
       # so it only applies at runtime, not during build (which needs full RAM)
       - key: HOSTNAME
@@ -82,6 +86,8 @@ services:
         value: production
       - key: DB_POOL_SIZE
         value: "3"            # Limit pool to reduce connection pressure during traffic spikes
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"          # Web-only query cancel guard (see bnbscan-web note above)
       # NOTE: --max-old-space-size is set in startCommand (not NODE_OPTIONS)
       - key: HOSTNAME
         value: "0.0.0.0"         # Required for standalone output — binds to all interfaces

@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { desc } from 'drizzle-orm'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -68,7 +68,7 @@ export default async function ValidatorsPage() {
                     {v.status}
                   </Badge>
                 </td>
-                <td className="px-4 py-2">{formatNumber(parseFloat(v.votingPower ?? '0'))}</td>
+                <td className="px-4 py-2">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
                 <td className="px-4 py-2">{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
                 <td className="px-4 py-2">{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
               </tr>

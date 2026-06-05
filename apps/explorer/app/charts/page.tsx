@@ -119,11 +119,11 @@ export default async function ChartsPage() {
             <LineChart
               data={gasData}
               label="Gwei"
-              formatY={(n) => `${n.toFixed(2)} Gwei`}
+              formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
             />
           ) : chainConfig.key === 'bnb' ? (
             <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
-              BNB Chain uses a fixed minimum gas price of 3 Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
+              BNB Chain has a low minimum gas price of 0.1 Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
             </div>
           ) : null}
         </ChartCard>

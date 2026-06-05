@@ -13,6 +13,7 @@
  *   - Bot detection skips Moralis entirely for crawlers
  */
 import { chainConfig } from './chain'
+import { sanitizeSymbol } from './format'
 import { registerCache } from './cache-registry'
 import { kvGet, kvSet, getKvFallbackSize, getRedis, isRedisUnavailable } from '@bnbscan/explorer-core'
 
@@ -106,6 +107,82 @@ export type MoralisNft = {
   symbol: string
   metadata: Record<string, unknown> | null
   imageUrl: string | null
+}
+
+/**
+ * Build a clean, human-readable summary for a Moralis history item.
+ * Moralis's own `summary` field is garbled for swaps — e.g. it returns
+ * "Swapped 0.134 WBNB and 0.134 BNB for 0.134 WBNB and 0.134 BNB" (same tokens
+ * and amounts on both sides). We rebuild swaps from the structured
+ * erc20_transfers and only fall back to Moralis's prose for simple cases.
+ */
+function summarizeMoralisHistory(t: {
+  category: string
+  summary: string
+  value: string
+  erc20_transfers?: Array<{
+    token_symbol: string
+    contract_address: string
+    value_formatted: string
+    direction: string
+  }>
+}): string {
+  const transfers = t.erc20_transfers ?? []
+  const fmtAmt = (v: string): string => {
+    const n = Number(v)
+    if (!isFinite(n) || n === 0) return '0'
+    if (n < 0.0001) return n.toExponential(2)
+    return n.toLocaleString('en-US', { maximumFractionDigits: 4 })
+  }
+  const symOf = (s: string): string => sanitizeSymbol(s || '').slice(0, 12) || 'tokens'
+  const largest = <T extends { value_formatted: string }>(arr: T[]): T | undefined =>
+    arr.slice().sort((a, b) => Number(b.value_formatted) - Number(a.value_formatted))[0]
+  const humanizeCategory = (c: string): string =>
+    c ? c.replace(/[_-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()) : 'Transaction'
+  const isDegenerate = (s: string): boolean => {
+    const i = s.toLowerCase().indexOf(' for ')
+    if (i === -1) return false
+    const before = s.slice(0, i).replace(/^\s*swapped\s+/i, '').trim()
+    const after = s.slice(i + 5).trim()
+    return before === after
+  }
+
+  const sent = transfers.filter((e) => e.direction === 'send')
+  const received = transfers.filter((e) => e.direction === 'receive')
+
+  // Swap: tokens both leaving and entering the wallet — the exact case Moralis garbles.
+  if (sent.length > 0 && received.length > 0) {
+    const out = largest(sent)
+    const inc = largest(received)
+    if (out && inc && out.contract_address?.toLowerCase() !== inc.contract_address?.toLowerCase()) {
+      return `Swapped ${fmtAmt(out.value_formatted)} ${symOf(out.token_symbol)} for ${fmtAmt(inc.value_formatted)} ${symOf(inc.token_symbol)}`
+    }
+    return 'Token swap'
+  }
+
+  // Non-swap: trust Moralis prose unless it's empty, the uninformative
+  // "Signed a transaction", or the degenerate "X for X" form.
+  const prose = t.summary?.trim()
+  if (prose && prose !== 'Signed a transaction' && !isDegenerate(prose)) {
+    return prose
+  }
+
+  // Structured single-sided transfer.
+  if (sent.length > 0) {
+    const out = largest(sent)
+    if (out) return `Sent ${fmtAmt(out.value_formatted)} ${symOf(out.token_symbol)}`
+  }
+  if (received.length > 0) {
+    const inc = largest(received)
+    if (inc) return `Received ${fmtAmt(inc.value_formatted)} ${symOf(inc.token_symbol)}`
+  }
+
+  // Native-value transfer with no token legs, else humanized category.
+  const nativeVal = Number(t.value) / 1e18
+  if (nativeVal > 0) {
+    return `${nativeVal.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${chainConfig.currency} transfer`
+  }
+  return humanizeCategory(t.category)
 }
 
 /**
@@ -315,7 +392,7 @@ export async function getWalletHistory(
         gasPrice: t.gas_price,
         gasUsed: t.receipt_gas_used,
         category: t.category,
-        summary: t.summary,
+        summary: summarizeMoralisHistory(t),
         possibleSpam: t.possible_spam,
         erc20Transfers: (t.erc20_transfers ?? []).map(e => ({
           fromAddress: e.from_address,

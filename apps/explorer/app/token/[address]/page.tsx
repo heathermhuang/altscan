@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { eq, desc, count, sql } from 'drizzle-orm'
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { formatNumber, formatAddress } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -31,7 +32,18 @@ type OnDemandToken = {
   type: string
 }
 
-async function fetchTokenFromRpc(addr: string): Promise<OnDemandToken | null> {
+/** Resolve a fallback after `ms` so a slow DB/RPC call never blocks the page render. */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ])
+}
+
+// Wrapped in cache() so generateMetadata and the page render share one RPC round-trip
+// per request instead of each firing their own (which doubled the latency on
+// not-yet-indexed tokens).
+const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | null> => {
   try {
     const contract = new Contract(addr, ERC20_ABI, getProvider())
     const [name, symbol, decimals, totalSupply] = await Promise.all([
@@ -53,7 +65,7 @@ async function fetchTokenFromRpc(addr: string): Promise<OnDemandToken | null> {
   } catch {
     return null
   }
-}
+})
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -149,27 +161,49 @@ export default async function TokenDetailPage({
     }
   }
 
-  // Skip DB-heavy queries for live-fetched tokens (no local transfer data exists)
-  const [transfers, totalTransfers, topHolders, riskSignals] = isLive
-    ? [[], 0, [], [] as RiskSignal[]]
+  // Skip DB-heavy queries for live-fetched tokens (no local transfer data exists).
+  // For indexed tokens, time-box every heavy query so a slow aggregation on a
+  // mega-token (USDT/WBNB had millions of transfers) renders a partial page instead
+  // of hanging until the connection drops ("Connection closed").
+  const TRANSFERS_FALLBACK: typeof schema.tokenTransfers.$inferSelect[] = []
+  const [transfers, totalTransfersRaw, topHolders, riskSignals] = isLive
+    ? [TRANSFERS_FALLBACK, -1, [] as HolderRow[], [] as RiskSignal[]]
     : await Promise.all([
-        db
-          .select()
-          .from(schema.tokenTransfers)
-          .where(eq(schema.tokenTransfers.tokenAddress, addr))
-          .orderBy(desc(schema.tokenTransfers.blockNumber))
-          .limit(PAGE_SIZE)
-          .offset(offset)
-          .catch(() => []),
-        db
-          .select({ value: count() })
-          .from(schema.tokenTransfers)
-          .where(eq(schema.tokenTransfers.tokenAddress, addr))
-          .then(([r]) => r?.value ?? 0)
-          .catch(() => 0),
-        fetchTopHolders(addr),
-        analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]),
+        // Top-N by indexed (token_address, block_number) — fast even for big tokens.
+        withTimeout(
+          db
+            .select()
+            .from(schema.tokenTransfers)
+            .where(eq(schema.tokenTransfers.tokenAddress, addr))
+            .orderBy(desc(schema.tokenTransfers.blockNumber))
+            .limit(PAGE_SIZE)
+            .offset(offset)
+            .catch(() => TRANSFERS_FALLBACK),
+          6000,
+          TRANSFERS_FALLBACK,
+        ),
+        // COUNT(*) scans every matching row — slow for mega-tokens. -1 = "unknown"
+        // (timed out / errored) so we never render a misleading "0 total".
+        withTimeout(
+          db
+            .select({ value: count() })
+            .from(schema.tokenTransfers)
+            .where(eq(schema.tokenTransfers.tokenAddress, addr))
+            .then(([r]) => r?.value ?? 0)
+            .catch(() => -1),
+          5000,
+          -1,
+        ),
+        withTimeout(fetchTopHolders(addr), 5000, [] as HolderRow[]),
+        withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
       ])
+  const countKnown = totalTransfersRaw >= 0
+  const totalTransfers = countKnown ? totalTransfersRaw : 0
+  // When the exact count is unknown, estimate just enough to drive prev/next:
+  // assume another page exists only if this one came back full.
+  const paginationTotal = countKnown
+    ? totalTransfers
+    : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0)
 
   const displaySupply = (() => {
     try {
@@ -336,7 +370,7 @@ export default async function TokenDetailPage({
         <h2 className="font-semibold">
           Token Transfers{' '}
           <span className="text-gray-400 font-normal text-sm">
-            ({formatNumber(totalTransfers)} total)
+            {countKnown ? `(${formatNumber(totalTransfers)} total)` : '(showing latest)'}
           </span>
         </h2>
       </div>
@@ -415,7 +449,7 @@ export default async function TokenDetailPage({
       </div>
       <Pagination
         page={page}
-        total={totalTransfers}
+        total={paginationTotal}
         perPage={PAGE_SIZE}
         baseUrl={`/token/${addr}`}
       />

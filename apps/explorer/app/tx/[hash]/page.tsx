@@ -415,7 +415,7 @@ export default async function TxDetailPage({
                 )}
               </td>
             </tr>
-            {tx.methodId && tx.methodId !== '0x' && (
+            {tx.methodId && tx.methodId !== '0x' && !(decodedUtf8 && !methodName) && (
               <Row
                 label="Method"
                 value={methodName ? `${methodName} (${tx.methodId})` : tx.methodId}

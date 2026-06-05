@@ -40,8 +40,14 @@ export function getDb(envVarName = 'DATABASE_URL') {
   // Pool size configurable via DB_POOL_SIZE env var.
   // Default 5 for web app — leaves headroom for the indexer within Render's 25 connections.
   const poolSize = parseInt(process.env.DB_POOL_SIZE ?? '5', 10) || 5
+  // Opt-in per-connection statement timeout (ms). Set on the web services so a runaway
+  // query (e.g. a COUNT/aggregation on a mega-token) is cancelled server-side and frees
+  // its pool slot, instead of hanging the request and holding the connection. Left unset
+  // (0 = disabled) for the indexer, whose batch jobs legitimately run for minutes.
+  const statementTimeoutMs = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS ?? '0', 10) || 0
   const sql = postgres(url, {
     max: poolSize,
+    ...(statementTimeoutMs > 0 ? { connection: { statement_timeout: statementTimeoutMs } } : {}),
     // Recycle idle connections — Render's managed Postgres (and network proxies)
     // can silently close idle TCP connections. Without idle_timeout, the pool
     // hands out dead connections that hang until OS-level TCP keepalive fires
