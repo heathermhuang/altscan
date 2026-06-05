@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { chainConfig } from '@/lib/chain'
+import { chainConfig } from '@/lib/chain-client'
 import type { MoralisToken } from '@/lib/moralis'
 
 type HoldingsResponse = {

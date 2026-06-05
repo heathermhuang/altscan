@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { chainConfig } from '@/lib/chain'
+import { chainConfig } from '@/lib/chain-client'
 
 /**
  * WebMCP (https://webmachinelearning.github.io/webmcp/) — exposes a small
