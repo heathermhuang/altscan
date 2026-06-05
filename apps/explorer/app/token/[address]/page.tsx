@@ -67,6 +67,29 @@ const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | nu
   }
 })
 
+// The indexer persists name='Unknown'/symbol='???'/totalSupply='0' when its
+// first-sight RPC metadata fetch fails (apps/indexer/src/block-processor.ts) and
+// never re-resolves — so mega-tokens first indexed during a rate-limited window
+// (USDT/WBNB/CAKE) render forever as "Unknown (???)" with a 0 supply. When a
+// stored row still carries a sentinel, re-resolve it live from RPC for display.
+// Only the broken fields are overlaid (guarded against RPC's own failure values),
+// so healthy rows and partially-good rows are never regressed. fetchTokenFromRpc
+// is cache()'d, so generateMetadata and the page render share one round-trip.
+async function healPlaceholderMeta(
+  token: typeof schema.tokens.$inferSelect,
+  addr: string,
+): Promise<typeof schema.tokens.$inferSelect> {
+  if (token.name !== 'Unknown' && token.symbol !== '???') return token
+  const rpc = await fetchTokenFromRpc(addr)
+  if (!rpc) return token
+  return {
+    ...token,
+    name: token.name === 'Unknown' && rpc.name !== 'Unknown Token' ? rpc.name : token.name,
+    symbol: token.symbol === '???' && rpc.symbol !== '???' ? rpc.symbol : token.symbol,
+    totalSupply: token.totalSupply === '0' && rpc.totalSupply !== '0' ? rpc.totalSupply : token.totalSupply,
+  }
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
   let token: typeof schema.tokens.$inferSelect | null = null
@@ -82,6 +105,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     }
     return { title: `Token Not Found — ${chainConfig.brandName}` }
   }
+  token = await healPlaceholderMeta(token, address.toLowerCase())
   return {
     title: `${token.name} (${token.symbol}) — ${chainConfig.brandName}`,
     description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}. ${token.holderCount.toLocaleString()} holders.`,
@@ -159,6 +183,11 @@ export default async function TokenDetailPage({
     } else {
       notFound()
     }
+  } else {
+    // Indexed row exists but may carry stale "Unknown (???)" placeholders the
+    // indexer persisted on a failed first-sight metadata fetch (block-processor.ts).
+    // Re-resolve live so mega-tokens (USDT/WBNB/CAKE) don't render as "Unknown".
+    token = await healPlaceholderMeta(token, addr)
   }
 
   // Skip DB-heavy queries for live-fetched tokens (no local transfer data exists).
