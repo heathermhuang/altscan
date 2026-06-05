@@ -164,9 +164,10 @@ databases:
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: basic-4gb         # 4 GB RAM — upgraded 2026-06-05 to fix BNB indexer write-throughput lag.
-                            # MUST stay basic-4gb: a prior dashboard upgrade (2026-04-16) was silently
-                            # reverted because this blueprint still said basic-1gb and re-synced it.
+    plan: basic-1gb         # 1 GB RAM — reverted from basic-4gb 2026-06-05: the upgrade did NOT give
+                            # sustained tip-tracking (only a transient post-restart burst), so it wasn't
+                            # worth the recurring cost. The real ceiling is token_transfers insert cost
+                            # (index maintenance under concurrent writes), fixable in code, not by DB plan.
 
   # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
   # ETH grows ~6-8 GB/month — basic-1gb holds for 3-4 months

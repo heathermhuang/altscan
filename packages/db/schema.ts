@@ -71,9 +71,11 @@ export const tokenTransfers = pgTable('token_transfers', {
   // Composite indexes on (address, timestamp) also cover single-address lookups
   fromTsIdx:    index('tt_from_ts_idx').on(t.fromAddress, t.timestamp),
   toTsIdx:      index('tt_to_ts_idx').on(t.toAddress, t.timestamp),
-  txIdx:        index('tt_tx_idx').on(t.txHash),
+  // tt_tx_idx(tx_hash) dropped 2026-06-05: redundant — txLogUnique's leftmost
+  // column (tx_hash) already serves tx_hash lookups, so it was pure insert cost.
   blockIdx:     index('tt_block_idx').on(t.blockNumber),
-  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay
+  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay;
+  // also serves tx_hash point lookups via its leftmost column.
   txLogUnique:  unique('tt_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 

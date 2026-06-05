@@ -238,13 +238,18 @@ export async function ensureSchema(): Promise<void> {
   // Build indexes in background using CONCURRENTLY so startup is never blocked.
   // CONCURRENTLY allows reads/writes during build — safe to run while indexing.
   // Each index is tried individually so a failure on one doesn't block the rest.
-  // Drop redundant single-column indexes — composite (address, timestamp) indexes cover these.
-  // Each saves ~2-4GB on 10M+ row tables.
+  // Drop redundant indexes — composites / unique constraints already cover these.
+  // Each saves disk AND per-insert index-maintenance cost on 10M+ row tables.
+  // tt_tx_idx(tx_hash) is covered by the tt_tx_log_unique(tx_hash, log_index)
+  // unique index's leftmost column, so tx_hash lookups still use an index.
+  // Dropping it cuts token_transfers index writes ~1/7 (profiled 2026-06-05:
+  // token_transfers inserts were ~50% of BNB block time — the throughput ceiling).
   const dropIndexes = [
     'DROP INDEX CONCURRENTLY IF EXISTS tx_from_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx',
+    'DROP INDEX CONCURRENTLY IF EXISTS tt_tx_idx',
   ]
   for (const stmt of dropIndexes) {
     try { await db.execute(sql.raw(stmt)) } catch { /* already dropped */ }
@@ -261,7 +266,7 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_tx_idx               ON token_transfers(tx_hash)',
+    // tt_tx_idx(tx_hash) intentionally NOT created — covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
