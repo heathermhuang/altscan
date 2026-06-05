@@ -16,6 +16,11 @@ services:
     envVars:
       - key: CHAIN
         value: bnb
+      - key: NEXT_PUBLIC_CHAIN
+        value: bnb            # client bundle (inlined at build) — MUST match CHAIN.
+                              # Without it, 'use client' components default to bnb (renders
+                              # "Value (BNB)" / wrong theme on the ETH build). See guard test
+                              # apps/explorer/lib/client-chain-config.test.ts.
       - key: DATABASE_URL
         fromDatabase:
           name: bnbscan-db
@@ -58,6 +63,11 @@ services:
     envVars:
       - key: CHAIN
         value: eth
+      - key: NEXT_PUBLIC_CHAIN
+        value: eth            # client bundle (inlined at build) — MUST match CHAIN.
+                              # Without it, 'use client' components default to bnb (renders
+                              # "Value (BNB)" / wrong theme on this ETH build). See guard test
+                              # apps/explorer/lib/client-chain-config.test.ts.
       - key: ETH_DATABASE_URL
         fromDatabase:
           name: ethscan-db
