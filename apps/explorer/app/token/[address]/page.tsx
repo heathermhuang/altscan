@@ -1,8 +1,8 @@
 import { db, schema } from '@/lib/db'
-import { eq, desc, count, sql } from 'drizzle-orm'
+import { eq, desc, count } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatAddress } from '@/lib/format'
+import { formatNumber, formatAddress, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -13,6 +13,8 @@ import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { Contract } from 'ethers'
 import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
+import { getTokenMarketData } from '@/lib/market-data'
+import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 
 const ERC20_ABI = [
@@ -121,35 +123,6 @@ export const revalidate = 300
 
 const PAGE_SIZE = 25
 
-type HolderRow = { addr: string; balance: string }
-
-async function fetchTopHolders(tokenAddr: string): Promise<HolderRow[]> {
-  try {
-    const result = await db.execute(sql`
-      WITH inflows AS (
-        SELECT to_address as addr, SUM(value::numeric) as total
-        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
-      ),
-      outflows AS (
-        SELECT from_address as addr, SUM(value::numeric) as total
-        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
-      )
-      SELECT i.addr, (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
-      FROM inflows i
-      LEFT JOIN outflows o ON i.addr = o.addr
-      WHERE (COALESCE(i.total, 0) - COALESCE(o.total, 0)) > 0
-      ORDER BY balance DESC
-      LIMIT 10
-    `)
-    return Array.from(result).map((row) => ({
-      addr: String((row as Record<string, unknown>).addr),
-      balance: String((row as Record<string, unknown>).balance),
-    }))
-  } catch {
-    return []
-  }
-}
-
 export default async function TokenDetailPage({
   params,
   searchParams,
@@ -195,8 +168,12 @@ export default async function TokenDetailPage({
   // mega-token (USDT/WBNB had millions of transfers) renders a partial page instead
   // of hanging until the connection drops ("Connection closed").
   const TRANSFERS_FALLBACK: typeof schema.tokenTransfers.$inferSelect[] = []
-  const [transfers, totalTransfersRaw, topHolders, riskSignals] = isLive
-    ? [TRANSFERS_FALLBACK, -1, [] as HolderRow[], [] as RiskSignal[]]
+  // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
+  // every real token — including live/not-yet-indexed ones. Holders need GoldRush or local
+  // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
+  const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
+  const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
+    ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
         // Top-N by indexed (token_address, block_number) — fast even for big tokens.
         withTimeout(
@@ -223,9 +200,11 @@ export default async function TokenDetailPage({
           5000,
           -1,
         ),
-        withTimeout(fetchTopHolders(addr), 5000, [] as HolderRow[]),
+        withTimeout(getTokenHolders(addr).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
         withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
       ])
+  const marketData = await marketDataPromise
+  const topHolders = holdersResult.holders
   const countKnown = totalTransfersRaw >= 0
   const totalTransfers = countKnown ? totalTransfersRaw : 0
   // When the exact count is unknown, estimate just enough to drive prev/next:
@@ -298,11 +277,80 @@ export default async function TokenDetailPage({
           {!isLive && (
             <div>
               <p className="text-gray-500 text-xs mb-0.5">Holders</p>
-              <p className="font-semibold">{formatNumber(token.holderCount)}</p>
+              <p className="font-semibold">{formatNumber(holdersResult.holderCount ?? token.holderCount)}</p>
             </div>
           )}
         </div>
       </div>
+
+      {marketData && (
+        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Market</h2>
+            {marketData.dexUrl && (
+              <a
+                href={marketData.dexUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-gray-400 hover:underline"
+              >
+                {marketData.pairLabel} ↗
+              </a>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">Price</p>
+              <p className="font-semibold">
+                {marketData.priceUsd != null ? formatUsdPrice(marketData.priceUsd) : '—'}
+                {marketData.priceChange24h != null && (
+                  <span
+                    className={`ml-2 text-xs ${
+                      marketData.priceChange24h >= 0
+                        ? chainConfig.theme.positiveChange
+                        : chainConfig.theme.negativeChange
+                    }`}
+                  >
+                    {formatPercent(marketData.priceChange24h)}
+                  </span>
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">24h Volume</p>
+              <p className="font-semibold">
+                {marketData.volume24h != null ? formatCompactUsd(marketData.volume24h) : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">Liquidity</p>
+              <p className="font-semibold">
+                {marketData.liquidityUsd != null ? formatCompactUsd(marketData.liquidityUsd) : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-0.5">
+                {marketData.marketCap != null ? 'Market Cap' : 'FDV'}
+              </p>
+              <p className="font-semibold">
+                {marketData.marketCap != null
+                  ? formatCompactUsd(marketData.marketCap)
+                  : marketData.fdv != null
+                    ? formatCompactUsd(marketData.fdv)
+                    : '—'}
+              </p>
+            </div>
+          </div>
+          {marketData.circulatingSupply != null && (
+            <p className="text-xs text-gray-400 mt-3">
+              Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {token.symbol}
+            </p>
+          )}
+          <p className="text-[11px] text-gray-400 mt-2">
+            Market data via DexScreener{marketData.source.includes('coingecko') ? ' + CoinGecko' : ''}. For information only.
+          </p>
+        </div>
+      )}
 
       <BinanceReferralAd
         context={tokenReferralContext}
@@ -314,16 +362,31 @@ export default async function TokenDetailPage({
       {/* Top Holders */}
       {topHolders.length > 0 && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
-          <div className="px-4 py-3 border-b">
-            <h2 className="font-semibold">Top Holders</h2>
+          <div className="px-4 py-3 border-b flex items-center justify-between gap-2">
+            <h2 className="font-semibold">
+              Top Holders
+              {holdersResult.source === 'goldrush' && holdersResult.holderCount != null && (
+                <span className="text-gray-400 font-normal text-sm">
+                  {' '}({formatNumber(holdersResult.holderCount)} total)
+                </span>
+              )}
+            </h2>
+            <span className="text-[11px] text-gray-400">
+              {holdersResult.source === 'goldrush' ? 'via GoldRush' : 'Estimated from recent transfers'}
+            </span>
           </div>
+          {holdersResult.source === 'local' && (
+            <div className="px-4 py-2 bg-yellow-50 text-yellow-800 text-xs border-b">
+              ⚠️ Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left px-4 py-2 text-gray-500 w-10">#</th>
                 <th className="text-left px-4 py-2 text-gray-500">Address</th>
                 <th className="text-left px-4 py-2 text-gray-500">
-                  Approx. Balance
+                  {holdersResult.source === 'goldrush' ? 'Balance' : 'Approx. Balance'}
                 </th>
                 <th className="text-left px-4 py-2 text-gray-500">
                   % of Supply
