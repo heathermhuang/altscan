@@ -129,10 +129,11 @@ async function fetchGoldrushHolders(addr: string): Promise<HoldersResult | null>
         pagination?: { total_count?: number | null } | null
       } | null
     }
-    if (data.error || !data.data?.items) return null
-    const holders = mapGoldrushHolders(data.data.items)
+    const items = data.data?.items
+    if (data.error || !items) return null
+    const holders = mapGoldrushHolders(items)
     if (holders.length === 0) return null
-    const total = data.data.pagination?.total_count
+    const total = data.data?.pagination?.total_count
     return {
       holders,
       holderCount: typeof total === 'number' && total > 0 ? total : null,
