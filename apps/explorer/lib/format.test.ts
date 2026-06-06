@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatGwei } from './format'
+import { formatGwei, formatUsdPrice, formatCompactUsd, formatPercent } from './format'
 
 describe('formatGwei', () => {
   it('shows sub-Gwei BNB gas prices instead of collapsing to "0.00"', () => {
@@ -20,5 +20,23 @@ describe('formatGwei', () => {
 
   it('accepts string input', () => {
     expect(formatGwei('100000000')).toBe('0.1')
+  })
+})
+
+describe('market formatters', () => {
+  it('formatUsdPrice adapts precision', () => {
+    expect(formatUsdPrice(1234.5)).toBe('$1,234.50')
+    expect(formatUsdPrice(0.1234)).toBe('$0.1234')
+    expect(formatUsdPrice(0.00000123)).toBe('$0.00000123')
+    expect(formatUsdPrice(NaN)).toBe('—')
+  })
+  it('formatCompactUsd abbreviates', () => {
+    expect(formatCompactUsd(1_250_000_000)).toBe('$1.25B')
+    expect(formatCompactUsd(345_600_000)).toBe('$345.6M')
+    expect(formatCompactUsd(12_340)).toBe('$12.34K')
+  })
+  it('formatPercent signs', () => {
+    expect(formatPercent(3.2)).toBe('+3.20%')
+    expect(formatPercent(-1.5)).toBe('-1.50%')
   })
 })

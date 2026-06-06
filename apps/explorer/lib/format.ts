@@ -39,6 +39,25 @@ export function formatNumber(n: number | bigint): string {
   return Number(n).toLocaleString('en-US')
 }
 
+/** Adaptive USD price: 2dp for ≥$1, 4dp for ≥$0.01, up to 8dp for micro-caps. */
+export function formatUsdPrice(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  const max = n >= 1 ? 2 : n >= 0.01 ? 4 : 8
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: max })}`
+}
+
+/** Compact USD for large figures: $1.25B, $345.6M, $12.34K. */
+export function formatCompactUsd(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  return `$${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n)}`
+}
+
+/** Signed percentage to 2dp, e.g. "+3.20%" / "-1.50%". */
+export function formatPercent(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+}
+
 export function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
   if (seconds < 0) return 'just now'
