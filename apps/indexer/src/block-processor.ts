@@ -893,6 +893,13 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
         blockNumber: r.blockNumber,
         timestamp: r.timestamp,
       })))
+      // Gracefully skip the rare cross-block collision the DELETE can't cover:
+      // during a deploy rollover the old (synchronous) instance briefly co-writes
+      // the tip, so a (tx_hash, log_index) can already exist under another block.
+      // Skipping matches the prior inline-insert behavior; on the future
+      // partitioned table (no unique) this is a harmless no-op. DELETE-first
+      // still provides the primary per-block idempotency.
+      .onConflictDoNothing()
     }
   })
 }
