@@ -120,5 +120,46 @@ console.log('3. market-data pure helpers')
   eq(buildMarketData(best, null).marketCap, null, '3.no marketCap when absent both')
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// 4. holders pure helper (keep body identical to lib/holders.ts)
+// ─────────────────────────────────────────────────────────────────────
+console.log('4. holders pure helper')
+{
+  const mapGoldrushHolders = (items) =>
+    items
+      .filter((it) => it.address && it.balance && it.balance !== '0')
+      .map((it) => ({ addr: it.address.toLowerCase(), balance: String(it.balance) }))
+  const items = [
+    { address: '0xAbC', balance: '100' },
+    { address: '0xDdD', balance: '0' },      // dropped: zero
+    { address: '0xEeE', balance: null },     // dropped: null
+    { address: '', balance: '5' },           // dropped: no address
+    { address: '0xFfF', balance: '250' },
+  ]
+  const mapped = mapGoldrushHolders(items)
+  eq(mapped.length, 2, '4.drops zero/null/empty')
+  eq(mapped[0], { addr: '0xabc', balance: '100' }, '4.lowercases addr, stringifies balance')
+  eq(mapped[1].addr, '0xfff', '4.keeps order')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 5. wiring presence checks (page + clients + env docs)
+// ─────────────────────────────────────────────────────────────────────
+console.log('5. wiring presence checks')
+{
+  const page = readSrc('apps/explorer/app/token/[address]/page.tsx')
+  ok(page.includes("from '@/lib/market-data'"), '5.page imports market-data')
+  ok(page.includes("from '@/lib/holders'"), '5.page imports holders')
+  ok(page.includes('getTokenMarketData'), '5.page calls getTokenMarketData')
+  ok(page.includes('getTokenHolders'), '5.page calls getTokenHolders')
+  ok(!page.includes('fetchTopHolders'), '5.in-page fetchTopHolders removed')
+  ok(!/type HolderRow/.test(page), '5.in-page HolderRow type removed')
+  ok(page.includes('holdersResult.source'), '5.page is holders-source-aware')
+  ok(page.includes('{marketData && ('), '5.page renders market card guarded')
+  const env = readSrc('apps/explorer/.env.example')
+  ok(env.includes('GOLDRUSH_API_KEY'), '5.env documents GOLDRUSH_API_KEY')
+  ok(env.includes('COINGECKO_API_KEY'), '5.env documents COINGECKO_API_KEY')
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
