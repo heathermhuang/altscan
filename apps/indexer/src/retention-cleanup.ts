@@ -10,6 +10,7 @@
  */
 import { getDb } from './db'
 import { sql } from 'drizzle-orm'
+import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
 
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
@@ -116,6 +117,48 @@ async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<
 }
 
 /**
+ * Retention for the RANGE-partitioned token_transfers: DROP every partition whose
+ * entire block range is below the cutoff (instant, reclaims disk to the OS, no
+ * 12-min sequential DELETE, no VACUUM bloat), then a bounded DELETE on the single
+ * partition that straddles the cutoff. Returns the number of partitions dropped.
+ */
+async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
+  const db = getDb()
+  const parts = await listTokenTransferPartitions()
+  let dropped = 0
+  for (const p of parts) {
+    // Defense-in-depth: partition names come from the pg catalog, but we build the
+    // DROP with sql.raw, so refuse anything that isn't a simple identifier.
+    if (!/^[a-z_][a-z0-9_]*$/.test(p.name)) {
+      console.warn(`[retention] skipping partition with unexpected name: "${p.name}"`)
+      continue
+    }
+    if (p.hi <= cutoffBlock) {
+      // Entire partition is older than the cutoff → drop it outright.
+      try {
+        await db.execute(sql.raw(`DROP TABLE IF EXISTS ${p.name}`))
+        console.log(`[retention] dropped token_transfers partition ${p.name} (blocks ${p.lo}–${p.hi - 1})`)
+        dropped++
+      } catch (err) {
+        console.warn(`[retention] drop partition ${p.name} failed:`, err instanceof Error ? err.message : err)
+      }
+    } else if (p.lo < cutoffBlock && cutoffBlock < p.hi) {
+      // Partition straddles the cutoff → delete only the rows below it.
+      try {
+        const r = await db.execute(
+          sql`DELETE FROM token_transfers WHERE block_number >= ${p.lo} AND block_number < ${cutoffBlock}`
+        )
+        const n = (r as any).count ?? (r as any).rowCount ?? 0
+        if (n > 0) console.log(`[retention] boundary partition ${p.name}: deleted ${n} rows below block ${cutoffBlock}`)
+      } catch (err) {
+        console.warn(`[retention] boundary delete on ${p.name} failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+  }
+  return dropped
+}
+
+/**
  * Disk % threshold above which runCleanup triggers an emergency re-cleanup
  * with a tighter retention window. Bounded by EMERGENCY_RETENTION_MIN_DAYS
  * so we never nuke the site's recent-data window entirely.
@@ -191,10 +234,17 @@ async function runCleanup(overrideDays?: number): Promise<void> {
     console.error('[retention] cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
   }
 
+  // token_transfers is RANGE-partitioned on BNB post-migration — prune it by
+  // dropping whole partitions (instant) instead of a row DELETE. Detected at runtime
+  // so this stays a no-op pre-migration and on ETH (monolithic table).
+  const ttPartitioned = await isPartitioned('token_transfers')
+
   // Delete order: children first, then parents (FK: transactions → blocks).
   // All these tables have a block_number column + index, so we delete by
-  // block_number for speed.
-  const blockNumberTables = ['dex_trades', 'token_transfers', 'gas_history', 'transactions', 'logs']
+  // block_number for speed. token_transfers is handled separately when partitioned.
+  const blockNumberTables = ttPartitioned
+    ? ['dex_trades', 'gas_history', 'transactions', 'logs']
+    : ['dex_trades', 'token_transfers', 'gas_history', 'transactions', 'logs']
 
   let totalDeleted = 0
 
@@ -207,6 +257,14 @@ async function runCleanup(overrideDays?: number): Promise<void> {
         totalDeleted += deleted
       } catch (err) {
         console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+    if (ttPartitioned) {
+      try {
+        const dropped = await pruneTokenTransfersPartitioned(cutoffBlock)
+        if (dropped > 0) console.log(`[retention] token_transfers: dropped ${dropped} partition(s)`)
+      } catch (err) {
+        console.error('[retention] token_transfers partition prune failed:', err instanceof Error ? err.message : err)
       }
     }
   } else {
@@ -268,7 +326,11 @@ async function runCleanup(overrideDays?: number): Promise<void> {
   if (totalDeleted > 0) {
     console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
     const db = getDb()
-    const highVolumeTables = ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history', 'token_balances']
+    // When token_transfers is partitioned, DROP PARTITION already returned its space
+    // to the OS — no VACUUM needed (and we avoid scanning a multi-GB partitioned table).
+    const highVolumeTables = ttPartitioned
+      ? ['transactions', 'logs', 'dex_trades', 'gas_history', 'token_balances']
+      : ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history', 'token_balances']
     for (const t of highVolumeTables) {
       assertAllowedIdentifier(t, 'table')
       try {
@@ -278,6 +340,13 @@ async function runCleanup(overrideDays?: number): Promise<void> {
         console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
       }
     }
+  }
+
+  // Keep forward partitions provisioned (every cycle, not just at boot) so the
+  // writer never runs out of range between restarts. No-op unless partitioned.
+  if (ttPartitioned) {
+    await ensureForwardPartitions().catch(err =>
+      console.warn('[retention] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
   }
 
   // Self-heal: if we're still above the emergency threshold AND we have

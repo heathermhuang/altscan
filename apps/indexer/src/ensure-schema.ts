@@ -199,6 +199,19 @@ export async function ensureSchema(): Promise<void> {
     )
   `))
 
+  // Single-row durable cursor for the async token_transfers writer.
+  // transfers_durable_block = W: every block ≤ W has all its transfers committed.
+  // It is the crash-safe resume point (see index.ts getResumeCursor + block-processor
+  // writer). Seed at 0; index.ts initializes it to MAX(blocks.number) on first run.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS indexer_cursor (
+      id                      INTEGER PRIMARY KEY DEFAULT 1,
+      transfers_durable_block BIGINT NOT NULL DEFAULT 0,
+      CONSTRAINT indexer_cursor_singleton CHECK (id = 1)
+    )
+  `))
+  await db.execute(sql.raw(`INSERT INTO indexer_cursor (id, transfers_durable_block) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`))
+
   // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution.
   //
   // CRITICAL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes an
@@ -244,16 +257,37 @@ export async function ensureSchema(): Promise<void> {
   // unique index's leftmost column, so tx_hash lookups still use an index.
   // Dropping it cuts token_transfers index writes ~1/7 (profiled 2026-06-05:
   // token_transfers inserts were ~50% of BNB block time — the throughput ceiling).
+  // token_transfers is RANGE-partitioned post-migration (see migrate-partition-tt.ts).
+  // When partitioned, the migration owns its indexes (created ON ONLY parent + then
+  // attached) and tt_tx_idx is the tx-lookup index that must be KEPT; CONCURRENTLY
+  // index DDL also isn't allowed on a partitioned parent. So branch on it. Pre-
+  // migration BNB and all of ETH keep the original monolithic behavior unchanged.
+  const ttPartitioned = await isPartitioned('token_transfers')
+
   const dropIndexes = [
     'DROP INDEX CONCURRENTLY IF EXISTS tx_from_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx',
-    'DROP INDEX CONCURRENTLY IF EXISTS tt_tx_idx',
+    // tt_tx_idx is redundant ONLY while the unique (tx_hash, log_index) exists, i.e.
+    // on the monolithic table. Post-partition there is no unique → it's the tx-lookup
+    // index and must NOT be dropped.
+    ...(ttPartitioned ? [] : ['DROP INDEX CONCURRENTLY IF EXISTS tt_tx_idx']),
   ]
   for (const stmt of dropIndexes) {
     try { await db.execute(sql.raw(stmt)) } catch { /* already dropped */ }
   }
+
+  // token_transfers index DDL is skipped when partitioned (the migration owns it,
+  // and CONCURRENTLY isn't valid on a partitioned parent).
+  const ttIndexes = ttPartitioned ? [] : [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
+    // tt_tx_idx(tx_hash) intentionally NOT created here — on the monolithic table it's
+    // covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
+  ]
 
   const indexes = [
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
@@ -263,11 +297,7 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_ts_idx            ON transactions(to_address, timestamp DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
-    // tt_tx_idx(tx_hash) intentionally NOT created — covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
+    ...ttIndexes,
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
@@ -277,6 +307,13 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]
+
+  // When partitioned, create forward partitions BEFORE the indexing loop starts
+  // inserting (await, not fire-and-forget) so no insert ever hits a missing range.
+  if (ttPartitioned) {
+    await ensureForwardPartitions().catch(err =>
+      console.warn('[indexer] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
+  }
 
   // Fire-and-forget: index builds run sequentially after ensureSchema() returns.
   // Sequential (not parallel) to avoid exhausting DB connection slots.
@@ -314,4 +351,81 @@ async function addColumnIfMissing(table: string, column: string, type: string): 
   const rows = Array.from(result)
   if (rows.length > 0) return
   await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`))
+}
+
+/** True if `table` is a declaratively-partitioned (RANGE/LIST/HASH) table. */
+export async function isPartitioned(table: string): Promise<boolean> {
+  const db = getDb()
+  const res = await db.execute(sql`
+    SELECT 1 FROM pg_partitioned_table p
+    JOIN pg_class c ON c.oid = p.partrelid
+    WHERE c.relname = ${table}
+    LIMIT 1
+  `)
+  return Array.from(res).length > 0
+}
+
+/**
+ * List token_transfers RANGE partitions as { name, lo, hi } (block_number bounds),
+ * sorted ascending. Skips a DEFAULT partition (no FROM..TO). Used by both forward-
+ * partition creation and DROP-PARTITION retention.
+ */
+export async function listTokenTransferPartitions(): Promise<Array<{ name: string; lo: number; hi: number }>> {
+  const db = getDb()
+  const res = await db.execute(sql`
+    SELECT c.relname AS name, pg_get_expr(c.relpartbound, c.oid) AS bound
+    FROM pg_inherits i
+    JOIN pg_class c ON c.oid = i.inhrelid
+    WHERE i.inhparent = 'token_transfers'::regclass
+  `)
+  const out: Array<{ name: string; lo: number; hi: number }> = []
+  for (const row of Array.from(res) as Array<Record<string, unknown>>) {
+    const bound = String(row.bound ?? '')
+    // e.g. "FOR VALUES FROM ('0') TO ('192000')" or "... FROM (0) TO (192000)"
+    const m = bound.match(/FROM \('?(\d+)'?\) TO \('?(\d+)'?\)/)
+    if (!m) continue
+    out.push({ name: String(row.name), lo: Number(m[1]), hi: Number(m[2]) })
+  }
+  return out.sort((a, b) => a.lo - b.lo)
+}
+
+/**
+ * Ensure token_transfers has empty partitions covering well past where data
+ * currently ends, so the writer never hits a missing range. Extends contiguously
+ * from the highest existing partition upper-bound in PARTITION_BLOCKS-wide chunks
+ * until PARTITION_AHEAD widths beyond MAX(block_number). No-op unless partitioned.
+ * Safe to call at boot and on the retention interval.
+ */
+export async function ensureForwardPartitions(): Promise<void> {
+  const db = getDb()
+  if (!(await isPartitioned('token_transfers'))) return
+  const width = Math.max(1, parseInt(process.env.PARTITION_BLOCKS ?? '192000', 10))   // ~1 day BSC
+  const ahead = Math.max(1, parseInt(process.env.PARTITION_AHEAD ?? '7', 10))
+
+  const parts = await listTokenTransferPartitions()
+  if (parts.length === 0) return  // migration not run yet — nothing to extend
+
+  let upper = Math.max(...parts.map(p => p.hi))
+  const maxRow = await db.execute(sql`SELECT COALESCE(MAX(block_number), 0)::bigint AS m FROM token_transfers`)
+  const maxBlock = Number((Array.from(maxRow)[0] as Record<string, unknown>).m) || 0
+  const target = maxBlock + ahead * width
+
+  let created = 0
+  // Bound the loop generously so a bad config can never spin forever.
+  for (let guard = 0; upper <= target && guard < 10_000; guard++) {
+    const lo = upper
+    const hi = upper + width
+    const name = `token_transfers_p_${lo}`
+    try {
+      await db.execute(sql.raw(
+        `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF token_transfers FOR VALUES FROM (${lo}) TO (${hi})`,
+      ))
+      created++
+    } catch (err) {
+      console.warn(`[indexer] forward partition ${name} warning:`, err instanceof Error ? err.message : err)
+      break
+    }
+    upper = hi
+  }
+  if (created > 0) console.log(`[indexer] ensured ${created} forward token_transfers partition(s) up to block ${upper}`)
 }

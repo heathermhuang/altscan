@@ -56,7 +56,14 @@ export const addresses = pgTable('addresses', {
 })
 
 export const tokenTransfers = pgTable('token_transfers', {
-  id:           serial('id').primaryKey(),
+  // `id` is a plain sequence-backed column, NOT a primary key. token_transfers is
+  // RANGE-partitioned by block_number (see migrate-partition-tt.ts); a partitioned
+  // table's PK/unique would have to include the partition key, and nothing reads or
+  // orders by `id` (all reads key on token_address / from/to_address / tx_hash /
+  // block_number). Keeping the column — but not the PK — lets `SELECT *` stay valid
+  // while removing the per-insert id-index maintenance cost. (Pre-migration / ETH the
+  // physical table may still carry the old SERIAL PRIMARY KEY; harmless.)
+  id:           serial('id'),
   txHash:       varchar('tx_hash', { length: 66 }).notNull(),
   logIndex:     integer('log_index').notNull(),
   tokenAddress: varchar('token_address', { length: 42 }).notNull(),
@@ -71,12 +78,13 @@ export const tokenTransfers = pgTable('token_transfers', {
   // Composite indexes on (address, timestamp) also cover single-address lookups
   fromTsIdx:    index('tt_from_ts_idx').on(t.fromAddress, t.timestamp),
   toTsIdx:      index('tt_to_ts_idx').on(t.toAddress, t.timestamp),
-  // tt_tx_idx(tx_hash) dropped 2026-06-05: redundant — txLogUnique's leftmost
-  // column (tx_hash) already serves tx_hash lookups, so it was pure insert cost.
   blockIdx:     index('tt_block_idx').on(t.blockNumber),
-  // Unique constraint enables ON CONFLICT DO NOTHING for idempotent replay;
-  // also serves tx_hash point lookups via its leftmost column.
-  txLogUnique:  unique('tt_tx_log_unique').on(t.txHash, t.logIndex),
+  // Non-unique index on tx_hash for the tx-detail page lookup. Replaces the old
+  // tt_tx_log_unique(tx_hash, log_index): idempotent writes no longer rely on a
+  // unique constraint (the async transfer-writer rewrites each block-range with
+  // DELETE+INSERT — see block-processor.ts), and a partitioned table can't carry a
+  // unique that omits the partition key. ensure-schema.ts is the runtime DDL authority.
+  txIdx:        index('tt_tx_idx').on(t.txHash),
 }))
 
 export const tokens = pgTable('tokens', {

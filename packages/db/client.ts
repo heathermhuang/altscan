@@ -66,5 +66,20 @@ export function getDb(envVarName = 'DATABASE_URL') {
   return db
 }
 
+/**
+ * Create a dedicated, NON-pooled postgres connection for one-off maintenance work
+ * (e.g. the token_transfers partition migration) where a long index build or
+ * VALIDATE must not be recycled mid-flight. Single connection, no idle/lifetime
+ * recycling, no statement timeout. The caller MUST call `.end()` when finished.
+ */
+export function createMaintenanceConnection(url: string) {
+  return postgres(url, {
+    max: 1,
+    idle_timeout: 0,
+    max_lifetime: 0,
+    connect_timeout: 30,
+  })
+}
+
 export { schema }
 export type Db = ReturnType<typeof getDb>

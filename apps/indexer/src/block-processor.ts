@@ -19,6 +19,19 @@ const abi = AbiCoder.defaultAbiCoder()
 // Cap all sql.join/insert batches to stay well within the limit.
 const SQL_BATCH_CHUNK = 500
 
+// ── Async token_transfers writer flag ────────────────────────────────
+// When ON, token_transfers INSERTs move off the per-block hot path into a single
+// crash-safe coalescing writer (see "Async token_transfers writer" section + the
+// indexer_cursor watermark). Default ON for BNB (0.45s blocks need it), OFF for
+// ETH (12s blocks are fine on the synchronous inline path). Override with
+// ASYNC_TT_WRITER=1/0. When OFF, behavior is byte-for-byte today's inline path.
+const ASYNC_TT_WRITER = (() => {
+  const v = process.env.ASYNC_TT_WRITER
+  if (v === '1' || v === 'true')  return true
+  if (v === '0' || v === 'false') return false
+  return (process.env.CHAIN ?? 'bnb') === 'bnb'
+})()
+
 // ── Per-phase profiling (opt-in) ─────────────────────────────────────
 // Enable with PROFILE_BLOCKS=N (e.g. 30) — logs a phase breakdown every
 // N blocks to find the dominant cost center. Zero overhead when disabled.
@@ -262,8 +275,18 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   }
 
   // ── 3. Decode receipts (already awaited above) ─────────────────
+  let decodedTransfers: TokenTransferRow[] = []
   if (wantReceipts && block.prefetchedTransactions.length > 0 && receipts.length > 0) {
-    await processReceiptsBatch(receipts, blockNumber, timestamp, provider, t)
+    decodedTransfers = await processReceiptsBatch(receipts, blockNumber, timestamp, provider, t)
+  }
+
+  // ── 3b. Async transfer-writer enqueue ──────────────────────────
+  // Hand decoded transfers to the single coalescing writer. Enqueue EVERY block —
+  // including transfer-less ones (empty array) — so the durable watermark can
+  // advance past it. The writer persists these rows and only then advances
+  // indexer_cursor.transfers_durable_block, the crash-safe resume point.
+  if (ASYNC_TT_WRITER) {
+    enqueueTransferWrite(block.number, decodedTransfers)
   }
 
   // ── 4. Webhooks (non-blocking) ─────────────────────────────────
@@ -293,8 +316,12 @@ async function processReceiptsBatch(
   timestamp: Date,
   provider: JsonRpcProvider,
   t: PhaseTimings | null = null,
-) {
+): Promise<TokenTransferRow[]> {
   const db = getDb()
+
+  // Decoded transfer rows for this block. In async mode these are returned to the
+  // caller to enqueue on the writer instead of being INSERTed inline here.
+  let decodedTransfers: TokenTransferRow[] = []
 
   // Note: tx.status / tx.gasUsed are now populated at INSERT time in processBlock
   // (receipts awaited up-front and merged into txValues). No second UPDATE pass.
@@ -379,40 +406,50 @@ async function processReceiptsBatch(
       if (t) t.rpcEnsureTokens = performance.now() - sT
     }
 
-    // Bulk insert token transfers — chunked to avoid stack overflow in Drizzle
+    // Token transfer persistence. In async mode the rows are returned to the
+    // caller and written by the single coalescing writer (removing the 8-worker
+    // index contention that made this ~50% of BNB block time). In sync mode
+    // (ETH / ASYNC_TT_WRITER=0) they are INSERTed inline exactly as before.
     if (rows.length > 0) {
-      const sI = PROFILE_ENABLED ? performance.now() : 0
-      let totalInserted = 0
-      for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
-        const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
-        const inserted = await db.insert(schema.tokenTransfers)
-          .values(chunk.map(r => ({
-            txHash: r.txHash,
-            logIndex: r.logIndex,
-            tokenAddress: r.tokenAddress,
-            fromAddress: r.fromAddress,
-            toAddress: r.toAddress,
-            value: r.value,
-            tokenId: r.tokenId,
-            blockNumber: r.blockNumber,
-            timestamp: r.timestamp,
-          })))
-          .onConflictDoNothing()
-          .returning({ id: schema.tokenTransfers.id })
-        totalInserted += inserted.length
-      }
-      if (t) t.dbInsertTokenTransfers = performance.now() - sI
+      if (ASYNC_TT_WRITER) {
+        decodedTransfers = rows
+        // dbInsertTokenTransfers intentionally stays ~0 here — the write happens
+        // off the hot path in the writer; t.transferCount above still records volume.
+      } else {
+        // Bulk insert token transfers — chunked to avoid stack overflow in Drizzle
+        const sI = PROFILE_ENABLED ? performance.now() : 0
+        let totalInserted = 0
+        for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
+          const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
+          const inserted = await db.insert(schema.tokenTransfers)
+            .values(chunk.map(r => ({
+              txHash: r.txHash,
+              logIndex: r.logIndex,
+              tokenAddress: r.tokenAddress,
+              fromAddress: r.fromAddress,
+              toAddress: r.toAddress,
+              value: r.value,
+              tokenId: r.tokenId,
+              blockNumber: r.blockNumber,
+              timestamp: r.timestamp,
+            })))
+            .onConflictDoNothing()
+            .returning({ id: schema.tokenTransfers.id })
+          totalInserted += inserted.length
+        }
+        if (t) t.dbInsertTokenTransfers = performance.now() - sI
 
-      // Holder balance updates are queued for a single dedicated worker.
-      // Profiling showed inline UPSERTs took ~38% of in-block time (~2.5s/block)
-      // due to row-lock contention across 8 workers hammering the same hot tokens.
-      // Serializing through one worker eliminates cross-worker contention and
-      // unblocks block processing. Eventually consistent — queue drains during
-      // low-activity windows. Order doesn't matter (addition is commutative).
-      if (totalInserted > 0) {
-        const sH = PROFILE_ENABLED ? performance.now() : 0
-        enqueueHolderBalanceUpdate(rows)
-        if (t) t.dbUpdateHolderBalances = performance.now() - sH
+        // Holder balance updates are queued for a single dedicated worker.
+        // Profiling showed inline UPSERTs took ~38% of in-block time (~2.5s/block)
+        // due to row-lock contention across 8 workers hammering the same hot tokens.
+        // Serializing through one worker eliminates cross-worker contention and
+        // unblocks block processing. Eventually consistent — queue drains during
+        // low-activity windows. Order doesn't matter (addition is commutative).
+        if (totalInserted > 0) {
+          const sH = PROFILE_ENABLED ? performance.now() : 0
+          enqueueHolderBalanceUpdate(rows)
+          if (t) t.dbUpdateHolderBalances = performance.now() - sH
+        }
       }
     }
   }
@@ -484,6 +521,8 @@ async function processReceiptsBatch(
       if (t) t.dbInsertDexTrades = performance.now() - sD
     }
   }
+
+  return decodedTransfers
 }
 
 // ── Async addresses coalescer ───────────────────────────────────────
@@ -706,6 +745,172 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
     }
   }
 }
+
+// ── Async token_transfers writer (crash-safe, coalescing) ───────────
+// token_transfers is PRIMARY data, so unlike the holder/address coalescers we
+// must NOT lose the queue on crash. The contract (mirrored by index.ts resume):
+//
+//   • Single writer.   Only this writer INSERTs token_transfers — block workers
+//     just enqueue. That removes the 8-worker index contention that made the
+//     inline insert ~50% of BNB block time.
+//   • Durable watermark. indexer_cursor.transfers_durable_block = W means every
+//     block ≤ W has ALL its transfers committed. It is the crash-resume point.
+//   • W advances only AFTER a commit, through the contiguous prefix of written
+//     blocks. Writing ahead of W is fine — replay re-writes idempotently.
+//   • Each drain is written DELETE+INSERT inside one transaction, targeting
+//     EXACTLY the drained block numbers. Reads never see a half-written block;
+//     replay is a clean overwrite (no dupes, no reliance on a unique constraint,
+//     so it works identically on the block-range-partitioned table — Part B).
+const TT_QUEUE_HIGH_WATER_ROWS = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '50000', 10)
+let transferPending = new Map<number, TokenTransferRow[]>()
+let transferPendingRows = 0
+const transferWritten = new Set<number>()   // committed, not yet folded into W
+let durableBlock = 0
+let transferWriterSeeded = false
+let transferWriterRunning = false
+let ttWriterDrainCount = 0
+
+/**
+ * Seed the in-memory watermark from indexer_cursor at startup. MUST be called by
+ * index.ts before the indexing loop — without a seed the writer refuses to run
+ * (so it can never persist a bogus W=0 over a real cursor).
+ */
+export function initTransferWriter(seedDurableBlock: number): void {
+  durableBlock = seedDurableBlock
+  transferWriterSeeded = true
+  console.log(`[tt-writer] seeded durable watermark = ${durableBlock}`)
+  runTransferWriter()  // flush anything enqueued during startup
+}
+
+/**
+ * Jump the watermark forward when the indexer deliberately abandons a block range
+ * (the MAX_LAG "skip to tip" path in index.ts). Without this, W would freeze at the
+ * skip boundary because the skipped blocks are never enqueued. Accepts the same gap
+ * the pre-existing skip already creates in `blocks`; the resume gap-scan heals
+ * recent holes on restart.
+ */
+export function setDurableFloor(block: number): void {
+  if (!transferWriterSeeded || block <= durableBlock) return
+  durableBlock = block
+  for (const n of transferWritten) if (n <= durableBlock) transferWritten.delete(n)
+  persistDurableBlock(durableBlock).catch(err =>
+    console.warn('[tt-writer] floor persist failed:', err instanceof Error ? err.message : err))
+}
+
+export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number } {
+  return { blocks: transferPending.size, rows: transferPendingRows, durableBlock }
+}
+
+export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
+  const prev = transferPending.get(blockNumber)
+  if (prev) transferPendingRows -= prev.length
+  transferPending.set(blockNumber, rows)   // latest decode of a block wins
+  transferPendingRows += rows.length
+  runTransferWriter()
+}
+
+function runTransferWriter(): void {
+  if (!transferWriterSeeded) return        // never write/persist before the seed
+  if (transferWriterRunning) return
+  if (transferPending.size === 0) return
+  transferWriterRunning = true
+  // Fire-and-forget single drainer — coalesces the entire current queue per pass.
+  ;(async () => {
+    try {
+      while (transferPending.size > 0) {
+        const drained = transferPending
+        transferPending = new Map()
+        transferPendingRows = 0
+
+        const blockNums = Array.from(drained.keys())
+        const rows: TokenTransferRow[] = []
+        for (const batch of drained.values()) for (const r of batch) rows.push(r)
+        // Sort by (block_number, log_index): keeps tt_block_idx writes sequential
+        // and clusters same-block rows for better index-leaf locality.
+        rows.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
+
+        try {
+          await writeTransferBlocks(blockNums, rows)
+
+          // Fold written blocks into W through the contiguous prefix.
+          for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
+          let moved = false
+          while (transferWritten.delete(durableBlock + 1)) { durableBlock++; moved = true }
+          if (moved) await persistDurableBlock(durableBlock)
+
+          // Rows are durable now — let holder-balance tracking see them.
+          // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
+          if (rows.length > 0) enqueueHolderBalanceUpdate(rows)
+
+          if (++ttWriterDrainCount % 200 === 0) {
+            console.log(`[tt-writer] W=${durableBlock} pending=${transferPending.size}blk/${transferPendingRows}rows ahead=${transferWritten.size}`)
+          }
+        } catch (err) {
+          console.warn('[tt-writer] write failed, re-queueing:', err instanceof Error ? err.message : err)
+          // Re-queue (don't clobber a newer decode of the same block).
+          for (const [n, batch] of drained) {
+            if (!transferPending.has(n)) {
+              transferPending.set(n, batch)
+              transferPendingRows += batch.length
+            }
+          }
+          await new Promise(r => setTimeout(r, 250))
+        }
+      }
+    } finally {
+      transferWriterRunning = false
+    }
+  })()
+}
+
+/**
+ * Persist a set of blocks atomically: DELETE the target blocks, then INSERT the
+ * decoded rows, in one transaction. DELETE makes replay idempotent without any
+ * unique constraint; on the first-write path it matches zero rows and is cheap.
+ * Targets EXACTLY the drained block numbers (never a min..max span) so a
+ * non-contiguous drain can't wipe an already-written neighbour.
+ */
+async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]): Promise<void> {
+  const db = getDb()
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < blockNums.length; i += SQL_BATCH_CHUNK) {
+      const chunk = blockNums.slice(i, i + SQL_BATCH_CHUNK)
+      await tx.execute(sql`
+        DELETE FROM token_transfers
+        WHERE block_number IN (${sql.join(chunk.map(n => sql`${n}`), sql`, `)})
+      `)
+    }
+    for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
+      const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
+      await tx.insert(schema.tokenTransfers).values(chunk.map(r => ({
+        txHash: r.txHash,
+        logIndex: r.logIndex,
+        tokenAddress: r.tokenAddress,
+        fromAddress: r.fromAddress,
+        toAddress: r.toAddress,
+        value: r.value,
+        tokenId: r.tokenId,
+        blockNumber: r.blockNumber,
+        timestamp: r.timestamp,
+      })))
+    }
+  })
+}
+
+async function persistDurableBlock(block: number): Promise<void> {
+  const db = getDb()
+  await db.execute(sql`UPDATE indexer_cursor SET transfers_durable_block = ${block} WHERE id = 1`)
+}
+
+/** Drain the queue to empty — used for graceful shutdown + backpressure. */
+export async function flushTransferWriter(): Promise<void> {
+  runTransferWriter()
+  while (transferPending.size > 0 || transferWriterRunning) {
+    await new Promise(r => setTimeout(r, 25))
+  }
+}
+
+export { TT_QUEUE_HIGH_WATER_ROWS, ASYNC_TT_WRITER }
 
 // ── Token metadata lookup ───────────────────────────────────────────
 const ERC20_ABI = [

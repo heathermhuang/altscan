@@ -14,7 +14,15 @@
 import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@bnbscan/chain-config'
-import { processBlock } from './block-processor'
+import {
+  processBlock,
+  initTransferWriter,
+  setDurableFloor,
+  getTransferQueueDepth,
+  flushTransferWriter,
+  ASYNC_TT_WRITER,
+  TT_QUEUE_HIGH_WATER_ROWS,
+} from './block-processor'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
@@ -114,6 +122,7 @@ async function main() {
 
   if (forceStart > 0) {
     lastIndexed = forceStart - 1
+    if (ASYNC_TT_WRITER) initTransferWriter(forceStart - 1)
     console.log(`${TAG} FORCE_START_BLOCK=${forceStart} (tip: ${tip})`)
   } else {
     const startBlock = parseInt(process.env.START_BLOCK ?? String(chain.defaultStartBlock), 10)
@@ -148,6 +157,10 @@ async function main() {
       if (resumeGapBackfillUntil === null && latest - lastIndexed > MAX_LAG) {
         console.log(`${TAG} ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — skipping to block ${latest - 200}`)
         lastIndexed = latest - 200
+        // Jump the transfer watermark with the skip — these blocks are deliberately
+        // abandoned (same gap the pre-existing skip already creates in `blocks`), so
+        // the watermark must not stay stuck waiting for transfers that never come.
+        if (ASYNC_TT_WRITER) setDurableFloor(latest - 200)
       }
 
       const from = lastIndexed + 1
@@ -201,7 +214,12 @@ async function main() {
         if (lastIndexed % LOG_EVERY === 0 || lastIndexed === to) {
           const elapsed = Date.now() - windowStart
           const bps = elapsed > 0 ? (windowBlocks / (elapsed / 1000)).toFixed(2) : '?'
-          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)`)
+          let ttInfo = ''
+          if (ASYNC_TT_WRITER) {
+            const q = getTransferQueueDepth()
+            ttInfo = ` | tt:W=${q.durableBlock} q=${q.blocks}blk/${q.rows}rows`
+          }
+          console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)${ttInfo}`)
           windowStart = Date.now()
           windowBlocks = 0
         }
@@ -210,6 +228,13 @@ async function main() {
       await Promise.all(
         Array.from({ length: CONCURRENCY }, async (_, workerId) => {
           while (running && failure === null) {
+            // Backpressure: don't let block decoding outrun the transfer writer.
+            // Bounds memory (OOM history) and the W↔tip replay window on crash.
+            if (ASYNC_TT_WRITER) {
+              while (running && failure === null && getTransferQueueDepth().rows > TT_QUEUE_HIGH_WATER_ROWS) {
+                await sleep(20)
+              }
+            }
             const idx = claimNext()
             if (idx < 0) return
             const blockNum = from + idx
@@ -239,6 +264,13 @@ async function main() {
     }
   }
 
+  // Drain the async transfer writer so in-flight transfers persist + the watermark
+  // advances before exit. Best-effort: if SIGKILL beats us, the watermark guarantees
+  // the next boot replays [W+1..] with no gap.
+  if (ASYNC_TT_WRITER) {
+    console.log(`${TAG} draining transfer writer before exit...`)
+    await flushTransferWriter()
+  }
   console.log(`${TAG} Stopped.`)
 }
 
@@ -253,8 +285,13 @@ async function getResumeCursor(
   const row = await db.select({ number: schema.blocks.number })
     .from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(1)
   const maxIndexed = row[0]?.number
-  if (maxIndexed === undefined) return { lastIndexed: startBlock - 1, backfillUntil: null }
+  if (maxIndexed === undefined) {
+    // Empty DB — seed the transfer watermark to the same fresh-start floor.
+    if (ASYNC_TT_WRITER) initTransferWriter(startBlock - 1)
+    return { lastIndexed: startBlock - 1, backfillUntil: null }
+  }
 
+  // Block-row gap scan over the recent window (heals holes in `blocks`).
   const scanFrom = Math.max(startBlock, maxIndexed - RESUME_GAP_SCAN_BLOCKS)
   const gapResult = await db.execute(sql`
     WITH expected AS (
@@ -266,13 +303,56 @@ async function getResumeCursor(
     WHERE blocks.number IS NULL
   `)
   const missingRaw = (Array.from(gapResult)[0] as Record<string, unknown> | undefined)?.missing
+  let base: { lastIndexed: number; backfillUntil: number | null }
   if (missingRaw !== null && missingRaw !== undefined) {
     const missing = Number(missingRaw)
     console.warn(`${TAG} Resume gap detected at block ${missing}; backfilling before tip ${maxIndexed}`)
-    return { lastIndexed: missing - 1, backfillUntil: maxIndexed }
+    base = { lastIndexed: missing - 1, backfillUntil: maxIndexed }
+  } else {
+    base = { lastIndexed: maxIndexed, backfillUntil: null }
   }
 
-  return { lastIndexed: maxIndexed, backfillUntil: null }
+  if (!ASYNC_TT_WRITER) return base
+
+  // Async writer: resume from the LOWER of the block cursor and the durable
+  // transfer watermark W. token_transfers are only guaranteed present for blocks
+  // ≤ W, so any block in (W, maxIndexed] must be re-processed to idempotently
+  // re-write its transfers. Seed the writer with W so it advances from there.
+  const W = await getOrInitDurableBlock(db, maxIndexed)
+  initTransferWriter(W)
+  const lastIndexed = Math.min(base.lastIndexed, W)
+  // When replaying un-durable transfers up to maxIndexed, suppress the MAX_LAG
+  // skip until we've caught back up — otherwise the skip would floor past the
+  // un-durable range and leave a permanent transfer gap.
+  const backfillUntil = lastIndexed < maxIndexed
+    ? Math.max(base.backfillUntil ?? 0, maxIndexed)
+    : base.backfillUntil
+  if (lastIndexed < maxIndexed) {
+    console.warn(`${TAG} transfer watermark W=${W} < maxIndexed=${maxIndexed}; replaying transfers [${lastIndexed + 1}..${maxIndexed}]`)
+  }
+  return { lastIndexed, backfillUntil }
+}
+
+/**
+ * Read indexer_cursor.transfers_durable_block (the async writer's watermark W).
+ * On first run the row is 0/absent — initialize W to maxIndexed, because every
+ * block already in `blocks` had its transfers written by the old synchronous code.
+ */
+async function getOrInitDurableBlock(
+  db: ReturnType<typeof getDb>,
+  maxIndexed: number,
+): Promise<number> {
+  const res = await db.execute(sql`SELECT transfers_durable_block FROM indexer_cursor WHERE id = 1`)
+  const raw = (Array.from(res)[0] as Record<string, unknown> | undefined)?.transfers_durable_block
+  const stored = raw === null || raw === undefined ? 0 : Number(raw)
+  if (stored > 0) return stored
+  // Fresh cursor — adopt maxIndexed as the durable floor (old sync-code guarantee).
+  await db.execute(sql`
+    INSERT INTO indexer_cursor (id, transfers_durable_block) VALUES (1, ${maxIndexed})
+    ON CONFLICT (id) DO UPDATE SET transfers_durable_block = ${maxIndexed}
+  `)
+  console.log(`${TAG} initialized transfers_durable_block = ${maxIndexed}`)
+  return maxIndexed
 }
 
 main().catch(err => {

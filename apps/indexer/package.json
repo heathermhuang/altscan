@@ -6,7 +6,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc || true",
     "start": "node dist/index.js",
-    "backfill": "tsx src/backfill.ts"
+    "backfill": "tsx src/backfill.ts",
+    "migrate-partition": "node dist/migrate-partition-tt.js",
+    "migrate-partition:dev": "tsx src/migrate-partition-tt.ts"
   },
   "dependencies": {
     "@bnbscan/chain-config": "workspace:*",
