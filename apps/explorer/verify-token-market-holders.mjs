@@ -2,10 +2,12 @@
  * Standalone logic verification for the token-page market-data + holders feature.
  * Pure JS — no TS/esbuild/DB — runs under the broken local toolchain:
  *   node apps/explorer/verify-token-market-holders.mjs
- * Pure-helper sections REPLICATE the exact bodies from market-data.ts / holders.ts /
+ * Pure-helper sections REPLICATE the exact bodies from market-data.ts / moralis.ts /
  * format.ts and assert their cases (the case table is the contract the .ts must satisfy).
  * Config/wiring sections read source via fs and assert presence (genuine red→green).
  * Render `next build` is the type gate; live curl is behavioral truth.
+ *
+ * Holders source = Moralis (already-wired Pro) /erc20/{addr}/owners + /holders — NOT GoldRush.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -24,18 +26,18 @@ const eq = (got, want, msg) => {
 const ok = (cond, msg) => { if (cond) { pass++ } else { fail++; console.error(`  ✗ ${msg}`) } }
 
 // ─────────────────────────────────────────────────────────────────────
-// 1. chain-config external-API identifiers
+// 1. chain-config external-API identifiers (market data only; holders reuse moralisChain)
 // ─────────────────────────────────────────────────────────────────────
 console.log('1. chain-config external-API identifiers')
 {
   const src = readSrc('packages/chain-config/src/index.ts')
-  for (const field of ['coingeckoPlatform', 'goldrushChain', 'dexscreenerChain']) {
+  for (const field of ['coingeckoPlatform', 'dexscreenerChain']) {
     ok(src.includes(`${field}:`), `1.${field} present on ChainConfig/configs`)
   }
   ok(src.includes("'binance-smart-chain'"), '1.bsc coingeckoPlatform value')
-  ok(src.includes("'bsc-mainnet'"), '1.bsc goldrushChain value')
-  ok(src.includes("'eth-mainnet'"), '1.eth goldrushChain value')
   ok(src.includes("'ethereum'"), '1.eth coingecko/dexscreener value')
+  ok(src.includes("dexscreenerChain: 'bsc'"), '1.bsc dexscreenerChain value')
+  ok(!src.includes('goldrushChain'), '1.goldrushChain removed (holders use Moralis)')
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -121,29 +123,39 @@ console.log('3. market-data pure helpers')
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 4. holders pure helper (keep body identical to lib/holders.ts)
+// 4. Moralis owners mapper (keep body identical to lib/moralis.ts mapMoralisOwners)
 // ─────────────────────────────────────────────────────────────────────
-console.log('4. holders pure helper')
+console.log('4. moralis owners mapper')
 {
-  const mapGoldrushHolders = (items) =>
+  const mapMoralisOwners = (items) =>
     items
-      .filter((it) => it.address && it.balance && it.balance !== '0')
-      .map((it) => ({ addr: it.address.toLowerCase(), balance: String(it.balance) }))
+      .filter((r) => r.owner_address && r.balance && r.balance !== '0')
+      .map((r) => ({
+        address: r.owner_address.toLowerCase(),
+        balance: String(r.balance),
+        balanceFormatted: r.balance_formatted ?? null,
+        usdValue: r.usd_value ?? null,
+        isContract: !!r.is_contract,
+        percentage: r.percentage_relative_to_total_supply != null
+          ? String(r.percentage_relative_to_total_supply)
+          : null,
+        label: r.owner_address_label ?? null,
+      }))
   const items = [
-    { address: '0xAbC', balance: '100' },
-    { address: '0xDdD', balance: '0' },      // dropped: zero
-    { address: '0xEeE', balance: null },     // dropped: null
-    { address: '', balance: '5' },           // dropped: no address
-    { address: '0xFfF', balance: '250' },
+    { owner_address: '0xAbC', balance: '100', balance_formatted: '1.0', usd_value: '5', is_contract: false, percentage_relative_to_total_supply: 1.5, owner_address_label: 'Binance' },
+    { owner_address: '0xDdD', balance: '0' },        // dropped: zero
+    { owner_address: '0xEeE', balance: null },       // dropped: null
+    { owner_address: '', balance: '5' },             // dropped: no address
+    { owner_address: '0xFfF', balance: '250', is_contract: true },
   ]
-  const mapped = mapGoldrushHolders(items)
+  const mapped = mapMoralisOwners(items)
   eq(mapped.length, 2, '4.drops zero/null/empty')
-  eq(mapped[0], { addr: '0xabc', balance: '100' }, '4.lowercases addr, stringifies balance')
-  eq(mapped[1].addr, '0xfff', '4.keeps order')
+  eq(mapped[0], { address: '0xabc', balance: '100', balanceFormatted: '1.0', usdValue: '5', isContract: false, percentage: '1.5', label: 'Binance' }, '4.maps full owner row + lowercases')
+  eq(mapped[1], { address: '0xfff', balance: '250', balanceFormatted: null, usdValue: null, isContract: true, percentage: null, label: null }, '4.defaults for sparse row')
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 5. wiring presence checks (page + clients + env docs)
+// 5. wiring presence checks (page + clients + env docs + config)
 // ─────────────────────────────────────────────────────────────────────
 console.log('5. wiring presence checks')
 {
@@ -154,11 +166,26 @@ console.log('5. wiring presence checks')
   ok(page.includes('getTokenHolders'), '5.page calls getTokenHolders')
   ok(!page.includes('fetchTopHolders'), '5.in-page fetchTopHolders removed')
   ok(!/type HolderRow/.test(page), '5.in-page HolderRow type removed')
-  ok(page.includes('holdersResult.source'), '5.page is holders-source-aware')
+  ok(page.includes("holdersResult.source === 'moralis'"), '5.page holders source = moralis')
+  ok(!/goldrush/i.test(page), '5.no goldrush refs left in page')
   ok(page.includes('{marketData && ('), '5.page renders market card guarded')
+
+  const holdersLib = readSrc('apps/explorer/lib/holders.ts')
+  ok(holdersLib.includes('getTokenOwners'), '5.holders lib uses Moralis getTokenOwners')
+  ok(!/goldrush/i.test(holdersLib), '5.no goldrush refs left in holders lib')
+
+  const moralisLib = readSrc('apps/explorer/lib/moralis.ts')
+  ok(moralisLib.includes('export async function getTokenOwners'), '5.moralis exposes getTokenOwners')
+  ok(moralisLib.includes('export async function getTokenHolderCount'), '5.moralis exposes getTokenHolderCount')
+  ok(moralisLib.includes('MORALIS_DAILY_MAX'), '5.moralis caps env-overridable')
+
   const env = readSrc('apps/explorer/.env.example')
-  ok(env.includes('GOLDRUSH_API_KEY'), '5.env documents GOLDRUSH_API_KEY')
+  ok(!/GOLDRUSH/.test(env), '5.env: GoldRush vars removed')
+  ok(env.includes('MORALIS_DAILY_MAX'), '5.env: Moralis Pro cap documented')
   ok(env.includes('COINGECKO_API_KEY'), '5.env documents COINGECKO_API_KEY')
+
+  const config = readSrc('packages/chain-config/src/index.ts')
+  ok(!config.includes('goldrushChain'), '5.config: goldrushChain removed')
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed`)

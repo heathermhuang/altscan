@@ -95,8 +95,6 @@ export type ChainConfig = {
   moralisChain: string
   /** CoinGecko asset-platform id for /coins/{platform}/contract lookups, e.g. "binance-smart-chain" */
   coingeckoPlatform: string
-  /** GoldRush/Covalent chain name for token_holders_v2, e.g. "bsc-mainnet" */
-  goldrushChain: string
   /** DexScreener chainId filter for the /tokens endpoint, e.g. "bsc" */
   dexscreenerChain: string
   /** Visual theme tokens */
@@ -129,7 +127,6 @@ export const BSC: ChainConfig = {
   notAffiliatedWith: 'BscScan or Binance',
   moralisChain: '0x38',
   coingeckoPlatform: 'binance-smart-chain',
-  goldrushChain: 'bsc-mainnet',
   dexscreenerChain: 'bsc',
   theme: {
     headerBg: 'bg-yellow-400',
@@ -183,7 +180,6 @@ export const ETH: ChainConfig = {
   notAffiliatedWith: 'Etherscan or the Ethereum Foundation',
   moralisChain: '0x1',
   coingeckoPlatform: 'ethereum',
-  goldrushChain: 'eth-mainnet',
   dexscreenerChain: 'ethereum',
   theme: {
     headerBg: 'bg-blue-900',

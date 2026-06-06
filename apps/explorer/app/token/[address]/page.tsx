@@ -169,7 +169,7 @@ export default async function TokenDetailPage({
   // of hanging until the connection drops ("Connection closed").
   const TRANSFERS_FALLBACK: typeof schema.tokenTransfers.$inferSelect[] = []
   // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
-  // every real token — including live/not-yet-indexed ones. Holders need GoldRush or local
+  // every real token — including live/not-yet-indexed ones. Holders need Moralis or local
   // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
   const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
@@ -365,14 +365,14 @@ export default async function TokenDetailPage({
           <div className="px-4 py-3 border-b flex items-center justify-between gap-2">
             <h2 className="font-semibold">
               Top Holders
-              {holdersResult.source === 'goldrush' && holdersResult.holderCount != null && (
+              {holdersResult.source === 'moralis' && holdersResult.holderCount != null && (
                 <span className="text-gray-400 font-normal text-sm">
                   {' '}({formatNumber(holdersResult.holderCount)} total)
                 </span>
               )}
             </h2>
             <span className="text-[11px] text-gray-400">
-              {holdersResult.source === 'goldrush' ? 'via GoldRush' : 'Estimated from recent transfers'}
+              {holdersResult.source === 'moralis' ? 'via Moralis' : 'Estimated from recent transfers'}
             </span>
           </div>
           {holdersResult.source === 'local' && (
@@ -386,7 +386,7 @@ export default async function TokenDetailPage({
                 <th className="text-left px-4 py-2 text-gray-500 w-10">#</th>
                 <th className="text-left px-4 py-2 text-gray-500">Address</th>
                 <th className="text-left px-4 py-2 text-gray-500">
-                  {holdersResult.source === 'goldrush' ? 'Balance' : 'Approx. Balance'}
+                  {holdersResult.source === 'moralis' ? 'Balance' : 'Approx. Balance'}
                 </th>
                 <th className="text-left px-4 py-2 text-gray-500">
                   % of Supply

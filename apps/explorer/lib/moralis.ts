@@ -193,15 +193,14 @@ function summarizeMoralisHistory(t: {
  * Leaves 87% of the daily budget as headroom.
  */
 const HOURLY_WINDOW = 3600_000
-const HOURLY_MAX = 200             // fleet-wide burst guard. 10 (orig) and 120 (v2) both got
-                                   // re-exhausted by real traffic — each idle-address view burns
-                                   // 1–2 calls. The daily cap below is the real budget guard.
+// Caps are env-overridable so a Pro plan can lift the free-tier-conservative defaults WITHOUT a
+// deploy. This matters now that the token page's holder lookups (getTokenOwners /
+// getTokenHolderCount, ~50 CU each, cached) share this fleet-wide budget with address-page
+// history — set MORALIS_DAILY_MAX to match your Pro tier so neither feature starves the other.
+// Defaults equal the prior hardcoded values, so behavior is unchanged unless the env vars are set.
+const HOURLY_MAX = parseInt(process.env.MORALIS_HOURLY_MAX ?? '200', 10) || 200
 const DAILY_WINDOW = 86400_000
-const DAILY_MAX = 1200             // ~30,000 CU/day at ~25 CU/call = ~75% of the 40K free budget,
-                                   // leaving headroom for pricier calls. This is a hard ceiling: if
-                                   // real demand exceeds it, idle-wallet pages dead-end until the
-                                   // daily window rolls — the durable fix is paid Moralis or longer
-                                   // local retention (see getMoralisLimiterState in /api/health).
+const DAILY_MAX = parseInt(process.env.MORALIS_DAILY_MAX ?? '1200', 10) || 1200
 // v6 keys: bumped together with lazy-loading transfers/holdings/nfts tabs. All three tabs now
 // defer Moralis fetches to the client (HTML scrapers / bots with no JS never trigger them).
 // v5 was exhausted by the residential botnet hitting ?tab=transfers/holdings/nfts SSR paths.
@@ -591,5 +590,99 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
     return result
   } catch {
     return []
+  }
+}
+
+export type MoralisHolder = {
+  address: string
+  balance: string
+  balanceFormatted: string | null
+  usdValue: string | null
+  isContract: boolean
+  percentage: string | null   // percentage_relative_to_total_supply
+  label: string | null
+}
+
+type RawOwner = {
+  owner_address: string
+  balance: string | null
+  balance_formatted?: string | null
+  usd_value?: string | null
+  is_contract?: boolean
+  percentage_relative_to_total_supply?: number | string | null
+  owner_address_label?: string | null
+}
+
+/** Map Moralis /erc20/{addr}/owners rows → MoralisHolder[]. Pure — keep body identical to the .mjs. */
+export function mapMoralisOwners(items: RawOwner[]): MoralisHolder[] {
+  return items
+    .filter((r) => r.owner_address && r.balance && r.balance !== '0')
+    .map((r) => ({
+      address: r.owner_address.toLowerCase(),
+      balance: String(r.balance),
+      balanceFormatted: r.balance_formatted ?? null,
+      usdValue: r.usd_value ?? null,
+      isContract: !!r.is_contract,
+      percentage: r.percentage_relative_to_total_supply != null
+        ? String(r.percentage_relative_to_total_supply)
+        : null,
+      label: r.owner_address_label ?? null,
+    }))
+}
+
+/**
+ * Get the top holders of an ERC20 token, highest balance first (Moralis pre-sorts).
+ * Cost: ~50 CU. Cached + rate-limited + kill-switchable via the shared infra above.
+ */
+export async function getTokenOwners(
+  address: string,
+): Promise<{ holders: MoralisHolder[]; totalSupply: string | null } | null> {
+  const cacheKey = `owners:${address}`
+  const cached = await cacheGetJson<{ holders: MoralisHolder[]; totalSupply: string | null }>(cacheKey)
+  if (cached !== undefined) return cached
+  const h = await getAuthHeaders()
+  if (!h) return null
+  try {
+    const url = new URL(`${BASE}/erc20/${address}/owners`)
+    url.searchParams.set('chain', CHAIN)
+    url.searchParams.set('limit', '25')
+    const res = await fetch(url.toString(), {
+      headers: h, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) { await cacheSetNull(cacheKey); return null }
+    const data = (await res.json()) as { total_supply?: string | null; result?: RawOwner[] }
+    const result = {
+      holders: mapMoralisOwners(data.result ?? []),
+      totalSupply: data.total_supply ?? null,
+    }
+    if (result.holders.length === 0) { await cacheSetNull(cacheKey); return null }
+    await cacheSetJson(cacheKey, result)
+    return result
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Get the total holder count of an ERC20 token (Moralis holder-stats).
+ * Cost: ~50 CU. Cached. Best-effort — null when unavailable.
+ */
+export async function getTokenHolderCount(address: string): Promise<number | null> {
+  const cacheKey = `holdercount:${address}`
+  const cached = await cacheGetJson<number>(cacheKey)
+  if (cached !== undefined) return cached
+  const h = await getAuthHeaders()
+  if (!h) return null
+  try {
+    const res = await fetch(`${BASE}/erc20/${address}/holders?chain=${CHAIN}`, {
+      headers: h, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) { await cacheSetNull(cacheKey); return null }
+    const data = (await res.json()) as { totalHolders?: number }
+    if (typeof data.totalHolders !== 'number') { await cacheSetNull(cacheKey); return null }
+    await cacheSetJson(cacheKey, data.totalHolders)
+    return data.totalHolders
+  } catch {
+    return null
   }
 }
