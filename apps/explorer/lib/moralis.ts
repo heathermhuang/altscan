@@ -186,125 +186,146 @@ function summarizeMoralisHistory(t: {
 }
 
 /**
- * Rate limiter — hard cap on Moralis calls per hour AND per day.
- * Free tier: 40,000 CU/day. Each call costs ~25 CU.
- * Daily budget: 40,000 CU / 25 CU = 1,600 calls/day max.
- * We cap conservatively: 10 calls/hour, 200 calls/day (~5,000 CU/day).
- * Leaves 87% of the daily budget as headroom.
+ * Rate limiter — PER-FEATURE budgets so a spike/abuse in one feature can't starve the others.
+ * Buckets:
+ *   - history : getWalletHistory                                  (~25 CU/call)
+ *   - holders : getTokenOwners + getTokenHolderCount              (~50 CU/call, 2 calls/token)
+ *   - assets  : getTokenBalances + getNfts + getTokenTransfers    (~25 CU/call)
+ * Caps are env-overridable; defaults sum to 1500/hr + 10000/day — the prior single-bucket total —
+ * so total Moralis exposure is UNCHANGED (this only partitions it). A saturated bucket returns
+ * null → the caller falls back to its local view, and the OTHER buckets keep serving.
+ * Keyed in Redis so caps apply fleet-wide (in-memory fallback when Redis is down).
  */
-const HOURLY_WINDOW = 3600_000
-// Caps are env-overridable so a Pro plan can lift the free-tier-conservative defaults WITHOUT a
-// deploy. This matters now that the token page's holder lookups (getTokenOwners /
-// getTokenHolderCount, ~50 CU each, cached) share this fleet-wide budget with address-page
-// history — set MORALIS_DAILY_MAX to match your Pro tier so neither feature starves the other.
-// Defaults equal the prior hardcoded values, so behavior is unchanged unless the env vars are set.
-const HOURLY_MAX = parseInt(process.env.MORALIS_HOURLY_MAX ?? '200', 10) || 200
-const DAILY_WINDOW = 86400_000
-const DAILY_MAX = parseInt(process.env.MORALIS_DAILY_MAX ?? '1200', 10) || 1200
-// v6 keys: bumped together with lazy-loading transfers/holdings/nfts tabs. All three tabs now
-// defer Moralis fetches to the client (HTML scrapers / bots with no JS never trigger them).
-// v5 was exhausted by the residential botnet hitting ?tab=transfers/holdings/nfts SSR paths.
-const RL_HOURLY_KEY = 'moralis:rl:v6:hourly'
-const RL_DAILY_KEY = 'moralis:rl:v6:daily'
-let hourlyCounter = 0
-let hourlyWindowStart = Date.now()
-let dailyCounter = 0
-let dailyWindowStart = Date.now()
+export type MoralisBucket = 'history' | 'holders' | 'assets'
 
-// In-memory fallback — used only when Redis is unavailable. Per-instance, so with
-// numInstances > 1 the effective cap is N×; acceptable as a degraded fallback.
-function isRateLimitedMemory(): boolean {
+const HOURLY_WINDOW = 3600_000
+const DAILY_WINDOW = 86400_000
+
+function envInt(name: string, fallback: number): number {
+  return parseInt(process.env[name] ?? String(fallback), 10) || fallback
+}
+
+type BucketCaps = { hourlyMax: number; dailyMax: number }
+const BUCKET_CAPS: Record<MoralisBucket, BucketCaps> = {
+  history: { hourlyMax: envInt('MORALIS_HISTORY_HOURLY_MAX', 700), dailyMax: envInt('MORALIS_HISTORY_DAILY_MAX', 5000) },
+  holders: { hourlyMax: envInt('MORALIS_HOLDERS_HOURLY_MAX', 400), dailyMax: envInt('MORALIS_HOLDERS_DAILY_MAX', 2500) },
+  assets:  { hourlyMax: envInt('MORALIS_ASSETS_HOURLY_MAX', 400),  dailyMax: envInt('MORALIS_ASSETS_DAILY_MAX', 2500) },
+}
+
+// v7 keys: per-bucket. Bumped from v6 (single shared counter) so the new buckets start clean and
+// the poisoned/over-inflated v6 counter is abandoned (same trick as every prior limiter fix).
+const RL_PREFIX = 'moralis:rl:v7'
+function bucketKeys(bucket: MoralisBucket): { hourly: string; daily: string } {
+  return { hourly: `${RL_PREFIX}:${bucket}:hourly`, daily: `${RL_PREFIX}:${bucket}:daily` }
+}
+
+// In-memory fallback — per bucket, used only when Redis is unavailable (e.g. EthScan has no Redis,
+// or a Redis blip). Per-instance, so with numInstances > 1 the effective cap is N×; acceptable.
+type MemCounter = { hourly: number; hourlyStart: number; daily: number; dailyStart: number }
+const memCounters: Record<MoralisBucket, MemCounter> = {
+  history: { hourly: 0, hourlyStart: Date.now(), daily: 0, dailyStart: Date.now() },
+  holders: { hourly: 0, hourlyStart: Date.now(), daily: 0, dailyStart: Date.now() },
+  assets:  { hourly: 0, hourlyStart: Date.now(), daily: 0, dailyStart: Date.now() },
+}
+
+function isRateLimitedMemory(bucket: MoralisBucket): boolean {
   const now = Date.now()
-  // Reset hourly window
-  if (now - hourlyWindowStart > HOURLY_WINDOW) {
-    hourlyCounter = 0
-    hourlyWindowStart = now
-  }
-  // Reset daily window
-  if (now - dailyWindowStart > DAILY_WINDOW) {
-    dailyCounter = 0
-    dailyWindowStart = now
-  }
-  if (dailyCounter >= DAILY_MAX) {
-    return true
-  }
-  if (hourlyCounter >= HOURLY_MAX) {
-    return true
-  }
-  hourlyCounter++
-  dailyCounter++
+  const c = memCounters[bucket]
+  const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
+  if (now - c.hourlyStart > HOURLY_WINDOW) { c.hourly = 0; c.hourlyStart = now }
+  if (now - c.dailyStart > DAILY_WINDOW) { c.daily = 0; c.dailyStart = now }
+  if (c.daily >= dailyMax) return true
+  if (c.hourly >= hourlyMax) return true
+  c.hourly++; c.daily++
   return false
 }
 
 /**
- * Redis-backed limiter: counters are shared across instances via INCR/PEXPIRE, so the
- * hourly/daily CU caps apply FLEET-WIDE. The previous in-process counters allowed N× the
- * intended Moralis spend with numInstances > 1, and reset on every deploy. Falls back to
- * the in-memory limiter when Redis is unavailable.
+ * Redis-backed per-bucket limiter. INCR then, if over cap, DECR back so blocked retries don't keep
+ * inflating the counter (the old code's INCR-before-check let a blocked feature climb to 3× its cap
+ * and made the health readout lie). Always guarantees a TTL: set on first INCR, re-arm if PTTL<0.
  */
-async function isRateLimited(): Promise<boolean> {
+async function isRateLimited(bucket: MoralisBucket): Promise<boolean> {
   const r = getRedis()
   if (r && !isRedisUnavailable()) {
     try {
-      const hourly = await r.incr(RL_HOURLY_KEY)
-      // Always guarantee a TTL: set it on the first INCR, and re-arm if the key ever lost its
-      // expiry (PTTL < 0 means -1 no-expiry / -2 no-key). Without this a counter could stick
-      // above the cap forever and silently disable Moralis for everyone.
-      if (hourly === 1) await r.pexpire(RL_HOURLY_KEY, HOURLY_WINDOW)
-      else if ((await r.pttl(RL_HOURLY_KEY)) < 0) await r.pexpire(RL_HOURLY_KEY, HOURLY_WINDOW)
-      if (hourly > HOURLY_MAX) return true
-      const daily = await r.incr(RL_DAILY_KEY)
-      if (daily === 1) await r.pexpire(RL_DAILY_KEY, DAILY_WINDOW)
-      else if ((await r.pttl(RL_DAILY_KEY)) < 0) await r.pexpire(RL_DAILY_KEY, DAILY_WINDOW)
-      if (daily > DAILY_MAX) return true
+      const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
+      const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
+      const hourly = await r.incr(hKey)
+      if (hourly === 1) await r.pexpire(hKey, HOURLY_WINDOW)
+      else if ((await r.pttl(hKey)) < 0) await r.pexpire(hKey, HOURLY_WINDOW)
+      if (hourly > hourlyMax) { await r.decr(hKey); return true }
+      const daily = await r.incr(dKey)
+      if (daily === 1) await r.pexpire(dKey, DAILY_WINDOW)
+      else if ((await r.pttl(dKey)) < 0) await r.pexpire(dKey, DAILY_WINDOW)
+      if (daily > dailyMax) { await r.decr(dKey); await r.decr(hKey); return true }
       return false
     } catch {
       // Redis blip — fall through to in-memory
     }
   }
-  return isRateLimitedMemory()
+  return isRateLimitedMemory(bucket)
+}
+
+/** Pure assembler for one bucket's health row. Exported for the standalone logic test. */
+export function buildBucketState(
+  hourly: number | null,
+  daily: number | null,
+  caps: { hourlyMax: number; dailyMax: number },
+): Record<string, unknown> {
+  return {
+    hourly, hourlyMax: caps.hourlyMax,
+    daily, dailyMax: caps.dailyMax,
+    limited: (hourly !== null && hourly >= caps.hourlyMax) || (daily !== null && daily >= caps.dailyMax),
+  }
 }
 
 /**
- * Snapshot of the Moralis limiter for the admin /api/health endpoint. Read-only (plain GETs,
- * no INCR) so calling it never consumes budget. This is the visibility that was missing when the
- * limiter silently disabled Moralis fleet-wide: now `limited: true` plus the counter vs. cap makes
- * the cause obvious instead of guessable.
+ * Per-bucket snapshot for the admin /api/health endpoint. Read-only (plain GETs, no INCR) so it
+ * never consumes budget. Shows WHICH feature saturated — the visibility that turned every prior
+ * limiter incident from a multi-hour guess into a one-line diagnosis.
  */
 export async function getMoralisLimiterState(): Promise<Record<string, unknown>> {
-  let hourly: number | null = null
-  let daily: number | null = null
+  const buckets: Record<string, unknown> = {}
+  let anyLimited = false
   const r = getRedis()
-  if (r && !isRedisUnavailable()) {
-    try {
-      const [h, d] = await Promise.all([r.get(RL_HOURLY_KEY), r.get(RL_DAILY_KEY)])
-      hourly = h ? Number(h) : 0
-      daily = d ? Number(d) : 0
-    } catch { /* Redis blip — report unknown */ }
+  for (const bucket of ['history', 'holders', 'assets'] as MoralisBucket[]) {
+    let hourly: number | null = null
+    let daily: number | null = null
+    if (r && !isRedisUnavailable()) {
+      try {
+        const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
+        const [h, d] = await Promise.all([r.get(hKey), r.get(dKey)])
+        hourly = h ? Number(h) : 0
+        daily = d ? Number(d) : 0
+      } catch { /* Redis blip — report unknown */ }
+    }
+    const state = buildBucketState(hourly, daily, BUCKET_CAPS[bucket])
+    if (state.limited) anyLimited = true
+    buckets[bucket] = state
   }
   return {
     disabled: process.env.MORALIS_DISABLED === 'true',
     keyPresent: !!process.env.MORALIS_API_KEY,
-    hourly, hourlyMax: HOURLY_MAX,
-    daily, dailyMax: DAILY_MAX,
-    limited: (hourly !== null && hourly >= HOURLY_MAX) || (daily !== null && daily >= DAILY_MAX),
+    buckets,
+    limited: anyLimited,
   }
 }
 
 /** Known bot user agents — skip Moralis entirely for these */
 const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
 
-async function getAuthHeaders(): Promise<Record<string, string> | null> {
+async function getAuthHeaders(bucket: MoralisBucket): Promise<Record<string, string> | null> {
   // Moralis is enabled with strict protections:
   // 1. Redis-backed response cache (off-heap, shared across instances)
-  // 2. Redis-backed rate limiter (10 calls/hr + 200 calls/day, fleet-wide)
-  // 3. Bot detection (address page skips Moralis for bots)
+  // 2. Redis-backed PER-BUCKET rate limiter (history / holders / assets, fleet-wide)
+  // 3. Bot detection (address + token pages skip Moralis for bots)
   // Set MORALIS_DISABLED=true to kill all calls instantly
   if (process.env.MORALIS_DISABLED === 'true') return null
 
   const key = process.env.MORALIS_API_KEY
   if (!key) return null
-  if (await isRateLimited()) return null
+  if (await isRateLimited(bucket)) return null
   return { 'X-API-Key': key, 'Accept': 'application/json' }
 }
 
@@ -334,7 +355,7 @@ export async function getWalletHistory(
   const cached = await cacheGetJson<{ txs: MoralisTx[]; cursor: string | null; totalTxs: number }>(cacheKey)
   if (cached !== undefined) return cached
 
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('history')
   if (!h) return null
 
   try {
@@ -421,7 +442,7 @@ export async function getTokenBalances(address: string): Promise<MoralisToken[]>
   const cacheKey = `balances:${address}`
   const cached = await cacheGetJson<MoralisToken[]>(cacheKey)
   if (cached !== undefined) return cached ?? []
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('assets')
   if (!h) return []
 
   try {
@@ -491,7 +512,7 @@ export async function getTokenTransfers(
   const cached = await cacheGetJson<{ transfers: MoralisTokenTransfer[]; cursor: string | null }>(cacheKey)
   if (cached !== undefined) return cached
 
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('assets')
   if (!h) return null
 
   try {
@@ -555,7 +576,7 @@ export async function getNfts(address: string): Promise<MoralisNft[]> {
   const cached = await cacheGetJson<MoralisNft[]>(cacheKey)
   if (cached !== undefined) return cached ?? []
 
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('assets')
   if (!h) return []
 
   try {
@@ -640,7 +661,7 @@ export async function getTokenOwners(
   const cacheKey = `owners:${address}`
   const cached = await cacheGetJson<{ holders: MoralisHolder[]; totalSupply: string | null }>(cacheKey)
   if (cached !== undefined) return cached
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('holders')
   if (!h) return null
   try {
     const url = new URL(`${BASE}/erc20/${address}/owners`)
@@ -671,7 +692,7 @@ export async function getTokenHolderCount(address: string): Promise<number | nul
   const cacheKey = `holdercount:${address}`
   const cached = await cacheGetJson<number>(cacheKey)
   if (cached !== undefined) return cached
-  const h = await getAuthHeaders()
+  const h = await getAuthHeaders('holders')
   if (!h) return null
   try {
     const res = await fetch(`${BASE}/erc20/${address}/holders?chain=${CHAIN}`, {

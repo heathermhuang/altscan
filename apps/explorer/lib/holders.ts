@@ -71,20 +71,25 @@ async function fetchLocalNetFlowHolders(tokenAddr: string): Promise<HoldersResul
  * getTokenOwners is cached + rate-limited + kill-switchable internally and returns null when
  * disabled / keyless / rate-limited / errored → we fall back to the local estimate.
  */
-export async function getTokenHolders(addr: string): Promise<HoldersResult> {
-  const owners = await getTokenOwners(addr)
-  if (owners && owners.holders.length > 0) {
-    const holderCount = await getTokenHolderCount(addr).catch(() => null)
-    return {
-      holders: owners.holders.map((h) => ({
-        addr: h.address,
-        balance: h.balance,
-        usdValue: h.usdValue,
-        isContract: h.isContract,
-        label: h.label,
-      })),
-      holderCount,
-      source: 'moralis',
+export async function getTokenHolders(
+  addr: string,
+  opts?: { skipMoralis?: boolean },
+): Promise<HoldersResult> {
+  if (!opts?.skipMoralis) {
+    const owners = await getTokenOwners(addr)
+    if (owners && owners.holders.length > 0) {
+      const holderCount = await getTokenHolderCount(addr).catch(() => null)
+      return {
+        holders: owners.holders.map((h) => ({
+          addr: h.address,
+          balance: h.balance,
+          usdValue: h.usdValue,
+          isContract: h.isContract,
+          label: h.label,
+        })),
+        holderCount,
+        source: 'moralis',
+      }
     }
   }
   return fetchLocalNetFlowHolders(addr)

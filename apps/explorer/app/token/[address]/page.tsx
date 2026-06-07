@@ -15,6 +15,8 @@ import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
+import { headers } from 'next/headers'
+import { isBotRequest } from '@/lib/moralis'
 import { isStablecoinToken } from '@/lib/binance-referral'
 
 const ERC20_ABI = [
@@ -171,6 +173,11 @@ export default async function TokenDetailPage({
   // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
   // every real token — including live/not-yet-indexed ones. Holders need Moralis or local
   // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
+  // Bot-gate the SSR Moralis holders call: honest crawlers get the labeled local estimate (0 CU);
+  // real browsers get accurate Moralis holders. The page already reads searchParams (dynamic), so
+  // reading headers() forfeits no caching. The fake-UA botnet is held off by the edge /token/
+  // Managed Challenge + the holders bucket cap. Mirrors the address page's bot-gate.
+  const isBot = isBotRequest((await headers()).get('user-agent'))
   const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
@@ -200,7 +207,7 @@ export default async function TokenDetailPage({
           5000,
           -1,
         ),
-        withTimeout(getTokenHolders(addr).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
+        withTimeout(getTokenHolders(addr, { skipMoralis: isBot }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
         withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
       ])
   const marketData = await marketDataPromise
