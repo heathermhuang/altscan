@@ -29,10 +29,15 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content="https://altscan.io/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    {/* Post-deploy: paste the Cloudflare Web Analytics beacon here once the site
-        is live and a token is minted (Workers → Web Analytics). It's a public
-        beacon token, no cookies/consent banner. Omitted now to avoid a broken
-        request before provisioning. */}
+    {/* Cloudflare Web Analytics — privacy-first, no cookies/consent banner.
+        Public beacon token (safe to commit). is:inline keeps Astro from
+        bundling/transforming the third-party beacon (preserves data-cf-beacon). */}
+    <script
+      is:inline
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "f19b095fbf3a4b6eac6eb0cc10f3cdc3"}'
+    ></script>
   </head>
   <body>
     <slot />
