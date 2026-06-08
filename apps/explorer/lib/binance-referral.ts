@@ -1,4 +1,4 @@
-import type { ChainConfig } from '@bnbscan/chain-config'
+import type { ChainConfig } from '@altscan/chain-config'
 
 export type BinanceReferralContext =
   | 'home'

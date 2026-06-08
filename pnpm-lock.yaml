@@ -26,16 +26,16 @@ importers:
 
   apps/explorer:
     dependencies:
-      '@bnbscan/chain-config':
+      '@altscan/chain-config':
         specifier: workspace:*
         version: link:../../packages/chain-config
-      '@bnbscan/db':
+      '@altscan/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@bnbscan/explorer-core':
+      '@altscan/explorer-core':
         specifier: workspace:*
         version: link:../../packages/explorer-core
-      '@bnbscan/types':
+      '@altscan/types':
         specifier: workspace:*
         version: link:../../packages/types
       axios:
@@ -81,13 +81,13 @@ importers:
 
   apps/indexer:
     dependencies:
-      '@bnbscan/chain-config':
+      '@altscan/chain-config':
         specifier: workspace:*
         version: link:../../packages/chain-config
-      '@bnbscan/db':
+      '@altscan/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@bnbscan/types':
+      '@altscan/types':
         specifier: workspace:*
         version: link:../../packages/types
       axios:

@@ -1,5 +1,5 @@
 {
-  "name": "@bnbscan/indexer",
+  "name": "@altscan/indexer",
   "version": "0.0.1",
   "main": "dist/index.js",
   "scripts": {
@@ -11,9 +11,9 @@
     "migrate-partition:dev": "tsx src/migrate-partition-tt.ts"
   },
   "dependencies": {
-    "@bnbscan/chain-config": "workspace:*",
-    "@bnbscan/db": "workspace:*",
-    "@bnbscan/types": "workspace:*",
+    "@altscan/chain-config": "workspace:*",
+    "@altscan/db": "workspace:*",
+    "@altscan/types": "workspace:*",
     "drizzle-orm": "^0.31.0",
     "ethers": "^6.11.0",
     "bullmq": "^5.4.0",

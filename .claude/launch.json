@@ -4,7 +4,7 @@
     {
       "name": "BNBScan Web (Next.js)",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@bnbscan/explorer", "dev"],
+      "runtimeArgs": ["--filter", "@altscan/explorer", "dev"],
       "port": 3000,
       "autoPort": false,
       "env": {
@@ -15,13 +15,13 @@
     {
       "name": "BNBScan Indexer (Worker)",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@bnbscan/indexer", "dev"],
+      "runtimeArgs": ["--filter", "@altscan/indexer", "dev"],
       "port": 0
     },
     {
       "name": "Explorer BNB (Next.js)",
       "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["pnpm", "--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "runtimeArgs": ["pnpm", "--filter", "@altscan/explorer", "exec", "next", "dev", "-p", "3002"],
       "port": 3002,
       "env": {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -32,7 +32,7 @@
     {
       "name": "Explorer ETH (Next.js)",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@bnbscan/explorer", "exec", "next", "dev", "-p", "3003"],
+      "runtimeArgs": ["--filter", "@altscan/explorer", "exec", "next", "dev", "-p", "3003"],
       "port": 3003,
       "env": {
         "CHAIN": "eth",

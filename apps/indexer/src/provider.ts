@@ -1,5 +1,5 @@
 import { JsonRpcProvider, Network } from 'ethers'
-import { getChainConfig } from '@bnbscan/chain-config'
+import { getChainConfig } from '@altscan/chain-config'
 
 /**
  * Shared RPC provider singleton for one-off callers (validator-syncer etc.).

@@ -15,13 +15,13 @@
 import { chainConfig } from './chain'
 import { sanitizeSymbol } from './format'
 import { registerCache } from './cache-registry'
-import { kvGet, kvSet, getKvFallbackSize, getRedis, isRedisUnavailable } from '@bnbscan/explorer-core'
+import { kvGet, kvSet, getKvFallbackSize, getRedis, isRedisUnavailable } from '@altscan/explorer-core'
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 const CHAIN = chainConfig.moralisChain
 
 // Cache strategy: responses live in Redis (shared across instances, OFF the Node heap),
-// with a small bounded in-memory fallback when Redis is absent (see @bnbscan/explorer-core
+// with a small bounded in-memory fallback when Redis is absent (see @altscan/explorer-core
 // kv-cache). Moving this cache off the heap is what lets Moralis stay enabled without the
 // OOM crash-loop that the old in-process Map caused on BNBScan.
 // NULL_SENTINEL: negative results are cached for NULL_TTL to stop repeated Moralis calls

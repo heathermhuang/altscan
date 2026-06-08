@@ -1,5 +1,5 @@
 {
-  "name": "@bnbscan/explorer",
+  "name": "@altscan/explorer",
   "version": "0.0.1",
   "scripts": {
     "dev": "next dev",
@@ -8,10 +8,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@bnbscan/chain-config": "workspace:*",
-    "@bnbscan/db": "workspace:*",
-    "@bnbscan/explorer-core": "workspace:*",
-    "@bnbscan/types": "workspace:*",
+    "@altscan/chain-config": "workspace:*",
+    "@altscan/db": "workspace:*",
+    "@altscan/explorer-core": "workspace:*",
+    "@altscan/types": "workspace:*",
     "next": "^15.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

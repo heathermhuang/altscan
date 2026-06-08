@@ -34,8 +34,8 @@
  * Env knobs: PARTITION_BLOCKS (width, default 192000 ≈ 1 day BSC), PARTITION_AHEAD.
  */
 import 'dotenv/config'
-import { createMaintenanceConnection } from '@bnbscan/db'
-import { getChainConfig } from '@bnbscan/chain-config'
+import { createMaintenanceConnection } from '@altscan/db'
+import { getChainConfig } from '@altscan/chain-config'
 import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'

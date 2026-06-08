@@ -16,8 +16,8 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./*"],
-      "@bnbscan/db": ["../../packages/db/client.ts"],
-      "@bnbscan/types": ["../../packages/types/index.ts"]
+      "@altscan/db": ["../../packages/db/client.ts"],
+      "@altscan/types": ["../../packages/types/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

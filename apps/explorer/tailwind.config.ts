@@ -1,5 +1,5 @@
 import type { Config } from 'tailwindcss'
-import { getAllThemeClasses } from '@bnbscan/chain-config'
+import { getAllThemeClasses } from '@altscan/chain-config'
 
 const config: Config = {
   content: [

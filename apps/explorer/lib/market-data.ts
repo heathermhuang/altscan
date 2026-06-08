@@ -11,7 +11,7 @@
  * verify-token-market-holders.mjs section 3 — that case table is their contract.
  */
 import { chainConfig } from './chain'
-import { kvGet, kvSet } from '@bnbscan/explorer-core'
+import { kvGet, kvSet } from '@altscan/explorer-core'
 
 const DEXSCREENER_BASE = 'https://api.dexscreener.com/latest/dex/tokens'
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3'

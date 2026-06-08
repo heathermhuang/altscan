@@ -19,7 +19,7 @@ const nextConfig = {
   },
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },
-  transpilePackages: ['@bnbscan/db', '@bnbscan/types', '@bnbscan/chain-config', '@bnbscan/explorer-core', '@bnbscan/ui'],
+  transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/ui'],
   async headers() {
     return [
       // Security headers for all pages

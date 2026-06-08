@@ -13,7 +13,7 @@
  */
 import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
-import { getChainConfig } from '@bnbscan/chain-config'
+import { getChainConfig } from '@altscan/chain-config'
 import {
   processBlock,
   initTransferWriter,

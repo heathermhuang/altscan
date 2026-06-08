@@ -9,7 +9,7 @@ services:
                             # (bumped from 1 after May 2026 botnet OOM-crashed the sole instance)
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
@@ -60,7 +60,7 @@ services:
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
@@ -99,7 +99,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -131,7 +131,7 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo (upgraded from starter after OOM crashes, exit 134)
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @bnbscan/chain-config build && pnpm --filter @bnbscan/db build && pnpm --filter @bnbscan/indexer build
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN

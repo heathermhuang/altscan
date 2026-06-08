@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { getCacheSizes, getTotalCacheEntries } from '@/lib/cache-registry'
 import { getMoralisLimiterState } from '@/lib/moralis'
-import { getRateLimitMapSize } from '@bnbscan/explorer-core'
+import { getRateLimitMapSize } from '@altscan/explorer-core'
 
 export const dynamic = 'force-dynamic'
 

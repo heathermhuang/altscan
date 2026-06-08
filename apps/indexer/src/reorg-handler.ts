@@ -11,7 +11,7 @@
  * naturally as the main loop resumes from the fork point.
  */
 
-import { getDb, schema } from '@bnbscan/db'
+import { getDb, schema } from '@altscan/db'
 import { eq, gte } from 'drizzle-orm'
 import { JsonRpcProvider } from 'ethers'
 

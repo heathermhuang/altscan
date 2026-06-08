@@ -1,27 +1,28 @@
 <p align="center">
-  <img src="docs/screenshots/bnbscan-homepage.png" alt="BNBScan Homepage" width="720" />
+  <img src="docs/screenshots/bnbscan-homepage.png" alt="Altscan — BNBScan explorer" width="720" />
 </p>
 
-<h1 align="center">BNBScan &amp; EthScan</h1>
+<h1 align="center">Altscan</h1>
 
 <p align="center">
-  Open-source, independent block explorers for <strong>BNB Chain</strong> and <strong>Ethereum</strong>.<br/>
-  Built with Next.js 14, Drizzle ORM, and ethers.js. Maintained by <a href="https://mdt.io">Measurable Data Token (MDT)</a>.
+  The open-source, multi-chain block explorer platform.<br/>
+  One codebase powers independent explorers for <strong>BNB Chain</strong> and <strong>Ethereum</strong> today — and is built to add more chains over time.<br/>
+  Next.js 14, Drizzle ORM, and ethers.js. Maintained by <a href="https://mdt.io">Measurable Data Token (MDT)</a>.
 </p>
 
 <p align="center">
+  <a href="https://altscan.io"><strong>altscan.io</strong></a> &nbsp;|&nbsp;
   <a href="https://bnbscan.com"><strong>bnbscan.com</strong></a> &nbsp;|&nbsp;
-  <a href="https://ethscan.io"><strong>ethscan.io</strong></a> &nbsp;|&nbsp;
-  <a href="https://status-page-6ez4.onrender.com"><strong>Status Page</strong></a>
+  <a href="https://ethscan.io"><strong>ethscan.io</strong></a>
 </p>
 
 ---
 
 ## What is this?
 
-BNBScan and EthScan are **alternative block explorers** — fully independent from BscScan, Etherscan, Binance, or the Ethereum Foundation. They provide a clean, fast interface for exploring blocks, transactions, addresses, tokens, and on-chain activity.
+**Altscan** is an open-source, multi-chain block explorer platform. One codebase powers two independent explorers today — **BNBScan** ([bnbscan.com](https://bnbscan.com), BNB Chain) and **EthScan** ([ethscan.io](https://ethscan.io), Ethereum) — and is designed to extend to more chains over time. They are fully independent from BscScan, Etherscan, Binance, or the Ethereum Foundation, providing a clean, fast interface for exploring blocks, transactions, addresses, tokens, and on-chain activity.
 
-Both explorers run from **one unified codebase**. A single `CHAIN` environment variable switches between BNB Chain and Ethereum — same frontend, same indexer, same schema.
+A single `CHAIN` environment variable selects which chain a deployment serves — same frontend, same indexer, same schema.
 
 ## Screenshots
 
@@ -63,7 +64,7 @@ Both explorers run from **one unified codebase**. A single `CHAIN` environment v
 ## Architecture
 
 ```
-bnbscan/
+altscan/
 ├── apps/
 │   ├── explorer/       Unified Next.js 14 frontend + API routes
 │   │                   CHAIN=bnb → bnbscan.com
@@ -114,8 +115,8 @@ bnbscan/
 
 ```bash
 # Clone the repo
-git clone https://github.com/heathermhuang/bnbscan.git
-cd bnbscan
+git clone https://github.com/heathermhuang/altscan.git
+cd altscan
 
 # Install dependencies
 pnpm install
@@ -133,13 +134,13 @@ The BNB explorer will be available at `http://localhost:3000`.
 
 ```bash
 # BNB Chain explorer only
-CHAIN=bnb pnpm --filter @bnbscan/explorer dev
+CHAIN=bnb pnpm --filter @altscan/explorer dev
 
 # Ethereum explorer only
-CHAIN=eth pnpm --filter @bnbscan/explorer dev -p 3001
+CHAIN=eth pnpm --filter @altscan/explorer dev -p 3001
 
 # BNB indexer only
-CHAIN=bnb pnpm --filter @bnbscan/indexer dev
+CHAIN=bnb pnpm --filter @altscan/indexer dev
 
 # Status page only
 npx tsx apps/status/src/server.ts
@@ -242,4 +243,4 @@ curl -X POST "https://bnbscan.com/api/admin/db-prune?days=7" \
 
 ## License
 
-MIT
+Licensed under [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.en.html). © Measurable Data Token (MDT).

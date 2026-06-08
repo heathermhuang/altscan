@@ -8,7 +8,7 @@ All notable changes to BNBScan / EthScan are documented here.
 - **Moralis re-enabled on BNBScan without the OOM**: address pages for wallets idle longer than the 7-day index-retention window were dead-ending ("Transaction history is not available in the local index") because the Moralis fallback had been globally disabled to stop an OOM crash-loop. The crash-loop was driven by the in-process response-cache `Map` growing on the heap. Moved the Moralis response cache and its hourly/daily rate-limiter counters into Redis (off-heap, shared across instances) with a bounded in-memory fallback for environments without Redis (EthScan). Re-enables Transactions, Token Transfers, Holdings, and NFTs for unindexed/pruned addresses on BNBScan.
 
 ### Added
-- **`@bnbscan/explorer-core` `redis-client` + `kv-cache`**: shared lazy Redis singleton and a Redis-backed string cache with bounded in-memory fallback, reused by rate limiting and the Moralis cache.
+- **`@altscan/explorer-core` `redis-client` + `kv-cache`**: shared lazy Redis singleton and a Redis-backed string cache with bounded in-memory fallback, reused by rate limiting and the Moralis cache.
 
 ### Changed
 - **Moralis rate limiter is now fleet-wide**: hourly/daily CU caps use Redis `INCR`/`PEXPIRE`, so `numInstances: 2` no longer multiplies the intended Moralis spend, and caps survive deploys.
@@ -46,7 +46,7 @@ All notable changes to BNBScan / EthScan are documented here.
 
 ### Security
 - **X-Forwarded-For IP spoofing fix**: Rate limiter now takes the LAST entry from X-Forwarded-For (Render appends the real client IP last; first entries are attacker-controlled)
-- **Consolidated rate limiter**: Shared `@bnbscan/explorer-core` package eliminates divergent per-app implementations
+- **Consolidated rate limiter**: Shared `@altscan/explorer-core` package eliminates divergent per-app implementations
 - **Webhook secret hashing**: Raw secret returned to caller once; SHA-256 hash stored in DB — DB compromise cannot be used to forge webhook signatures
 - **API key hashing**: `bnbs_`/`eths_` keys stored as SHA-256 hashes; prefix stored for display
 

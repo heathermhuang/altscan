@@ -1,5 +1,5 @@
 {
-  "name": "bnbscan",
+  "name": "altscan",
   "private": true,
   "scripts": {
     "dev": "turbo run dev",
