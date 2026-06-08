@@ -15,9 +15,8 @@ import { getProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
-import { headers } from 'next/headers'
-import { isBotRequest } from '@/lib/moralis'
 import { isStablecoinToken } from '@/lib/binance-referral'
+import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -173,11 +172,11 @@ export default async function TokenDetailPage({
   // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
   // every real token — including live/not-yet-indexed ones. Holders need Moralis or local
   // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
-  // Bot-gate the SSR Moralis holders call: honest crawlers get the labeled local estimate (0 CU);
-  // real browsers get accurate Moralis holders. The page already reads searchParams (dynamic), so
-  // reading headers() forfeits no caching. The fake-UA botnet is held off by the edge /token/
-  // Managed Challenge + the holders bucket cap. Mirrors the address page's bot-gate.
-  const isBot = isBotRequest((await headers()).get('user-agent'))
+  // Holders: SSR always renders the labeled local net-flow estimate (0 Moralis CU) — safe for
+  // crawlers AND no-JS scrapers hitting the origin direct. Real browsers get accurate Moralis
+  // holders client-side via <HoldersLazy> → /api/internal/token/<addr>/holders (bots don't run
+  // the XHR, so they never spend CU — same model as the address tabs). This removes the last
+  // unguarded SSR Moralis call; the edge /token/ Managed Challenge + holders bucket cap remain.
   const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
@@ -207,11 +206,10 @@ export default async function TokenDetailPage({
           5000,
           -1,
         ),
-        withTimeout(getTokenHolders(addr, { skipMoralis: isBot }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
+        withTimeout(getTokenHolders(addr, { skipMoralis: true }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
         withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
       ])
   const marketData = await marketDataPromise
-  const topHolders = holdersResult.holders
   const countKnown = totalTransfersRaw >= 0
   const totalTransfers = countKnown ? totalTransfersRaw : 0
   // When the exact count is unknown, estimate just enough to drive prev/next:
@@ -230,14 +228,6 @@ export default async function TokenDetailPage({
     }
   })()
 
-  // Compute total supply as BigInt for percentage calculation
-  const totalSupplyBig = (() => {
-    try {
-      return BigInt(token.totalSupply ?? '0')
-    } catch {
-      return 0n
-    }
-  })()
   const tokenReferralContext = isStablecoinToken(token.symbol, token.name)
     ? 'stablecoin'
     : 'token_research'
@@ -284,7 +274,9 @@ export default async function TokenDetailPage({
           {!isLive && (
             <div>
               <p className="text-gray-500 text-xs mb-0.5">Holders</p>
-              <p className="font-semibold">{formatNumber(holdersResult.holderCount ?? token.holderCount)}</p>
+              <p className="font-semibold">
+                <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
+              </p>
             </div>
           )}
         </div>
@@ -366,83 +358,16 @@ export default async function TokenDetailPage({
         className="mb-6"
       />
 
-      {/* Top Holders */}
-      {topHolders.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
-          <div className="px-4 py-3 border-b flex items-center justify-between gap-2">
-            <h2 className="font-semibold">
-              Top Holders
-              {holdersResult.source === 'moralis' && holdersResult.holderCount != null && (
-                <span className="text-gray-400 font-normal text-sm">
-                  {' '}({formatNumber(holdersResult.holderCount)} total)
-                </span>
-              )}
-            </h2>
-            <span className="text-[11px] text-gray-400">
-              {holdersResult.source === 'moralis' ? 'via Moralis' : 'Estimated from recent transfers'}
-            </span>
-          </div>
-          {holdersResult.source === 'local' && (
-            <div className="px-4 py-2 bg-yellow-50 text-yellow-800 text-xs border-b">
-              ⚠️ Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.
-            </div>
-          )}
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-2 text-gray-500 w-10">#</th>
-                <th className="text-left px-4 py-2 text-gray-500">Address</th>
-                <th className="text-left px-4 py-2 text-gray-500">
-                  {holdersResult.source === 'moralis' ? 'Balance' : 'Approx. Balance'}
-                </th>
-                <th className="text-left px-4 py-2 text-gray-500">
-                  % of Supply
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {topHolders.map((holder, i) => {
-                const holderAmount = (() => {
-                  try {
-                    const divisor = 10n ** BigInt(token.decimals)
-                    const whole = BigInt(holder.balance) / divisor
-                    return whole.toLocaleString()
-                  } catch {
-                    return holder.balance.slice(0, 12)
-                  }
-                })()
-                const pct = (() => {
-                  try {
-                    if (totalSupplyBig === 0n) return '—'
-                    const bal = BigInt(holder.balance)
-                    // Use integer math, scale by 10000 for 2 decimal places
-                    const scaled = (bal * 10000n) / totalSupplyBig
-                    return `${(Number(scaled) / 100).toFixed(2)}%`
-                  } catch {
-                    return '—'
-                  }
-                })()
-                return (
-                  <tr key={holder.addr} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                    <td className="px-4 py-2 font-mono text-xs">
-                      <Link
-                        href={`/address/${holder.addr}`}
-                        className={`${chainConfig.theme.linkText} hover:underline`}
-                      >
-                        {holder.addr}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2">
-                      {holderAmount} {token.symbol}
-                    </td>
-                    <td className="px-4 py-2 text-gray-600">{pct}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+      {/* Top Holders — SSR shows the local net-flow estimate (0 Moralis CU, crawler/no-JS safe);
+          HoldersLazy enhances to accurate Moralis balances client-side for real browsers. */}
+      {!isLive && (
+        <HoldersLazy
+          address={addr}
+          symbol={token.symbol}
+          decimals={token.decimals}
+          totalSupply={token.totalSupply ?? null}
+          initial={holdersResult}
+        />
       )}
 
       {/* Risk Signals */}
