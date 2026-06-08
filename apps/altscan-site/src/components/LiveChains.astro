@@ -1,0 +1,54 @@
+---
+import { products } from '../data/products';
+---
+<div class="chains">
+  <div class="cap"><span>// live chains</span>
+    <span class="on"><span class="dotlive"></span><span data-chains-summary>2 online · 1 queued</span></span>
+  </div>
+  {products.map((p) => (
+    <div class="crow" data-chain={p.id}>
+      <span class="bar" style={`background:var(${p.colorVar})`}></span>
+      <span class="who">{p.brand}<small>{p.domain}</small></span>
+      <span><span class="lbl">chain</span><br><span class="val">{p.chain}</span></span>
+      <span><span class="lbl">latest block</span><br><span class="val" data-block>—</span></span>
+      <a class="go" href={p.url}>open ↗</a>
+    </div>
+  ))}
+  <div class="crow pending">
+    <span class="bar" style="background:#d6d6de"></span>
+    <span class="who">More chains<small>coming soon</small></span>
+    <span><span class="lbl">chain</span><br><span class="val">—</span></span>
+    <span><span class="lbl">latest block</span><br><span class="val">—</span></span>
+    <span class="go" style="color:var(--mut)">queued</span>
+  </div>
+</div>
+
+<script>
+  // Progressive enhancement: fill in live block heights. Page is correct without it.
+  (async () => {
+    try {
+      const res = await fetch('/api/chains.json');
+      if (!res.ok) return;
+      const data = await res.json();
+      let online = 0;
+      document.querySelectorAll('[data-chain]').forEach((row) => {
+        const id = row.getAttribute('data-chain');
+        const state = data[id];
+        const cell = row.querySelector('[data-block]');
+        if (!cell) return;
+        if (state && typeof state.block === 'number') {
+          cell.textContent = '#' + state.block.toLocaleString();
+          online++;
+        } else {
+          cell.textContent = 'offline';
+        }
+      });
+      document.querySelectorAll('[data-chain-block]').forEach((el) => {
+        const st = data[el.getAttribute('data-chain-block')];
+        if (st && typeof st.block === 'number') el.textContent = '#' + (st.block / 1e6).toFixed(1) + 'M';
+      });
+      const summary = document.querySelector('[data-chains-summary]');
+      if (summary) summary.textContent = `${online} online · 1 queued`;
+    } catch { /* keep static fallback */ }
+  })();
+</script>

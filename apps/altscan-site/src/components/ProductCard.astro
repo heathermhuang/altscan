@@ -1,0 +1,16 @@
+---
+import type { Product } from '../data/products';
+interface Props { product: Product; }
+const { product: p } = Astro.props;
+---
+<a class={`pcard ${p.id}`} href={p.url}>
+  <div class="edge"></div>
+  <div class="top"><span class="logo">{p.logoLetter}</span>
+    <h3>{p.brand}<small>{p.domain} · {p.chain}</small></h3>
+  </div>
+  <div class="pstats">
+    <div><div class="lbl">latest block</div><div class="n" data-chain-block={p.id}>—</div></div>
+    <div><div class="lbl">status</div><div class="n" style="color:var(--live)">● live</div></div>
+  </div>
+  <span class="open">Open explorer →</span>
+</a>

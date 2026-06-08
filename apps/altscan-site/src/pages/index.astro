@@ -1,6 +1,33 @@
 ---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Hero from '../components/Hero.astro';
+import LiveChains from '../components/LiveChains.astro';
+import ProductCard from '../components/ProductCard.astro';
+import Capabilities from '../components/Capabilities.astro';
+import OpenSource from '../components/OpenSource.astro';
+import Footer from '../components/Footer.astro';
+import { products } from '../data/products';
 ---
-<html lang="en">
-  <head><meta charset="utf-8" /><title>altscan.io</title></head>
-  <body><h1>altscan scaffold ok</h1></body>
-</html>
+<Base>
+  <Nav />
+  <Hero><LiveChains /></Hero>
+
+  <div class="wrap">
+    <section id="explorers" style="border-top:none">
+      <div class="sec-head"><h2>Two explorers, live today</h2>
+        <p>Independent, fast, and ad-light — each on its own domain.</p></div>
+      <div class="prods">
+        {products.map((p) => <ProductCard product={p} />)}
+        <div class="more-card">+ more chains coming
+          <div class="chips"><span class="chip">Base?</span><span class="chip">Arbitrum?</span><span class="chip">Polygon?</span><span class="chip">your chain →</span></div>
+        </div>
+      </div>
+    </section>
+
+    <Capabilities />
+    <OpenSource />
+  </div>
+
+  <Footer />
+</Base>
