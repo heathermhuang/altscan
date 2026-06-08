@@ -52,6 +52,14 @@ export function Footer() {
             >
               Measurable Data Token (MDT)
             </a>
+            <a
+              href="https://altscan.io"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${theme.footerAccent} hover:opacity-80 text-xs font-medium transition-colors mt-1.5 block`}
+            >
+              Powered by Altscan ↗
+            </a>
           </div>
         </div>
       </div>
@@ -68,7 +76,7 @@ export function Footer() {
           <Link href="/about" className="hover:text-gray-200 transition-colors py-2">About</Link>
           <a href="https://status-page-6ez4.onrender.com/" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">Status ↗</a>
 
-          <a href="https://github.com/heathermhuang/bnbscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
+          <a href="https://github.com/heathermhuang/altscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
         </div>
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />
