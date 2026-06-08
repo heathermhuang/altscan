@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "altscan-site",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@altscan/site", "dev"],
+      "port": 4321
+    },
+    {
       "name": "BNBScan Web (Next.js)",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@altscan/explorer", "dev"],

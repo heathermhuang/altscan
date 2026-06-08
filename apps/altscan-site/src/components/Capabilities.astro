@@ -1,0 +1,12 @@
+---
+import { capabilities } from '../data/capabilities';
+---
+<section id="capabilities">
+  <div class="sec-head"><h2>Everything you'd expect in an explorer</h2>
+    <p>The same toolkit on every chain Altscan powers.</p></div>
+  <div class="caps">
+    {capabilities.map((c) => (
+      <div class="cap-tile"><div class="ic">{c.n}</div><h4>{c.title}</h4><p>{c.desc}</p></div>
+    ))}
+  </div>
+</section>

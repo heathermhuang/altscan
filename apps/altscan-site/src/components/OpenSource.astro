@@ -1,0 +1,24 @@
+---
+import { GITHUB } from '../data/site';
+---
+<section id="open-source">
+  <div class="oss">
+    <div>
+      <span class="kick">// free & open source</span>
+      <h2>One codebase. Run it yourself.</h2>
+      <p>Altscan is AGPL-3.0. The same engine that runs bnbscan.com and ethscan.io is yours to read, fork, and self-host. Point <span class="mono" style="color:#cfcfdd">CHAIN</span> at a network and go.</p>
+      <div class="feats"><span>Next.js 14</span><span>Drizzle ORM</span><span>ethers.js</span><span>one schema</span><span>AGPL-3.0</span></div>
+      <div class="ossbtns"><a class="b1" href={GITHUB}>★ Star on GitHub</a><a class="b2" href={`${GITHUB}#getting-started`}>Self-host guide →</a></div>
+    </div>
+    <div class="term">
+      <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+      <div class="body">
+        <span class="c1"># clone & run any chain</span><br>
+        <span class="g">$</span> git clone altscan && pnpm i<br>
+        <span class="g">$</span> <span class="y">CHAIN=bnb</span> pnpm dev <span class="c1"># → bnbscan</span><br>
+        <span class="g">$</span> <span class="b">CHAIN=eth</span> pnpm dev <span class="c1"># → ethscan</span><br>
+        <span class="g">$</span> <span class="c1">CHAIN=your-chain pnpm dev</span>
+      </div>
+    </div>
+  </div>
+</section>

@@ -12,6 +12,7 @@ dist/
 .claude/scheduled_tasks.lock
 *.bak
 .design-review/
+.DS_Store
 
 # claude-mem auto-generated context dump — regenerated locally, never committed
 AGENTS.md
@@ -23,3 +24,6 @@ TODOS.md
 QA-*.md
 docs/superpowers/
 docs/cloudflare-waf-api-internal.md
+
+# Visual-companion brainstorm scratch (local only)
+.superpowers/

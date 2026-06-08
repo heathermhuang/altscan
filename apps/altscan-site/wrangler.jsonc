@@ -1,0 +1,9 @@
+{
+  "name": "altscan-site",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./dist/_worker.js/index.js",
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  "routes": [{ "pattern": "altscan.io", "custom_domain": true }],
+  "observability": { "enabled": true }
+}
