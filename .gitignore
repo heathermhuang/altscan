@@ -12,6 +12,7 @@ dist/
 .claude/scheduled_tasks.lock
 *.bak
 .design-review/
+.DS_Store
 
 # claude-mem auto-generated context dump — regenerated locally, never committed
 AGENTS.md
