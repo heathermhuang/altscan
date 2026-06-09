@@ -16,6 +16,13 @@
   <a href="https://ethscan.io"><strong>ethscan.io</strong></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/heathermhuang/altscan/actions/workflows/ci.yml"><img src="https://github.com/heathermhuang/altscan/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
+  <img src="https://img.shields.io/badge/Next.js-14-black?logo=next.js" alt="Next.js 14" />
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+</p>
+
 ---
 
 ## What is this?
@@ -193,7 +200,7 @@ pnpm test
 
 Test suite covers IP spoofing prevention, SSRF protection, and rate limiting. See:
 - `packages/explorer-core/src/rate-limit.test.ts`
-- `apps/web/lib/webhook-ssrf.test.ts`
+- `apps/explorer/lib/webhook-ssrf.test.ts`
 
 ## Deployment
 
@@ -212,12 +219,12 @@ git push origin main
 | `ethscan-web` | Pro (2GB) | `CHAIN=eth`, rootDir: `apps/explorer` |
 | `bnbscan-indexer` | Worker | `CHAIN=bnb`, 7-day data retention |
 | `eth-indexer` | Worker | `CHAIN=eth`, 7-day data retention |
-| BNB Postgres | Basic 4GB | 50GB disk, autoscaling off |
-| ETH Postgres | Basic 1GB | 50GB disk, autoscaling off |
+| BNB Postgres | Basic 1GB | 150GB disk, autoscaling off |
+| ETH Postgres | Basic 1GB | 30GB disk, autoscaling off |
 
 ### Data Retention
 
-Indexers enforce a **7-day rolling retention** window, running cleanup every 6 hours. Database size stays around 25-30GB per chain.
+Indexers enforce a **7-day rolling retention** window, running cleanup every 6 hours. Database size scales with chain throughput and the retention window — typically tens of GB per chain.
 
 To manually trigger cleanup:
 ```bash
@@ -229,17 +236,20 @@ curl -X POST "https://bnbscan.com/api/admin/db-prune?days=7" \
 
 - **No reorg handling** — indexers advance by block height without canonical chain validation
 - **Token balances not live-updated** — holder counts and balances refresh on indexer pass
-- **Per-process rate limiting** — not Redis-backed; may allow bypass under auto-scaling
 - **Historical coverage** — starts from a recent block, not genesis
 - **Bot detection disabled** — turned off to enable ISR caching
 
 ## Contributing
 
+Contributions are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup, the `CHAIN` model, and PR conventions, and our **[Code of Conduct](CODE_OF_CONDUCT.md)**.
+
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/my-feature`
 3. Make your changes and add tests
 4. Run the test suite: `pnpm test`
-5. Submit a pull request
+5. Submit a pull request against `main`
+
+Found a security vulnerability? Please follow our **[Security Policy](SECURITY.md)** — do not open a public issue.
 
 ## License
 

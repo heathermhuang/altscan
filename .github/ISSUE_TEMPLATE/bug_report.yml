@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a problem with an explorer, the API, the indexer, or altscan.io
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please search [existing issues](https://github.com/heathermhuang/altscan/issues) first to avoid duplicates.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface is affected?
+      options:
+        - BNBScan (bnbscan.com)
+        - EthScan (ethscan.io)
+        - altscan.io (umbrella site)
+        - Public REST API
+        - Indexer
+        - Self-hosted / local dev
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact URL, address / tx / token, or API request where relevant.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Affected URL (if any)
+      placeholder: https://bnbscan.com/address/0x...
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Browser / OS for UI issues; Node and pnpm versions plus the `CHAIN` value for self-hosted issues.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste any relevant console output or attach screenshots.

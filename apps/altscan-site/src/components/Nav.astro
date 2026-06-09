@@ -1,5 +1,6 @@
 ---
 import { GITHUB } from '../data/site';
+import GitHubIcon from './GitHubIcon.astro';
 ---
 <nav><div class="nav-in">
   <span class="brand">altscan<span class="cur">▋</span></span>
@@ -7,5 +8,5 @@ import { GITHUB } from '../data/site';
     <a href="#explorers">Explorers</a><a href="#capabilities">Capabilities</a>
     <a href="#open-source">Open Source</a><a href={GITHUB}>Docs</a>
   </div>
-  <a class="gh" href={GITHUB}>★ <b>GitHub</b></a>
+  <a class="gh" href={GITHUB} aria-label="Altscan on GitHub"><GitHubIcon size={15} /> <b>GitHub</b></a>
 </div></nav>

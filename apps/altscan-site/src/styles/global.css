@@ -94,7 +94,7 @@ section{padding:60px 0;border-top:1px solid var(--hair)}
 .oss .feats{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 .oss .feats span{font-family:var(--mono);font-size:12px;border:1px solid rgba(255,255,255,.14);border-radius:99px;padding:5px 11px;color:#cfcfdd}
 .oss .ossbtns{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
-.oss .b1{background:#fff;color:#0c0c12;font-weight:600;font-size:13.5px;padding:10px 16px;border-radius:9px;font-family:var(--sans)}
+.oss .b1{background:#fff;color:#0c0c12;font-weight:600;font-size:13.5px;padding:10px 16px;border-radius:9px;font-family:var(--sans);display:inline-flex;align-items:center;gap:7px}
 .oss .b2{border:1px solid rgba(255,255,255,.22);color:#fff;font-weight:600;font-size:13.5px;padding:10px 16px;border-radius:9px}
 .term{background:#06060a;border:1px solid rgba(255,255,255,.1);border-radius:12px;font-family:var(--mono);font-size:12.5px;overflow:hidden}
 .term .bar{display:flex;gap:6px;padding:10px 13px;border-bottom:1px solid rgba(255,255,255,.08)}

@@ -25,5 +25,8 @@ QA-*.md
 docs/superpowers/
 docs/cloudflare-waf-api-internal.md
 
+# Local machine fixup for this iCloud-synced clone — not part of the open-source repo
+scripts/local-postinstall.sh
+
 # Visual-companion brainstorm scratch (local only)
 .superpowers/

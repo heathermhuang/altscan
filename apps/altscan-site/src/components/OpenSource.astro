@@ -1,5 +1,6 @@
 ---
 import { GITHUB } from '../data/site';
+import GitHubIcon from './GitHubIcon.astro';
 ---
 <section id="open-source">
   <div class="oss">
@@ -8,7 +9,7 @@ import { GITHUB } from '../data/site';
       <h2>One codebase. Run it yourself.</h2>
       <p>Altscan is AGPL-3.0. The same engine that runs bnbscan.com and ethscan.io is yours to read, fork, and self-host. Point <span class="mono" style="color:#cfcfdd">CHAIN</span> at a network and go.</p>
       <div class="feats"><span>Next.js 14</span><span>Drizzle ORM</span><span>ethers.js</span><span>one schema</span><span>AGPL-3.0</span></div>
-      <div class="ossbtns"><a class="b1" href={GITHUB}>★ Star on GitHub</a><a class="b2" href={`${GITHUB}#getting-started`}>Self-host guide →</a></div>
+      <div class="ossbtns"><a class="b1" href={GITHUB}><GitHubIcon size={15} /> Star on GitHub</a><a class="b2" href={`${GITHUB}#getting-started`}>Self-host guide →</a></div>
     </div>
     <div class="term">
       <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
