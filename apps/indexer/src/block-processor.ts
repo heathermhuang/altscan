@@ -871,11 +871,21 @@ function runTransferWriter(): void {
         try {
           await writeTransferBlocks(blockNums, rows)
 
-          // Fold written blocks into W through the contiguous prefix.
+          // Fold written blocks into W through the contiguous prefix. Compute the new
+          // watermark first and only advance durableBlock / clear transferWritten AFTER
+          // persistDurableBlock() commits. The old order advanced in memory before the
+          // persist, so a failed persist was never retried (the next cycle saw nothing to
+          // move) AND the in-memory watermark ran ahead of the durable one — masking a
+          // sustained indexer_cursor outage. Holding state until the persist lands makes
+          // the failure recur every cycle, so it both retries and feeds the failure ALERT.
           for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
-          let moved = false
-          while (transferWritten.delete(durableBlock + 1)) { durableBlock++; moved = true }
-          if (moved) await persistDurableBlock(durableBlock)
+          let newDurable = durableBlock
+          while (transferWritten.has(newDurable + 1)) newDurable++
+          if (newDurable > durableBlock) {
+            await persistDurableBlock(newDurable)
+            for (let n = durableBlock + 1; n <= newDurable; n++) transferWritten.delete(n)
+            durableBlock = newDurable
+          }
 
           // Rows are durable now — let holder-balance tracking see them.
           // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
