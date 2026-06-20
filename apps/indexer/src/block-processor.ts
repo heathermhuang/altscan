@@ -285,7 +285,15 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   // including transfer-less ones (empty array) — so the durable watermark can
   // advance past it. The writer persists these rows and only then advances
   // indexer_cursor.transfers_durable_block, the crash-safe resume point.
-  if (ASYNC_TT_WRITER) {
+  //
+  // EXCEPT when skipLogs: receipts weren't decoded, so decodedTransfers is empty
+  // by-omission, not empty-by-fact. The writer would DELETE the block's existing
+  // token_transfers (writeTransferBlocks always DELETEs the drained blocks) and
+  // re-insert nothing — silent data loss for `--skip-logs` backfills such as the
+  // documented `backfill.js 1 N --skip-logs`. The live indexer never sets skipLogs,
+  // so its watermark-advance behavior (transfer-less blocks still enqueue []) is
+  // unchanged.
+  if (ASYNC_TT_WRITER && !skipLogs) {
     enqueueTransferWrite(block.number, decodedTransfers)
   }
 
