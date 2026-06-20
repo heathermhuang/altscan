@@ -819,16 +819,17 @@ export function getTransferQueueDepth(): { blocks: number; rows: number; durable
   return { blocks: transferPending.size, rows: transferPendingRows, durableBlock }
 }
 
-export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
-  const prev = transferPending.get(blockNumber)
-  if (prev) transferPendingRows -= prev.length
-  transferPending.set(blockNumber, rows)   // latest decode of a block wins
-  transferPendingRows += rows.length
-  // Queue high-water alert. Fires when pending rows cross the same bound the live loop
-  // (index.ts) and the backfill loop use for backpressure — i.e. the writer is falling
-  // behind faster than producers are being throttled. Edge-triggered (warn once on the
-  // way up, log once on the way back down) so a sustained breach doesn't spam every
-  // enqueue. The June 2026 incident saw the queue blow past this with no signal at all.
+// Edge-triggered high-water alert for the pending queue (warn once on the way up,
+// log once on the way back down) so a sustained breach doesn't spam every enqueue.
+// The June 2026 incident saw the queue blow past this bound with no signal at all.
+// MUST be called after every DURABLE change to transferPendingRows — enqueue,
+// post-failure requeue, and a completed drain — otherwise the flag desyncs: the
+// writer draining a breach to empty (or a requeue re-crossing the bound) happens
+// outside enqueue, so without this the recovery log is missed and the flag can stick
+// true. Deliberately NOT called at the transient top-of-loop reset to 0, which would
+// flap warn/recovered every 250ms during a write-failure retry storm. Reuses
+// TT_QUEUE_HIGH_WATER_ROWS — the same bound the live + backfill loops throttle on.
+function evaluateTransferQueueHighWater(): void {
   if (!ttQueueOverHighWater && transferPendingRows > TT_QUEUE_HIGH_WATER_ROWS) {
     ttQueueOverHighWater = true
     console.warn(`[tt-writer] ALERT queue over high-water: ${transferPendingRows} rows > ${TT_QUEUE_HIGH_WATER_ROWS} (${transferPending.size} blocks pending, W=${durableBlock})`)
@@ -836,6 +837,14 @@ export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow
     ttQueueOverHighWater = false
     console.log(`[tt-writer] queue recovered: ${transferPendingRows} rows ≤ ${TT_QUEUE_HIGH_WATER_ROWS}`)
   }
+}
+
+export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
+  const prev = transferPending.get(blockNumber)
+  if (prev) transferPendingRows -= prev.length
+  transferPending.set(blockNumber, rows)   // latest decode of a block wins
+  transferPendingRows += rows.length
+  evaluateTransferQueueHighWater()
   runTransferWriter()
 }
 
@@ -891,6 +900,10 @@ function runTransferWriter(): void {
               transferPendingRows += batch.length
             }
           }
+          // A requeue can push the pending count back over the bound without an enqueue —
+          // re-evaluate so a breach during a failure storm still surfaces. No-op when the
+          // flag is already set, so it won't flap against the per-retry failure alert below.
+          evaluateTransferQueueHighWater()
           // token_transfers is primary data, so the writer retries forever rather than
           // dropping the queue. But a sustained failure streak means the durable watermark
           // is frozen and rows are piling up unwritten — escalate from the per-attempt warn
@@ -906,6 +919,9 @@ function runTransferWriter(): void {
           await new Promise(r => setTimeout(r, 250))
         }
       }
+      // Loop exits only when transferPending is empty, so the queue is durably drained
+      // here — fire the recovery log if we'd alerted (the writer cleared it, not an enqueue).
+      evaluateTransferQueueHighWater()
     } finally {
       transferWriterRunning = false
     }
