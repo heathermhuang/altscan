@@ -1,7 +1,12 @@
 import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
-import { processBlock } from './block-processor'
+import {
+  processBlock,
+  initTransferWriter,
+  flushTransferWriter,
+  ASYNC_TT_WRITER,
+} from './block-processor'
 
 const chain = getChainConfig()
 
@@ -24,6 +29,19 @@ const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network }
 async function backfill() {
   console.log(`[backfill] Processing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS}, concurrency=${CONCURRENCY})`)
 
+  // Async token_transfers writer (block-processor's default for BNB): processBlock
+  // ENQUEUES transfers for a background coalescing writer instead of inserting them
+  // inline. That writer is inert until seeded — so without this call every backfilled
+  // transfer just piles up in memory and is silently dropped at process.exit (the
+  // June 2026 tt-writer data-loss incident). Seed at END (top of range), NOT START-1:
+  // the writer must persist the rows but must NOT advance/persist
+  // indexer_cursor.transfers_durable_block (the shared crash-safe watermark a live
+  // indexer reads on restart). Seeding low would drag that watermark backward and
+  // force a full replay; seeding at END means no enqueued block exceeds the
+  // watermark, so the fold-and-persist step is skipped while rows are still written.
+  // Inline path (ETH / ASYNC_TT_WRITER=0) writes synchronously and needs none of this.
+  if (ASYNC_TT_WRITER) initTransferWriter(END)
+
   const blocks = Array.from({ length: END - START + 1 }, (_, i) => START + i)
   let done = 0
 
@@ -41,6 +59,15 @@ async function backfill() {
     if (done % 100 === 0 || done === blocks.length) {
       console.log(`[backfill] Progress: ${done}/${blocks.length} (${Math.round(done / blocks.length * 100)}%)`)
     }
+  }
+
+  // Drain the async writer so every enqueued transfer is committed to the DB before
+  // we exit — process.exit(0) would otherwise discard the in-memory queue. No-op on
+  // the inline path. flushTransferWriter resolves only once the queue is empty and
+  // the drainer's final DB transaction has landed.
+  if (ASYNC_TT_WRITER) {
+    console.log('[backfill] draining transfer writer before exit...')
+    await flushTransferWriter()
   }
 
   console.log('[backfill] Done.')
