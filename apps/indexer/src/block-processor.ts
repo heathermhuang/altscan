@@ -871,12 +871,6 @@ function runTransferWriter(): void {
         try {
           await writeTransferBlocks(blockNums, rows)
 
-          // Writer is healthy — clear the failure streak (announce recovery if we'd alerted).
-          if (ttWriterConsecutiveFailures >= TT_WRITER_FAILURE_ALERT_THRESHOLD) {
-            console.log(`[tt-writer] writer recovered after ${ttWriterConsecutiveFailures} consecutive failure(s)`)
-          }
-          ttWriterConsecutiveFailures = 0
-
           // Fold written blocks into W through the contiguous prefix.
           for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
           let moved = false
@@ -886,6 +880,16 @@ function runTransferWriter(): void {
           // Rows are durable now — let holder-balance tracking see them.
           // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
           if (rows.length > 0) enqueueHolderBalanceUpdate(rows)
+
+          // Only clear the failure streak after the FULL cycle succeeded (write AND
+          // watermark persist). Resetting right after writeTransferBlocks would mask a
+          // persistDurableBlock() failure: the catch re-increments from 0 each retry, so a
+          // frozen-watermark loop (write OK, persist failing while new blocks arrive) would
+          // never reach the ALERT threshold. Announce recovery if we'd previously alerted.
+          if (ttWriterConsecutiveFailures >= TT_WRITER_FAILURE_ALERT_THRESHOLD) {
+            console.log(`[tt-writer] writer recovered after ${ttWriterConsecutiveFailures} consecutive failure(s)`)
+          }
+          ttWriterConsecutiveFailures = 0
 
           if (++ttWriterDrainCount % 200 === 0) {
             console.log(`[tt-writer] W=${durableBlock} pending=${transferPending.size}blk/${transferPendingRows}rows ahead=${transferWritten.size}`)
