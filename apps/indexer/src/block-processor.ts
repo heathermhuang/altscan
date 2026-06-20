@@ -434,7 +434,10 @@ async function processReceiptsBatch(
               timestamp: r.timestamp,
             })))
             .onConflictDoNothing()
-            .returning({ id: schema.tokenTransfers.id })
+            // Count inserted rows only (gates the holder-balance enqueue below). We
+            // return block_number (NOT NULL) purely so `.length` is correct — there is
+            // no `id` column anymore (dropped 2026-06-20 after int4 seq overflow).
+            .returning({ b: schema.tokenTransfers.blockNumber })
           totalInserted += inserted.length
         }
         if (t) t.dbInsertTokenTransfers = performance.now() - sI

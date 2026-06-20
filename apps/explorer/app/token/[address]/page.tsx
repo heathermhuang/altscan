@@ -429,7 +429,7 @@ export default async function TokenDetailPage({
                 }
               })()
               return (
-                <tr key={t.id} className="hover:bg-gray-50">
+                <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono text-xs">
                     <Link
                       href={`/tx/${t.txHash}`}

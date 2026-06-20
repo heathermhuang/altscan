@@ -64,7 +64,6 @@ export async function ensureSchema(): Promise<void> {
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS token_transfers (
-      id            SERIAL PRIMARY KEY,
       tx_hash       VARCHAR(66) NOT NULL,
       log_index     INTEGER NOT NULL DEFAULT 0,
       token_address VARCHAR(42) NOT NULL,
