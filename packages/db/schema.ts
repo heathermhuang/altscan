@@ -56,14 +56,11 @@ export const addresses = pgTable('addresses', {
 })
 
 export const tokenTransfers = pgTable('token_transfers', {
-  // `id` is a plain sequence-backed column, NOT a primary key. token_transfers is
-  // RANGE-partitioned by block_number (see migrate-partition-tt.ts); a partitioned
-  // table's PK/unique would have to include the partition key, and nothing reads or
-  // orders by `id` (all reads key on token_address / from/to_address / tx_hash /
-  // block_number). Keeping the column — but not the PK — lets `SELECT *` stay valid
-  // while removing the per-insert id-index maintenance cost. (Pre-migration / ETH the
-  // physical table may still carry the old SERIAL PRIMARY KEY; harmless.)
-  id:           serial('id'),
+  // No surrogate `id`: token_transfers is RANGE-partitioned by block_number (see
+  // migrate-partition-tt.ts) and nothing reads or orders by a row id — all reads key
+  // on token_address / from/to_address / tx_hash / block_number. The old int4 `serial`
+  // id was dropped 2026-06-20 after its sequence overflowed 2^31 on BNB and OOM-crash-
+  // looped the indexer; writers count inserted rows via `.length`, never the id value.
   txHash:       varchar('tx_hash', { length: 66 }).notNull(),
   logIndex:     integer('log_index').notNull(),
   tokenAddress: varchar('token_address', { length: 42 }).notNull(),

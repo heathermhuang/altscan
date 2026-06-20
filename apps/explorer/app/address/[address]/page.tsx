@@ -553,7 +553,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
           </thead>
           <tbody className="divide-y">
             {transfers.map((t) => (
-              <tr key={t.id} className="hover:bg-gray-50">
+              <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-gray-50">
                 <td className="px-4 py-2 font-mono text-xs">
                   <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
                     {t.txHash.slice(0, 14)}...
