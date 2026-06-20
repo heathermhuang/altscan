@@ -5,7 +5,9 @@ import {
   processBlock,
   initTransferWriter,
   flushTransferWriter,
+  getTransferQueueDepth,
   ASYNC_TT_WRITER,
+  TT_QUEUE_HIGH_WATER_ROWS,
 } from './block-processor'
 
 const chain = getChainConfig()
@@ -25,6 +27,10 @@ const rpcUrl = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
   .filter(Boolean)[0] ?? chain.defaultRpcUrl
 const network = Network.from(chain.chainId)
 const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 async function backfill() {
   console.log(`[backfill] Processing blocks ${START}–${END} (${END - START + 1} blocks, skipLogs=${SKIP_LOGS}, concurrency=${CONCURRENCY})`)
@@ -51,6 +57,16 @@ async function backfill() {
 
   // Process in chunks of CONCURRENCY
   for (let i = 0; i < blocks.length; i += CONCURRENCY) {
+    // Backpressure: don't let block decoding outrun the async transfer writer.
+    // Mirrors the live loop (index.ts) — bounds the pending-queue memory (OOM history)
+    // and the W↔tip replay window if we crash mid-backfill. Only meaningful when the
+    // async writer is active AND enqueuing; SKIP_LOGS never enqueues (block-processor
+    // "3b"), so there is nothing to bound — same guard as the seed/flush calls above.
+    if (ASYNC_TT_WRITER && !SKIP_LOGS) {
+      while (getTransferQueueDepth().rows > TT_QUEUE_HIGH_WATER_ROWS) {
+        await sleep(20)
+      }
+    }
     const chunk = blocks.slice(i, i + CONCURRENCY)
     await Promise.all(
       chunk.map(n =>

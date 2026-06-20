@@ -773,6 +773,11 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
 //     replay is a clean overwrite (no dupes, no reliance on a unique constraint,
 //     so it works identically on the block-range-partitioned table — Part B).
 const TT_QUEUE_HIGH_WATER_ROWS = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '50000', 10)
+// Consecutive failed drains before the writer escalates from a per-attempt warn to a
+// loud error alert (and again every Nth failure after). Mirrors webhook-notifier's
+// "deactivate after 5 consecutive failures" pattern — here we never give up (transfers
+// are primary data), we just get loud so log-based monitoring fires.
+const TT_WRITER_FAILURE_ALERT_THRESHOLD = parseInt(process.env.TT_WRITER_FAILURE_ALERT_THRESHOLD ?? '5', 10)
 let transferPending = new Map<number, TokenTransferRow[]>()
 let transferPendingRows = 0
 const transferWritten = new Set<number>()   // committed, not yet folded into W
@@ -780,6 +785,8 @@ let durableBlock = 0
 let transferWriterSeeded = false
 let transferWriterRunning = false
 let ttWriterDrainCount = 0
+let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
+let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
 
 /**
  * Seed the in-memory watermark from indexer_cursor at startup. MUST be called by
@@ -817,6 +824,18 @@ export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow
   if (prev) transferPendingRows -= prev.length
   transferPending.set(blockNumber, rows)   // latest decode of a block wins
   transferPendingRows += rows.length
+  // Queue high-water alert. Fires when pending rows cross the same bound the live loop
+  // (index.ts) and the backfill loop use for backpressure — i.e. the writer is falling
+  // behind faster than producers are being throttled. Edge-triggered (warn once on the
+  // way up, log once on the way back down) so a sustained breach doesn't spam every
+  // enqueue. The June 2026 incident saw the queue blow past this with no signal at all.
+  if (!ttQueueOverHighWater && transferPendingRows > TT_QUEUE_HIGH_WATER_ROWS) {
+    ttQueueOverHighWater = true
+    console.warn(`[tt-writer] ALERT queue over high-water: ${transferPendingRows} rows > ${TT_QUEUE_HIGH_WATER_ROWS} (${transferPending.size} blocks pending, W=${durableBlock})`)
+  } else if (ttQueueOverHighWater && transferPendingRows <= TT_QUEUE_HIGH_WATER_ROWS) {
+    ttQueueOverHighWater = false
+    console.log(`[tt-writer] queue recovered: ${transferPendingRows} rows ≤ ${TT_QUEUE_HIGH_WATER_ROWS}`)
+  }
   runTransferWriter()
 }
 
@@ -843,6 +862,12 @@ function runTransferWriter(): void {
         try {
           await writeTransferBlocks(blockNums, rows)
 
+          // Writer is healthy — clear the failure streak (announce recovery if we'd alerted).
+          if (ttWriterConsecutiveFailures >= TT_WRITER_FAILURE_ALERT_THRESHOLD) {
+            console.log(`[tt-writer] writer recovered after ${ttWriterConsecutiveFailures} consecutive failure(s)`)
+          }
+          ttWriterConsecutiveFailures = 0
+
           // Fold written blocks into W through the contiguous prefix.
           for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
           let moved = false
@@ -857,13 +882,26 @@ function runTransferWriter(): void {
             console.log(`[tt-writer] W=${durableBlock} pending=${transferPending.size}blk/${transferPendingRows}rows ahead=${transferWritten.size}`)
           }
         } catch (err) {
-          console.warn('[tt-writer] write failed, re-queueing:', err instanceof Error ? err.message : err)
+          ttWriterConsecutiveFailures++
+          const msg = err instanceof Error ? err.message : String(err)
           // Re-queue (don't clobber a newer decode of the same block).
           for (const [n, batch] of drained) {
             if (!transferPending.has(n)) {
               transferPending.set(n, batch)
               transferPendingRows += batch.length
             }
+          }
+          // token_transfers is primary data, so the writer retries forever rather than
+          // dropping the queue. But a sustained failure streak means the durable watermark
+          // is frozen and rows are piling up unwritten — escalate from the per-attempt warn
+          // to a loud error at the threshold (and every Nth after) so monitoring fires.
+          if (
+            ttWriterConsecutiveFailures >= TT_WRITER_FAILURE_ALERT_THRESHOLD &&
+            ttWriterConsecutiveFailures % TT_WRITER_FAILURE_ALERT_THRESHOLD === 0
+          ) {
+            console.error(`[tt-writer] ALERT write failing: ${ttWriterConsecutiveFailures} consecutive failure(s), queue not draining (W=${durableBlock}, ${transferPendingRows} rows pending): ${msg}`)
+          } else {
+            console.warn('[tt-writer] write failed, re-queueing:', msg)
           }
           await new Promise(r => setTimeout(r, 250))
         }
