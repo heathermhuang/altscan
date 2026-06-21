@@ -773,6 +773,22 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
 //     replay is a clean overwrite (no dupes, no reliance on a unique constraint,
 //     so it works identically on the block-range-partitioned table — Part B).
 const TT_QUEUE_HIGH_WATER_ROWS = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '50000', 10)
+// Pending-rows threshold for the high-water ALERT, decoupled from the backpressure
+// bound above. PR #43 reused TT_QUEUE_HIGH_WATER_ROWS for both, so the WARN tripped on
+// every momentary ride along the backpressure ceiling (13 benign fires the first day,
+// all ~50,000–50,200 rows with W advancing). The alert must mean "backpressure is
+// FAILING to contain the queue" (the 838k June incident), not "the queue is busy" — so
+// it gets its own, higher bound: default 2× the backpressure bound, floored AT the bound
+// so a misconfigured override can never make the alert noisier than PR #43 was. Pairs
+// with the lower recovery edge in evaluateTransferQueueHighWater() to form a hysteresis
+// band that can't flap.
+const parsedTtQueueAlertRows = parseInt(process.env.TT_QUEUE_ALERT_ROWS ?? '', 10)
+const TT_QUEUE_ALERT_ROWS = Math.max(
+  TT_QUEUE_HIGH_WATER_ROWS,
+  Number.isFinite(parsedTtQueueAlertRows) && parsedTtQueueAlertRows > 0
+    ? parsedTtQueueAlertRows
+    : TT_QUEUE_HIGH_WATER_ROWS * 2,
+)
 // Consecutive failed drains before the writer escalates from a per-attempt warn to a
 // loud error alert (and again every Nth failure after). Mirrors webhook-notifier's
 // "deactivate after 5 consecutive failures" pattern — here we never give up (transfers
@@ -796,7 +812,7 @@ let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives th
 export function initTransferWriter(seedDurableBlock: number): void {
   durableBlock = seedDurableBlock
   transferWriterSeeded = true
-  console.log(`[tt-writer] seeded durable watermark = ${durableBlock}`)
+  console.log(`[tt-writer] seeded durable watermark = ${durableBlock} (backpressure bound ${TT_QUEUE_HIGH_WATER_ROWS} rows, alert bound ${TT_QUEUE_ALERT_ROWS} rows)`)
   runTransferWriter()  // flush anything enqueued during startup
 }
 
@@ -821,21 +837,25 @@ export function getTransferQueueDepth(): { blocks: number; rows: number; durable
 
 // Edge-triggered high-water alert for the pending queue (warn once on the way up,
 // log once on the way back down) so a sustained breach doesn't spam every enqueue.
-// The June 2026 incident saw the queue blow past this bound with no signal at all.
+// The June 2026 incident saw the queue blow past the bound (~838k rows) with no signal.
 // MUST be called after every DURABLE change to transferPendingRows — enqueue,
 // post-failure requeue, and a completed drain — otherwise the flag desyncs: the
 // writer draining a breach to empty (or a requeue re-crossing the bound) happens
 // outside enqueue, so without this the recovery log is missed and the flag can stick
 // true. Deliberately NOT called at the transient top-of-loop reset to 0, which would
-// flap warn/recovered every 250ms during a write-failure retry storm. Reuses
-// TT_QUEUE_HIGH_WATER_ROWS — the same bound the live + backfill loops throttle on.
+// flap warn/recovered every 250ms during a write-failure retry storm.
+// Hysteresis band: WARN above TT_QUEUE_ALERT_ROWS (the high edge, only reached when
+// backpressure has lost containment) and recover at/under TT_QUEUE_HIGH_WATER_ROWS (the
+// backpressure bound the live + backfill loops throttle on). Warning at the higher edge
+// keeps normal busy-load oscillation along the backpressure ceiling silent; recovering
+// at the lower edge means "recovered" = backpressure pulled the queue back to target.
 function evaluateTransferQueueHighWater(): void {
-  if (!ttQueueOverHighWater && transferPendingRows > TT_QUEUE_HIGH_WATER_ROWS) {
+  if (!ttQueueOverHighWater && transferPendingRows > TT_QUEUE_ALERT_ROWS) {
     ttQueueOverHighWater = true
-    console.warn(`[tt-writer] ALERT queue over high-water: ${transferPendingRows} rows > ${TT_QUEUE_HIGH_WATER_ROWS} (${transferPending.size} blocks pending, W=${durableBlock})`)
+    console.warn(`[tt-writer] ALERT queue over high-water: ${transferPendingRows} rows > ${TT_QUEUE_ALERT_ROWS} alert bound — backpressure bound ${TT_QUEUE_HIGH_WATER_ROWS} not containing the queue (${transferPending.size} blocks pending, W=${durableBlock})`)
   } else if (ttQueueOverHighWater && transferPendingRows <= TT_QUEUE_HIGH_WATER_ROWS) {
     ttQueueOverHighWater = false
-    console.log(`[tt-writer] queue recovered: ${transferPendingRows} rows ≤ ${TT_QUEUE_HIGH_WATER_ROWS}`)
+    console.log(`[tt-writer] queue recovered: ${transferPendingRows} rows ≤ ${TT_QUEUE_HIGH_WATER_ROWS} backpressure bound`)
   }
 }
 
