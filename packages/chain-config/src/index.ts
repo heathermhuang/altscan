@@ -69,6 +69,12 @@ export type ChainConfig = {
   blockTime: number
   /** CoinGecko coin ID for price fetch */
   coingeckoId: string
+  /** Fallback circulating supply for the native coin, used to derive market cap as
+   *  price × supply when the market-cap APIs fail (they're unreliable from datacenter
+   *  IPs, but the Binance price is not). Self-refined at runtime from any successful cap
+   *  fetch (impliedSupply = reportedCap / price), so this is only the seed estimate —
+   *  a few % drift from quarterly burns is fine. */
+  nativeCirculatingSupply: number
   /** Env var name for RPC URL */
   rpcEnvVar: string
   /** Env var name for DB URL */
@@ -114,6 +120,7 @@ export const BSC: ChainConfig = {
   domain: 'bnbscan.com',
   blockTime: 3,
   coingeckoId: 'binancecoin',
+  nativeCirculatingSupply: 134_500_000, // ~implied from live cap/price; self-refines at runtime
   rpcEnvVar: 'BNB_RPC_URL',
   dbEnvVar: 'DATABASE_URL',
   defaultRpcUrl: 'https://bsc-dataseed1.binance.org/',
@@ -167,6 +174,7 @@ export const ETH: ChainConfig = {
   domain: 'ethscan.io',
   blockTime: 12,
   coingeckoId: 'ethereum',
+  nativeCirculatingSupply: 120_700_000, // ~ETH circulating; self-refines at runtime
   rpcEnvVar: 'ETH_RPC_URL',
   dbEnvVar: 'ETH_DATABASE_URL',
   defaultRpcUrl: 'https://eth.llamarpc.com',

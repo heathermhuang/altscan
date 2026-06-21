@@ -189,34 +189,39 @@ async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number
   return null
 }
 
-// Last-known-good market cap, kept in-process. The three free price APIs above all
-// rate-limit independently, so on some ISR regenerations every source fails at once
-// and the homepage's flagship stat rendered a broken-looking "—" (seen in prod: cap
-// blank while the live price beside it was fine). Serve the last real value instead,
-// bounded ~MARKET_CAP_MAX_STALE_MS from the last value THIS wrapper saw — approximate,
-// not a hard upstream-age cap: the fetches above use Next's revalidate Data Cache, which
-// can replay a prior success and re-stamp the timer, so true staleness may run somewhat
-// longer. Fine for a big-number cap that tracks price; past the bound with every source
-// still down we fall back to "—" (honest empty). Market cap tracks price (circulating
-// supply ~constant) and the price card stays live, so a few-minutes-stale cap reads as
-// accurate. In-memory + per-process: prod bnbscan-web may run multiple instances, so each
-// warms its own cache (a Redis/DB store would make the fallback fleet-consistent — not
-// worth it for this stat); a deploy/restart clears it and it repopulates on the next good fetch.
-let lastKnownMarketCap: { value: number; change24h: number } | null = null
-let lastKnownMarketCapAt = 0
-const MARKET_CAP_MAX_STALE_MS = 30 * 60 * 1000 // 30 min
+// Circulating supply for the native coin, refined in-process from any successful
+// market-cap API response (impliedSupply = reportedCap / price) so it auto-tracks BNB's
+// quarterly burns, and seeded from the chain-config constant until/if one succeeds. The
+// three free cap APIs above fail persistently from Render's datacenter IPs, but the
+// Binance PRICE (fetchNativePrice) is reliable — so deriving cap = price × supply makes
+// the homepage's flagship stat as dependable as the price (it only blanks if Binance
+// itself is down, vs. the old "—" whenever the cap APIs hiccuped). Only a FRESH cap value
+// refines supply: a stale cap ÷ the current price would distort it. In-memory + per
+// process; a restart reseeds from the constant, then re-refines on the next good fetch.
+let refinedSupply: number | null = null
 
-async function fetchMarketCap(): Promise<{ value: number; change24h: number } | null> {
-  const fresh = await fetchMarketCapFresh()
-  if (fresh) {
-    lastKnownMarketCap = fresh
-    lastKnownMarketCapAt = Date.now()
-    return fresh
+/** Market cap = reliable native price × circulating supply. `capRaw` is a best-effort
+ *  fresh market-cap fetch, used ONLY to refine the supply estimate — never for the value. */
+function deriveMarketCap(
+  price: { usd: number; change24h: number } | null,
+  capRaw: { value: number; change24h: number } | null,
+): { value: number; change24h: number } | null {
+  if (!price || price.usd <= 0) return null
+  if (capRaw && capRaw.value > 0) {
+    // Refine supply from a fresh cap, but reject outliers so one bad/stale/wrong-unit
+    // provider response can't poison the process-wide estimate (a stale Next Data Cache
+    // replay or a value off by orders of magnitude). A real circulating supply sits near
+    // the seed — it only drifts with slow burns — so accept only within [0.5×, 2×].
+    const implied = capRaw.value / price.usd
+    const seed = chainConfig.nativeCirculatingSupply
+    if (Number.isFinite(implied) && implied >= seed * 0.5 && implied <= seed * 2) {
+      refinedSupply = implied
+    }
   }
-  if (lastKnownMarketCap && Date.now() - lastKnownMarketCapAt < MARKET_CAP_MAX_STALE_MS) {
-    return lastKnownMarketCap
-  }
-  return null
+  const supply = refinedSupply ?? chainConfig.nativeCirculatingSupply
+  if (!(supply > 0)) return null
+  // Supply is ~constant over 24h, so the cap's 24h change tracks the price's.
+  return { value: price.usd * supply, change24h: price.change24h }
 }
 
 function formatMarketCap(value: number): string {
@@ -235,12 +240,16 @@ export default async function HomePage() {
     return Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), 15_000))])
   }
 
-  const [blocksResult, txsResult, nativePrice, marketCap] = await Promise.all([
+  const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
     dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []), []),
     fetchNativePrice(),
-    fetchMarketCap(),
+    fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
   ])
+
+  // Derive cap from the reliable Binance price × supply (the cap APIs fail from Render);
+  // capRaw only nudges the supply estimate. Stays populated whenever the price does.
+  const marketCap = deriveMarketCap(nativePrice, capRaw)
 
   latestBlocks = blocksResult
   latestTxs = txsResult
