@@ -140,8 +140,9 @@ async function fetchTxCount24h(latestBlock: { timestamp: Date } | undefined): Pr
   }
 }
 
-/** Fetch market cap and 24h change for the native currency. */
-async function fetchMarketCap(): Promise<{ value: number; change24h: number } | null> {
+/** Fetch market cap and 24h change for the native currency from the free price
+ * APIs, tried in order. Returns null only if ALL sources fail/rate-limit. */
+async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number } | null> {
   const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
 
   // Try CryptoCompare (has MKTCAP + CHANGEPCT24HOUR in RAW data)
@@ -185,6 +186,36 @@ async function fetchMarketCap(): Promise<{ value: number; change24h: number } | 
     }
   } catch { /* all failed */ }
 
+  return null
+}
+
+// Last-known-good market cap, kept in-process. The three free price APIs above all
+// rate-limit independently, so on some ISR regenerations every source fails at once
+// and the homepage's flagship stat rendered a broken-looking "—" (seen in prod: cap
+// blank while the live price beside it was fine). Serve the last real value instead,
+// bounded ~MARKET_CAP_MAX_STALE_MS from the last value THIS wrapper saw — approximate,
+// not a hard upstream-age cap: the fetches above use Next's revalidate Data Cache, which
+// can replay a prior success and re-stamp the timer, so true staleness may run somewhat
+// longer. Fine for a big-number cap that tracks price; past the bound with every source
+// still down we fall back to "—" (honest empty). Market cap tracks price (circulating
+// supply ~constant) and the price card stays live, so a few-minutes-stale cap reads as
+// accurate. In-memory + per-process: prod bnbscan-web may run multiple instances, so each
+// warms its own cache (a Redis/DB store would make the fallback fleet-consistent — not
+// worth it for this stat); a deploy/restart clears it and it repopulates on the next good fetch.
+let lastKnownMarketCap: { value: number; change24h: number } | null = null
+let lastKnownMarketCapAt = 0
+const MARKET_CAP_MAX_STALE_MS = 30 * 60 * 1000 // 30 min
+
+async function fetchMarketCap(): Promise<{ value: number; change24h: number } | null> {
+  const fresh = await fetchMarketCapFresh()
+  if (fresh) {
+    lastKnownMarketCap = fresh
+    lastKnownMarketCapAt = Date.now()
+    return fresh
+  }
+  if (lastKnownMarketCap && Date.now() - lastKnownMarketCapAt < MARKET_CAP_MAX_STALE_MS) {
+    return lastKnownMarketCap
+  }
   return null
 }
 
