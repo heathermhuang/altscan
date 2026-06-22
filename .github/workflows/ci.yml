@@ -32,3 +32,8 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      # apps/altscan-site ships its own tsx harness (excluded from the root
+      # vitest run); run it here so its chain-payload tests still gate PRs.
+      - name: Run altscan-site tests
+        run: pnpm --filter @altscan/site test
