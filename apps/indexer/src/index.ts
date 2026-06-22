@@ -22,6 +22,7 @@ import {
   flushTransferWriter,
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
+  TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -231,7 +232,12 @@ async function main() {
             // Backpressure: don't let block decoding outrun the transfer writer.
             // Bounds memory (OOM history) and the W↔tip replay window on crash.
             if (ASYNC_TT_WRITER) {
-              while (running && failure === null && getTransferQueueDepth().rows > TT_QUEUE_HIGH_WATER_ROWS) {
+              // Throttle on EITHER bound: pending rows (busy ranges) OR pending block
+              // count (transfer-less ranges where rows stays ~0 but the pending Map
+              // grows unbounded if the writer stalls — codex P2 from PR #43/#44).
+              while (running && failure === null) {
+                const q = getTransferQueueDepth()
+                if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
                 await sleep(20)
               }
             }
