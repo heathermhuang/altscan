@@ -772,7 +772,30 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
 //     EXACTLY the drained block numbers. Reads never see a half-written block;
 //     replay is a clean overwrite (no dupes, no reliance on a unique constraint,
 //     so it works identically on the block-range-partitioned table — Part B).
-const TT_QUEUE_HIGH_WATER_ROWS = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '50000', 10)
+// Backpressure bound on pending rows. Robust to unset/NaN/zero/negative → default
+// 50000: a malformed env must fall back to a finite bound, never disable backpressure
+// (the 838k-row OOM is why this exists). It must also never stay NaN — the dual-bound
+// loops below break on `rows <= bound`, and `x <= NaN` is always false, so a NaN bound
+// would throttle forever even on an empty queue (codex P2). Was a bare parseInt with a
+// `?? '50000'` that only defaulted on unset, leaving empty/garbage env → NaN.
+const parsedTtQueueHighWaterRows = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '', 10)
+const TT_QUEUE_HIGH_WATER_ROWS =
+  Number.isFinite(parsedTtQueueHighWaterRows) && parsedTtQueueHighWaterRows > 0
+    ? parsedTtQueueHighWaterRows
+    : 50000
+// Parallel backpressure bound on the pending BLOCK COUNT (transferPending.size), not
+// just rows. The rows bound above never engages for an all-transfer-less block range
+// with a stalled writer — rows stays ~0 while the pending Map grows unbounded (codex
+// P2 deferred from PR #43/#44). Bounding blocks caps that Map (and the W↔tip crash
+// replay window) regardless of how few transfers the range carries. Robust to
+// unset/NaN/zero/negative → default 2000. Backpressure only — the high-water ALERT
+// (TT_QUEUE_ALERT_ROWS) stays rows-only; a genuinely stuck writer is already caught by
+// the consecutive-write-failure alert, which is failure-count- not row-driven.
+const parsedTtQueueHighWaterBlocks = parseInt(process.env.TT_QUEUE_HIGH_WATER_BLOCKS ?? '', 10)
+const TT_QUEUE_HIGH_WATER_BLOCKS =
+  Number.isFinite(parsedTtQueueHighWaterBlocks) && parsedTtQueueHighWaterBlocks > 0
+    ? parsedTtQueueHighWaterBlocks
+    : 2000
 // Pending-rows threshold for the high-water ALERT, decoupled from the backpressure
 // bound above. PR #43 reused TT_QUEUE_HIGH_WATER_ROWS for both, so the WARN tripped on
 // every momentary ride along the backpressure ceiling (13 benign fires the first day,
@@ -812,7 +835,7 @@ let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives th
 export function initTransferWriter(seedDurableBlock: number): void {
   durableBlock = seedDurableBlock
   transferWriterSeeded = true
-  console.log(`[tt-writer] seeded durable watermark = ${durableBlock} (backpressure bound ${TT_QUEUE_HIGH_WATER_ROWS} rows, alert bound ${TT_QUEUE_ALERT_ROWS} rows)`)
+  console.log(`[tt-writer] seeded durable watermark = ${durableBlock} (backpressure bounds ${TT_QUEUE_HIGH_WATER_ROWS} rows / ${TT_QUEUE_HIGH_WATER_BLOCKS} blocks, alert bound ${TT_QUEUE_ALERT_ROWS} rows)`)
   runTransferWriter()  // flush anything enqueued during startup
 }
 
@@ -1016,7 +1039,7 @@ export async function flushTransferWriter(): Promise<void> {
   }
 }
 
-export { TT_QUEUE_HIGH_WATER_ROWS, ASYNC_TT_WRITER }
+export { TT_QUEUE_HIGH_WATER_ROWS, TT_QUEUE_HIGH_WATER_BLOCKS, ASYNC_TT_WRITER }
 
 // ── Token metadata lookup ───────────────────────────────────────────
 const ERC20_ABI = [

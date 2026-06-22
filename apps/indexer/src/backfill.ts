@@ -8,6 +8,7 @@ import {
   getTransferQueueDepth,
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
+  TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
 
 const chain = getChainConfig()
@@ -63,7 +64,11 @@ async function backfill() {
     // async writer is active AND enqueuing; SKIP_LOGS never enqueues (block-processor
     // "3b"), so there is nothing to bound — same guard as the seed/flush calls above.
     if (ASYNC_TT_WRITER && !SKIP_LOGS) {
-      while (getTransferQueueDepth().rows > TT_QUEUE_HIGH_WATER_ROWS) {
+      // Throttle on EITHER bound — see index.ts. Rows alone misses a transfer-less
+      // range whose pending block count climbs while rows stays ~0.
+      while (true) {
+        const q = getTransferQueueDepth()
+        if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
         await sleep(20)
       }
     }
