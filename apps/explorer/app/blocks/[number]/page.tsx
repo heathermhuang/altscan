@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
@@ -11,16 +12,27 @@ import { chainConfig } from '@/lib/chain'
 
 export const revalidate = 300
 
+// One DB→RPC lookup per request, shared by generateMetadata and the page render
+// (cache() dedupes). notFound() must throw from generateMetadata — it resolves
+// before the streamed shell flushes, so nonexistent block numbers get a real
+// HTTP 404 instead of a streamed 200 soft-404.
+const getBlock = cache(async (blockNumber: number) => {
+  let dbBlock: typeof schema.blocks.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber)).limit(1)
+    dbBlock = row ?? null
+  } catch { /* DB error — fall through to RPC */ }
+  const rpcBlock: RpcBlock | null = !dbBlock ? await fetchBlockFromRpc(blockNumber) : null
+  return { dbBlock, rpcBlock }
+})
+
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const { number } = await params
   const blockNumber = Number(number)
-  if (isNaN(blockNumber)) return { title: `Block Not Found — ${chainConfig.brandName}` }
-  let block: typeof schema.blocks.$inferSelect | null = null
-  try {
-    const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber)).limit(1)
-    block = row ?? null
-  } catch { /* DB error */ }
-  if (!block) return { title: `Block #${formatNumber(blockNumber)} — ${chainConfig.brandName}` }
+  if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) notFound()
+  const { dbBlock, rpcBlock } = await getBlock(blockNumber)
+  const block = dbBlock ?? rpcBlock
+  if (!block) notFound()
   return {
     title: `Block #${formatNumber(blockNumber)} — ${chainConfig.brandName}`,
     description: `${chainConfig.name} block #${formatNumber(blockNumber)} validated by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
@@ -42,13 +54,7 @@ export default async function BlockDetailPage({
 
   if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) notFound()
 
-  let dbBlock: typeof schema.blocks.$inferSelect | null = null
-  try {
-    const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber))
-    dbBlock = row ?? null
-  } catch { /* DB error — fall through to RPC */ }
-
-  const rpcBlock: RpcBlock | null = !dbBlock ? await fetchBlockFromRpc(blockNumber) : null
+  const { dbBlock, rpcBlock } = await getBlock(blockNumber)
   const block = dbBlock ?? rpcBlock
   if (!block) notFound()
 

@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
@@ -85,14 +86,27 @@ async function fetchChainTip(): Promise<number | null> {
   }
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
-  const { hash } = await params
-  let tx: typeof schema.transactions.$inferSelect | null = null
+// One DB→RPC lookup per request, shared by generateMetadata and the page render
+// (cache() dedupes). notFound() must throw from generateMetadata — it resolves
+// before the streamed shell flushes, so unknown hashes get a real HTTP 404.
+// A notFound() only in the page body arrives after the 200 header is already
+// sent (root loading.tsx Suspense) — that soft-404 got indexed by Google.
+const getTx = cache(async (hash: string) => {
+  let dbTx: typeof schema.transactions.$inferSelect | null = null
   try {
     const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash)).limit(1)
-    tx = row ?? null
-  } catch { /* DB error */ }
-  if (!tx) return { title: `Transaction Not Found — ${chainConfig.brandName}` }
+    dbTx = row ?? null
+  } catch { /* DB error — fall through to RPC */ }
+  const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
+  return { dbTx, rpcTx }
+})
+
+export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
+  const { hash } = await params
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
+  const { dbTx, rpcTx } = await getTx(hash)
+  const tx = dbTx ?? rpcTx
+  if (!tx) notFound()
   const val = formatNativeToken(safeBigInt(tx.value))
   return {
     title: `Tx ${hash.slice(0, 18)}… — ${chainConfig.brandName}`,
@@ -187,13 +201,7 @@ export default async function TxDetailPage({
   const { hash } = await params
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
 
-  let dbTx: typeof schema.transactions.$inferSelect | null = null
-  try {
-    const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash))
-    dbTx = row ?? null
-  } catch { /* DB error — fall through to RPC */ }
-
-  const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
+  const { dbTx, rpcTx } = await getTx(hash)
   const tx = dbTx ?? rpcTx
   if (!tx) notFound()
 
