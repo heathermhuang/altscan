@@ -94,9 +94,20 @@ async function healPlaceholderMeta(
   }
 }
 
+// Missing tokens return noindex metadata instead of throwing notFound(): on
+// this Next version, notFound() from generateMetadata still responds 200 with
+// the not-found UI, so status can't be trusted for SEO — noindex in the head
+// is what reliably keeps these off Google. The page body's notFound() still
+// renders the 404 UI.
+const NOT_FOUND_METADATA: Metadata = {
+  robots: { index: false, follow: false },
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    return { title: `Token Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+  }
   let token: typeof schema.tokens.$inferSelect | null = null
   try {
     const [row] = await db.select().from(schema.tokens).where(eq(schema.tokens.address, address.toLowerCase())).limit(1)
@@ -109,9 +120,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
       description: `${rpcToken.name} (${rpcToken.symbol}) token on ${chainConfig.name}.`,
       alternates: { canonical: `/token/${address.toLowerCase()}` },
     }
-    // Real 404 (thrown before the streamed shell flushes) — a "Not Found" title
-    // with status 200 is a soft-404 that pollutes the search index.
-    notFound()
+    return { title: `Token Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
   }
   token = await healPlaceholderMeta(token, address.toLowerCase())
   return {

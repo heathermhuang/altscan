@@ -27,9 +27,7 @@ export async function generateStaticParams(): Promise<Array<{ number: string }>>
 }
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
-// (cache() dedupes). notFound() must throw from generateMetadata — it resolves
-// before the streamed shell flushes, so nonexistent block numbers get a real
-// HTTP 404 instead of a streamed 200 soft-404.
+// (cache() dedupes).
 const getBlock = cache(async (blockNumber: number) => {
   let dbBlock: typeof schema.blocks.$inferSelect | null = null
   try {
@@ -40,13 +38,27 @@ const getBlock = cache(async (blockNumber: number) => {
   return { dbBlock, rpcBlock }
 })
 
+// Missing entities return noindex metadata instead of throwing notFound():
+// on this Next version, notFound() from metadata/body during an on-demand
+// static render still responds 200 with the not-found UI (and skips the ISR
+// cache), so status can't be trusted for SEO. noindex in the head is what
+// reliably keeps these off Google. The page body's notFound() still renders
+// the 404 UI.
+const NOT_FOUND_METADATA: Metadata = {
+  robots: { index: false, follow: false },
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const { number } = await params
   const blockNumber = Number(number)
-  if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) notFound()
+  if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) {
+    return { title: `Block Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+  }
   const { dbBlock, rpcBlock } = await getBlock(blockNumber)
   const block = dbBlock ?? rpcBlock
-  if (!block) notFound()
+  if (!block) {
+    return { title: `Block Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+  }
   return {
     title: `Block #${formatNumber(blockNumber)} — ${chainConfig.brandName}`,
     description: `${chainConfig.name} block #${formatNumber(blockNumber)} validated by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,

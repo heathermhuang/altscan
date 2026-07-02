@@ -101,10 +101,7 @@ async function fetchChainTip(): Promise<number | null> {
 }
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
-// (cache() dedupes). notFound() must throw from generateMetadata — it resolves
-// before the streamed shell flushes, so unknown hashes get a real HTTP 404.
-// A notFound() only in the page body arrives after the 200 header is already
-// sent (root loading.tsx Suspense) — that soft-404 got indexed by Google.
+// (cache() dedupes).
 const getTx = cache(async (hash: string) => {
   let dbTx: typeof schema.transactions.$inferSelect | null = null
   try {
@@ -115,12 +112,27 @@ const getTx = cache(async (hash: string) => {
   return { dbTx, rpcTx }
 })
 
+// Missing entities return noindex metadata instead of throwing notFound():
+// on this Next version, notFound() from metadata/body during an on-demand
+// static render still responds 200 with the not-found UI (and skips the ISR
+// cache), so status can't be trusted for SEO. noindex in the head is what
+// reliably keeps these off Google, and the previously indexed
+// "Transaction Not Found" page drops out on recrawl. The page body's
+// notFound() still renders the 404 UI.
+const NOT_FOUND_METADATA: Metadata = {
+  robots: { index: false, follow: false },
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    return { title: `Transaction Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+  }
   const { dbTx, rpcTx } = await getTx(hash)
   const tx = dbTx ?? rpcTx
-  if (!tx) notFound()
+  if (!tx) {
+    return { title: `Transaction Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+  }
   const val = formatNativeToken(safeBigInt(tx.value))
   return {
     title: `Tx ${hash.slice(0, 18)}… — ${chainConfig.brandName}`,
