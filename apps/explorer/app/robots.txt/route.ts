@@ -1,41 +1,19 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
+import { TRAINING_BLOCKED } from '@/lib/bot-policy'
 
-// Aggressive AI crawlers — we block them from heavy list/detail paths to protect
-// the DB pool. Mirrors the UA list in apps/explorer/middleware.ts which returns
-// 429 on these paths. robots.txt is the polite signal; the middleware is the fence.
-const AI_BOTS_HEAVY_BLOCK = [
-  'GPTBot',
-  'ChatGPT-User',
-  'OAI-SearchBot',
-  'ClaudeBot',
-  'Claude-Web',
-  'anthropic-ai',
-  'PerplexityBot',
-  'Perplexity-User',
-  'Google-Extended',
-  'Applebot-Extended',
-  'Amazonbot',
-  'Bytespider',
-  'CCBot',
-  'cohere-ai',
-  'Diffbot',
-  'FacebookBot',
-  'meta-externalagent',
-  'ImagesiftBot',
-  'omgilibot',
-  'YouBot',
-]
-
-const HEAVY_PATHS = ['/blocks', '/txs', '/tx/', '/address/', '/token/', '/block/']
+// Bot policy lives in lib/bot-policy.ts (shared with middleware.ts, which
+// enforces the same list with HTTP 429 — robots.txt is the polite signal,
+// the middleware is the fence).
 
 export async function GET() {
   const BASE = `https://${chainConfig.domain}`
 
   const lines: string[] = []
 
-  lines.push('# Human-readable policy: block AI crawlers from heavy DB-backed pages.')
-  lines.push('# See Content-Signal below for AI content-usage preferences.')
+  lines.push('# Policy: search engines and AI retrieval/citation agents are welcome.')
+  lines.push('# AI training / bulk-corpus crawlers are blocked (and rate-limited).')
+  lines.push('# Machine-readable AI usage preferences: see Content-Signal below.')
   lines.push('')
 
   lines.push('User-agent: *')
@@ -44,11 +22,14 @@ export async function GET() {
   lines.push('Disallow: /api/')
   lines.push('')
 
-  for (const bot of AI_BOTS_HEAVY_BLOCK) {
-    lines.push(`User-agent: ${bot}`)
-    for (const p of HEAVY_PATHS) lines.push(`Disallow: ${p}`)
-    lines.push('')
-  }
+  // One shared group — every User-agent line above a rule block shares it.
+  // Retrieval/search agents (OAI-SearchBot, ChatGPT-User, Claude-User,
+  // PerplexityBot, …) deliberately get NO group of their own: under REP a UA
+  // without a matching group inherits `User-agent: *` above.
+  lines.push('# AI training / bulk-scrape crawlers — blocked site-wide:')
+  for (const bot of TRAINING_BLOCKED) lines.push(`User-agent: ${bot}`)
+  lines.push('Disallow: /')
+  lines.push('')
 
   // Content Signals (https://contentsignals.org/) — declare AI content-usage policy.
   // ai-train=no   → do not use content to train models
