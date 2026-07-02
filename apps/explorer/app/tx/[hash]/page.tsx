@@ -14,6 +14,7 @@ import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const revalidate = 300
 
@@ -307,6 +308,7 @@ export default async function TxDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Transactions', href: '/txs' }, { name: `Tx ${hash.slice(0, 18)}…` }]} />
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Transaction Details</h1>
         <Badge variant={tx.status ? 'success' : 'fail'}>
