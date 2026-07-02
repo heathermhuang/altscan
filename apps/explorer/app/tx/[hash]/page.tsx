@@ -17,6 +17,15 @@ import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const revalidate = 300
+// Without generateStaticParams a dynamic-segment route renders per-request
+// (verified live: no-store, no full-route ISR — `revalidate` above never
+// engaged) and streams a 200 shell before notFound() can throw, so missing
+// hashes soft-404'd. Empty array = prerender nothing at build; each path
+// static-renders on first request, is cached per `revalidate`, and a
+// notFound() render returns a real HTTP 404.
+export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
+  return []
+}
 
 async function fetchNativePrice(): Promise<number | null> {
   const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'

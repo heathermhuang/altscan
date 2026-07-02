@@ -17,6 +17,13 @@ const nextConfig = {
     workerThreads: false,
     cpus: 1,
   },
+  // Treat EVERY user agent as an "HTML-limited bot": disables Next 15.2+
+  // streaming metadata, so generateMetadata resolves BEFORE the response
+  // shell flushes. On dynamic routes (token/address read request data) this
+  // is what lets notFound() thrown in generateMetadata produce a real HTTP
+  // 404 instead of a streamed-200 soft-404. Cost: TTFB on dynamic pages
+  // waits for metadata — a cache()-deduped PK lookup the page needs anyway.
+  htmlLimitedBots: /./,
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },
   transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/ui'],
