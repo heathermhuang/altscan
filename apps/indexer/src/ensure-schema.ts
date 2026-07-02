@@ -303,6 +303,8 @@ export async function ensureSchema(): Promise<void> {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
+    // Top-N tokens by holders (explorer sitemap top-5000, token directory)
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]
