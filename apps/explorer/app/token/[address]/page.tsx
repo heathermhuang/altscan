@@ -16,6 +16,7 @@ import { chainConfig } from '@/lib/chain'
 import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
 
 const ERC20_ABI = [
@@ -238,6 +239,7 @@ export default async function TokenDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Tokens', href: '/token' }, { name: `${token.name} (${token.symbol})` }]} />
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">{token.name}</h1>
         <Badge variant="default">{token.symbol}</Badge>

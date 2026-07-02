@@ -9,6 +9,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
+import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const revalidate = 300
 
@@ -72,6 +73,7 @@ export default async function BlockDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      <BreadcrumbJsonLd items={[{ name: 'Blocks', href: '/blocks' }, { name: `Block #${formatNumber(block.number)}` }]} />
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold">Block #{formatNumber(block.number)}</h1>
         <a

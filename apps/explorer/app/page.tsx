@@ -344,6 +344,33 @@ export default async function HomePage() {
           <TxTable txs={latestTxs} compact />
         </section>
       </div>
+
+      {/* Crawlable intro — the only prose on the homepage; stays server-rendered */}
+      <section className="mt-10 max-w-3xl">
+        <h2 className="text-lg font-semibold mb-2">What is {chainConfig.brandName}?</h2>
+        <div className="text-sm text-gray-600 space-y-3">
+          <p>
+            {chainConfig.brandDomain} is an open, independent {chainConfig.name} block
+            explorer maintained by Measurable Data Token (MDT). It tracks blocks and
+            transactions in real time and offers a{' '}
+            <Link href="/token" className={`${chainConfig.theme.linkText} hover:underline`}>token directory</Link>,{' '}
+            <Link href="/dex" className={`${chainConfig.theme.linkText} hover:underline`}>DEX trade tracker</Link>,{' '}
+            <Link href="/gas" className={`${chainConfig.theme.linkText} hover:underline`}>gas tracker</Link>,{' '}
+            <Link href="/whales" className={`${chainConfig.theme.linkText} hover:underline`}>whale tracker</Link>, and a free{' '}
+            <Link href="/api-docs" className={`${chainConfig.theme.linkText} hover:underline`}>REST API</Link>
+            {' '}— no account required.
+          </p>
+          <p>
+            The same open-source engine,{' '}
+            <a href="https://altscan.io" className={`${chainConfig.theme.linkText} hover:underline`}>Altscan</a>,
+            powers our sister explorer at{' '}
+            <a href={chainConfig.peerUrl} className={`${chainConfig.theme.linkText} hover:underline`}>
+              {chainConfig.peerUrl.replace('https://', '')}
+            </a>
+            . Read more <Link href="/about" className={`${chainConfig.theme.linkText} hover:underline`}>about the project</Link>.
+          </p>
+        </div>
+      </section>
     </div>
   )
 }
