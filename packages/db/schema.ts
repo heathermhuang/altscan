@@ -93,7 +93,11 @@ export const tokens = pgTable('tokens', {
   totalSupply:  numeric('total_supply', { precision: 78, scale: 0 }).notNull().default('0'),
   holderCount:  integer('holder_count').notNull().default(0),
   logoUrl:      text('logo_url'),
-})
+}, (t) => ({
+  // Top-N by holders (sitemap top-5000, token directory ranking).
+  // ensure-schema.ts is the runtime DDL authority (declared holder_count DESC there).
+  holderCountIdx: index('tokens_holder_count_idx').on(t.holderCount),
+}))
 
 export const logs = pgTable('logs', {
   id:           serial('id').primaryKey(),
