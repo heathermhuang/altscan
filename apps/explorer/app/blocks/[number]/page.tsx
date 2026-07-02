@@ -11,7 +11,20 @@ import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
-export const revalidate = 300
+// 60s (not 300): with ISR a transient miss — a fresh block during indexer
+// lag — caches its 404 for everyone until the next revalidate. Block content
+// is immutable, so short revalidation costs one render/min per actively-hit
+// path while keeping the fresh-URL 404 window ≤ ~1-2 min.
+export const revalidate = 60
+// Without generateStaticParams a dynamic-segment route renders per-request
+// (verified live: no-store, no full-route ISR — `revalidate` above never
+// engaged) and streams a 200 shell before notFound() can throw, so unknown
+// block numbers soft-404'd. Empty array = prerender nothing at build; each
+// path static-renders on first request, is cached per `revalidate`, and a
+// notFound() render returns a real HTTP 404.
+export async function generateStaticParams(): Promise<Array<{ number: string }>> {
+  return []
+}
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
 // (cache() dedupes). notFound() must throw from generateMetadata — it resolves
