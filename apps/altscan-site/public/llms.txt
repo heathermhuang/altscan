@@ -1,0 +1,35 @@
+# Altscan
+
+> Altscan is an open-source, multi-chain block explorer platform. One engine —
+> one indexer, one schema — powers independent explorers across chains.
+> BNBScan (BNB Chain) and EthScan (Ethereum) are live today. AGPL-3.0.
+
+## Products
+
+- [BNBScan](https://bnbscan.com): BNB Chain explorer — blocks, transactions,
+  tokens, DEX trades, gas, whales, free REST API. Agent map: https://bnbscan.com/llms.txt
+- [EthScan](https://ethscan.io): Ethereum explorer, same engine and features.
+  Agent map: https://ethscan.io/llms.txt
+- [Status page](https://status.altscan.io): live health of both explorers
+
+## Source
+
+- [GitHub](https://github.com/heathermhuang/altscan): the full platform —
+  Next.js explorer frontend, BullMQ indexer, Postgres schema, Astro site.
+  TypeScript throughout. License: AGPL-3.0 — read, fork, self-host.
+
+## Data
+
+- [Live chain status JSON](https://altscan.io/api/chains.json): current health,
+  latest block, and response time for every explorer (60s cache)
+
+## Usage policy
+
+- AI retrieval and citation: allowed (Content-Signal: ai-input=yes)
+- AI training on site content: not permitted (ai-train=no)
+
+## Facts
+
+- Maintained by Measurable Data Token (MDT). Independent — not affiliated with
+  BscScan, Etherscan, Binance, or the Ethereum Foundation.
+- Adding a chain is one config entry; the platform is designed to extend.
