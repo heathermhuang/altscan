@@ -312,8 +312,11 @@ export async function getMoralisLimiterState(): Promise<Record<string, unknown>>
   }
 }
 
-/** Known bot user agents — skip Moralis entirely for these */
-const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot/i
+/** Known bot user agents — skip Moralis entirely for these. Includes the
+ *  user-triggered AI fetchers (ChatGPT-User/Perplexity-User/Claude-User) that
+ *  robots.txt now welcomes but whose UAs lack a "bot" substring: they get the
+ *  local-index view like every other bot and never spend Moralis CU. */
+const BOT_PATTERNS = /bot|crawl|spider|slurp|baiduspider|yandex|sogou|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot|chatgpt-user|perplexity-user|claude-user/i
 
 async function getAuthHeaders(bucket: MoralisBucket): Promise<Record<string, string> | null> {
   // Moralis is enabled with strict protections:

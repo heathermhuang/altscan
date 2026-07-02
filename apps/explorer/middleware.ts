@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { isTrainingBot, HEAVY_PATH_PREFIXES } from '@/lib/bot-policy'
 
 /**
  * Minimal middleware — request-level bot throttling + abuse-source IP block.
@@ -13,10 +14,12 @@ import type { NextRequest } from 'next/server'
  *      after a 47.79.0.0/16 (Alibaba Cloud HK) botnet OOM-killed bnbscan-web
  *      in a multi-hour loop while spoofing real Chrome UAs (UA-based throttle
  *      below could not see it). Short-circuits before any route work.
- *   2. UA-based throttle — aggressive crawlers (Meta, ClaudeBot, GPTBot, etc.)
- *      that ignore robots.txt get 429 on heavy list pages.
+ *   2. UA-based throttle — AI training/bulk-corpus crawlers that ignore
+ *      robots.txt get 429 on heavy list pages. The UA lists live in
+ *      lib/bot-policy.ts (single source of truth shared with robots.txt);
+ *      search engines and AI retrieval agents are deliberately not throttled.
  *
- * Real users on residential IPs and the listed UA families are unaffected.
+ * Real users on residential IPs and unlisted UA families are unaffected.
  */
 function ipToInt(ip: string): number {
   const parts = ip.split('.')
@@ -66,58 +69,6 @@ function isBlockedIp(ip: string | null): boolean {
   if (n === 0) return false
   for (const { network, mask } of BLOCKED_IPV4_CIDRS) {
     if ((n & mask) === network) return true
-  }
-  return false
-}
-
-const AGGRESSIVE_BOT_UAS = [
-  'ClaudeBot',
-  'meta-externalagent',
-  'meta-webindexer',
-  'GPTBot',
-  'Bytespider',
-  'Amazonbot',
-  'Applebot-Extended',
-  'ImagesiftBot',
-  'PerplexityBot',
-  'Google-Extended',
-  'CCBot',
-  'anthropic-ai',
-  'FacebookBot',
-  'facebookexternalhit',
-  'cohere-ai',
-  'Diffbot',
-  'omgilibot',
-  'YouBot',
-]
-
-// Heavy paths that hit big tables (transactions/token_transfers/blocks).
-// Home is ISR-cached and doesn't need throttling.
-//
-// The `/md/tx/` and `/md/block/` mirrors are listed explicitly — an aggressive
-// crawler can request those directly, bypassing the canonical-path check, and
-// each hit runs a DB lookup in the /md route handler.
-const HEAVY_PATH_PREFIXES = [
-  '/blocks',
-  '/txs',
-  '/tx/',
-  '/address/',
-  '/token/',
-  '/block/',
-  '/api/v1/blocks',
-  '/api/v1/transactions',
-  '/api/v1/addresses',
-  '/api/v1/tokens',
-  '/api/v1/contracts',
-  '/md/tx/',
-  '/md/block/',
-]
-
-function isAggressiveBot(ua: string | null): boolean {
-  if (!ua) return false
-  const normalized = ua.toLowerCase()
-  for (const needle of AGGRESSIVE_BOT_UAS) {
-    if (normalized.includes(needle.toLowerCase())) return true
   }
   return false
 }
@@ -207,7 +158,7 @@ export function middleware(request: NextRequest) {
     })
   }
 
-  if (isAggressiveBot(ua) && isHeavyPath(pathname)) {
+  if (isTrainingBot(ua) && isHeavyPath(pathname)) {
     return new NextResponse('Too Many Requests — this path is rate-limited for crawlers. See /robots.txt.', {
       status: 429,
       headers: {
