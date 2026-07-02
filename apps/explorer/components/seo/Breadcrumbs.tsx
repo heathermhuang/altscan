@@ -24,7 +24,10 @@ export function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] }) {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      // Escape `<` so untrusted item names (e.g. token names from arbitrary
+      // ERC-20 contracts) can't emit `</script>` and break out of this raw
+      // script block. < is valid JSON and parsed identically by crawlers.
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
     />
   )
 }
