@@ -6,6 +6,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/600.css';
 import '@fontsource/jetbrains-mono/700.css';
 import '../styles/global.css';
+import { GITHUB } from '../data/site';
 
 interface Props { title?: string; description?: string; }
 const {
@@ -13,6 +14,40 @@ const {
   description = 'One open-source engine powering independent block explorers across chains. BNBScan and EthScan are live today, more on the way.',
 } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
+
+// Organization + WebSite + SoftwareSourceCode — the GitHub repo is the citable
+// artifact for the open-source positioning (answer engines resolve "what is
+// Altscan" through these entities).
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': 'https://altscan.io/#org',
+      name: 'Altscan',
+      url: 'https://altscan.io',
+      sameAs: [GITHUB, 'https://bnbscan.com', 'https://ethscan.io'],
+    },
+    {
+      '@type': 'WebSite',
+      '@id': 'https://altscan.io/#website',
+      url: 'https://altscan.io',
+      name: 'Altscan',
+      description,
+      publisher: { '@id': 'https://altscan.io/#org' },
+    },
+    {
+      '@type': 'SoftwareSourceCode',
+      name: 'Altscan',
+      codeRepository: GITHUB,
+      programmingLanguage: 'TypeScript',
+      runtimePlatform: 'Node.js',
+      license: 'https://www.gnu.org/licenses/agpl-3.0.html',
+      about: 'Open-source multi-chain block explorer platform powering bnbscan.com and ethscan.io',
+      url: 'https://altscan.io',
+    },
+  ],
+};
 ---
 <!DOCTYPE html>
 <html lang="en">
@@ -29,6 +64,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content="https://altscan.io/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     {/* Cloudflare Web Analytics — privacy-first, no cookies/consent banner.
         Public beacon token (safe to commit). is:inline keeps Astro from
         bundling/transforming the third-party beacon (preserves data-cf-beacon). */}
