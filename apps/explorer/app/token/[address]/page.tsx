@@ -95,6 +95,7 @@ async function healPlaceholderMeta(
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
   let token: typeof schema.tokens.$inferSelect | null = null
   try {
     const [row] = await db.select().from(schema.tokens).where(eq(schema.tokens.address, address.toLowerCase())).limit(1)
@@ -105,8 +106,11 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     if (rpcToken) return {
       title: `${rpcToken.name} (${rpcToken.symbol}) — ${chainConfig.brandName}`,
       description: `${rpcToken.name} (${rpcToken.symbol}) token on ${chainConfig.name}.`,
+      alternates: { canonical: `/token/${address.toLowerCase()}` },
     }
-    return { title: `Token Not Found — ${chainConfig.brandName}` }
+    // Real 404 (thrown before the streamed shell flushes) — a "Not Found" title
+    // with status 200 is a soft-404 that pollutes the search index.
+    notFound()
   }
   token = await healPlaceholderMeta(token, address.toLowerCase())
   return {
