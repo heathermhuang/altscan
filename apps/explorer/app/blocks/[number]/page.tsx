@@ -52,15 +52,16 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
   const { number } = await params
   const blockNumber = Number(number)
   if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber)) {
-    return { title: `Block Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Block Not Found', ...NOT_FOUND_METADATA }
   }
   const { dbBlock, rpcBlock } = await getBlock(blockNumber)
   const block = dbBlock ?? rpcBlock
   if (!block) {
-    return { title: `Block Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Block Not Found', ...NOT_FOUND_METADATA }
   }
   return {
-    title: `Block #${formatNumber(blockNumber)} — ${chainConfig.brandName}`,
+    // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
+    title: `Block #${formatNumber(blockNumber)}`,
     description: `${chainConfig.name} block #${formatNumber(blockNumber)} validated by ${block.miner.slice(0, 14)}…. Contains ${block.txCount} transactions.`,
     alternates: { canonical: `/blocks/${blockNumber}` },
     openGraph: {

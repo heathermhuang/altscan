@@ -126,16 +126,17 @@ const NOT_FOUND_METADATA: Metadata = {
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-    return { title: `Transaction Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Transaction Not Found', ...NOT_FOUND_METADATA }
   }
   const { dbTx, rpcTx } = await getTx(hash)
   const tx = dbTx ?? rpcTx
   if (!tx) {
-    return { title: `Transaction Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Transaction Not Found', ...NOT_FOUND_METADATA }
   }
   const val = formatNativeToken(safeBigInt(tx.value))
   return {
-    title: `Tx ${hash.slice(0, 18)}… — ${chainConfig.brandName}`,
+    // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
+    title: `Tx ${hash.slice(0, 18)}…`,
     description: `${chainConfig.name} transaction: ${val} ${chainConfig.currency} from ${tx.fromAddress.slice(0, 12)}… to ${(tx.toAddress ?? 'contract creation').slice(0, 12)}…`,
     alternates: { canonical: `/tx/${hash}` },
     openGraph: {

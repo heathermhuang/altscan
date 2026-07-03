@@ -34,7 +34,8 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   } catch { /* DB error */ }
   const type = info?.isContract ? 'Contract' : 'Address'
   return {
-    title: `${type} ${address.slice(0, 14)}… — ${chainConfig.brandName}`,
+    // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
+    title: `${type} ${address.slice(0, 14)}…`,
     description: `${chainConfig.name} ${type.toLowerCase()} ${address} — Balance: ${formatNativeToken(safeBigInt(info?.balance))} ${chainConfig.currency}, ${info?.txCount ?? 0} transactions`,
     alternates: { canonical: `/address/${address.toLowerCase()}` },
     openGraph: {
