@@ -106,7 +106,7 @@ const NOT_FOUND_METADATA: Metadata = {
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
-    return { title: `Token Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   let token: typeof schema.tokens.$inferSelect | null = null
   try {
@@ -116,15 +116,16 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   if (!token) {
     const rpcToken = await fetchTokenFromRpc(address.toLowerCase())
     if (rpcToken) return {
-      title: `${rpcToken.name} (${rpcToken.symbol}) — ${chainConfig.brandName}`,
+      title: `${rpcToken.name} (${rpcToken.symbol})`,
       description: `${rpcToken.name} (${rpcToken.symbol}) token on ${chainConfig.name}.`,
       alternates: { canonical: `/token/${address.toLowerCase()}` },
     }
-    return { title: `Token Not Found — ${chainConfig.brandName}`, ...NOT_FOUND_METADATA }
+    return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   token = await healPlaceholderMeta(token, address.toLowerCase())
   return {
-    title: `${token.name} (${token.symbol}) — ${chainConfig.brandName}`,
+    // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
+    title: `${token.name} (${token.symbol})`,
     description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}. ${token.holderCount.toLocaleString()} holders.`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
