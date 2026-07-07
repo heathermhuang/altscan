@@ -14,8 +14,10 @@
     { "binding": "DB", "database_name": "altscan-admin", "database_id": "0e3ddd98-748f-403d-a836-95a40b23f5cd" }
   ],
   "vars": {
-    // Filled after the user creates the Access app (Task 8). Empty = prod fails closed 503.
-    "CF_ACCESS_TEAM_DOMAIN": "",
-    "CF_ACCESS_AUD": ""
+    // Non-secret Access identifiers (team domain is public; AUD is an audience
+    // tag, not a credential — a forged JWT still fails the JWKS signature check).
+    // Empty here = prod fails closed 503. App: "Altscan Admin Console".
+    "CF_ACCESS_TEAM_DOMAIN": "wellingtonst",
+    "CF_ACCESS_AUD": "12e28d89b24f808b6fef38b19510577b6325da6dcb14eb5295b558f41ed9dcb8"
   }
 }
