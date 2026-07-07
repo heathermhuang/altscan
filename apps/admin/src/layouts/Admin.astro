@@ -1,0 +1,21 @@
+---
+import '../styles/admin.css';
+const { title = 'Altscan Admin' } = Astro.props;
+const member = Astro.locals.member;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="site">
+      <span class="brand">altscan admin</span>
+      <a href="/">fleet</a>
+      <span class="who">{member.email} · {member.role}</span>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>

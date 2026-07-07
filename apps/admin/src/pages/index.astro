@@ -1,0 +1,9 @@
+---
+import Admin from '../layouts/Admin.astro';
+import { FleetBoard } from '../islands/FleetBoard';
+export const prerender = false;
+---
+<Admin title="Altscan Admin — Fleet">
+  <h2>Fleet</h2>
+  <FleetBoard client:load />
+</Admin>
