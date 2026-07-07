@@ -1,0 +1,5 @@
+.dev.vars
+seed.local.sql
+dist/
+.astro/
+.wrangler/

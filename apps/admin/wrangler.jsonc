@@ -1,0 +1,17 @@
+{
+  "name": "altscan-admin",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./dist/_worker.js/index.js",
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  "routes": [{ "pattern": "admin.altscan.io", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "altscan-admin", "database_id": "FILL_AFTER_TASK_2" }
+  ],
+  "vars": {
+    // Filled after the user creates the Access app (Task 8). Empty = prod fails closed 503.
+    "CF_ACCESS_TEAM_DOMAIN": "",
+    "CF_ACCESS_AUD": ""
+  }
+}
