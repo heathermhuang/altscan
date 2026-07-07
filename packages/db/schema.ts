@@ -205,3 +205,24 @@ export const apiKeys = pgTable('api_keys', {
 }, (t) => ({
   ownerIdx: index('api_keys_owner_idx').on(t.ownerAddress),
 }))
+
+// Runtime-editable explorer settings (admin console) — one JSONB doc per
+// namespace ('links' | 'footer' | 'ads'), validated by @altscan/settings-schema.
+export const explorerSettings = pgTable('explorer_settings', {
+  key:       text('key').primaryKey(),
+  value:     jsonb('value').notNull(),
+  version:   integer('version').notNull().default(1),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text('updated_by'),
+})
+
+export const explorerSettingsAudit = pgTable('explorer_settings_audit', {
+  id:        serial('id').primaryKey(),
+  key:       text('key').notNull(),
+  value:     jsonb('value').notNull(),
+  version:   integer('version').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text('updated_by'),
+}, (t) => ({
+  keyIdx: index('explorer_settings_audit_key_idx').on(t.key, t.id),
+}))
