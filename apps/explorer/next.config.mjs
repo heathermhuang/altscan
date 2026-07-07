@@ -26,7 +26,7 @@ const nextConfig = {
   htmlLimitedBots: /./,
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },
-  transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/ui'],
+  transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/ui', '@altscan/settings-schema'],
   async headers() {
     return [
       // Security headers for all pages

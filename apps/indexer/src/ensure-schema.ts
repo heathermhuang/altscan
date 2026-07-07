@@ -211,6 +211,33 @@ export async function ensureSchema(): Promise<void> {
   `))
   await db.execute(sql.raw(`INSERT INTO indexer_cursor (id, transfers_durable_block) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`))
 
+  // Runtime-editable explorer settings (admin console) — one JSONB doc per
+  // namespace, written via the web app's /api/admin/settings, read at render time.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS explorer_settings (
+      key        TEXT PRIMARY KEY,
+      value      JSONB NOT NULL,
+      version    INTEGER NOT NULL DEFAULT 1,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by TEXT
+    )
+  `))
+
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS explorer_settings_audit (
+      id         SERIAL PRIMARY KEY,
+      key        TEXT NOT NULL,
+      value      JSONB NOT NULL,
+      version    INTEGER NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by TEXT
+    )
+  `))
+
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS explorer_settings_audit_key_idx ON explorer_settings_audit (key, id DESC)`,
+  ))
+
   // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution.
   //
   // CRITICAL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes an

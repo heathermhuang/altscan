@@ -1,0 +1,17 @@
+{
+  "name": "@altscan/settings-schema",
+  "version": "0.0.1",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

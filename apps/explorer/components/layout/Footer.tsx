@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain'
 import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { getSetting } from '@/lib/settings'
+import { resolveFooterText, resolveLinks } from '@/lib/settings-defaults'
 
 function FooterLogo() {
   return (
@@ -21,8 +23,14 @@ function FooterLogo() {
   )
 }
 
-export function Footer() {
+export async function Footer() {
   const { theme } = chainConfig
+  const [linksOverride, footerOverride] = await Promise.all([
+    getSetting('links'),
+    getSetting('footer'),
+  ])
+  const quickLinks = resolveLinks(linksOverride)
+  const { tagline, notAffiliatedWith } = resolveFooterText(footerOverride, chainConfig)
 
   return (
     <footer className="bg-gray-900 text-gray-400 text-sm mt-auto">
@@ -39,7 +47,7 @@ export function Footer() {
             <FooterLogo />
             <div>
               <p className="text-white font-semibold text-base leading-tight">{chainConfig.brandDomain}</p>
-              <p className="text-gray-400 text-xs">{chainConfig.tagline}</p>
+              <p className="text-gray-400 text-xs">{tagline}</p>
             </div>
           </div>
           <div className="text-center md:text-right">
@@ -67,21 +75,28 @@ export function Footer() {
       {/* Links + network switcher + copyright */}
       <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-1 text-sm">
-          <Link href="/blocks" className="hover:text-gray-200 transition-colors py-2">Blocks</Link>
-          <Link href="/txs" className="hover:text-gray-200 transition-colors py-2">Transactions</Link>
-          <Link href="/token" className="hover:text-gray-200 transition-colors py-2">Tokens</Link>
-          <Link href="/charts" className="hover:text-gray-200 transition-colors py-2">Charts</Link>
-          <Link href="/api-docs" className="hover:text-gray-200 transition-colors py-2">API</Link>
-          <Link href="/developer" className="hover:text-gray-200 transition-colors py-2">Developer</Link>
-          <Link href="/about" className="hover:text-gray-200 transition-colors py-2">About</Link>
-          <a href="https://status.altscan.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">Status ↗</a>
-
-          <a href="https://github.com/heathermhuang/altscan" target="_blank" rel="noopener noreferrer" className="hover:text-gray-200 transition-colors py-2">GitHub ↗</a>
+          {quickLinks.map((l) =>
+            l.href.startsWith('/') ? (
+              <Link key={`${l.label}-${l.href}`} href={l.href} className="hover:text-gray-200 transition-colors py-2">
+                {l.label}
+              </Link>
+            ) : (
+              <a
+                key={`${l.label}-${l.href}`}
+                href={l.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-gray-200 transition-colors py-2"
+              >
+                {l.label} ↗
+              </a>
+            ),
+          )}
         </div>
         <div className="flex items-center gap-4">
           <NetworkSwitcher direction="up" theme="footer" />
           <p className="text-xs text-gray-600">
-            &copy; {new Date().getFullYear()} {chainConfig.brandDomain} &middot; Not affiliated with {chainConfig.notAffiliatedWith}
+            &copy; {new Date().getFullYear()} {chainConfig.brandDomain} &middot; Not affiliated with {notAffiliatedWith}
           </p>
         </div>
       </div>
