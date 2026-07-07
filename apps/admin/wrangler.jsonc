@@ -2,6 +2,10 @@
   "name": "altscan-admin",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
+  // The ONLY hostname is the Access-protected custom domain — never expose the
+  // admin surface on an unprotected *.workers.dev / preview URL.
+  "workers_dev": false,
+  "preview_urls": false,
   "main": "./dist/_worker.js/index.js",
   "assets": { "directory": "./dist", "binding": "ASSETS" },
   "routes": [{ "pattern": "admin.altscan.io", "custom_domain": true }],

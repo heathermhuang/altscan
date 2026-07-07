@@ -21,6 +21,47 @@ function currentValue<T>(p: SettingsPayload, key: string): T | null {
   return (p.settings[key]?.value as T | undefined) ?? null
 }
 
+/** Module-level (NOT nested in SettingsPanel) so React keeps a stable
+ *  component identity across parent re-renders — a nested definition would
+ *  remount this subtree on every keystroke. */
+function SaveRow({
+  k,
+  saved,
+  draft,
+  dirty,
+  readOnly,
+  busy,
+  version,
+  onSave,
+  onHistory,
+}: {
+  k: string
+  saved: unknown
+  draft: unknown
+  dirty: boolean
+  readOnly: boolean
+  busy: boolean
+  version: number | undefined
+  onSave: () => void
+  onHistory: () => void
+}) {
+  return (
+    <div>
+      {dirty && (
+        <pre className="diff">
+          {`current: ${JSON.stringify(saved ?? '(defaults)', null, 1)}\n→ draft: ${JSON.stringify(draft, null, 1)}`}
+        </pre>
+      )}
+      <p className="row">
+        <button className="primary" disabled={readOnly || busy || !dirty} onClick={onSave}>
+          Save {k} {version !== undefined ? `(v${version} → v${version + 1})` : '(v1)'}
+        </button>
+        <button onClick={onHistory}>history</button>
+      </p>
+    </div>
+  )
+}
+
 export function SettingsPanel({ explorerId }: { explorerId: string }) {
   const [payload, setPayload] = useState<SettingsPayload | null>(null)
   const [links, setLinks] = useState<LinksValue>({ quickLinks: [] })
@@ -51,6 +92,9 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
 
   // "No saved row" compares against the empty draft shape, so a pristine
   // panel is not dirty and Save stays disabled until something changes.
+  // JSON.stringify comparison can false-positive on key-order differences
+  // (footer/ads drafts are rebuilt via spreads) — harmless: worst case is an
+  // enabled Save for an identical value, and the diff shows the real values.
   const emptyDraft = (key: string): unknown => (key === 'links' ? { quickLinks: [] } : {})
   const isDirty = (key: string): boolean => {
     if (!payload) return false
@@ -160,7 +204,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           </button>
           <span>empty list = built-in defaults</span>
         </p>
-        <SaveRow k="links" />
+        <SaveRow
+          k="links"
+          saved={payload.settings.links?.value}
+          draft={links}
+          dirty={isDirty('links')}
+          readOnly={readOnly}
+          busy={busy}
+          version={payload.settings.links?.version}
+          onSave={() => save('links')}
+          onHistory={() => showAudit('links')}
+        />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -187,7 +241,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             />
           </dd>
         </dl>
-        <SaveRow k="footer" />
+        <SaveRow
+          k="footer"
+          saved={payload.settings.footer?.value}
+          draft={footer}
+          dirty={isDirty('footer')}
+          readOnly={readOnly}
+          busy={busy}
+          version={payload.settings.footer?.version}
+          onSave={() => save('footer')}
+          onHistory={() => showAudit('footer')}
+        />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -220,7 +284,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             </label>
           ))}
         </div>
-        <SaveRow k="ads" />
+        <SaveRow
+          k="ads"
+          saved={payload.settings.ads?.value}
+          draft={ads}
+          dirty={isDirty('ads')}
+          readOnly={readOnly}
+          busy={busy}
+          version={payload.settings.ads?.version}
+          onSave={() => save('ads')}
+          onHistory={() => showAudit('ads')}
+        />
       </div>
 
       {auditKey && (
@@ -250,25 +324,4 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
       )}
     </div>
   )
-
-  function SaveRow({ k }: { k: string }) {
-    const saved = payload!.settings[k]?.value
-    const dirty = isDirty(k)
-    return (
-      <div>
-        {dirty && (
-          <pre className="diff">
-            {`current: ${JSON.stringify(saved ?? '(defaults)', null, 1)}\n→ draft: ${JSON.stringify(drafts[k], null, 1)}`}
-          </pre>
-        )}
-        <p className="row">
-          <button className="primary" disabled={readOnly || busy || !dirty} onClick={() => save(k)}>
-            Save {k}{' '}
-            {payload!.settings[k] ? `(v${payload!.settings[k].version} → v${payload!.settings[k].version + 1})` : '(v1)'}
-          </button>
-          <button onClick={() => showAudit(k)}>history</button>
-        </p>
-      </div>
-    )
-  }
 }

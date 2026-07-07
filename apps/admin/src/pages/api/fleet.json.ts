@@ -11,11 +11,17 @@ export const GET: APIRoute = async ({ locals }) => {
   const env = locals.runtime.env
   const rows = await getDb(env).select().from(explorers)
   const probes = await Promise.all(
-    rows.map(async (x) => ({
-      explorer: { id: x.id, brand: x.brand, publicUrl: x.publicUrl, status: x.status },
-      health: await fetchExplorerHealth(env, x),
-      deploys: await fetchLatestDeploys(env, x),
-    })),
+    rows.map(async (x) => {
+      const [health, deploys] = await Promise.all([
+        fetchExplorerHealth(env, x),
+        fetchLatestDeploys(env, x),
+      ])
+      return {
+        explorer: { id: x.id, brand: x.brand, publicUrl: x.publicUrl, status: x.status },
+        health,
+        deploys,
+      }
+    }),
   )
   return json(buildFleetPayload(probes, Date.now()))
 }
