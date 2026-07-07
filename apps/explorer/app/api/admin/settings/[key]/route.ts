@@ -33,6 +33,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ key:
   if (value === null) {
     return NextResponse.json({ error: 'value failed schema validation' }, { status: 422 })
   }
+  // JSON.parse can yield Infinity/floats here; postgres integer comparison
+  // would 500 on Infinity — reject early instead.
+  if (body.expectedVersion !== undefined && !Number.isInteger(body.expectedVersion)) {
+    return NextResponse.json({ error: 'expectedVersion must be an integer' }, { status: 400 })
+  }
   const updatedBy = typeof body.updatedBy === 'string' ? body.updatedBy.slice(0, 120) : null
   const json = JSON.stringify(value)
 
