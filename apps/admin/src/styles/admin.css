@@ -18,10 +18,10 @@ main { max-width: 1080px; margin: 0 auto; padding: 20px; }
 .card h3 { margin: 0 0 8px; font-size: 15px; }
 /* Fleet cards: the whole card drills into that explorer's settings. */
 .fleet-card { position: relative; transition: border-color .12s ease, background .12s ease; }
-.fleet-card:hover { border-color: #2f3a4d; background: #141a26; }
+.fleet-card:hover, .fleet-card:focus-within { border-color: #2f3a4d; background: #141a26; } /* keyboard parity */
 .fleet-card .card-link::after { content: ''; position: absolute; inset: 0; border-radius: 8px; } /* stretched link */
 .fleet-card a.ext { position: relative; z-index: 1; } /* stays clickable above the stretch */
-.card-cta { margin: 12px 0 0; color: #7aa2f7; font-size: 13px; }
+.fleet-card .card-cta { margin: 12px 0 0; color: #7aa2f7; font-size: 13px; }
 .fleet-card:hover .card-cta { text-decoration: underline; }
 /* Skeleton while the fleet endpoint probes both origins + Render. */
 .muted { color: #6b7280; margin: 0 0 12px; }
