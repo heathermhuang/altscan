@@ -21,11 +21,21 @@ type AdConfig = { eligible: boolean; refCode: string | null; disabled: string[] 
 const AD_CONFIG_TTL_MS = 5 * 60 * 1000
 const FALLBACK: AdConfig = { eligible: true, refCode: null, disabled: [] }
 
-let adConfigCache: AdConfig | null = null
+let adConfigCache: { config: AdConfig; at: number } | null = null
 let adConfigPromise: Promise<AdConfig> | null = null
 
+/** In-memory cache honors the same TTL as sessionStorage, so a long-lived SPA
+ *  session picks up settings changes at the next ad mount after expiry
+ *  instead of keeping the first-fetched config until a hard reload. */
+function freshCachedConfig(): AdConfig | null {
+  return adConfigCache && Date.now() - adConfigCache.at < AD_CONFIG_TTL_MS
+    ? adConfigCache.config
+    : null
+}
+
 async function loadAdConfig(): Promise<AdConfig> {
-  if (adConfigCache) return adConfigCache
+  const fresh = freshCachedConfig()
+  if (fresh) return fresh
   if (typeof window === 'undefined') return { ...FALLBACK, eligible: false }
 
   try {
@@ -34,11 +44,14 @@ async function loadAdConfig(): Promise<AdConfig> {
       const parsed = JSON.parse(raw) as Partial<AdConfig> & { at?: number }
       if (typeof parsed.at === 'number' && Date.now() - parsed.at < AD_CONFIG_TTL_MS) {
         adConfigCache = {
-          eligible: parsed.eligible !== false,
-          refCode: typeof parsed.refCode === 'string' ? parsed.refCode : null,
-          disabled: Array.isArray(parsed.disabled) ? parsed.disabled : [],
+          at: parsed.at,
+          config: {
+            eligible: parsed.eligible !== false,
+            refCode: typeof parsed.refCode === 'string' ? parsed.refCode : null,
+            disabled: Array.isArray(parsed.disabled) ? parsed.disabled : [],
+          },
         }
-        return adConfigCache
+        return adConfigCache.config
       }
     }
   } catch {
@@ -54,7 +67,8 @@ async function loadAdConfig(): Promise<AdConfig> {
     }))
     .catch(() => FALLBACK)
     .then((config) => {
-      adConfigCache = config
+      adConfigCache = { config, at: Date.now() }
+      adConfigPromise = null // allow a refetch once the TTL lapses
       try {
         window.sessionStorage.setItem('ad_config_v1', JSON.stringify({ ...config, at: Date.now() }))
       } catch {
@@ -77,7 +91,7 @@ export function BinanceReferralAd({
   variant?: BinanceReferralVariant
   className?: string
 }) {
-  const [config, setConfig] = useState<AdConfig | null>(adConfigCache)
+  const [config, setConfig] = useState<AdConfig | null>(freshCachedConfig())
   const impressionTracked = useRef(false)
   const copy = useMemo(() => getBinanceReferralCopy(context, chainConfig), [context])
   const href = getBinanceReferralUrl(chainConfig.key, config?.refCode ?? null)

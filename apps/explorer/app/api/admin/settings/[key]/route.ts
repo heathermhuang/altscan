@@ -24,7 +24,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ key:
 
   let body: { value?: unknown; expectedVersion?: number; updatedBy?: string }
   try {
-    body = await request.json()
+    const parsed: unknown = await request.json()
+    // Valid JSON that isn't an object (null, "str", [] …) would throw on
+    // field access below and surface as a 500 — reject it as a 400 instead.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return NextResponse.json({ error: 'body must be a JSON object' }, { status: 400 })
+    }
+    body = parsed as typeof body
   } catch {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
   }
