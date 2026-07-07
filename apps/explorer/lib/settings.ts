@@ -6,6 +6,8 @@ import { db, schema } from './db'
  * All settings rows, cached 60s and tagged so the admin PUT can
  * revalidateTag('settings') for near-instant application on this instance.
  * Any failure (table missing, DB down) → {} → callers use built-in defaults.
+ * Deliberate: the failure result is cached too — a transient DB blip serves
+ * defaults for ≤60s instead of hammering a struggling DB on every render.
  */
 const loadRaw = unstable_cache(
   async (): Promise<Record<string, unknown>> => {

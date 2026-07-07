@@ -34,31 +34,46 @@ export async function PUT(request: Request, { params }: { params: Promise<{ key:
     return NextResponse.json({ error: 'value failed schema validation' }, { status: 422 })
   }
   const updatedBy = typeof body.updatedBy === 'string' ? body.updatedBy.slice(0, 120) : null
-  const guard =
-    typeof body.expectedVersion === 'number'
-      ? sql`explorer_settings.version = ${body.expectedVersion}`
-      : sql`true`
+  const json = JSON.stringify(value)
 
-  const result = await db.execute(sql`
-    INSERT INTO explorer_settings (key, value, version, updated_at, updated_by)
-    VALUES (${key}, ${JSON.stringify(value)}::jsonb, 1, now(), ${updatedBy})
-    ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value,
-          version = explorer_settings.version + 1,
-          updated_at = now(),
-          updated_by = EXCLUDED.updated_by
-      WHERE ${guard}
-    RETURNING key, version
-  `)
-  const row = Array.from(result as Iterable<{ key: string; version: number }>)[0]
+  // One transaction so a crash can never persist a setting without its audit
+  // row — the console's revert-from-history trusts the audit trail. With
+  // expectedVersion: strict optimistic concurrency, where an absent row is a
+  // conflict too (a client that thinks it edits v N must not create v1).
+  const row = await db.transaction(async (tx) => {
+    const result =
+      typeof body.expectedVersion === 'number'
+        ? await tx.execute(sql`
+            UPDATE explorer_settings
+            SET value = ${json}::jsonb,
+                version = version + 1,
+                updated_at = now(),
+                updated_by = ${updatedBy}
+            WHERE key = ${key} AND version = ${body.expectedVersion}
+            RETURNING key, version
+          `)
+        : await tx.execute(sql`
+            INSERT INTO explorer_settings (key, value, version, updated_at, updated_by)
+            VALUES (${key}, ${json}::jsonb, 1, now(), ${updatedBy})
+            ON CONFLICT (key) DO UPDATE
+              SET value = EXCLUDED.value,
+                  version = explorer_settings.version + 1,
+                  updated_at = now(),
+                  updated_by = EXCLUDED.updated_by
+            RETURNING key, version
+          `)
+    const updated = Array.from(result as Iterable<{ key: string; version: number }>)[0]
+    if (!updated) return undefined
+    await tx.execute(sql`
+      INSERT INTO explorer_settings_audit (key, value, version, updated_by)
+      VALUES (${key}, ${json}::jsonb, ${updated.version}, ${updatedBy})
+    `)
+    return updated
+  })
+
   if (!row) {
     return NextResponse.json({ error: 'version conflict — reload and retry' }, { status: 409 })
   }
-
-  await db.execute(sql`
-    INSERT INTO explorer_settings_audit (key, value, version, updated_by)
-    VALUES (${key}, ${JSON.stringify(value)}::jsonb, ${row.version}, ${updatedBy})
-  `)
 
   revalidateTag('settings')
   return NextResponse.json({ ok: true, key, version: row.version })
