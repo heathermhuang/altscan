@@ -11,6 +11,7 @@
     "@altscan/chain-config": "workspace:*",
     "@altscan/db": "workspace:*",
     "@altscan/explorer-core": "workspace:*",
+    "@altscan/settings-schema": "workspace:*",
     "@altscan/types": "workspace:*",
     "next": "^15.3.0",
     "react": "^19.1.0",
