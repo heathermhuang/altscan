@@ -9,7 +9,7 @@ export const prerender = false
  *  the caller's role so the editor island can disable inputs for viewers. */
 export const GET: APIRoute = async ({ params, locals }) => {
   const env = locals.runtime.env
-  const explorer = await getExplorer(env, params.id!)
+  const explorer = await getExplorer(env, params.id!, locals.member.tenantId)
   if (!explorer) return json({ error: 'unknown explorer' }, 404)
   const upstream = await explorerAdminFetch(env, explorer, '/api/admin/settings')
   if (!upstream.ok) {

@@ -13,7 +13,7 @@ export const PUT: APIRoute = async ({ params, locals, request }) => {
   const env = locals.runtime.env
   if (!canWrite(locals.member.role)) return json({ error: 'forbidden: read-only role' }, 403)
 
-  const explorer = await getExplorer(env, params.id!)
+  const explorer = await getExplorer(env, params.id!, locals.member.tenantId)
   if (!explorer) return json({ error: 'unknown explorer' }, 404)
 
   let body: { value?: unknown; expectedVersion?: number }

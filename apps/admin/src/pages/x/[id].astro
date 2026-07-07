@@ -4,7 +4,7 @@ import { SettingsPanel } from '../../islands/SettingsPanel';
 import { getExplorer } from '../../lib/db';
 export const prerender = false;
 
-const explorer = await getExplorer(Astro.locals.runtime.env, Astro.params.id!);
+const explorer = await getExplorer(Astro.locals.runtime.env, Astro.params.id!, Astro.locals.member.tenantId);
 if (!explorer) return new Response('unknown explorer', { status: 404 });
 ---
 <Admin title={`Altscan Admin — ${explorer.brand}`}>
