@@ -50,14 +50,33 @@ export function FleetBoard() {
   }, [])
 
   if (error) return <p className="msg err">fleet load failed: {error}</p>
-  if (!data) return <p>loading fleet…</p>
+  if (!data)
+    return (
+      <>
+        <p className="muted">contacting explorers…</p>
+        <div className="grid">
+          {[0, 1].map((i) => (
+            <div className="card skeleton" key={i} aria-hidden="true">
+              <div className="sk w40" />
+              <div className="sk w70" />
+              <div className="sk w55" />
+              <div className="sk w70" />
+            </div>
+          ))}
+        </div>
+      </>
+    )
 
   return (
     <div className="grid">
       {data.explorers.map((x) => (
-        <div className="card" key={x.id}>
+        // Whole card is a click target (stretched-link pattern below); the
+        // external site link opts back out with its own stacking context.
+        <div className="card fleet-card" key={x.id}>
           <h3>
-            <a href={`/x/${x.id}`}>{x.brand}</a>{' '}
+            <a className="card-link" href={`/x/${x.id}`}>
+              {x.brand}
+            </a>{' '}
             <span className={`pill ${HEALTH_CLASS[x.health] ?? ''}`}>{x.health}</span>
           </h3>
           <dl className="kv">
@@ -81,11 +100,12 @@ export function FleetBoard() {
             </dd>
             <dt>site</dt>
             <dd>
-              <a href={x.publicUrl} target="_blank" rel="noopener noreferrer">
+              <a className="ext" href={x.publicUrl} target="_blank" rel="noopener noreferrer">
                 {x.publicUrl.replace('https://', '')} ↗
               </a>
             </dd>
           </dl>
+          <p className="card-cta">Manage settings →</p>
         </div>
       ))}
     </div>
