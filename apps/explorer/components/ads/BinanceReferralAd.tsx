@@ -16,38 +16,54 @@ declare global {
   }
 }
 
-let eligibilityCache: boolean | null = null
-let eligibilityPromise: Promise<boolean> | null = null
+type AdConfig = { eligible: boolean; refCode: string | null; disabled: string[] }
 
-async function loadEligibility(): Promise<boolean> {
-  if (eligibilityCache !== null) return eligibilityCache
-  if (typeof window === 'undefined') return false
+const AD_CONFIG_TTL_MS = 5 * 60 * 1000
+const FALLBACK: AdConfig = { eligible: true, refCode: null, disabled: [] }
+
+let adConfigCache: AdConfig | null = null
+let adConfigPromise: Promise<AdConfig> | null = null
+
+async function loadAdConfig(): Promise<AdConfig> {
+  if (adConfigCache) return adConfigCache
+  if (typeof window === 'undefined') return { ...FALLBACK, eligible: false }
 
   try {
-    const cached = window.sessionStorage.getItem('binance_referral_eligible')
-    if (cached === 'true' || cached === 'false') {
-      eligibilityCache = cached === 'true'
-      return eligibilityCache
+    const raw = window.sessionStorage.getItem('ad_config_v1')
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AdConfig> & { at?: number }
+      if (typeof parsed.at === 'number' && Date.now() - parsed.at < AD_CONFIG_TTL_MS) {
+        adConfigCache = {
+          eligible: parsed.eligible !== false,
+          refCode: typeof parsed.refCode === 'string' ? parsed.refCode : null,
+          disabled: Array.isArray(parsed.disabled) ? parsed.disabled : [],
+        }
+        return adConfigCache
+      }
     }
   } catch {
     // Storage may be unavailable in strict privacy modes.
   }
 
-  eligibilityPromise ??= fetch('/api/ads/binance-eligibility', { cache: 'no-store' })
-    .then((res) => (res.ok ? res.json() : { eligible: true }))
-    .then((data: { eligible?: boolean }) => data.eligible !== false)
-    .catch(() => true)
-    .then((eligible) => {
-      eligibilityCache = eligible
+  adConfigPromise ??= fetch('/api/ads/binance-eligibility', { cache: 'no-store' })
+    .then((res) => (res.ok ? res.json() : FALLBACK))
+    .then((data: Partial<AdConfig>) => ({
+      eligible: data.eligible !== false,
+      refCode: typeof data.refCode === 'string' ? data.refCode : null,
+      disabled: Array.isArray(data.disabled) ? data.disabled : [],
+    }))
+    .catch(() => FALLBACK)
+    .then((config) => {
+      adConfigCache = config
       try {
-        window.sessionStorage.setItem('binance_referral_eligible', String(eligible))
+        window.sessionStorage.setItem('ad_config_v1', JSON.stringify({ ...config, at: Date.now() }))
       } catch {
         // Ignore storage failures; the in-memory cache still covers this page.
       }
-      return eligible
+      return config
     })
 
-  return eligibilityPromise
+  return adConfigPromise
 }
 
 export function BinanceReferralAd({
@@ -61,20 +77,23 @@ export function BinanceReferralAd({
   variant?: BinanceReferralVariant
   className?: string
 }) {
-  const [eligible, setEligible] = useState<boolean | null>(eligibilityCache)
+  const [config, setConfig] = useState<AdConfig | null>(adConfigCache)
   const impressionTracked = useRef(false)
   const copy = useMemo(() => getBinanceReferralCopy(context, chainConfig), [context])
-  const href = getBinanceReferralUrl(chainConfig.key)
+  const href = getBinanceReferralUrl(chainConfig.key, config?.refCode ?? null)
 
   useEffect(() => {
     let alive = true
-    loadEligibility().then((next) => {
-      if (alive) setEligible(next)
+    loadAdConfig().then((next) => {
+      if (alive) setConfig(next)
     })
     return () => {
       alive = false
     }
   }, [])
+
+  // Settings can disable individual placements; geo-ineligibility hides all.
+  const eligible = config ? config.eligible && !config.disabled.includes(placement) : null
 
   useEffect(() => {
     if (!eligible || impressionTracked.current) return
