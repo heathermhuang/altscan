@@ -35,6 +35,21 @@ describe('settings-schema', () => {
     }
   })
 
+  it('rejects backslash and control-character href tricks', () => {
+    const TAB = String.fromCharCode(9)
+    const NL = String.fromCharCode(10)
+    const BS = String.fromCharCode(92)
+    const tricky = ['/' + BS + 'evil.example', '/' + TAB + '/evil.example', '/' + NL + '/evil.example', '/ x']
+    for (const href of tricky) {
+      expect(parseSetting('links', { quickLinks: [{ label: 'x', href }] })).toBeNull()
+    }
+  })
+
+  it('trims hrefs and still accepts normal paths', () => {
+    const v = parseSetting('links', { quickLinks: [{ label: 'x', href: ' /blocks ' }] })
+    expect(v?.quickLinks[0]?.href).toBe('/blocks')
+  })
+
   it('rejects oversized labels and >12 links', () => {
     expect(parseSetting('links', { quickLinks: [{ label: 'x'.repeat(41), href: '/a' }] })).toBeNull()
     const links = Array.from({ length: 13 }, (_, i) => ({ label: `l${i}`, href: `/p${i}` }))

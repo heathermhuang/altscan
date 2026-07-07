@@ -29,14 +29,34 @@ export const AD_PLACEMENTS = [
 ] as const
 export type AdPlacement = (typeof AD_PLACEMENTS)[number]
 
-/** Relative path ("/x") or absolute https URL. Blocks //, http:, javascript: etc. */
+/** Relative path ("/x") or absolute https URL. Blocks //, http:, javascript:,
+ *  plus backslash and control/whitespace characters anywhere in the value —
+ *  WHATWG URL parsers normalize backslashes to slashes and strip control
+ *  chars, which would turn sneaky relative paths into off-origin URLs. The
+ *  relative branch is additionally verified with the same parser browsers use. */
 const httpsOrRelativeUrl = z
   .string()
+  .trim()
   .min(1)
   .max(300)
-  .refine((v) => (v.startsWith('/') ? !v.startsWith('//') : v.startsWith('https://')), {
-    message: 'href must be a relative path (/x) or an https:// URL',
-  })
+  .refine(
+    (v) => {
+      for (let i = 0; i < v.length; i++) {
+        const c = v.charCodeAt(i)
+        if (c <= 32 || c === 92) return false // controls + space + backslash
+      }
+      if (v.startsWith('/')) {
+        if (v.startsWith('//')) return false
+        try {
+          return new URL(v, 'https://placeholder.invalid').host === 'placeholder.invalid'
+        } catch {
+          return false
+        }
+      }
+      return v.startsWith('https://')
+    },
+    { message: 'href must be a relative path (/x) or an https:// URL' },
+  )
 
 export const linksSettingsSchema = z
   .object({
@@ -62,6 +82,7 @@ export const adsSettingsSchema = z
       .trim()
       .regex(/^[A-Za-z0-9_-]{2,32}$/, 'ref code: 2-32 chars of [A-Za-z0-9_-]')
       .optional(),
+    // deliberately partial: only overridden placements appear; absent = enabled
     placements: z.record(z.enum(AD_PLACEMENTS), z.object({ enabled: z.boolean() }).strict()).optional(),
   })
   .strict()
