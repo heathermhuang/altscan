@@ -7,4 +7,13 @@ export default defineConfig({
   output: 'server', // everything is per-request (auth + live data)
   adapter: cloudflare({ imageService: 'compile', platformProxy: { enabled: true } }),
   integrations: [react()],
+  vite: {
+    resolve: {
+      // React 19's react-dom/server default (browser build) references
+      // MessageChannel at module scope, which workerd doesn't define —
+      // deploy fails with error 10021. The edge build is the supported
+      // target for Workers (and runs fine under node in dev).
+      alias: { 'react-dom/server': 'react-dom/server.edge' },
+    },
+  },
 });
