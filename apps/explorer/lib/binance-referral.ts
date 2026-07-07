@@ -1,4 +1,5 @@
 import type { ChainConfig } from '@altscan/chain-config'
+import { AD_PLACEMENTS } from '@altscan/settings-schema'
 
 export type BinanceReferralContext =
   | 'home'
@@ -60,9 +61,9 @@ export function isBinanceRestrictedCountry(country: string | null | undefined): 
   return BINANCE_RESTRICTED_COUNTRIES.has(country.trim().toUpperCase())
 }
 
-export function getBinanceReferralUrl(chainKey: string): string {
-  const ref = chainKey === 'eth' ? 'ETHSCAN' : 'BNBSCAN'
-  return `https://www.binance.com/register?ref=${ref}`
+export function getBinanceReferralUrl(chainKey: string, refCode?: string | null): string {
+  const ref = refCode || (chainKey === 'eth' ? 'ETHSCAN' : 'BNBSCAN')
+  return `https://www.binance.com/register?ref=${encodeURIComponent(ref)}`
 }
 
 export function isBinanceIntentQuery(query: string): boolean {
@@ -233,3 +234,12 @@ export function getBinanceReferralCopy(
       }
   }
 }
+
+// Compile-time sync check: @altscan/settings-schema's runtime AD_PLACEMENTS
+// list must exactly equal the BinanceReferralPlacement union above. If either
+// side drifts, one of these Excludes becomes non-never and the assignment
+// below stops compiling.
+type _MissingFromSchema = Exclude<BinanceReferralPlacement, (typeof AD_PLACEMENTS)[number]>
+type _ExtraInSchema = Exclude<(typeof AD_PLACEMENTS)[number], BinanceReferralPlacement>
+const _placementSync: [_MissingFromSchema, _ExtraInSchema] extends [never, never] ? true : never = true
+void _placementSync
