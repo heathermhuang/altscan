@@ -7,7 +7,7 @@
   "routes": [{ "pattern": "admin.altscan.io", "custom_domain": true }],
   "observability": { "enabled": true },
   "d1_databases": [
-    { "binding": "DB", "database_name": "altscan-admin", "database_id": "FILL_AFTER_TASK_2" }
+    { "binding": "DB", "database_name": "altscan-admin", "database_id": "0e3ddd98-748f-403d-a836-95a40b23f5cd" }
   ],
   "vars": {
     // Filled after the user creates the Access app (Task 8). Empty = prod fails closed 503.
