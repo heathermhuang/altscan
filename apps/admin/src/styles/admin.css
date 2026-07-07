@@ -1,0 +1,42 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #0b0e14; color: #d7dce2;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+a { color: #7aa2f7; text-decoration: none; }
+a:hover { text-decoration: underline; }
+header.site {
+  display: flex; gap: 16px; align-items: baseline;
+  padding: 14px 20px; border-bottom: 1px solid #1e2430;
+}
+header.site .brand { color: #e5c07b; font-weight: 700; }
+header.site .who { margin-left: auto; color: #6b7280; }
+main { max-width: 1080px; margin: 0 auto; padding: 20px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.card { background: #11151f; border: 1px solid #1e2430; border-radius: 8px; padding: 14px 16px; }
+.card h3 { margin: 0 0 8px; font-size: 15px; }
+.kv { display: grid; grid-template-columns: 130px 1fr; gap: 2px 10px; margin: 0; }
+.kv dt { color: #6b7280; } .kv dd { margin: 0; }
+.ok { color: #98c379; } .warn { color: #e5c07b; } .bad { color: #e06c75; }
+button {
+  background: #1f2937; color: #d7dce2; border: 1px solid #374151;
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit;
+}
+button:hover:not(:disabled) { background: #374151; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+input[type='text'] {
+  background: #0b0e14; color: #d7dce2; border: 1px solid #374151;
+  border-radius: 6px; padding: 6px 8px; font: inherit; width: 100%;
+}
+table { border-collapse: collapse; width: 100%; }
+td, th { border-bottom: 1px solid #1e2430; padding: 6px 8px; text-align: left; vertical-align: top; }
+pre.diff { background: #0b0e14; border: 1px solid #1e2430; border-radius: 6px; padding: 10px; overflow-x: auto; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pill { border: 1px solid #374151; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.toggle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 14px; }
+label.toggle { display: flex; gap: 8px; align-items: center; }
+.msg { margin: 10px 0; padding: 8px 12px; border-radius: 6px; }
+.msg.err { background: #3b1d21; color: #e06c75; }
+.msg.ok { background: #1d3b24; color: #98c379; }
