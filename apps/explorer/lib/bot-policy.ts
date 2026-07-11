@@ -74,6 +74,7 @@ export const HEAVY_PATH_PREFIXES = [
   '/api/v1/contracts',
   '/md/tx/',
   '/md/block/',
+  '/md/blocks/',
 ] as const
 
 export function isTrainingBot(ua: string | null): boolean {

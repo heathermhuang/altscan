@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getTokenBalances } from '@/lib/moralis'
+import { guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,8 @@ export async function GET(
   { params }: { params: Promise<{ address: string }> },
 ) {
   const { address } = await params
+  const guard = await guardInternalAddress(_req, address)
+  if (guard) return guard
 
   const result = await getTokenBalances(address)
 

@@ -6,37 +6,70 @@
 import { getDb, schema } from './db'
 import { eq, or, and, inArray, isNull } from 'drizzle-orm'
 import crypto from 'crypto'
+import dns from 'node:dns/promises'
+import net from 'node:net'
 
 type WebhookPayload = {
   event: 'tx' | 'token_transfer' | 'new_block'
   timestamp: string
-  data: Record<string, unknown>
+  blockNumber?: number
+  count?: number
+  // A single event object, or (for batched per-block tx delivery) an array.
+  data: Record<string, unknown> | Record<string, unknown>[]
+}
+
+/** True for IPv4/IPv6 loopback, private, link-local, ULA and CGNAT ranges. */
+function isPrivateIp(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number)
+    return (
+      a === 0 || a === 10 || a === 127 ||
+      (a === 192 && b === 168) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 169 && b === 254) ||   // link-local (incl. 169.254.169.254 metadata)
+      (a === 100 && b >= 64 && b <= 127) // CGNAT
+    )
+  }
+  const low = ip.toLowerCase().replace(/^::ffff:/, '')
+  if (net.isIPv4(low)) return isPrivateIp(low)
+  return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80')
 }
 
 /**
- * Validate a webhook URL is safe to call (SSRF defense at delivery time).
- * DNS rebinding can cause a domain that pointed to a public IP at registration
- * to resolve to an internal IP at delivery time. Re-validate before every call.
+ * SSRF defense at delivery time. The registration-time host check only inspects
+ * the URL *string*; it cannot stop DNS rebinding (a hostname that resolved public
+ * at registration, re-pointed to an internal IP later). Two layers here:
+ *   1. Require https:// — an internal HTTP-only service (e.g. the cloud metadata
+ *      endpoint) cannot complete a public-CA TLS handshake for the registered host.
+ *   2. Resolve the hostname NOW and reject if any A/AAAA record is private/reserved.
+ * Redirect following is disabled separately (`redirect: 'error'`).
  */
-function isUrlSafe(url: string): boolean {
+async function isUrlSafe(url: string): Promise<boolean> {
+  let parsed: URL
   try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== 'https:') return false
-    const hostname = parsed.hostname.toLowerCase()
-    // Block internal/private networks
-    const blockedHosts = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fe80:|0x|%)/
-    if (blockedHosts.test(hostname)) return false
-    // Block numeric IPs (DNS rebinding defense)
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) return false
-    return true
+    parsed = new URL(url)
   } catch {
     return false
   }
+  if (parsed.protocol !== 'https:') return false
+  const hostname = parsed.hostname.toLowerCase()
+  const blockedHosts = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fe80:|0x|%)/
+  if (blockedHosts.test(hostname)) return false
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) return false
+  // Resolve and reject if the host currently points at a private/reserved IP.
+  try {
+    const addrs = await dns.lookup(hostname, { all: true })
+    if (addrs.length === 0) return false
+    if (addrs.some((a) => isPrivateIp(a.address))) return false
+  } catch {
+    return false
+  }
+  return true
 }
 
 async function deliverWebhook(url: string, secretHash: string, payload: WebhookPayload): Promise<boolean> {
   // Re-validate URL at delivery time (DNS rebinding defense)
-  if (!isUrlSafe(url)) {
+  if (!(await isUrlSafe(url))) {
     console.warn(`[webhook-notifier] Blocked delivery to unsafe URL: ${url}`)
     return false
   }
@@ -125,27 +158,31 @@ export async function notifyWebhooks(
       ? txs.filter(tx => tx.fromAddress === webhook.watchAddress || tx.toAddress === webhook.watchAddress)
       : txs
 
-    let anyFailed = false
-    for (const tx of relevantTxs) {
-      const payload: WebhookPayload = {
-        event: 'tx',
-        timestamp: timestamp.toISOString(),
-        data: {
-          hash: tx.hash,
-          blockNumber,
-          from: tx.fromAddress,
-          to: tx.toAddress,
-          value: tx.value,
-        },
-      }
+    if (relevantTxs.length === 0) continue
 
-      const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
-      if (!ok) anyFailed = true
+    // ONE POST per webhook per block — batch all relevant txs into a single
+    // payload. Previously this sent one POST per tx, so a global webhook (no
+    // watchAddress) emitted hundreds of POSTs/block to an attacker-suppliable
+    // target URL — an amplification/DoS vector. Consumers now receive `data`
+    // as an array of tx objects for the block.
+    const payload: WebhookPayload = {
+      event: 'tx',
+      timestamp: timestamp.toISOString(),
+      blockNumber,
+      count: relevantTxs.length,
+      data: relevantTxs.map((tx) => ({
+        hash: tx.hash,
+        blockNumber,
+        from: tx.fromAddress,
+        to: tx.toAddress,
+        value: tx.value,
+      })),
     }
 
-    if (!anyFailed && relevantTxs.length > 0) {
+    const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
+    if (ok) {
       succeededIds.add(webhook.id)
-    } else if (anyFailed) {
+    } else {
       const currentFail = (webhook as { failCount?: number }).failCount ?? 0
       failedWebhooks.set(webhook.id, currentFail + 1)
     }

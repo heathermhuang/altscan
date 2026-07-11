@@ -23,7 +23,7 @@ list/analytics pages are durable.
 ## Machine-friendly access
 
 - [Markdown mirrors](${BASE}/md): send \`Accept: text/markdown\` to /, /about,
-  /developer, /api-docs, /tx/{hash}, /block/{number} to get markdown instead of HTML
+  /developer, /api-docs, /tx/{hash}, /blocks/{number} to get markdown instead of HTML
 - [REST API docs](${BASE}/api-docs): free public JSON API
 - [API catalog (RFC 9727)](${BASE}/.well-known/api-catalog)
 - [Agent skills index](${BASE}/.well-known/agent-skills/index.json)

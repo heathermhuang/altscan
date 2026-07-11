@@ -82,6 +82,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid watchAddress' }, { status: 400 })
   }
 
+  // Cap webhooks per owner. Each active webhook fires every block, so an
+  // uncapped owner could register many webhooks pointing at a victim URL and
+  // turn the indexer into an amplifier. Global (address-less) webhooks match
+  // EVERY tx, so they are capped tighter than address-scoped ones.
+  const existing = await db.select({ watchAddress: schema.webhooks.watchAddress })
+    .from(schema.webhooks)
+    .where(eq(schema.webhooks.ownerAddress, ownerAddress.toLowerCase()))
+  if (existing.length >= 10) {
+    return NextResponse.json({ error: 'Maximum 10 webhooks per address' }, { status: 400 })
+  }
+  if (!watchAddress) {
+    const globalCount = existing.filter((w) => w.watchAddress === null).length
+    if (globalCount >= 2) {
+      return NextResponse.json({ error: 'Maximum 2 global (address-less) webhooks per address' }, { status: 400 })
+    }
+  }
+
   // Validate eventTypes
   const VALID_EVENTS = new Set(['tx', 'token_transfer', 'new_block'])
   const sanitizedEvents = (eventTypes ?? ['tx']).filter(e => VALID_EVENTS.has(e))
@@ -106,6 +123,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     id: created.id,
     secret: rawSecret,
-    message: 'Webhook created. Keep the secret — it will not be shown again. BNBScan will POST to your URL with an X-BNBScan-Signature header (HMAC-SHA256 of the payload using sha256(yourSecret) as the HMAC key).',
+    message: 'Webhook created. Keep the secret — it will not be shown again. BNBScan sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.',
   }, { status: 201 })
 }

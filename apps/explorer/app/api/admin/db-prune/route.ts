@@ -27,8 +27,10 @@ export async function POST(request: NextRequest) {
   const days = parseInt(request.nextUrl.searchParams.get('days') ?? '7', 10)
   const vacuumMode = request.nextUrl.searchParams.get('vacuum') ?? 'regular'
 
-  if (days < 1 || days > 365) {
-    return NextResponse.json({ error: 'days must be between 1 and 365' }, { status: 400 })
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    // Number.isInteger rejects NaN (parseInt('abc')) — otherwise NaN slips the
+    // range check and produces INTERVAL 'NaN days'.
+    return NextResponse.json({ error: 'days must be an integer between 1 and 365' }, { status: 400 })
   }
 
   try {
