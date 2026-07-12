@@ -99,7 +99,9 @@ const MARKDOWN_PATHS = new Set<string>(['/', '/about', '/developer', '/api-docs'
 // /address/* is intentionally excluded; its fan-out queries are too heavy.
 const MARKDOWN_DYNAMIC = [
   /^\/tx\/0x[0-9a-fA-F]{64}$/,
-  /^\/block\/\d{1,12}$/,
+  // Canonical block route is plural /blocks/{n}; keep the singular /block/{n}
+  // working for backward-compat (older agent links) via the optional `s`.
+  /^\/blocks?\/\d{1,12}$/,
 ]
 
 function hasMarkdownRepresentation(pathname: string): boolean {

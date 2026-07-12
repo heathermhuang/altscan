@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getTokenHolders } from '@/lib/holders'
+import { guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,8 @@ export async function GET(
   { params }: { params: Promise<{ address: string }> },
 ) {
   const { address } = await params
+  const guard = await guardInternalAddress(_req, address)
+  if (guard) return guard
 
   // Lowercase to share Moralis KV-cache keys (owners:/holdercount:) with the SSR path.
   const result = await getTokenHolders(address.toLowerCase())

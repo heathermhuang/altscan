@@ -1,11 +1,10 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
+import { secureHeaders } from 'hono/secure-headers'
 import { html } from './page.js'
 
 // ── Config ──────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3090
-const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
 const POLL_INTERVAL = 30_000 // 30s
 const HISTORY_HOURS = 24
 const MAX_HISTORY = (HISTORY_HOURS * 3600_000) / POLL_INTERVAL // ~2880 entries
@@ -18,13 +17,6 @@ interface ServiceHealth {
   latestBlock: number | null
   lagSeconds: number | null
   responseTimeMs: number | null
-  dbSizeMB: number | null
-  txRows: number | null
-  blockRows: number | null
-  activeConns: number | null
-  totalConns: number | null
-  heapUsedMB: number | null
-  uptime: number | null
   lastChecked: string | null
   error: string | null
 }
@@ -52,9 +44,7 @@ const services: Record<string, ServiceHealth> = {
     healthUrl: 'https://ethscan.io/api/health',
     status: 'unknown',
     latestBlock: null, lagSeconds: null, responseTimeMs: null,
-    dbSizeMB: null, txRows: null, blockRows: null,
-    activeConns: null, totalConns: null, heapUsedMB: null,
-    uptime: null, lastChecked: null, error: null,
+    lastChecked: null, error: null,
   },
   bnbscan: {
     name: 'bnbscan.com',
@@ -62,9 +52,7 @@ const services: Record<string, ServiceHealth> = {
     healthUrl: 'https://bnbscan.com/api/health',
     status: 'unknown',
     latestBlock: null, lagSeconds: null, responseTimeMs: null,
-    dbSizeMB: null, txRows: null, blockRows: null,
-    activeConns: null, totalConns: null, heapUsedMB: null,
-    uptime: null, lastChecked: null, error: null,
+    lastChecked: null, error: null,
   },
 }
 
@@ -85,10 +73,11 @@ async function checkService(key: string) {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10_000)
-    const headers: Record<string, string> = {}
-    if (ADMIN_SECRET) headers['Authorization'] = `Bearer ${ADMIN_SECRET}`
-
-    const res = await fetch(svc.healthUrl, { signal: controller.signal, headers })
+    // Public status page: consume ONLY the unauthenticated /api/health view
+    // (status/latestBlock/lagSeconds). Do NOT send ADMIN_SECRET here — this
+    // page and its /api/status JSON are public, and forwarding the secret
+    // pulled admin-only internals (DB conns/size, heap) into a public surface.
+    const res = await fetch(svc.healthUrl, { signal: controller.signal })
     clearTimeout(timeout)
     const elapsed = Date.now() - start
 
@@ -108,25 +97,16 @@ async function checkService(key: string) {
     svc.lastChecked = new Date().toISOString()
     svc.error = null
 
-    if (data.status === 'ok') {
+    if (data.status === 'ok' || data.status === 'degraded') {
       svc.latestBlock = (data.latestBlock as number) ?? null
       svc.lagSeconds = (data.lagSeconds as number) ?? null
 
-      // Admin-only fields
-      const db = data.database as Record<string, number> | undefined
-      if (db) {
-        svc.dbSizeMB = db.sizeMB ?? null
-        svc.txRows = db.txRows ?? null
-        svc.blockRows = db.blockRows ?? null
-        svc.activeConns = db.activeConns ?? null
-        svc.totalConns = db.totalConns ?? null
-      }
-      const mem = data.memory as Record<string, unknown> | undefined
-      if (mem) svc.heapUsedMB = (mem.heapUsedMB as number) ?? null
-      svc.uptime = (data.uptime as number) ?? null
-
-      // Lag > 2 min = degraded
-      svc.status = (svc.lagSeconds !== null && svc.lagSeconds > 120) ? 'degraded' : 'operational'
+      // Upstream says 'degraded' (the public health view carries the flag when
+      // the explorer is under critical memory pressure — never the numbers) OR
+      // the chain head is stale (> 2 min).
+      svc.status = (data.status === 'degraded' || (svc.lagSeconds !== null && svc.lagSeconds > 120))
+        ? 'degraded'
+        : 'operational'
     } else {
       svc.status = 'degraded'
     }
@@ -165,7 +145,22 @@ async function pollAll() {
 
 // ── App ─────────────────────────────────────────────────────────────
 const app = new Hono()
-app.use('*', cors())
+
+// Security headers. No CORS: the status HTML is same-origin server-rendered and
+// no cross-origin consumer needs to read /api/status — a wildcard ACAO would let
+// any site's JS scrape whatever this endpoint exposes. The page has no scripts
+// and only inline styles, so the CSP can be tight.
+app.use('*', secureHeaders({
+  strictTransportSecurity: 'max-age=63072000; includeSubDomains; preload',
+  xFrameOptions: 'DENY',
+  contentSecurityPolicy: {
+    defaultSrc: ["'none'"],
+    styleSrc: ["'unsafe-inline'"],
+    imgSrc: ["'self'", 'data:'],
+    baseUri: ["'none'"],
+    frameAncestors: ["'none'"],
+  },
+}))
 
 app.get('/', (c) => {
   return c.html(html(services, history, dailyHistory))

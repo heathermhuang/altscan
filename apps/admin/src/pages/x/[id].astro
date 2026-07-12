@@ -2,6 +2,7 @@
 import Admin from '../../layouts/Admin.astro';
 import { SettingsPanel } from '../../islands/SettingsPanel';
 import { getExplorer } from '../../lib/db';
+import { safeExternalUrl } from '../../lib/safe-url';
 export const prerender = false;
 
 const explorer = await getExplorer(Astro.locals.runtime.env, Astro.params.id!, Astro.locals.member.tenantId);
@@ -10,7 +11,7 @@ if (!explorer) return new Response('unknown explorer', { status: 404 });
 <Admin title={`Altscan Admin — ${explorer.brand}`}>
   <h2>{explorer.brand} <span class="pill">{explorer.status}</span></h2>
   <p class="row">
-    <a href={explorer.publicUrl} target="_blank" rel="noopener noreferrer">public site ↗</a>
+    <a href={safeExternalUrl(explorer.publicUrl)} target="_blank" rel="noopener noreferrer">public site ↗</a>
     {explorer.renderWebId && (
       <a href={`https://dashboard.render.com/web/${explorer.renderWebId}`} target="_blank" rel="noopener noreferrer">render: web ↗</a>
     )}

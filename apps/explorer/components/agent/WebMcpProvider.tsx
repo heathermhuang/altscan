@@ -106,8 +106,8 @@ export function WebMcpProvider() {
           if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) {
             throw new Error('Invalid block number.')
           }
-          window.location.assign(`/block/${n}`)
-          return { navigatedTo: `/block/${n}` }
+          window.location.assign(`/blocks/${n}`)
+          return { navigatedTo: `/blocks/${n}` }
         },
       },
       {

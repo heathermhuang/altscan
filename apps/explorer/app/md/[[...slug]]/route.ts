@@ -39,7 +39,7 @@ function homepageMarkdown(): string {
     `- API catalog (RFC 9727): \`https://${c.domain}/.well-known/api-catalog\`.`,
     `- Agent skills index: \`https://${c.domain}/.well-known/agent-skills/index.json\`.`,
     `- Content negotiation: request this or any markdown-enabled page with \`Accept: text/markdown\`.`,
-    `- Per-entity markdown: \`/tx/{hash}\` and \`/block/{number}\` also support \`Accept: text/markdown\`.`,
+    `- Per-entity markdown: \`/tx/{hash}\` and \`/blocks/{number}\` also support \`Accept: text/markdown\`.`,
     '',
     '## Crawl policy',
     '',
@@ -93,7 +93,7 @@ function developerMarkdown(): string {
     '',
     'Markdown-enabled paths:',
     '- Static: `/`, `/about`, `/api-docs`, `/developer`',
-    '- Dynamic (PK lookups, immutable): `/tx/{hash}`, `/block/{number}`',
+    '- Dynamic (PK lookups, immutable): `/tx/{hash}`, `/blocks/{number}`',
     '',
     '`/address/*` is intentionally HTML-only — its fan-out queries are too heavy for ad-hoc requests. Use `/api/v1/addresses/{addr}` for structured access.',
     '',
@@ -156,7 +156,7 @@ async function txMarkdown(hash: string): Promise<string | null> {
     '## Summary',
     '',
     `- Status: ${tx.status ? 'success' : 'failed'}`,
-    `- Block: [${formatNumber(tx.blockNumber)}](https://${c.domain}/block/${tx.blockNumber})`,
+    `- Block: [${formatNumber(tx.blockNumber)}](https://${c.domain}/blocks/${tx.blockNumber})`,
     `- Timestamp: ${tx.timestamp.toISOString()}`,
     `- From: \`${tx.fromAddress}\``,
     `- To: ${tx.toAddress ? `\`${tx.toAddress}\`` : '_contract creation_'}`,
@@ -217,7 +217,7 @@ async function blockMarkdown(num: number): Promise<string | null> {
     '',
     '## Web view',
     '',
-    `- HTML: https://${c.domain}/block/${block.number}`,
+    `- HTML: https://${c.domain}/blocks/${block.number}`,
     '',
   )
   return lines.join('\n')
@@ -230,7 +230,7 @@ function notFoundMarkdown(kind: 'tx' | 'block', id: string): string {
     '',
     `\`${id}\` is not in the ${c.brandDomain} index. Either it has not been indexed yet, or it has fallen outside the retention window. Recent chain state is kept on a rolling window; for full history, query a node RPC directly.`,
     '',
-    `- Web view: https://${c.domain}/${kind}/${id}`,
+    `- Web view: https://${c.domain}/${kind === 'tx' ? 'tx' : 'blocks'}/${id}`,
     `- API: https://${c.domain}/api/v1/${kind === 'tx' ? 'transactions' : 'blocks'}/${id}`,
     '',
   ].join('\n')
@@ -275,7 +275,7 @@ async function dispatch(path: string): Promise<RouteResult> {
     }
   }
 
-  const blockMatch = /^\/block\/(.+)$/.exec(path)
+  const blockMatch = /^\/blocks?\/(.+)$/.exec(path)
   if (blockMatch) {
     const raw = blockMatch[1]
     if (!BLOCK_NUMBER.test(raw)) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 
@@ -95,17 +95,53 @@ export async function POST(request: Request) {
   const rawSecret = crypto.randomBytes(32).toString('hex')
   const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 
-  const [created] = await db.insert(schema.webhooks).values({
-    ownerAddress: ownerAddress.toLowerCase(),
-    url,
-    watchAddress: watchAddress?.toLowerCase(),
-    eventTypes: sanitizedEvents,
-    secret: secretHash,
-  }).returning()
+  const owner = ownerAddress.toLowerCase()
+
+  // Cap webhooks per owner. Each active webhook fires every block, so an
+  // uncapped owner could register many webhooks pointing at a victim URL and
+  // turn the indexer into an amplifier. Global (address-less) webhooks match
+  // EVERY tx, so they are capped tighter than address-scoped ones.
+  //
+  // Count + insert run in one transaction holding a per-owner advisory lock:
+  // without it, N parallel POSTs all read the same pre-insert count and sail
+  // past the cap (the amplification path the cap exists to close). The xact
+  // lock releases automatically on commit/rollback.
+  let created: { id: number } | undefined
+  let capError: string | null = null
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${owner}))`)
+
+    const existing = await tx.select({ watchAddress: schema.webhooks.watchAddress })
+      .from(schema.webhooks)
+      .where(eq(schema.webhooks.ownerAddress, owner))
+    if (existing.length >= 10) {
+      capError = 'Maximum 10 webhooks per address'
+      return
+    }
+    if (!watchAddress) {
+      const globalCount = existing.filter((w) => w.watchAddress === null).length
+      if (globalCount >= 2) {
+        capError = 'Maximum 2 global (address-less) webhooks per address'
+        return
+      }
+    }
+
+    const [row] = await tx.insert(schema.webhooks).values({
+      ownerAddress: owner,
+      url,
+      watchAddress: watchAddress?.toLowerCase(),
+      eventTypes: sanitizedEvents,
+      secret: secretHash,
+    }).returning({ id: schema.webhooks.id })
+    created = row
+  })
+  if (capError || !created) {
+    return NextResponse.json({ error: capError ?? 'Webhook creation failed' }, { status: 400 })
+  }
 
   return NextResponse.json({
     id: created.id,
     secret: rawSecret,
-    message: 'Webhook created. Keep the secret — it will not be shown again. BNBScan will POST to your URL with an X-BNBScan-Signature header (HMAC-SHA256 of the payload using sha256(yourSecret) as the HMAC key).',
+    message: 'Webhook created. Keep the secret — it will not be shown again. BNBScan sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.',
   }, { status: 201 })
 }

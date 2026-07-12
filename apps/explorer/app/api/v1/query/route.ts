@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, or, desc } from 'drizzle-orm'
 import { authRequest } from '@/lib/api-auth'
+// apiJson (not NextResponse.json) for data rows: blocks/transactions carry
+// Drizzle bigint columns (gas_used, gas, gas_limit) that JSON.stringify throws
+// on — that throw is what made those two entities 500. apiJson stringifies
+// BigInt safely; error responses stay on NextResponse.json (plain objects).
+import { apiJson } from '@/lib/api-serialize'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
 
@@ -84,7 +89,7 @@ export async function POST(request: Request) {
           .orderBy(orderBy === 'asc' ? schema.transactions.blockNumber : desc(schema.transactions.blockNumber))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
-        return NextResponse.json({ entity, count: rows.length, data: rows })
+        return apiJson({ entity, count: rows.length, data: rows })
       }
 
       case 'blocks': {
@@ -96,14 +101,14 @@ export async function POST(request: Request) {
           .orderBy(orderBy === 'asc' ? schema.blocks.number : desc(schema.blocks.number))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
-        return NextResponse.json({ entity, count: rows.length, data: rows })
+        return apiJson({ entity, count: rows.length, data: rows })
       }
 
       case 'tokens': {
         const rows = await db.select().from(schema.tokens)
           .orderBy(orderBy === 'asc' ? schema.tokens.holderCount : desc(schema.tokens.holderCount))
           .limit(safeLimit).offset(safeOffset)
-        return NextResponse.json({ entity, count: rows.length, data: rows })
+        return apiJson({ entity, count: rows.length, data: rows })
       }
 
       case 'token_transfers': {
@@ -125,7 +130,7 @@ export async function POST(request: Request) {
           .orderBy(orderBy === 'asc' ? schema.tokenTransfers.blockNumber : desc(schema.tokenTransfers.blockNumber))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
-        return NextResponse.json({ entity, count: rows.length, data: rows })
+        return apiJson({ entity, count: rows.length, data: rows })
       }
 
       case 'dex_trades': {
@@ -139,7 +144,7 @@ export async function POST(request: Request) {
           .orderBy(orderBy === 'asc' ? schema.dexTrades.blockNumber : desc(schema.dexTrades.blockNumber))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
-        return NextResponse.json({ entity, count: rows.length, data: rows })
+        return apiJson({ entity, count: rows.length, data: rows })
       }
 
       default:

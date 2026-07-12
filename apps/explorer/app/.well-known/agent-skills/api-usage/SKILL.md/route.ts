@@ -37,7 +37,7 @@ All \`/api/v1/*\` endpoints are public and require no authentication. There is n
 All responses are JSON. For human-friendly markdown representations, send \`Accept: text/markdown\` to any of:
 
 - Static pages: \`/\`, \`/about\`, \`/api-docs\`, \`/developer\`
-- Per-entity pages: \`/tx/{hash}\` (0x + 64 hex), \`/block/{number}\`
+- Per-entity pages: \`/tx/{hash}\` (0x + 64 hex), \`/blocks/{number}\`
 
 \`/address/*\` is HTML-only by design — its fan-out queries are too heavy for ad-hoc markdown requests. Use \`/api/v1/addresses/:address\` for structured access.
 

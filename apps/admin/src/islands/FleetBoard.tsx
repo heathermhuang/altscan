@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FleetPayload } from '../lib/fleet'
+import { safeExternalUrl } from '../lib/safe-url'
 
 const HEALTH_CLASS: Record<string, string> = { ok: 'ok', degraded: 'warn', unreachable: 'bad' }
 
@@ -100,7 +101,7 @@ export function FleetBoard() {
             </dd>
             <dt>site</dt>
             <dd>
-              <a className="ext" href={x.publicUrl} target="_blank" rel="noopener noreferrer">
+              <a className="ext" href={safeExternalUrl(x.publicUrl)} target="_blank" rel="noopener noreferrer">
                 {x.publicUrl.replace('https://', '')} ↗
               </a>
             </dd>
