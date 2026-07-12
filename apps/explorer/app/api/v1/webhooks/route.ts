@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 
@@ -82,23 +82,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid watchAddress' }, { status: 400 })
   }
 
-  // Cap webhooks per owner. Each active webhook fires every block, so an
-  // uncapped owner could register many webhooks pointing at a victim URL and
-  // turn the indexer into an amplifier. Global (address-less) webhooks match
-  // EVERY tx, so they are capped tighter than address-scoped ones.
-  const existing = await db.select({ watchAddress: schema.webhooks.watchAddress })
-    .from(schema.webhooks)
-    .where(eq(schema.webhooks.ownerAddress, ownerAddress.toLowerCase()))
-  if (existing.length >= 10) {
-    return NextResponse.json({ error: 'Maximum 10 webhooks per address' }, { status: 400 })
-  }
-  if (!watchAddress) {
-    const globalCount = existing.filter((w) => w.watchAddress === null).length
-    if (globalCount >= 2) {
-      return NextResponse.json({ error: 'Maximum 2 global (address-less) webhooks per address' }, { status: 400 })
-    }
-  }
-
   // Validate eventTypes
   const VALID_EVENTS = new Set(['tx', 'token_transfer', 'new_block'])
   const sanitizedEvents = (eventTypes ?? ['tx']).filter(e => VALID_EVENTS.has(e))
@@ -112,13 +95,49 @@ export async function POST(request: Request) {
   const rawSecret = crypto.randomBytes(32).toString('hex')
   const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 
-  const [created] = await db.insert(schema.webhooks).values({
-    ownerAddress: ownerAddress.toLowerCase(),
-    url,
-    watchAddress: watchAddress?.toLowerCase(),
-    eventTypes: sanitizedEvents,
-    secret: secretHash,
-  }).returning()
+  const owner = ownerAddress.toLowerCase()
+
+  // Cap webhooks per owner. Each active webhook fires every block, so an
+  // uncapped owner could register many webhooks pointing at a victim URL and
+  // turn the indexer into an amplifier. Global (address-less) webhooks match
+  // EVERY tx, so they are capped tighter than address-scoped ones.
+  //
+  // Count + insert run in one transaction holding a per-owner advisory lock:
+  // without it, N parallel POSTs all read the same pre-insert count and sail
+  // past the cap (the amplification path the cap exists to close). The xact
+  // lock releases automatically on commit/rollback.
+  let created: { id: number } | undefined
+  let capError: string | null = null
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${owner}))`)
+
+    const existing = await tx.select({ watchAddress: schema.webhooks.watchAddress })
+      .from(schema.webhooks)
+      .where(eq(schema.webhooks.ownerAddress, owner))
+    if (existing.length >= 10) {
+      capError = 'Maximum 10 webhooks per address'
+      return
+    }
+    if (!watchAddress) {
+      const globalCount = existing.filter((w) => w.watchAddress === null).length
+      if (globalCount >= 2) {
+        capError = 'Maximum 2 global (address-less) webhooks per address'
+        return
+      }
+    }
+
+    const [row] = await tx.insert(schema.webhooks).values({
+      ownerAddress: owner,
+      url,
+      watchAddress: watchAddress?.toLowerCase(),
+      eventTypes: sanitizedEvents,
+      secret: secretHash,
+    }).returning({ id: schema.webhooks.id })
+    created = row
+  })
+  if (capError || !created) {
+    return NextResponse.json({ error: capError ?? 'Webhook creation failed' }, { status: 400 })
+  }
 
   return NextResponse.json({
     id: created.id,

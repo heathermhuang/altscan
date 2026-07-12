@@ -85,20 +85,22 @@ export async function GET(request: NextRequest) {
       lagSeconds,
     }
 
+    // Memory pressure drives the top-level status for ALL callers — the public
+    // status page (status.altscan.io) polls unauthenticated and must still see
+    // 'degraded' when heap is critical. Only the detailed numbers stay admin-only.
+    const mem = process.memoryUsage()
+    const fmt = (bytes: number) => Math.round(bytes / 1024 / 1024)
+    const heapUsedMB = fmt(mem.heapUsed)
+    const heapLimitMB = 1200
+    const heapWarnMB = 900
+    let memoryStatus: 'ok' | 'warning' | 'critical' = 'ok'
+    if (heapUsedMB > heapLimitMB) memoryStatus = 'critical'
+    else if (heapUsedMB > heapWarnMB) memoryStatus = 'warning'
+    if (memoryStatus === 'critical') response.status = 'degraded'
+
     // Authenticated response: add memory, caches, DB diagnostics
     if (isAdmin) {
-      const mem = process.memoryUsage()
-      const fmt = (bytes: number) => Math.round(bytes / 1024 / 1024)
-      const heapUsedMB = fmt(mem.heapUsed)
       const heapTotalMB = fmt(mem.heapTotal)
-
-      const heapLimitMB = 1200
-      const heapWarnMB = 900
-      let memoryStatus: 'ok' | 'warning' | 'critical' = 'ok'
-      if (heapUsedMB > heapLimitMB) memoryStatus = 'critical'
-      else if (heapUsedMB > heapWarnMB) memoryStatus = 'warning'
-
-      if (memoryStatus === 'critical') response.status = 'degraded'
 
       const caches = getCacheSizes()
       caches['rate-limit'] = getRateLimitMapSize()

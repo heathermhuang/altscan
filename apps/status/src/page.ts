@@ -5,13 +5,6 @@ interface ServiceHealth {
   latestBlock: number | null
   lagSeconds: number | null
   responseTimeMs: number | null
-  dbSizeMB: number | null
-  txRows: number | null
-  blockRows: number | null
-  activeConns: number | null
-  totalConns: number | null
-  heapUsedMB: number | null
-  uptime: number | null
   lastChecked: string | null
   error: string | null
 }
@@ -193,28 +186,6 @@ function serviceCard(key: string, svc: ServiceHealth, hist: HistoryEntry[], dail
           <div class="metric-label">Uptime (24h)</div>
           <div class="metric-value">${uptimePercent === '—' ? '—' : uptimePercent + '%'}</div>
         </div>
-        ${svc.dbSizeMB !== null ? `
-        <div class="metric">
-          <div class="metric-label">DB Size</div>
-          <div class="metric-value">${svc.dbSizeMB > 1024 ? (svc.dbSizeMB / 1024).toFixed(1) + ' GB' : svc.dbSizeMB + ' MB'}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Transactions</div>
-          <div class="metric-value">${formatNumber(svc.txRows)}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Blocks</div>
-          <div class="metric-value">${formatNumber(svc.blockRows)}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">DB Conns</div>
-          <div class="metric-value">${svc.activeConns ?? '—'} / ${svc.totalConns ?? '—'}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Heap Used</div>
-          <div class="metric-value">${svc.heapUsedMB !== null ? svc.heapUsedMB + ' MB' : '—'}</div>
-        </div>
-        ` : ''}
       </div>
 
       ${svc.error ? `<div class="error-msg">${svc.error}</div>` : ''}

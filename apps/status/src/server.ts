@@ -17,13 +17,6 @@ interface ServiceHealth {
   latestBlock: number | null
   lagSeconds: number | null
   responseTimeMs: number | null
-  dbSizeMB: number | null
-  txRows: number | null
-  blockRows: number | null
-  activeConns: number | null
-  totalConns: number | null
-  heapUsedMB: number | null
-  uptime: number | null
   lastChecked: string | null
   error: string | null
 }
@@ -51,9 +44,7 @@ const services: Record<string, ServiceHealth> = {
     healthUrl: 'https://ethscan.io/api/health',
     status: 'unknown',
     latestBlock: null, lagSeconds: null, responseTimeMs: null,
-    dbSizeMB: null, txRows: null, blockRows: null,
-    activeConns: null, totalConns: null, heapUsedMB: null,
-    uptime: null, lastChecked: null, error: null,
+    lastChecked: null, error: null,
   },
   bnbscan: {
     name: 'bnbscan.com',
@@ -61,9 +52,7 @@ const services: Record<string, ServiceHealth> = {
     healthUrl: 'https://bnbscan.com/api/health',
     status: 'unknown',
     latestBlock: null, lagSeconds: null, responseTimeMs: null,
-    dbSizeMB: null, txRows: null, blockRows: null,
-    activeConns: null, totalConns: null, heapUsedMB: null,
-    uptime: null, lastChecked: null, error: null,
+    lastChecked: null, error: null,
   },
 }
 
@@ -108,25 +97,16 @@ async function checkService(key: string) {
     svc.lastChecked = new Date().toISOString()
     svc.error = null
 
-    if (data.status === 'ok') {
+    if (data.status === 'ok' || data.status === 'degraded') {
       svc.latestBlock = (data.latestBlock as number) ?? null
       svc.lagSeconds = (data.lagSeconds as number) ?? null
 
-      // Admin-only fields
-      const db = data.database as Record<string, number> | undefined
-      if (db) {
-        svc.dbSizeMB = db.sizeMB ?? null
-        svc.txRows = db.txRows ?? null
-        svc.blockRows = db.blockRows ?? null
-        svc.activeConns = db.activeConns ?? null
-        svc.totalConns = db.totalConns ?? null
-      }
-      const mem = data.memory as Record<string, unknown> | undefined
-      if (mem) svc.heapUsedMB = (mem.heapUsedMB as number) ?? null
-      svc.uptime = (data.uptime as number) ?? null
-
-      // Lag > 2 min = degraded
-      svc.status = (svc.lagSeconds !== null && svc.lagSeconds > 120) ? 'degraded' : 'operational'
+      // Upstream says 'degraded' (the public health view carries the flag when
+      // the explorer is under critical memory pressure — never the numbers) OR
+      // the chain head is stale (> 2 min).
+      svc.status = (data.status === 'degraded' || (svc.lagSeconds !== null && svc.lagSeconds > 120))
+        ? 'degraded'
+        : 'operational'
     } else {
       svc.status = 'degraded'
     }
