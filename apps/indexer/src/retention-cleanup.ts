@@ -8,9 +8,10 @@
  * Delete order respects FK: transactions → blocks (transactions.block_number
  * references blocks.number, so transactions must be deleted first).
  */
-import { getDb } from './db'
-import { sql } from 'drizzle-orm'
+import { getMaintenanceDb } from './db'
+import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
+import { HOLDER_BALANCE_TRACKING_ENABLED } from './block-processor'
 
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
@@ -32,6 +33,28 @@ const DB_DISK_GB     = parseInt(process.env.DB_DISK_GB ?? '0', 10)
 // lag when we're already losing the race to catch up.
 const HOLDER_COUNT_LAG_THRESHOLD =
   parseInt(process.env.HOLDER_COUNT_LAG_THRESHOLD ?? '1000', 10)
+
+// ── Batched-maintenance tuning ──────────────────────────────────────
+// Every heavy DELETE and the holder-count recompute run in bounded chunks with a
+// sleep between them, so they trickle disk I/O to the live indexer instead of
+// running as one multi-minute statement. Before this, a single unbounded DELETE +
+// a 6-min monolithic recompute saturated the DB's disk I/O and crawled block
+// ingestion to ~0.06 blk/s for the whole maintenance window (root cause of the
+// periodic ~6-min stall). All are env-tunable.
+const RETENTION_DELETE_BATCH = parseInt(process.env.RETENTION_DELETE_BATCH ?? String(BATCH_SIZE), 10) || BATCH_SIZE
+const RETENTION_BATCH_SLEEP_MS = (() => {
+  const v = parseInt(process.env.RETENTION_BATCH_SLEEP_MS ?? '250', 10)
+  return Number.isFinite(v) && v >= 0 ? v : 250
+})()
+const HOLDER_RECOMPUTE_CHUNK = parseInt(process.env.HOLDER_RECOMPUTE_CHUNK ?? '2000', 10) || 2000
+const HOLDER_RECOMPUTE_SLEEP_MS = (() => {
+  const v = parseInt(process.env.HOLDER_RECOMPUTE_SLEEP_MS ?? '100', 10)
+  return Number.isFinite(v) && v >= 0 ? v : 100
+})()
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 // Indexer lag reporter — index.ts pushes lag on every batch advance so
 // recomputeHolderCounts can decide whether to skip this tick.
@@ -79,7 +102,7 @@ function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void 
  * null — caller should skip the delete rather than wipe the table.
  */
 async function cutoffBlockNumber(cutoff: Date, days: number): Promise<number | null> {
-  const db = getDb()
+  const db = getMaintenanceDb()
   const cutoffStr = cutoff.toISOString()
   const result = await db.execute(
     sql`SELECT MIN(number)::bigint AS n FROM blocks WHERE timestamp >= ${cutoffStr}::timestamptz`
@@ -107,13 +130,38 @@ async function cutoffBlockNumber(cutoff: Date, days: number): Promise<number | n
   return Number(relRow.n)
 }
 
+/**
+ * Batched, throttled delete. Repeatedly removes up to RETENTION_DELETE_BATCH rows
+ * matching `where`, sleeping between batches so a multi-million-row prune trickles
+ * disk I/O to the live indexer instead of monopolizing it for minutes.
+ *
+ * Uses `ctid IN (SELECT ctid … LIMIT n)` — the LIMIT short-circuits, and the inner
+ * scan uses whatever index `where` supports (all callers filter on an indexed
+ * column). `ident` MUST already be a safe identifier fragment (caller validates);
+ * ctid is only unique within a single physical table, so for partitioned data the
+ * caller passes the child partition, never the parent.
+ */
+async function deleteBatchLoop(ident: SQL, where: SQL): Promise<number> {
+  const db = getMaintenanceDb()
+  let total = 0
+  for (;;) {
+    const result = await db.execute(sql`
+      DELETE FROM ${ident}
+      WHERE ctid IN (
+        SELECT ctid FROM ${ident} WHERE ${where} LIMIT ${RETENTION_DELETE_BATCH}
+      )
+    `)
+    const n = Number((result as any).count ?? (result as any).rowCount ?? 0)
+    total += n
+    if (n < RETENTION_DELETE_BATCH) break
+    await sleep(RETENTION_BATCH_SLEEP_MS)
+  }
+  return total
+}
+
 async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<number> {
   assertAllowedIdentifier(table, 'table')
-  const db = getDb()
-  const result = await db.execute(
-    sql`DELETE FROM ${sql.raw(table)} WHERE block_number < ${cutoffBlock}`
-  )
-  return (result as any).count ?? (result as any).rowCount ?? 0
+  return deleteBatchLoop(sql.raw(table), sql`block_number < ${cutoffBlock}`)
 }
 
 /**
@@ -123,7 +171,7 @@ async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<
  * partition that straddles the cutoff. Returns the number of partitions dropped.
  */
 async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
-  const db = getDb()
+  const db = getMaintenanceDb()
   const parts = await listTokenTransferPartitions()
   let dropped = 0
   for (const p of parts) {
@@ -143,12 +191,13 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
         console.warn(`[retention] drop partition ${p.name} failed:`, err instanceof Error ? err.message : err)
       }
     } else if (p.lo < cutoffBlock && cutoffBlock < p.hi) {
-      // Partition straddles the cutoff → delete only the rows below it.
+      // Partition straddles the cutoff → delete only the rows below it. Delete
+      // directly from the CHILD partition (p.name), not the parent token_transfers:
+      // ctid is not unique across a partitioned parent, so the batched ctid-IN loop
+      // must target the physical partition. Every row here is in [p.lo, p.hi), so
+      // `block_number < cutoffBlock` selects exactly the below-cutoff rows.
       try {
-        const r = await db.execute(
-          sql`DELETE FROM token_transfers WHERE block_number >= ${p.lo} AND block_number < ${cutoffBlock}`
-        )
-        const n = (r as any).count ?? (r as any).rowCount ?? 0
+        const n = await deleteBatchLoop(sql.raw(p.name), sql`block_number < ${cutoffBlock}`)
         if (n > 0) console.log(`[retention] boundary partition ${p.name}: deleted ${n} rows below block ${cutoffBlock}`)
       } catch (err) {
         console.warn(`[retention] boundary delete on ${p.name} failed:`, err instanceof Error ? err.message : err)
@@ -179,7 +228,7 @@ const EMERGENCY_RETENTION_MIN_DAYS = 1
  * cutoff, but can also hide a disk about to fill up).
  */
 async function reportSizes(): Promise<number> {
-  const db = getDb()
+  const db = getMaintenanceDb()
   const result = await db.execute(sql`
     SELECT
       pg_database_size(current_database())::bigint                           AS db_bytes,
@@ -278,13 +327,11 @@ async function runCleanup(overrideDays?: number): Promise<void> {
   // trivially indexed.
   if (cutoffBlock !== null && cutoffBlock > 0) {
     try {
-      const db = getDb()
       console.log(`[retention] Deleting old rows from blocks (number < ${cutoffBlock})...`)
-      const blockResult = await db.execute(
-        sql`DELETE FROM blocks WHERE number < ${cutoffBlock}
-          AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
+      const blocksDeleted = await deleteBatchLoop(
+        sql.raw('blocks'),
+        sql`number < ${cutoffBlock} AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
       )
-      const blocksDeleted = (blockResult as any).count ?? (blockResult as any).rowCount ?? 0
       if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
       totalDeleted += blocksDeleted
     } catch (err) {
@@ -294,10 +341,14 @@ async function runCleanup(overrideDays?: number): Promise<void> {
     console.log('[retention] Skipping blocks delete — no cutoff block available')
   }
 
-  // Prune zero-balance rows from token_balances — these are former holders whose
-  // balance has dropped to zero. They accumulate over time and are safe to delete.
+  // Prune zero-balance rows from token_balances — former holders whose balance
+  // dropped to zero. Deliberately NOT run through deleteBatchLoop: there is no index
+  // on `balance`, so a `WHERE balance <= 0 LIMIT n` batch would re-seq-scan the
+  // surviving rows every iteration (O(batches × scan)). token_balances is currently
+  // static (per-block writes disabled) and mostly pruned already, so this runs as a
+  // single bounded statement on the isolated maintenance connection.
   try {
-    const db = getDb()
+    const db = getMaintenanceDb()
     const zbResult = await db.execute(sql.raw(`
       DELETE FROM token_balances WHERE balance <= 0
     `))
@@ -325,7 +376,7 @@ async function runCleanup(overrideDays?: number): Promise<void> {
   // indexer + web queries for 10-30min on a 50GB table).
   if (totalDeleted > 0) {
     console.log('[retention] Running VACUUM ANALYZE to reclaim freed disk space...')
-    const db = getDb()
+    const db = getMaintenanceDb()
     // When token_transfers is partitioned, DROP PARTITION already returned its space
     // to the OS — no VACUUM needed (and we avoid scanning a multi-GB partitioned table).
     const highVolumeTables = ttPartitioned
@@ -366,7 +417,7 @@ async function runCleanup(overrideDays?: number): Promise<void> {
 }
 
 async function runVacuumFull(): Promise<void> {
-  const db = getDb()
+  const db = getMaintenanceDb()
   const tables = ['token_transfers', 'transactions', 'blocks', 'logs', 'dex_trades', 'gas_history', 'token_balances']
   console.log('[retention] VACUUM FULL requested — this will lock tables and take several minutes')
   for (const t of tables) {
@@ -383,42 +434,71 @@ async function runVacuumFull(): Promise<void> {
 }
 
 /**
- * Recompute tokens.holder_count from current token_balances.
+ * Recompute tokens.holder_count from current token_balances, in throttled chunks.
  *
- * Runs as a single SQL statement — much cheaper than tracking deltas
- * per block because it scans token_balances once and groups by token,
- * whereas the per-block CTE re-locked 1000+ rows every block and was
- * the primary throughput ceiling on ETH.
+ * Gated on HOLDER_BALANCE_TRACKING_ENABLED: while per-block balance writes are
+ * disabled, token_balances is static, so this has no new input and is skipped
+ * entirely. The old monolithic single-statement version had grown to ~6 min and
+ * saturated disk I/O, stalling block ingestion while updating zero rows.
  *
- * Runs every few minutes; eventual consistency is fine for holder counts.
+ * When tracking is on, it pages over tokens by address (keyset) and updates
+ * holder_count a chunk at a time with a sleep between chunks, so it never holds the
+ * DB's I/O for minutes. Semantics match the old full recompute: a token with no
+ * balance>0 rows is set to 0 (LEFT JOIN + COALESCE), and only rows whose count
+ * actually changes are written. Eventual consistency is fine for holder counts.
  */
+let holderCountDisabledLogged = false
 async function recomputeHolderCounts(): Promise<void> {
+  if (!HOLDER_BALANCE_TRACKING_ENABLED) {
+    // Static token_balances → nothing to recompute. Log the reason once, stay quiet after.
+    if (!holderCountDisabledLogged) {
+      console.log('[holder-count] recompute disabled — holder-balance tracking is off (token_balances static); skipping')
+      holderCountDisabledLogged = true
+    }
+    return
+  }
   if (reportedLag > HOLDER_COUNT_LAG_THRESHOLD) {
     console.log(`[holder-count] skipping — indexer lag ${reportedLag} > ${HOLDER_COUNT_LAG_THRESHOLD}`)
     return
   }
-  const db = getDb()
+  const db = getMaintenanceDb()
+  const start = Date.now()
+  let cursor = ''
+  let pages = 0
+  let updated = 0
   try {
-    const start = Date.now()
-    // Only touch rows that will actually change — GREATEST(...,0) so zero-balance
-    // tokens without any balance rows drop to 0.
-    await db.execute(sql`
-      WITH new_counts AS (
-        SELECT token_address, COUNT(*)::int AS cnt
-        FROM token_balances
-        WHERE balance > 0
-        GROUP BY token_address
+    for (;;) {
+      // Keyset page of token addresses (indexed scan on the PK, no OFFSET blowup).
+      const page = await db.execute(
+        sql`SELECT address FROM tokens WHERE address > ${cursor} ORDER BY address LIMIT ${HOLDER_RECOMPUTE_CHUNK}`
       )
-      UPDATE tokens t
-      SET holder_count = COALESCE(nc.cnt, 0)
-      FROM (
-        SELECT address FROM tokens
-      ) all_t
-      LEFT JOIN new_counts nc ON nc.token_address = all_t.address
-      WHERE t.address = all_t.address
-        AND t.holder_count IS DISTINCT FROM COALESCE(nc.cnt, 0)
-    `)
-    console.log(`[holder-count] recompute done in ${Date.now() - start}ms`)
+      const addrs = Array.from(page).map(r => (r as Record<string, unknown>).address as string)
+      if (addrs.length === 0) break
+      cursor = addrs[addrs.length - 1]
+      pages++
+
+      const addrValues = sql.join(addrs.map(a => sql`(${a})`), sql`, `)
+      const result = await db.execute(sql`
+        WITH page(address) AS (VALUES ${addrValues}),
+        new_counts AS (
+          SELECT token_address, COUNT(*)::int AS cnt
+          FROM token_balances
+          WHERE balance > 0 AND token_address IN (SELECT address FROM page)
+          GROUP BY token_address
+        )
+        UPDATE tokens t
+        SET holder_count = COALESCE(nc.cnt, 0)
+        FROM page
+        LEFT JOIN new_counts nc ON nc.token_address = page.address
+        WHERE t.address = page.address
+          AND t.holder_count IS DISTINCT FROM COALESCE(nc.cnt, 0)
+      `)
+      updated += Number((result as any).count ?? (result as any).rowCount ?? 0)
+
+      if (addrs.length < HOLDER_RECOMPUTE_CHUNK) break
+      await sleep(HOLDER_RECOMPUTE_SLEEP_MS)
+    }
+    console.log(`[holder-count] chunked recompute done in ${Date.now() - start}ms (${pages} pages, ${updated} tokens updated)`)
   } catch (err) {
     console.warn('[holder-count] recompute failed:', err instanceof Error ? err.message : err)
   }

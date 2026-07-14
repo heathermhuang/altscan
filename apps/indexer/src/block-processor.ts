@@ -644,6 +644,12 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
 // Serializing through one worker removes cross-worker row-lock contention.
 const HOLDER_QUEUE_WARN_DEPTH = parseInt(process.env.HOLDER_QUEUE_WARN_DEPTH ?? '500', 10)
 const SKIP_HOLDER_BALANCES = true
+// Single source of truth for whether per-block holder-balance tracking is live.
+// While OFF, token_balances receives no per-block writes, so the periodic
+// holder_count recompute (retention-cleanup.ts) has no new input and is skipped —
+// it would otherwise full-scan a frozen token_balances for minutes and stall block
+// ingestion via disk-I/O contention while updating zero rows.
+export const HOLDER_BALANCE_TRACKING_ENABLED = !SKIP_HOLDER_BALANCES
 console.warn('[holder-queue] HARDCODED SKIP — token_balances writes DISABLED to save DB from write storm')
 const holderQueue: TokenTransferRow[][] = []
 let holderWorkerRunning = false

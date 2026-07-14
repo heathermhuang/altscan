@@ -9,6 +9,8 @@ import * as schema from './schema'
 const g = globalThis as typeof globalThis & {
   __db_instances?: Map<string, ReturnType<typeof drizzle>>
   __db_sql?: Map<string, postgres.Sql>
+  __maint_instances?: Map<string, ReturnType<typeof drizzle>>
+  __maint_sql?: Map<string, postgres.Sql>
 }
 
 /**
@@ -79,6 +81,45 @@ export function createMaintenanceConnection(url: string) {
     max_lifetime: 0,
     connect_timeout: 30,
   })
+}
+
+/**
+ * Dedicated, SMALL connection pool for recurring background maintenance
+ * (retention deletes, holder-count recompute). Kept SEPARATE from the primary
+ * getDb() pool so a long-running batched DELETE or recompute can never occupy
+ * the ingestion/web pool's slots. Singleton per env var, like getDb().
+ *
+ * NOTE: this isolates connection *slots*, not disk I/O — the callers still chunk
+ * and throttle their work (sleep between batches) to bound I/O on the shared DB,
+ * which is the actual bottleneck that stalled ingestion. Unlike
+ * createMaintenanceConnection() (a one-off, non-recycled connection for DDL), this
+ * pool recycles idle/old connections so it stays healthy for the process lifetime.
+ * Pool size via MAINTENANCE_POOL_SIZE (default 2).
+ */
+export function getMaintenanceDb(envVarName = 'DATABASE_URL') {
+  if (!g.__maint_instances) g.__maint_instances = new Map()
+  if (!g.__maint_sql) g.__maint_sql = new Map()
+
+  const cached = g.__maint_instances.get(envVarName)
+  if (cached) return cached
+
+  const url = process.env[envVarName]
+  if (!url) {
+    // Dev / unset: fall back to the shared handle so callers still work.
+    return getDb(envVarName)
+  }
+
+  const poolSize = parseInt(process.env.MAINTENANCE_POOL_SIZE ?? '2', 10) || 2
+  const sql = postgres(url, {
+    max: poolSize,
+    idle_timeout: 20,
+    max_lifetime: 300,
+    connect_timeout: 10,
+  })
+  g.__maint_sql.set(envVarName, sql)
+  const db = drizzle(sql, { schema })
+  g.__maint_instances.set(envVarName, db)
+  return db
 }
 
 export { schema }
