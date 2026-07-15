@@ -36,6 +36,10 @@ export const transactions = pgTable('transactions', {
   nonce:        integer('nonce'),
   txType:       integer('tx_type'),
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
+  // Set true by retention when the heavy `input` calldata is pruned in place
+  // (the compact row is kept forever). The tx page reads this to refetch the
+  // body (input + logs) on demand. Default false = body present.
+  bodyPruned:   boolean('body_pruned').notNull().default(false),
 }, (t) => ({
   // Composite indexes on (address, timestamp) also cover single-address lookups,
   // so we don't need separate single-column indexes on fromAddress/toAddress.

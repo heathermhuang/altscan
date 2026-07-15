@@ -253,6 +253,10 @@ export async function ensureSchema(): Promise<void> {
   await addColumnIfMissing('transactions', 'nonce',    'INTEGER')
   await addColumnIfMissing('transactions', 'tx_type',  'INTEGER')
   await addColumnIfMissing('tokens',       'logo_url', 'TEXT')
+  // A2 (retention inversion): marks rows whose heavy `input` body was pruned in
+  // place so the tx page knows to refetch it. Lock-safe: addColumnIfMissing skips
+  // the ALTER entirely once the column exists (see the CRITICAL note above).
+  await addColumnIfMissing('transactions', 'body_pruned', 'BOOLEAN NOT NULL DEFAULT false')
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
