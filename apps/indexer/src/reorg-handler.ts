@@ -15,10 +15,11 @@
  * children before parents; guardrail-tested against the schema so a future block-scoped
  * table can't be forgotten). The poll loop then reindexes from the fork point naturally.
  * addresses.tx_count is deliberately NOT decremented (reindex re-increments; small,
- * reorg-scoped inflation accepted). The tt-writer's durable watermark is NOT rewound:
- * crash-resume takes min(MAX(blocks.number), W) and replayed blocks are re-written via
- * DELETE+INSERT, so it self-heals once the caller purges stale queued rows above the
- * fork (purgeTransferQueueAbove) and reprocessing runs.
+ * reorg-scoped inflation accepted). The async tt-writer is rolled back FIRST via
+ * rollbackTransferWriterTo(fork): quiesce the in-flight drain, purge queued decodes
+ * above the fork, and rewind + persist the durable watermark W — min(blocks-cursor, W)
+ * resume alone only covers a crash BEFORE reprocessing, not mid-reprocess (codex
+ * P1+P2 on PR #67; full rationale on rollbackTransferWriterTo).
  */
 
 import { getDb, schema } from './db'

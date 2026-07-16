@@ -20,7 +20,7 @@ import {
   setDurableFloor,
   getTransferQueueDepth,
   flushTransferWriter,
-  purgeTransferQueueAbove,
+  rollbackTransferWriterTo,
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
@@ -153,11 +153,13 @@ async function main() {
   let lastIdleReorgCheck = 0
   console.log(`${TAG} reorg tail-check ${REORG_CHECK ? `ON (K=${REORG_DEPTH})` : 'OFF'}`)
 
-  // Purge stale queued transfers FIRST so the writer can't re-insert orphaned rows
-  // after the delete; then unwind; then let the loop reindex from the fork point.
+  // Roll back the transfer writer FIRST (quiesce in-flight drain, purge stale
+  // queue, rewind + persist W to the fork) so the writer can't re-insert orphaned
+  // rows after the delete and a crash mid-reprocess can't resume past the fork;
+  // then unwind; then let the loop reindex from the fork point.
   const recoverFromReorg = async (forkPoint: number) => {
     console.warn(`${TAG} ⚠ REORG: rolling back to fork point ${forkPoint} (depth ${lastIndexed - forkPoint})`)
-    if (ASYNC_TT_WRITER) purgeTransferQueueAbove(forkPoint)
+    if (ASYNC_TT_WRITER) await rollbackTransferWriterTo(forkPoint)
     await unwindFrom(forkPoint + 1)
     lastIndexed = forkPoint
     reportIndexerLag(0)
