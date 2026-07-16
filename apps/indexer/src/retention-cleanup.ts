@@ -170,15 +170,28 @@ async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<
  * matching `where`, in bounded ctid-limited chunks with a sleep between them, so a
  * multi-million-row prune trickles I/O to the live indexer. `setSql` MUST be a safe
  * assignment fragment built by the caller (never from user input).
+ *
+ * `orderBy` (a column fragment) is a PLAN PIN, not cosmetics: a bare
+ * `WHERE … LIMIT n` subselect lets the planner pick seqscan-with-LIMIT — its
+ * uniformity assumption says the first n matches arrive a few % into the scan,
+ * so it looks cheaper than any index. In reality the matches sit BEHIND the
+ * already-pruned prefix (or don't exist, on the final exhaustion batch), so every
+ * batch re-reads the whole prefix. Measured on prod BNB 2026-07-16: 193s / 8.7GB
+ * read / 14.3M rows filtered for a 0-row batch, with tx_body_unpruned_idx valid
+ * but unused. ORDER BY on the indexed column makes seqscan require a sort of the
+ * full match estimate, so the ordered (partial-)index scan wins at any pruned
+ * fraction — and rows are processed oldest-first, which makes interrupted runs
+ * resume deterministically.
  */
-async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL): Promise<number> {
+async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL, orderBy?: SQL): Promise<number> {
   const db = getMaintenanceDb()
+  const orderClause = orderBy ? sql` ORDER BY ${orderBy}` : sql.raw('')
   let total = 0
   for (;;) {
     const result = await db.execute(sql`
       UPDATE ${ident} SET ${setSql}
       WHERE ctid IN (
-        SELECT ctid FROM ${ident} WHERE ${where} LIMIT ${RETENTION_DELETE_BATCH}
+        SELECT ctid FROM ${ident} WHERE ${where}${orderClause} LIMIT ${RETENTION_DELETE_BATCH}
       )
     `)
     const n = Number((result as any).count ?? (result as any).rowCount ?? 0)
@@ -194,12 +207,18 @@ async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL): Promise
  * calldata and flag the row, keeping the compact projection (from/to/value/method/…)
  * forever. `body_pruned = false` in the predicate makes it idempotent + progressive
  * and lets the loop terminate. The tx page refetches input+logs on demand (Track A1).
+ *
+ * The predicate spelling `body_pruned = false` must match tx_body_unpruned_idx's
+ * WHERE clause (guardrail-tested in ensure-schema.test.ts), and the ORDER BY pin
+ * on block_number is what makes the planner actually USE that index — see
+ * nullColumnBatchLoop.
  */
 async function pruneTransactionBodies(cutoffBlock: number): Promise<number> {
   return nullColumnBatchLoop(
     sql.raw('transactions'),
     sql`input = '0x', body_pruned = true`,
     sql`block_number < ${cutoffBlock} AND body_pruned = false`,
+    sql.raw('block_number'),
   )
 }
 
