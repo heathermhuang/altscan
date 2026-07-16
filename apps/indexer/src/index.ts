@@ -20,10 +20,12 @@ import {
   setDurableFloor,
   getTransferQueueDepth,
   flushTransferWriter,
+  rollbackTransferWriterTo,
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
+import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { ensureSchema } from './ensure-schema'
@@ -141,11 +143,41 @@ async function main() {
 
   const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
 
+  // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
+  const REORG_CHECK = process.env.REORG_CHECK !== '0'
+  const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
+  const reorgDeps = makeReorgDeps(tipProvider)
+  // Throttle the idle (tip-mode) check — it costs 2 header calls; every poll would
+  // double idle RPC load for a condition the next boundary check surfaces anyway.
+  const IDLE_REORG_CHECK_MS = parseInt(process.env.IDLE_REORG_CHECK_MS ?? '30000', 10)
+  let lastIdleReorgCheck = 0
+  console.log(`${TAG} reorg tail-check ${REORG_CHECK ? `ON (K=${REORG_DEPTH})` : 'OFF'}`)
+
+  // Roll back the transfer writer FIRST (quiesce in-flight drain, purge stale
+  // queue, rewind + persist W to the fork) so the writer can't re-insert orphaned
+  // rows after the delete and a crash mid-reprocess can't resume past the fork;
+  // then unwind; then let the loop reindex from the fork point.
+  const recoverFromReorg = async (forkPoint: number) => {
+    console.warn(`${TAG} ⚠ REORG: rolling back to fork point ${forkPoint} (depth ${lastIndexed - forkPoint})`)
+    if (ASYNC_TT_WRITER) await rollbackTransferWriterTo(forkPoint)
+    await unwindFrom(forkPoint + 1)
+    lastIndexed = forkPoint
+    reportIndexerLag(0)
+  }
+
   while (running) {
     try {
       const latest = await tipProvider.getBlockNumber()
 
       if (latest <= lastIndexed) {
+        // Caught up. Periodically verify the tip we stored is still canonical —
+        // catches an in-place tail replacement that a boundary check can't see
+        // until the next block arrives.
+        if (REORG_CHECK && Date.now() - lastIdleReorgCheck >= IDLE_REORG_CHECK_MS) {
+          lastIdleReorgCheck = Date.now()
+          const check = await detectReorg(reorgDeps, lastIndexed, REORG_DEPTH)
+          if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
+        }
         await sleep(POLL_MS)
         continue
       }
@@ -162,6 +194,13 @@ async function main() {
         // abandoned (same gap the pre-existing skip already creates in `blocks`), so
         // the watermark must not stay stuck waiting for transfers that never come.
         if (ASYNC_TT_WRITER) setDurableFloor(latest - 200)
+      }
+
+      // A3: validate the batch boundary before processing — detects any reorg at or
+      // below lastIndexed (1 header call; the K-bounded walk only runs on mismatch).
+      if (REORG_CHECK) {
+        const check = await detectReorg(reorgDeps, lastIndexed, REORG_DEPTH)
+        if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
       }
 
       const from = lastIndexed + 1

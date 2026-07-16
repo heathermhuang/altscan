@@ -67,6 +67,11 @@ export type ChainConfig = {
   domain: string
   /** Average block time in seconds */
   blockTime: number
+  /** Confirmation depth K — only the last K blocks are considered mutable (the
+   *  reorg window). Fork search and rollback are bounded to K (spec invariant 4).
+   *  BSC: Maxwell-era fast-finality reorgs observed up to ~10-12 → 15 with margin.
+   *  ETH: PoS single-slot reorgs are 1-2 → 3 with margin. */
+  reorgDepth: number
   /** CoinGecko coin ID for price fetch */
   coingeckoId: string
   /** Fallback circulating supply for the native coin, used to derive market cap as
@@ -119,6 +124,7 @@ export const BSC: ChainConfig = {
   tagline: 'The Alternative BNB Chain Explorer',
   domain: 'bnbscan.com',
   blockTime: 3,
+  reorgDepth: 15,
   coingeckoId: 'binancecoin',
   nativeCirculatingSupply: 134_500_000, // ~implied from live cap/price; self-refines at runtime
   rpcEnvVar: 'BNB_RPC_URL',
@@ -173,6 +179,7 @@ export const ETH: ChainConfig = {
   tagline: 'The Alternative Ethereum Explorer',
   domain: 'ethscan.io',
   blockTime: 12,
+  reorgDepth: 3,
   coingeckoId: 'ethereum',
   nativeCirculatingSupply: 120_700_000, // ~ETH circulating; self-refines at runtime
   rpcEnvVar: 'ETH_RPC_URL',

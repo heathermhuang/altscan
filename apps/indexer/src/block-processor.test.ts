@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
-import { fetchBlockReceipts } from './block-processor'
+import {
+  fetchBlockReceipts, enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth,
+} from './block-processor'
 
 // Simulate the real failure mode observed on 2026-04-16: three consecutive
 // eth_getBlockReceipts 429s from a rate-limited BSC dataseed RPC.
@@ -107,5 +109,29 @@ describe('fetchBlockReceipts — post-fix recovery behavior', () => {
 
     const result = await fetchBlockReceipts(provider, 999)
     expect(result).toEqual([])
+  })
+})
+
+// A3 reorg support: stale queued decodes above the fork point must be dropped
+// before unwindFrom() deletes their rows, or the writer re-inserts orphaned
+// transfers. The writer is UNSEEDED in unit tests (initTransferWriter never
+// called), so enqueueTransferWrite only mutates the in-memory queue — no DB.
+describe('purgeTransferQueueAbove', () => {
+  const row = (n: number) => ({
+    txHash: `0x${n}`, logIndex: 0, tokenAddress: '0xt', fromAddress: '0xf',
+    toAddress: '0xto', value: '1', tokenId: null, blockNumber: n,
+    timestamp: new Date(0), tokenType: 'BEP20' as const,
+  })
+  it('drops queued rows for blocks above the fork point and keeps the rest', () => {
+    enqueueTransferWrite(101, [row(101)])
+    enqueueTransferWrite(102, [row(102), row(102)])
+    enqueueTransferWrite(103, [row(103)])
+    expect(getTransferQueueDepth().rows).toBe(4)
+    purgeTransferQueueAbove(101)
+    const after = getTransferQueueDepth()
+    expect(after.blocks).toBe(1)
+    expect(after.rows).toBe(1)
+    purgeTransferQueueAbove(0)   // cleanup so queue state can't leak into other tests
+    expect(getTransferQueueDepth().rows).toBe(0)
   })
 })

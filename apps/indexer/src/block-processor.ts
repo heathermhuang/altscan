@@ -829,6 +829,7 @@ const transferWritten = new Set<number>()   // committed, not yet folded into W
 let durableBlock = 0
 let transferWriterSeeded = false
 let transferWriterRunning = false
+let transferWriterPaused = false            // reorg rollback quiesce (see rollbackTransferWriterTo)
 let ttWriterDrainCount = 0
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
@@ -858,6 +859,68 @@ export function setDurableFloor(block: number): void {
   for (const n of transferWritten) if (n <= durableBlock) transferWritten.delete(n)
   persistDurableBlock(durableBlock).catch(err =>
     console.warn('[tt-writer] floor persist failed:', err instanceof Error ? err.message : err))
+}
+
+/**
+ * Reorg support (A3): drop queued-but-unwritten transfer decodes for blocks ABOVE
+ * the fork point, so the writer can't insert orphaned-chain rows after unwindFrom()
+ * deleted them. Rows at or below the fork are canonical — kept. Also clears
+ * transferWritten above the fork so a later fold can't re-advance W over blocks
+ * whose rows were just unwound. Call via rollbackTransferWriterTo (which quiesces
+ * the writer first — a purge alone can't see a batch an active drain already moved
+ * into its local map; codex P2 on PR #67).
+ */
+export function purgeTransferQueueAbove(forkPoint: number): void {
+  let dropped = 0
+  for (const [n, batch] of transferPending) {
+    if (n > forkPoint) {
+      transferPending.delete(n)
+      transferPendingRows -= batch.length
+      dropped += batch.length
+    }
+  }
+  for (const n of transferWritten) if (n > forkPoint) transferWritten.delete(n)
+  if (dropped > 0) {
+    console.warn(`[tt-writer] reorg purge: dropped ${dropped} queued rows above block ${forkPoint}`)
+    evaluateTransferQueueHighWater()
+  }
+}
+
+/**
+ * Full reorg rollback for the async transfer writer (A3; codex P1+P2 on PR #67):
+ *  1. QUIESCE — pause new drains and wait out an in-flight one, so a batch already
+ *     moved into the drainer's local map can't commit stale rows after unwindFrom()
+ *     deletes them (or fold W forward past the fork again).
+ *  2. PURGE — drop queued decodes + transferWritten entries above the fork.
+ *  3. REWIND W — durableBlock claims "every block ≤ W has all transfers committed",
+ *     which is false above the fork once rows are unwound. Crash-resume takes
+ *     min(MAX(blocks.number), W), which only covers a crash BEFORE reprocessing;
+ *     if we crash mid-reprocess (block row inserted, transfers not yet drained),
+ *     a stale W resumes past that block and its transfers are lost forever. So W
+ *     must be rewound and persisted. A persist failure is logged loudly but not
+ *     fatal: the in-memory rewind stands, and the next successful drain-fold
+ *     re-persists a correct W (only a crash inside that window is exposed).
+ * Always resumes the writer, even on persist failure.
+ */
+export async function rollbackTransferWriterTo(forkPoint: number): Promise<void> {
+  transferWriterPaused = true
+  try {
+    while (transferWriterRunning) await new Promise(r => setTimeout(r, 25))
+    purgeTransferQueueAbove(forkPoint)
+    if (transferWriterSeeded && durableBlock > forkPoint) {
+      const prev = durableBlock
+      durableBlock = forkPoint
+      try {
+        await persistDurableBlock(forkPoint)
+        console.warn(`[tt-writer] reorg rollback: durable watermark rewound ${prev} → ${forkPoint}`)
+      } catch (err) {
+        console.error(`[tt-writer] ALERT reorg rollback: watermark rewound in memory (${prev} → ${forkPoint}) but persist FAILED — a crash before the next drain-fold persists would resume past the fork:`, err instanceof Error ? err.message : err)
+      }
+    }
+  } finally {
+    transferWriterPaused = false
+    runTransferWriter()
+  }
 }
 
 export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number } {
@@ -899,13 +962,16 @@ export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow
 
 function runTransferWriter(): void {
   if (!transferWriterSeeded) return        // never write/persist before the seed
+  if (transferWriterPaused) return         // reorg rollback in progress — resumed by rollbackTransferWriterTo
   if (transferWriterRunning) return
   if (transferPending.size === 0) return
   transferWriterRunning = true
   // Fire-and-forget single drainer — coalesces the entire current queue per pass.
   ;(async () => {
     try {
-      while (transferPending.size > 0) {
+      // Checking paused per iteration lets an in-flight drain finish its current
+      // batch (commit or requeue) and then yield to a waiting reorg rollback.
+      while (!transferWriterPaused && transferPending.size > 0) {
         const drained = transferPending
         transferPending = new Map()
         transferPendingRows = 0
