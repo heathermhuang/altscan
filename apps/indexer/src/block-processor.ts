@@ -860,6 +860,29 @@ export function setDurableFloor(block: number): void {
     console.warn('[tt-writer] floor persist failed:', err instanceof Error ? err.message : err))
 }
 
+/**
+ * Reorg support (A3): drop queued-but-unwritten transfer decodes for blocks ABOVE
+ * the fork point, so the writer can't insert orphaned-chain rows after unwindFrom()
+ * deleted them. Rows at or below the fork are canonical — kept. The durable
+ * watermark is deliberately not rewound: crash-resume takes min(blocks-cursor, W)
+ * and reprocessed blocks are re-written via DELETE+INSERT (see reorg-handler header).
+ */
+export function purgeTransferQueueAbove(forkPoint: number): void {
+  let dropped = 0
+  for (const [n, batch] of transferPending) {
+    if (n > forkPoint) {
+      transferPending.delete(n)
+      transferPendingRows -= batch.length
+      dropped += batch.length
+    }
+  }
+  for (const n of transferWritten) if (n > forkPoint) transferWritten.delete(n)
+  if (dropped > 0) {
+    console.warn(`[tt-writer] reorg purge: dropped ${dropped} queued rows above block ${forkPoint}`)
+    evaluateTransferQueueHighWater()
+  }
+}
+
 export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number } {
   return { blocks: transferPending.size, rows: transferPendingRows, durableBlock }
 }
