@@ -308,37 +308,7 @@ export async function ensureSchema(): Promise<void> {
     try { await db.execute(sql.raw(stmt)) } catch { /* already dropped */ }
   }
 
-  // token_transfers index DDL is skipped when partitioned (the migration owns it,
-  // and CONCURRENTLY isn't valid on a partitioned parent).
-  const ttIndexes = ttPartitioned ? [] : [
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
-    // tt_tx_idx(tx_hash) intentionally NOT created here — on the monolithic table it's
-    // covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
-  ]
-
-  const indexes = [
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_timestamp_idx    ON blocks(timestamp)',
-    // Composite indexes: cover both point lookups and address+time range queries
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_ts_idx          ON transactions(from_address, timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_ts_idx            ON transactions(to_address, timestamp DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
-    ...ttIndexes,
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
-    // Top-N tokens by holders (explorer sitemap top-5000, token directory)
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
-  ]
+  const indexes = buildConcurrentIndexList(ttPartitioned)
 
   // When partitioned, create forward partitions BEFORE the indexing loop starts
   // inserting (await, not fire-and-forget) so no insert ever hits a missing range.
@@ -361,6 +331,54 @@ export async function ensureSchema(): Promise<void> {
     }
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
+}
+
+/**
+ * Full background-build index list. Pure (no DB) so the guardrail test can
+ * assert against the exact shipped statements. token_transfers index DDL is
+ * skipped when partitioned — the partition migration owns those indexes, and
+ * CONCURRENTLY isn't valid on a partitioned parent.
+ */
+export function buildConcurrentIndexList(ttPartitioned: boolean): string[] {
+  const ttIndexes = ttPartitioned ? [] : [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx            ON token_transfers(to_address, timestamp DESC)',
+    // tt_tx_idx(tx_hash) intentionally NOT created here — on the monolithic table it's
+    // covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
+  ]
+
+  return [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_miner_idx        ON blocks(miner)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_timestamp_idx    ON blocks(timestamp)',
+    // Composite indexes: cover both point lookups and address+time range queries
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_ts_idx          ON transactions(from_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_ts_idx            ON transactions(to_address, timestamp DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_block_idx            ON transactions(block_number)',
+    // A2 body-prune batch scans: retention batches on `block_number < cutoff AND
+    // body_pruned = false`. Via the plain tx_block_idx that walk re-visits the
+    // ever-growing pruned prefix on every batch — O(prefix × batches) once
+    // COMPACT_RETENTION_DAYS > RETENTION_DAYS lets pruned rows persist (root
+    // cause of BNB's 1h+ first inversion cycle). This partial index holds only
+    // unpruned rows, so each batch walk is bounded by real work and the index
+    // shrinks as rows prune. The WHERE spelling must stay exactly
+    // `body_pruned = false` — the same fragment pruneTransactionBodies filters
+    // on — so the planner can prove the query implies the index predicate.
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_body_unpruned_idx    ON transactions(block_number) WHERE body_pruned = false',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
+    ...ttIndexes,
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
+    // Top-N tokens by holders (explorer sitemap top-5000, token directory)
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
+  ]
 }
 
 /**
