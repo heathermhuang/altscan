@@ -12,6 +12,7 @@ import { getMaintenanceDb } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
 import { HOLDER_BALANCE_TRACKING_ENABLED } from './block-processor'
+import { buildRetentionPlan, parseCompactRetentionDays } from './retention-policy'
 
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
@@ -165,6 +166,44 @@ async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<
 }
 
 /**
+ * Throttled in-place UPDATE mirroring deleteBatchLoop: nulls a heavy column on rows
+ * matching `where`, in bounded ctid-limited chunks with a sleep between them, so a
+ * multi-million-row prune trickles I/O to the live indexer. `setSql` MUST be a safe
+ * assignment fragment built by the caller (never from user input).
+ */
+async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL): Promise<number> {
+  const db = getMaintenanceDb()
+  let total = 0
+  for (;;) {
+    const result = await db.execute(sql`
+      UPDATE ${ident} SET ${setSql}
+      WHERE ctid IN (
+        SELECT ctid FROM ${ident} WHERE ${where} LIMIT ${RETENTION_DELETE_BATCH}
+      )
+    `)
+    const n = Number((result as any).count ?? (result as any).rowCount ?? 0)
+    total += n
+    if (n < RETENTION_DELETE_BATCH) break
+    await sleep(RETENTION_BATCH_SLEEP_MS)
+  }
+  return total
+}
+
+/**
+ * Body prune for the compact-immortal transactions table: null the heavy `input`
+ * calldata and flag the row, keeping the compact projection (from/to/value/method/…)
+ * forever. `body_pruned = false` in the predicate makes it idempotent + progressive
+ * and lets the loop terminate. The tx page refetches input+logs on demand (Track A1).
+ */
+async function pruneTransactionBodies(cutoffBlock: number): Promise<number> {
+  return nullColumnBatchLoop(
+    sql.raw('transactions'),
+    sql`input = '0x', body_pruned = true`,
+    sql`block_number < ${cutoffBlock} AND body_pruned = false`,
+  )
+}
+
+/**
  * Retention for the RANGE-partitioned token_transfers: DROP every partition whose
  * entire block range is below the cutoff (instant, reclaims disk to the OS, no
  * 12-min sequential DELETE, no VACUUM bloat), then a bounded DELETE on the single
@@ -265,11 +304,13 @@ async function reportSizes(): Promise<number> {
   return 0
 }
 
-async function runCleanup(overrideDays?: number): Promise<void> {
-  const days = overrideDays ?? RETENTION_DAYS
+async function runCleanup(override?: { bodyDays?: number; compactDays?: number }): Promise<void> {
+  const days = override?.bodyDays ?? RETENTION_DAYS
+  const compactDays = override?.compactDays ?? parseCompactRetentionDays()
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-  const tag = overrideDays !== undefined ? `${days}d emergency` : `${days}d`
-  console.log(`[retention] Running cleanup — pruning rows older than ${cutoff.toISOString()} (${tag})`)
+  const tag = override !== undefined ? `${days}d body/${compactDays}d compact emergency` : `${days}d body`
+  console.log(`[retention] Running cleanup — body cutoff ${cutoff.toISOString()} (${tag}); ` +
+    `compact retention = ${Number.isFinite(compactDays) ? compactDays + 'd' : '∞ (immortal)'}`)
 
   // Translate timestamp cutoff → block_number cutoff ONCE. Every high-volume
   // table has a block_number index; only some have a timestamp index. Deleting
@@ -283,21 +324,21 @@ async function runCleanup(overrideDays?: number): Promise<void> {
     console.error('[retention] cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
   }
 
-  // token_transfers is RANGE-partitioned on BNB post-migration — prune it by
-  // dropping whole partitions (instant) instead of a row DELETE. Detected at runtime
-  // so this stays a no-op pre-migration and on ETH (monolithic table).
+  // token_transfers is RANGE-partitioned on BNB — relevant only to the compact
+  // bridge path below (it's immortal on the default path now).
   const ttPartitioned = await isPartitioned('token_transfers')
 
-  // Delete order: children first, then parents (FK: transactions → blocks).
-  // All these tables have a block_number column + index, so we delete by
-  // block_number for speed. token_transfers is handled separately when partitioned.
-  const blockNumberTables = ttPartitioned
-    ? ['dex_trades', 'gas_history', 'transactions', 'logs']
-    : ['dex_trades', 'token_transfers', 'gas_history', 'transactions', 'logs']
+  // A2 inversion: the default (body-cutoff) path prunes ONLY refetchable bodies.
+  // transactions and token_transfers are compact-immortal here — transactions keeps
+  // its row (input is nulled below), token_transfers is untouched. Compact-table row
+  // deletes happen only under the explicit finite override (see the compact block).
+  const plan = buildRetentionPlan({ ttPartitioned })
+  const blockNumberTables = plan.bodyDeleteTables   // ['logs','dex_trades','gas_history']
 
   let totalDeleted = 0
 
   if (cutoffBlock !== null && cutoffBlock > 0) {
+    // Body row-deletes (refetchable / secondary tables only).
     for (const table of blockNumberTables) {
       try {
         console.log(`[retention] Deleting old rows from ${table} (block_number < ${cutoffBlock})...`)
@@ -308,37 +349,89 @@ async function runCleanup(overrideDays?: number): Promise<void> {
         console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
       }
     }
-    if (ttPartitioned) {
+    // In-place body prune: null transactions.input on old rows, keep the compact row.
+    // Tied to the manifest (if the op is removed, this stops) but prunes explicitly —
+    // no dynamic identifier SQL, matching the file's whitelist-only identifier policy.
+    if (plan.nullColumnOps.some(o => o.table === 'transactions' && o.column === 'input')) {
       try {
-        const dropped = await pruneTokenTransfersPartitioned(cutoffBlock)
-        if (dropped > 0) console.log(`[retention] token_transfers: dropped ${dropped} partition(s)`)
+        console.log(`[retention] Pruning transactions.input in place (block_number < ${cutoffBlock})...`)
+        const pruned = await pruneTransactionBodies(cutoffBlock)
+        if (pruned > 0) console.log(`[retention] transactions.input: pruned ${pruned} rows (kept compact row)`)
+        totalDeleted += pruned
       } catch (err) {
-        console.error('[retention] token_transfers partition prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] transactions.input body prune failed:', err instanceof Error ? err.message : err)
       }
     }
   } else {
-    console.log('[retention] Skipping block-number deletes — no cutoff block found (blocks table empty or entirely beyond cutoff)')
+    console.log('[retention] Skipping body prune — no cutoff block found (blocks table empty or entirely beyond cutoff)')
   }
 
-  // blocks last — only those with no remaining transactions. Gate on the
-  // same cutoffBlock we used above so the stale-indexer fallback path stays
-  // consistent: if cutoffBlock is null, skip the blocks delete too (can't
-  // safely derive a cutoff). blocks.number is the PK so `< cutoffBlock` is
-  // trivially indexed.
-  if (cutoffBlock !== null && cutoffBlock > 0) {
+  // COMPACT-BRIDGE prune — runs ONLY when COMPACT_RETENTION_DAYS is finite (the
+  // explicit per-chain override for the heavy legacy chains). On the default path
+  // this whole block is skipped and compact tables (transactions/token_transfers/
+  // blocks) are immortal. Deep history on established chains then comes from
+  // provider backfill (Track A4).
+  if (Number.isFinite(compactDays)) {
+    const compactCutoff = new Date(Date.now() - compactDays * 24 * 60 * 60 * 1000)
+    let compactCutoffBlock: number | null = null
     try {
-      console.log(`[retention] Deleting old rows from blocks (number < ${cutoffBlock})...`)
-      const blocksDeleted = await deleteBatchLoop(
-        sql.raw('blocks'),
-        sql`number < ${cutoffBlock} AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`
-      )
-      if (blocksDeleted > 0) console.log(`[retention] blocks: deleted ${blocksDeleted} rows`)
-      totalDeleted += blocksDeleted
+      compactCutoffBlock = await cutoffBlockNumber(compactCutoff, compactDays)
     } catch (err) {
-      console.error('[retention] blocks delete failed:', err instanceof Error ? err.message : err)
+      console.error('[retention] compact cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
     }
-  } else {
-    console.log('[retention] Skipping blocks delete — no cutoff block available')
+    if (compactCutoffBlock !== null && compactCutoffBlock > 0) {
+      console.warn(`[retention] ⚠ COMPACT override active (${compactDays}d) — pruning compact tables below block ${compactCutoffBlock}`)
+      // Body sweep to the SAME cutoff first: when the compact cutoff is NEWER than
+      // the body cutoff (emergency re-run tightens only compactDays; or a
+      // COMPACT_RETENTION_DAYS < RETENTION_DAYS config), the transactions deleted
+      // below would otherwise strand their logs/dex_trades/gas_history rows in the
+      // gap window — orphaned exactly when disk pressure is highest. Idempotent:
+      // rows below the body cutoff are already gone, so on the normal path
+      // (compact ≥ body window) this finds ~nothing.
+      for (const table of plan.bodyDeleteTables) {
+        try {
+          const n = await deleteByBlockNumber(table, compactCutoffBlock)
+          if (n > 0) console.log(`[retention] [compact] ${table}: deleted ${n} rows (body sweep to compact cutoff)`)
+          totalDeleted += n
+        } catch (err) {
+          console.error(`[retention] [compact] ${table} body sweep failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+      // token_transfers: partition-drop when partitioned, else row-delete.
+      try {
+        if (ttPartitioned) {
+          const dropped = await pruneTokenTransfersPartitioned(compactCutoffBlock)
+          if (dropped > 0) console.log(`[retention] [compact] token_transfers: dropped ${dropped} partition(s)`)
+        } else {
+          const n = await deleteByBlockNumber('token_transfers', compactCutoffBlock)
+          if (n > 0) console.log(`[retention] [compact] token_transfers: deleted ${n} rows`)
+          totalDeleted += n
+        }
+      } catch (err) {
+        console.error('[retention] [compact] token_transfers prune failed:', err instanceof Error ? err.message : err)
+      }
+      // transactions BEFORE blocks (FK transactions.block_number → blocks.number).
+      try {
+        const n = await deleteByBlockNumber('transactions', compactCutoffBlock)
+        if (n > 0) console.log(`[retention] [compact] transactions: deleted ${n} rows`)
+        totalDeleted += n
+      } catch (err) {
+        console.error('[retention] [compact] transactions prune failed:', err instanceof Error ? err.message : err)
+      }
+      // blocks last — childless only.
+      try {
+        const n = await deleteBatchLoop(
+          sql.raw('blocks'),
+          sql`number < ${compactCutoffBlock} AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`,
+        )
+        if (n > 0) console.log(`[retention] [compact] blocks: deleted ${n} rows`)
+        totalDeleted += n
+      } catch (err) {
+        console.error('[retention] [compact] blocks prune failed:', err instanceof Error ? err.message : err)
+      }
+    } else {
+      console.log('[retention] [compact] no compact cutoff block — skipping compact prune')
+    }
   }
 
   // Prune zero-balance rows from token_balances — former holders whose balance
@@ -400,19 +493,18 @@ async function runCleanup(overrideDays?: number): Promise<void> {
       console.warn('[retention] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
   }
 
-  // Self-heal: if we're still above the emergency threshold AND we have
-  // room to tighten the window further, re-run with a shorter cutoff.
-  // Only recurses once per cycle (overrideDays is always the minimum).
-  if (
-    overrideDays === undefined &&
-    diskPct >= EMERGENCY_DISK_PCT &&
-    days > EMERGENCY_RETENTION_MIN_DAYS
-  ) {
-    console.warn(
-      `[retention] disk at ${diskPct.toFixed(1)}% (>= ${EMERGENCY_DISK_PCT}%) — ` +
-      `emergency re-run with ${EMERGENCY_RETENTION_MIN_DAYS}d window`
-    )
-    await runCleanup(EMERGENCY_RETENTION_MIN_DAYS)
+  // Self-heal: if still above the emergency threshold, tighten the window that
+  // actually holds the disk. When a finite compact override is active, the compact
+  // tables are the mass on the heavy chains → tighten compact; otherwise tighten
+  // the body window. Only recurses once (override passed = minimum).
+  if (override === undefined && diskPct >= EMERGENCY_DISK_PCT) {
+    if (Number.isFinite(compactDays) && compactDays > EMERGENCY_RETENTION_MIN_DAYS) {
+      console.warn(`[retention] disk at ${diskPct.toFixed(1)}% — emergency compact re-run at ${EMERGENCY_RETENTION_MIN_DAYS}d`)
+      await runCleanup({ compactDays: EMERGENCY_RETENTION_MIN_DAYS })
+    } else if (days > EMERGENCY_RETENTION_MIN_DAYS) {
+      console.warn(`[retention] disk at ${diskPct.toFixed(1)}% — emergency body re-run at ${EMERGENCY_RETENTION_MIN_DAYS}d`)
+      await runCleanup({ bodyDays: EMERGENCY_RETENTION_MIN_DAYS })
+    }
   }
 }
 

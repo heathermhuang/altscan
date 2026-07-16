@@ -13,6 +13,8 @@ import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+import { resolveTxViewKind } from '@/lib/tx-view'
+import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
@@ -108,8 +110,12 @@ const getTx = cache(async (hash: string) => {
     const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash)).limit(1)
     dbTx = row ?? null
   } catch { /* DB error — fall through to RPC */ }
+  const kind = resolveTxViewKind(dbTx, null)   // 'local' | 'pruned' | 'missing' (rpc decided next)
   const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
-  return { dbTx, rpcTx }
+  // A compact row whose heavy body was pruned → refetch input+logs on demand
+  // (cached). null on RPC failure → the page degrades to compact + a note.
+  const body = kind === 'pruned' ? await getTxBody(hash) : null
+  return { dbTx, rpcTx, body }
 })
 
 // Missing entities return noindex metadata instead of throwing notFound():
@@ -228,14 +234,17 @@ export default async function TxDetailPage({
   const { hash } = await params
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
 
-  const { dbTx, rpcTx } = await getTx(hash)
+  const { dbTx, rpcTx, body } = await getTx(hash)
   const tx = dbTx ?? rpcTx
   if (!tx) notFound()
 
   const fromRpc = !dbTx && !!rpcTx
+  const bodyPruned = !!dbTx?.bodyPruned
 
-  const [txLogs, transfers, methodName, nativePrice, chainTip] = await Promise.all([
-    fromRpc
+  // token_transfers is compact-immortal → still local even for a pruned tx.
+  // logs are a prunable body → local when present, else from the refetched body.
+  const [dbLogs, transfers, methodName, nativePrice, chainTip] = await Promise.all([
+    (fromRpc || bodyPruned)
       ? Promise.resolve([])
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(() => []),
     fromRpc
@@ -248,9 +257,19 @@ export default async function TxDetailPage({
     fetchChainTip(),
   ])
 
+  // Effective input: the refetched body wins for a pruned tx (DB input is '0x').
+  const effectiveInput = bodyPruned && body ? body.input : tx.input
+  // Effective logs: refetched body logs for a pruned tx, else local DB logs. Both
+  // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
+  const bodyLogs: CachedLog[] = bodyPruned && body ? body.logs : []
+  const txLogs = bodyPruned
+    ? bodyLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
+    : dbLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
+
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
-  const hasInput = tx.input && tx.input !== '0x'
-  const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(tx.input) : null
+  const hasInput = effectiveInput && effectiveInput !== '0x'
+  const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(effectiveInput) : null
+  const bodyUnavailable = bodyPruned && !body   // RPC refetch failed → degrade
 
   // Gas usage percentage
   const gasUsed = BigInt(tx.gasUsed ?? 0)
@@ -298,7 +317,7 @@ export default async function TxDetailPage({
 
   // Fallback: decode transfer from input data
   if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {
-    const parsed = decodeTransferInput(tx.input ?? null)
+    const parsed = decodeTransferInput(effectiveInput ?? null)
     if (parsed) {
       let tokenSymbol: string | undefined
       let tokenDecimals: number | undefined
@@ -354,6 +373,19 @@ export default async function TxDetailPage({
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
           <span>⚡</span>
           <span>Fetched live from {chainConfig.name} — this transaction predates our index.</span>
+        </div>
+      )}
+
+      {bodyPruned && !bodyUnavailable && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
+          <span>⚡</span>
+          <span>Input data &amp; event logs fetched live from {chainConfig.name} — this transaction is older than our local body-retention window.</span>
+        </div>
+      )}
+      {bodyUnavailable && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-gray-600">
+          <span>⏳</span>
+          <span>Input data &amp; event logs are temporarily unavailable — try again shortly. The transaction summary below is unaffected.</span>
         </div>
       )}
 
@@ -481,7 +513,7 @@ export default async function TxDetailPage({
               <div>
                 <p className="text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Hex</p>
                 <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-auto max-h-48 break-all whitespace-pre-wrap">
-                  {tx.input}
+                  {effectiveInput}
                 </pre>
               </div>
               {decodedUtf8 && (
