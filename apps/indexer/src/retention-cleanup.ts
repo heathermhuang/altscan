@@ -381,6 +381,22 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     }
     if (compactCutoffBlock !== null && compactCutoffBlock > 0) {
       console.warn(`[retention] ⚠ COMPACT override active (${compactDays}d) — pruning compact tables below block ${compactCutoffBlock}`)
+      // Body sweep to the SAME cutoff first: when the compact cutoff is NEWER than
+      // the body cutoff (emergency re-run tightens only compactDays; or a
+      // COMPACT_RETENTION_DAYS < RETENTION_DAYS config), the transactions deleted
+      // below would otherwise strand their logs/dex_trades/gas_history rows in the
+      // gap window — orphaned exactly when disk pressure is highest. Idempotent:
+      // rows below the body cutoff are already gone, so on the normal path
+      // (compact ≥ body window) this finds ~nothing.
+      for (const table of plan.bodyDeleteTables) {
+        try {
+          const n = await deleteByBlockNumber(table, compactCutoffBlock)
+          if (n > 0) console.log(`[retention] [compact] ${table}: deleted ${n} rows (body sweep to compact cutoff)`)
+          totalDeleted += n
+        } catch (err) {
+          console.error(`[retention] [compact] ${table} body sweep failed:`, err instanceof Error ? err.message : err)
+        }
+      }
       // token_transfers: partition-drop when partitioned, else row-delete.
       try {
         if (ttPartitioned) {

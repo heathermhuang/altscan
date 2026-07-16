@@ -23,8 +23,11 @@ export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
       provider.getTransaction(hash),
       provider.getTransactionReceipt(hash),
     ])
-    if (!tx && !receipt) return null
-    const logs: CachedLog[] = (receipt?.logs ?? []).map((l) => ({
+    // A pruned tx was mined, so the node must have BOTH the tx (input) and the
+    // receipt (logs). A null for either is a transient RPC miss — fail the whole
+    // fetch rather than cache a partial body (e.g. logs:[]) for the full TTL.
+    if (!tx || !receipt) return null
+    const logs: CachedLog[] = receipt.logs.map((l) => ({
       address: l.address.toLowerCase(),
       topic0: l.topics[0] ?? null,
       topic1: l.topics[1] ?? null,
@@ -33,7 +36,7 @@ export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
       data: l.data,
       logIndex: l.index,
     }))
-    return { input: tx?.data ?? '0x', logs }
+    return { input: tx.data, logs }
   } catch {
     return null
   }

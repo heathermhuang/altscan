@@ -44,4 +44,16 @@ describe('retention guardrail — compact indexes are immortal on the default pa
     expect(buildRetentionPlan({ env: {}, ttPartitioned: true }).bodyDeleteTables)
       .toEqual(['logs', 'dex_trades', 'gas_history'])
   })
+
+  // The compact-bridge block also sweeps body tables to the compact cutoff (so a
+  // compact cutoff newer than the body cutoff can't strand orphaned body rows).
+  // That sweep iterates plan.bodyDeleteTables — pin that under a finite-compact
+  // env it is still exactly the refetchable set and never a compact table.
+  it('body sweep input under a finite compact env is still never a compact table', () => {
+    const plan = buildRetentionPlan({ env: { COMPACT_RETENTION_DAYS: '4' }, ttPartitioned: false })
+    expect(plan.bodyDeleteTables).toEqual(['logs', 'dex_trades', 'gas_history'])
+    for (const t of plan.bodyDeleteTables) {
+      expect(compact.has(t), `body sweep must not target compact table ${t}`).toBe(false)
+    }
+  })
 })
