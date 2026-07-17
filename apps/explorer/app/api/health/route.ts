@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { getCacheSizes, getTotalCacheEntries } from '@/lib/cache-registry'
-import { getMoralisLimiterState } from '@/lib/moralis'
+import { getDataProviderHealth } from '@/lib/providers'
 import { getRateLimitMapSize } from '@altscan/explorer-core'
 
 export const dynamic = 'force-dynamic'
@@ -117,7 +117,8 @@ export async function GET(request: NextRequest) {
       response.totalCacheEntries = getTotalCacheEntries() + getRateLimitMapSize()
       response.uptime = Math.round(process.uptime())
       response.database = database
-      response.moralis = await getMoralisLimiterState()
+      // Response key stays `moralis` — admin-dashboard contract.
+      response.moralis = await getDataProviderHealth()
     }
 
     return NextResponse.json(response)

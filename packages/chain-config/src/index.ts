@@ -111,8 +111,6 @@ export type ChainConfig = {
   externalExplorerUrl: string
   /** Disclaimer text for footer — not affiliated with */
   notAffiliatedWith: string
-  /** Moralis chain identifier */
-  moralisChain: string
   /** Historical-data provider config; null = forward-only chain, no provider */
   provider: DataProviderConfig | null
   /** CoinGecko asset-platform id for /coins/{platform}/contract lookups, e.g. "binance-smart-chain" */
@@ -149,7 +147,6 @@ export const BSC: ChainConfig = {
   externalExplorer: 'BscScan',
   externalExplorerUrl: 'https://bscscan.com',
   notAffiliatedWith: 'BscScan or Binance',
-  moralisChain: '0x38',
   provider: { kind: 'moralis', moralisChain: '0x38' },
   coingeckoPlatform: 'binance-smart-chain',
   dexscreenerChain: 'bsc',
@@ -205,7 +202,6 @@ export const ETH: ChainConfig = {
   externalExplorer: 'Etherscan',
   externalExplorerUrl: 'https://etherscan.io',
   notAffiliatedWith: 'Etherscan or the Ethereum Foundation',
-  moralisChain: '0x1',
   provider: { kind: 'moralis', moralisChain: '0x1' },
   coingeckoPlatform: 'ethereum',
   dexscreenerChain: 'ethereum',

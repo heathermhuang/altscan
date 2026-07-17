@@ -11,4 +11,9 @@ describe('chain-config data provider', () => {
     const cfg = { ...CHAINS.bnb, provider: null }
     expect(cfg.provider).toBeNull()
   })
+
+  it('moralisChain no longer exists as a top-level field (moved into provider)', () => {
+    expect('moralisChain' in CHAINS.bnb).toBe(false)
+    expect('moralisChain' in CHAINS.eth).toBe(false)
+  })
 })
