@@ -3,14 +3,15 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
-import type { MoralisTx } from '@/lib/moralis'
+import type { ProviderTx } from '@/lib/providers'
 import { formatNumber, timeAgo } from '@/lib/format'
 
 type HistoryResponse = {
-  result: MoralisTx[]
+  result: ProviderTx[]
   cursor: string | null
   totalTxs?: number
   limited?: boolean
+  reason?: string
 }
 
 export function TxnsLazy({ addr }: { addr: string }) {
@@ -44,12 +45,19 @@ export function TxnsLazy({ addr }: { addr: string }) {
     )
   }
 
-  if (!data || data.limited || data.result.length === 0) {
+  if (!data || data.limited) {
+    const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
     return (
       <p className="text-gray-500">
-        Transaction history is not available in the local index for this address.
+        {throttled
+          ? 'The history provider is busy right now — full transaction history is temporarily unavailable. Check back in a few minutes.'
+          : 'Transaction history is not available in the local index for this address.'}
       </p>
     )
+  }
+
+  if (data.result.length === 0) {
+    return <p className="text-gray-500">No transactions found for this address.</p>
   }
 
   const txs = data.result

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getNfts } from '@/lib/moralis'
+import { getDataProvider } from '@/lib/providers'
 import { guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
@@ -12,11 +12,18 @@ export async function GET(
   const guard = await guardInternalAddress(_req, address)
   if (guard) return guard
 
-  const result = await getNfts(address)
+  const provider = getDataProvider()
+  const result = provider ? await provider.getAddressNfts(address) : null
 
-  // getNfts returns [] both when rate-limited and when the address has no NFTs.
+  if (!result || !result.ok) {
+    return NextResponse.json(
+      { nfts: [], limited: true, reason: result ? result.reason : 'not_configured' },
+      { headers: { 'cache-control': 'private, no-store' } },
+    )
+  }
+
   return NextResponse.json(
-    { nfts: result, limited: false },
+    { nfts: result.data, limited: false },
     { headers: { 'cache-control': 'private, no-store' } },
   )
 }

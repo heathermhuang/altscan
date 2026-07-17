@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getTokenTransfers } from '@/lib/moralis'
+import { getDataProvider } from '@/lib/providers'
 import { guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
@@ -14,17 +14,18 @@ export async function GET(
   const url = new URL(_req.url)
   const cursor = url.searchParams.get('cursor') ?? undefined
 
-  const result = await getTokenTransfers(address, cursor || undefined)
+  const provider = getDataProvider()
+  const result = provider ? await provider.getAddressTokenTransfers(address, cursor || undefined) : null
 
-  if (result === null) {
+  if (!result || !result.ok) {
     return NextResponse.json(
-      { transfers: [], cursor: null, limited: true },
+      { transfers: [], cursor: null, limited: true, reason: result ? result.reason : 'not_configured' },
       { status: 200, headers: { 'cache-control': 'private, no-store' } },
     )
   }
 
   return NextResponse.json(
-    { transfers: result.transfers, cursor: result.cursor, limited: false },
+    { transfers: result.data.transfers, cursor: result.data.cursor, limited: false },
     { headers: { 'cache-control': 'private, no-store' } },
   )
 }
