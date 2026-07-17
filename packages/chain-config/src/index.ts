@@ -48,6 +48,15 @@ export type ChainFeatures = {
   hasEip1559: boolean
 }
 
+/** Historical-data provider for established chains (spec §3.5). null = no
+ *  provider: the chain serves local-index data only (fine for a new chain —
+ *  it indexes forward from launch and never needs deep backfill). */
+export type DataProviderConfig = {
+  kind: 'moralis'
+  /** Moralis chain identifier (hex chain id), e.g. "0x38" */
+  moralisChain: string
+}
+
 export type ChainConfig = {
   /** Chain key for env var resolution */
   key: string
@@ -104,6 +113,8 @@ export type ChainConfig = {
   notAffiliatedWith: string
   /** Moralis chain identifier */
   moralisChain: string
+  /** Historical-data provider config; null = forward-only chain, no provider */
+  provider: DataProviderConfig | null
   /** CoinGecko asset-platform id for /coins/{platform}/contract lookups, e.g. "binance-smart-chain" */
   coingeckoPlatform: string
   /** DexScreener chainId filter for the /tokens endpoint, e.g. "bsc" */
@@ -139,6 +150,7 @@ export const BSC: ChainConfig = {
   externalExplorerUrl: 'https://bscscan.com',
   notAffiliatedWith: 'BscScan or Binance',
   moralisChain: '0x38',
+  provider: { kind: 'moralis', moralisChain: '0x38' },
   coingeckoPlatform: 'binance-smart-chain',
   dexscreenerChain: 'bsc',
   theme: {
@@ -194,6 +206,7 @@ export const ETH: ChainConfig = {
   externalExplorerUrl: 'https://etherscan.io',
   notAffiliatedWith: 'Etherscan or the Ethereum Foundation',
   moralisChain: '0x1',
+  provider: { kind: 'moralis', moralisChain: '0x1' },
   coingeckoPlatform: 'ethereum',
   dexscreenerChain: 'ethereum',
   theme: {
