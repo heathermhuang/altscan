@@ -16,7 +16,8 @@
  */
 import { db } from './db'
 import { sql } from 'drizzle-orm'
-import { getTokenOwners, getTokenHolderCount } from './moralis'
+import { getDataProvider } from './providers'
+import type { ProviderAdapter, ProviderResult, TokenHoldersPage } from './providers'
 
 export type TokenHolder = {
   addr: string
@@ -66,30 +67,48 @@ async function fetchLocalNetFlowHolders(tokenAddr: string): Promise<HoldersResul
   }
 }
 
+/** Pure: provider result pair → HoldersResult, or null → caller uses the local
+ *  fallback. `source` keeps the literal 'moralis' — it's the UI contract for
+ *  "real balances" labeling, not a vendor reference. */
+export function holdersFromProvider(
+  owners: ProviderResult<TokenHoldersPage>,
+  count: ProviderResult<number> | null,
+): HoldersResult | null {
+  if (!owners.ok || owners.data.holders.length === 0) return null
+  return {
+    holders: owners.data.holders.map((h) => ({
+      addr: h.address,
+      balance: h.balance,
+      usdValue: h.usdValue,
+      isContract: h.isContract,
+      label: h.label,
+    })),
+    holderCount: count && count.ok ? count.data : null,
+    source: 'moralis',
+  }
+}
+
 /**
- * Orchestrator: accurate Moralis holders when available, else the labeled local estimate.
- * getTokenOwners is cached + rate-limited + kill-switchable internally and returns null when
- * disabled / keyless / rate-limited / errored → we fall back to the local estimate.
+ * Orchestrator: accurate provider holders when available, else the labeled
+ * local estimate. The adapter is cached + rate-limited + kill-switchable
+ * internally; a failure of ANY reason (disabled / keyless / rate-limited /
+ * upstream) → local fallback — same behavior the old null contract gave,
+ * now spelled out. `deps.provider` is injectable for tests.
  */
 export async function getTokenHolders(
   addr: string,
-  opts?: { skipMoralis?: boolean },
+  opts?: { skipProvider?: boolean },
+  deps?: { provider?: ProviderAdapter | null },
 ): Promise<HoldersResult> {
-  if (!opts?.skipMoralis) {
-    const owners = await getTokenOwners(addr)
-    if (owners && owners.holders.length > 0) {
-      const holderCount = await getTokenHolderCount(addr).catch(() => null)
-      return {
-        holders: owners.holders.map((h) => ({
-          addr: h.address,
-          balance: h.balance,
-          usdValue: h.usdValue,
-          isContract: h.isContract,
-          label: h.label,
-        })),
-        holderCount,
-        source: 'moralis',
-      }
+  if (!opts?.skipProvider) {
+    const provider = deps?.provider !== undefined ? deps.provider : getDataProvider()
+    if (provider) {
+      const owners = await provider.getTokenHolders(addr)
+      const count = owners.ok && owners.data.holders.length > 0
+        ? await provider.getTokenHolderCount(addr).catch(() => null)
+        : null
+      const fromProvider = holdersFromProvider(owners, count)
+      if (fromProvider) return fromProvider
     }
   }
   return fetchLocalNetFlowHolders(addr)

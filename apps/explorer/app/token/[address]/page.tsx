@@ -221,7 +221,7 @@ export default async function TokenDetailPage({
           5000,
           -1,
         ),
-        withTimeout(getTokenHolders(addr, { skipMoralis: true }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
+        withTimeout(getTokenHolders(addr, { skipProvider: true }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
         withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
       ])
   const marketData = await marketDataPromise
