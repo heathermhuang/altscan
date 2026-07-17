@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getTokenBalances } from '@/lib/moralis'
+import { getDataProvider } from '@/lib/providers'
 import { guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
@@ -12,13 +12,18 @@ export async function GET(
   const guard = await guardInternalAddress(_req, address)
   if (guard) return guard
 
-  const result = await getTokenBalances(address)
+  const provider = getDataProvider()
+  const result = provider ? await provider.getAddressTokenBalances(address) : null
 
-  // getTokenBalances returns [] both when rate-limited (null internally) and when the
-  // address genuinely has no tokens. We can't distinguish here, so always return 200
-  // with the array (empty = no holdings, limited flag not applicable for this fn shape).
+  if (!result || !result.ok) {
+    return NextResponse.json(
+      { tokens: [], limited: true, reason: result ? result.reason : 'not_configured' },
+      { headers: { 'cache-control': 'private, no-store' } },
+    )
+  }
+
   return NextResponse.json(
-    { tokens: result, limited: false },
+    { tokens: result.data, limited: false },
     { headers: { 'cache-control': 'private, no-store' } },
   )
 }
