@@ -615,6 +615,42 @@ async function recomputeHolderCounts(): Promise<void> {
   }
 }
 
+/**
+ * Single-flight wrapper (exported for tests). A retention cycle can outlast
+ * RUN_EVERY_MS on a high-volume day — first observed 2026-07-17, when a
+ * ~3.4M-row input-null band ran 3h42m+ against the 6h cadence. Overlapping
+ * runs would stack batched UPDATE/DELETE + VACUUM I/O on the same tables
+ * (the exact stall class PR #65 fixed), so a tick that fires mid-run is
+ * skipped: the cutoff is recomputed per run, so the next tick simply picks
+ * up the larger band — no work is lost. The emergency re-run inside
+ * runCleanup is awaited by the outer run and thus covered by the same
+ * in-flight window (it must NOT be blocked, and isn't).
+ */
+export function makeSingleFlight(
+  run: () => Promise<void>,
+  onSkip: () => void,
+): () => Promise<'ran' | 'skipped'> {
+  let inFlight = false
+  return async () => {
+    if (inFlight) {
+      onSkip()
+      return 'skipped'
+    }
+    inFlight = true
+    try {
+      await run()
+      return 'ran'
+    } finally {
+      inFlight = false
+    }
+  }
+}
+
+const runCleanupGuarded = makeSingleFlight(
+  () => runCleanup(),
+  () => console.warn('[retention] ⚠ previous cleanup still running — skipping this tick (re-entrancy guard)'),
+)
+
 export async function startRetentionCleanup(): Promise<void> {
   // Previously awaited runCleanup() here so getLastIndexedBlock saw a clean
   // state. But with 3-day retention on a 15GB/day DB, the startup DELETE
@@ -625,7 +661,7 @@ export async function startRetentionCleanup(): Promise<void> {
   const STARTUP_DELAY_MS = 15 * 60 * 1000
   console.log(`[retention] startup cleanup deferred by ${STARTUP_DELAY_MS / 60_000}min to avoid DB-pool starvation`)
   setTimeout(() => {
-    runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', err))
   }, STARTUP_DELAY_MS)
 
   // One-time VACUUM FULL to reclaim disk space after bulk deletes.
@@ -635,7 +671,7 @@ export async function startRetentionCleanup(): Promise<void> {
   }
 
   setInterval(() => {
-    runCleanup().catch(err => console.error('[retention] cleanup error:', err))
+    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', err))
   }, RUN_EVERY_MS)
 
   // Recompute holder_count periodically (replaces per-block inline tracking).
