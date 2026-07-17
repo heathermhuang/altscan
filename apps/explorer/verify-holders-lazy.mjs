@@ -19,7 +19,7 @@ const page = read('app/token/[address]/page.tsx')
 // --- internal route: Moralis-enabled, off-SSR endpoint ---
 ok(/export const dynamic = 'force-dynamic'/.test(route), '1. route is force-dynamic')
 ok(/getTokenHolders\(address\.toLowerCase\(\)\)/.test(route), '2. route calls getTokenHolders (Moralis enabled, lowercased)')
-ok(!/skipMoralis/.test(route), '3. route does NOT skip Moralis (real-browser XHR gets accurate holders)')
+ok(!/skipMoralis|skipProvider/.test(route), '3. route does NOT skip the provider (real-browser XHR gets accurate holders)')
 ok(/cache-control.*private, no-store/.test(route), '4. route is no-store (per-user, never CDN-cached)')
 
 // --- HoldersLazy client component ---
@@ -32,8 +32,8 @@ ok(/export function HoldersLazy/.test(lazy) && /export function HoldersCountLazy
 ok(/const inflight = new Map/.test(lazy), '11. shares ONE in-flight fetch per address (table + count dedupe)')
 ok(/if \(data\.holders\.length === 0\) return null/.test(lazy), '12. renders nothing when there are no holders to show')
 
-// --- token page: SSR no longer calls Moralis for holders ---
-ok(/getTokenHolders\(addr, \{ skipMoralis: true \}\)/.test(page), '13. SSR holders call always skips Moralis (0 CU for crawlers AND no-JS scrapers)')
+// --- token page: SSR no longer calls the provider for holders ---
+ok(/getTokenHolders\(addr, \{ skipProvider: true \}\)/.test(page), '13. SSR holders call always skips the provider (0 CU for crawlers AND no-JS scrapers)')
 ok(!/from 'next\/headers'/.test(page), '14. page no longer imports next/headers (SSR bot-gate removed)')
 ok(!/isBotRequest/.test(page), '15. page no longer references isBotRequest')
 ok(/<HoldersLazy\b/.test(page) && /<HoldersCountLazy\b/.test(page), '16. page renders HoldersLazy + HoldersCountLazy')
