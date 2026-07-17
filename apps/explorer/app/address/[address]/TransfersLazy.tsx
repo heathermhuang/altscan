@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
-import type { MoralisTokenTransfer } from '@/lib/moralis'
+import type { ProviderTokenTransfer } from '@/lib/providers'
 import { timeAgo, formatAddress } from '@/lib/format'
 
 type TransfersResponse = {
-  transfers: MoralisTokenTransfer[]
+  transfers: ProviderTokenTransfer[]
   cursor: string | null
   limited?: boolean
 }

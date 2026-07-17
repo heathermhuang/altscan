@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { MoralisNft } from '@/lib/moralis'
+import type { ProviderNft } from '@/lib/providers'
 
 type NftsResponse = {
-  nfts: MoralisNft[]
+  nfts: ProviderNft[]
   limited?: boolean
 }
 
