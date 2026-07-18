@@ -295,7 +295,15 @@ async function reportSizes(): Promise<number> {
       COALESCE((SELECT pg_total_relation_size('blocks')), 0)::bigint         AS bl_bytes,
       COALESCE((SELECT pg_total_relation_size('logs')), 0)::bigint           AS lg_bytes,
       COALESCE((SELECT pg_total_relation_size('token_balances')), 0)::bigint AS tb_bytes,
-      COALESCE((SELECT pg_total_relation_size('dex_trades')), 0)::bigint     AS dx_bytes
+      COALESCE((SELECT pg_total_relation_size('dex_trades')), 0)::bigint     AS dx_bytes,
+      -- A4b: READ-ONLY observability for the immortal backfill tables. These are
+      -- the ONLY backfill_ identifiers permitted in this file, and a test pins
+      -- that they never appear in a destructive statement. to_regclass keeps
+      -- this null-safe before ensure-schema has created them (bare
+      -- pg_total_relation_size throws on a missing relation and would take the
+      -- whole retention run down with it).
+      COALESCE(pg_total_relation_size(to_regclass('backfill_address_txs')), 0)::bigint     AS bf_addr_bytes,
+      COALESCE(pg_total_relation_size(to_regclass('backfill_token_transfers')), 0)::bigint AS bf_tt_bytes
   `)
   const row = Array.from(result)[0] as Record<string, unknown>
   const mb = (b: unknown) => Math.round(Number(b) / 1024 / 1024)
@@ -308,6 +316,9 @@ async function reportSizes(): Promise<number> {
     `logs=${mb(row.lg_bytes)}MB`,
     `tb=${mb(row.tb_bytes)}MB`,
     `dex=${mb(row.dx_bytes)}MB`,
+    // Immortal + retention-exempt, so this only ever grows. The worker's own
+    // size/disk ceilings are the brake; this term is how you watch them work.
+    `bf=${mb(row.bf_addr_bytes) + mb(row.bf_tt_bytes)}MB`,
   ]
   if (DB_DISK_GB > 0) {
     const pct = (dbGB / DB_DISK_GB) * 100
