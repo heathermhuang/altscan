@@ -6,6 +6,7 @@ import type { ProviderNft } from '@/lib/providers'
 type NftsResponse = {
   nfts: ProviderNft[]
   limited?: boolean
+  reason?: string
 }
 
 export function NftsLazy({ addr }: { addr: string }) {
@@ -31,7 +32,18 @@ export function NftsLazy({ addr }: { addr: string }) {
     )
   }
 
-  if (!data || data.limited || data.nfts.length === 0) {
+  if (!data || data.limited) {
+    const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
+    return (
+      <p className="text-gray-500 py-8 text-center">
+        {throttled
+          ? 'The data provider is busy right now — NFT activity is temporarily unavailable. Check back in a few minutes.'
+          : 'NFT activity is not available for this address.'}
+      </p>
+    )
+  }
+
+  if (data.nfts.length === 0) {
     return (
       <p className="text-gray-500 py-8 text-center">No NFT activity found for this address.</p>
     )

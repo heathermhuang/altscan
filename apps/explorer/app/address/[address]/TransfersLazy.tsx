@@ -10,6 +10,7 @@ type TransfersResponse = {
   transfers: ProviderTokenTransfer[]
   cursor: string | null
   limited?: boolean
+  reason?: string
 }
 
 export function TransfersLazy({ addr }: { addr: string }) {
@@ -43,7 +44,18 @@ export function TransfersLazy({ addr }: { addr: string }) {
     )
   }
 
-  if (!data || data.limited || data.transfers.length === 0) {
+  if (!data || data.limited) {
+    const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
+    return (
+      <p className="text-gray-500">
+        {throttled
+          ? 'The data provider is busy right now — token transfer history is temporarily unavailable. Check back in a few minutes.'
+          : 'Token transfer history is not available for this address.'}
+      </p>
+    )
+  }
+
+  if (data.transfers.length === 0) {
     return (
       <p className="text-gray-500">No token transfers found for this address.</p>
     )

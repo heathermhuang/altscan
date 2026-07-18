@@ -8,6 +8,7 @@ import type { ProviderTokenBalance } from '@/lib/providers'
 type HoldingsResponse = {
   tokens: ProviderTokenBalance[]
   limited?: boolean
+  reason?: string
 }
 
 export function HoldingsLazy({ addr }: { addr: string }) {
@@ -33,7 +34,18 @@ export function HoldingsLazy({ addr }: { addr: string }) {
     )
   }
 
-  if (!data || data.limited || data.tokens.length === 0) {
+  if (!data || data.limited) {
+    const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
+    return (
+      <p className="text-gray-500">
+        {throttled
+          ? 'The data provider is busy right now — token holdings are temporarily unavailable. Check back in a few minutes.'
+          : 'Token holdings are not available for this address.'}
+      </p>
+    )
+  }
+
+  if (data.tokens.length === 0) {
     return (
       <p className="text-gray-500">No token holdings found for this address.</p>
     )
