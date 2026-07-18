@@ -76,3 +76,40 @@ describe('txToHistoryRow', () => {
     expect('erc20Transfers' in row).toBe(false)
   })
 })
+
+describe('cursor codec — hostile input (these cursors are forgeable)', () => {
+  // Local cursors are NOT unforgeable: anyone can base64url a payload and reach
+  // the cached path. That is tolerable (the address comes from the route path,
+  // never the cursor, so there is no cross-entity access), but every field
+  // reaches a SQL keyset predicate and must be validated as if hostile.
+  const enc = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url')
+
+  it('rejects non-finite / unsafe / negative block numbers', () => {
+    for (const blk of [-1, 1.5, 1e21, Number.MAX_VALUE]) {
+      expect(decodeCursor(enc({ source: 'local', blockNumber: blk, txHash: '0xab' })))
+        .toEqual({ source: 'head' })
+    }
+    // NaN and Infinity do not survive JSON at all — they arrive as null.
+    expect(decodeCursor(enc({ source: 'local', blockNumber: null, txHash: '0xab' })))
+      .toEqual({ source: 'head' })
+  })
+
+  it('rejects a txHash that is not 0x-hex', () => {
+    for (const h of ['nope', '0x', '0xzz', "0xab'; DROP TABLE--", '', 42]) {
+      expect(decodeCursor(enc({ source: 'local', blockNumber: 1, txHash: h })))
+        .toEqual({ source: 'head' })
+    }
+  })
+
+  it('rejects a negative or fractional logIndex', () => {
+    for (const li of [-1, 2.5, '3']) {
+      expect(decodeCursor(enc({ source: 'local', blockNumber: 1, txHash: '0xab', logIndex: li })))
+        .toEqual({ source: 'head' })
+    }
+  })
+
+  it('accepts a well-formed hostile-looking but valid cursor', () => {
+    expect(decodeCursor(enc({ source: 'local', blockNumber: 0, txHash: '0xAB', logIndex: 0 })))
+      .toEqual({ source: 'local', blockNumber: 0, txHash: '0xAB', logIndex: 0 })
+  })
+})

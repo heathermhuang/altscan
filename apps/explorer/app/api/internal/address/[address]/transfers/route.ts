@@ -6,7 +6,7 @@ import {
   cacheUsable,
   decodeCursor,
   encodeCursor,
-  hasLocalTransfersBelow,
+  transferCacheCoversFrom,
   readWatermark,
   serveLocalTokenTransfers,
   transferToRow,
@@ -44,7 +44,14 @@ export async function GET(
   }
 
   const cur = decodeCursor(cursor)
-  const wm = await readWatermark('token_transfers', address)
+  // See history/route.ts: a watermark read failure degrades to provider-only
+  // rather than breaking the live head.
+  let wm = null as Awaited<ReturnType<typeof readWatermark>>
+  try {
+    wm = await readWatermark('token_transfers', address)
+  } catch {
+    wm = null
+  }
   const usable = cacheUsable(wm)
 
   if (shouldEnqueueBackfill({
@@ -85,10 +92,15 @@ export async function GET(
     if (outage && usable && cur.source === 'head') {
       const { rows, lastBoundary, hasMore } = await serveLocalTokenTransfers(address, TOP_TRANSFER_BOUNDARY)
       if (rows.length > 0) {
+        const fbNext = hasMore && lastBoundary
+          ? encodeCursor({ source: 'local', ...lastBoundary })
+          : (wm && wm.status !== 'complete' && wm.oldestCursor
+              ? encodeCursor({ source: 'provider', providerCursor: wm.oldestCursor })
+              : null)
         return NextResponse.json(
           {
             transfers: rows,
-            cursor: hasMore && lastBoundary ? encodeCursor({ source: 'local', ...lastBoundary }) : null,
+            cursor: fbNext,
             source: 'local',
             stale: true,
             complete: false,
@@ -113,14 +125,18 @@ export async function GET(
   if (cur.source === 'head' && usable && rows.length > 0) {
     const oldest = rows[rows.length - 1]
     const oldestLogIndex = oldest.logIndex == null ? null : Number(oldest.logIndex)
-    if (oldestLogIndex != null && Number.isFinite(oldestLogIndex)) {
-      const boundary = {
-        blockNumber: Number(oldest.blockNumber),
-        txHash: oldest.txHash,
-        logIndex: oldestLogIndex,
-      }
-      if (await hasLocalTransfersBelow(address, boundary.blockNumber, boundary.txHash, boundary.logIndex)) {
-        next = encodeCursor({ source: 'local', ...boundary })
+    const oldestBlock = Number(oldest.blockNumber)
+    // A null logIndex cannot anchor a keyset boundary, so skip the handoff
+    // rather than coerce it — the provider cursor is always a correct fallback.
+    if (oldestLogIndex != null && Number.isSafeInteger(oldestLogIndex) && Number.isFinite(oldestBlock)) {
+      // Contiguity, not mere existence below — see transferCacheCoversFrom.
+      if (await transferCacheCoversFrom(address, oldestBlock).catch(() => false)) {
+        next = encodeCursor({
+          source: 'local',
+          blockNumber: oldestBlock,
+          txHash: oldest.txHash,
+          logIndex: oldestLogIndex,
+        })
       }
     }
   }

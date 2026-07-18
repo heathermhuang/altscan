@@ -56,12 +56,22 @@ export function decodeCursor(raw: string | null | undefined): ServeCursor {
     if (typeof o !== 'object' || o === null || Array.isArray(o)) return { source: 'head' }
     const c = o as Record<string, unknown>
 
-    if (c.source === 'local' && typeof c.blockNumber === 'number' && typeof c.txHash === 'string') {
-      // Both halves of the keyset boundary are required — a partial boundary
-      // makes the `<` predicate meaningless.
-      return typeof c.logIndex === 'number'
-        ? { source: 'local', blockNumber: c.blockNumber, txHash: c.txHash, logIndex: c.logIndex }
-        : { source: 'local', blockNumber: c.blockNumber, txHash: c.txHash }
+    if (c.source === 'local') {
+      // These cursors are NOT unforgeable — anyone can base64url a payload and
+      // reach the cached path. That is acceptable (the address comes from the
+      // route path, never the cursor, so no cross-entity access is possible and
+      // the rows are the same ones the caller could already read), but it does
+      // mean every field must be validated as if hostile: a non-finite or
+      // negative blockNumber, or a non-hex txHash, would otherwise reach the
+      // keyset predicate directly.
+      const blk = c.blockNumber
+      const hash = c.txHash
+      if (!Number.isSafeInteger(blk) || (blk as number) < 0) return { source: 'head' }
+      if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(hash)) return { source: 'head' }
+      const base = { source: 'local' as const, blockNumber: blk as number, txHash: hash }
+      if (c.logIndex === undefined) return base
+      if (!Number.isSafeInteger(c.logIndex) || (c.logIndex as number) < 0) return { source: 'head' }
+      return { ...base, logIndex: c.logIndex as number }
     }
     if (c.source === 'provider' && typeof c.providerCursor === 'string' && c.providerCursor) {
       return { source: 'provider', providerCursor: c.providerCursor }
@@ -137,18 +147,26 @@ export function cacheUsable(wm: BackfillWatermark | null): boolean {
   return !!wm && (wm.status === 'complete' || wm.status === 'capped' || wm.status === 'partial')
 }
 
-/** Step 2 probe: does the cache hold anything strictly below the live head's
- *  oldest row? If not, there is nothing to hand off to and we stay on the
- *  provider's own cursor. */
-export async function hasLocalRowsBelow(
-  address: string,
-  blockNumber: number,
-  txHash: string,
-): Promise<boolean> {
+/**
+ * Step 2 gate: may we hand pagination off to the cache after this live page?
+ *
+ * ONLY IF THE CACHE IS CONTIGUOUS WITH THE HEAD. Testing "does the cache hold
+ * anything below page 1's oldest row" is NOT sufficient and silently loses
+ * data: if activity arrived after the last backfill run, the cache's newest row
+ * sits well below the live head, and jumping to it skips every transaction in
+ * between. (Backfill at 100 txs, then 60 new ones arrive: page 1 shows txs
+ * 1-25, the cache starts at tx 61, and txs 26-60 disappear from the UI with no
+ * error anywhere.)
+ *
+ * Contiguity proof: the cache must contain at least one row at or above the
+ * live page's oldest block. Then there is no gap between what the provider just
+ * served and what the cache can serve next.
+ */
+export async function cacheCoversFrom(address: string, oldestBlock: number): Promise<boolean> {
   const res = await getDb().execute(sql`
     SELECT 1 FROM backfill_address_txs
     WHERE address = ${address.toLowerCase()}
-      AND (block_number, tx_hash) < (${blockNumber}, ${txHash})
+      AND block_number >= ${oldestBlock}
     LIMIT 1
   `)
   return Array.from(res).length > 0
@@ -244,16 +262,12 @@ function rowToTransferRow(r: Record<string, unknown>): TokenTransferRow {
   }
 }
 
-export async function hasLocalTransfersBelow(
-  scope: string,
-  blockNumber: number,
-  txHash: string,
-  logIndex: number,
-): Promise<boolean> {
+/** Transfers equivalent of cacheCoversFrom — same contiguity requirement. */
+export async function transferCacheCoversFrom(scope: string, oldestBlock: number): Promise<boolean> {
   const res = await getDb().execute(sql`
     SELECT 1 FROM backfill_token_transfers
     WHERE scope_address = ${scope.toLowerCase()}
-      AND (block_number, tx_hash, log_index) < (${blockNumber}, ${txHash}, ${logIndex})
+      AND block_number >= ${oldestBlock}
     LIMIT 1
   `)
   return Array.from(res).length > 0

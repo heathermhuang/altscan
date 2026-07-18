@@ -6,7 +6,7 @@ import {
   cacheUsable,
   decodeCursor,
   encodeCursor,
-  hasLocalRowsBelow,
+  cacheCoversFrom,
   readWatermark,
   serveLocalAddressTxs,
   txToHistoryRow,
@@ -49,7 +49,15 @@ export async function GET(
 
   // ── Backfill enabled ──────────────────────────────────────────────────────
   const cur = decodeCursor(cursor)
-  const wm = await readWatermark('address_txs', address)
+  // A watermark read failure must NOT break the live head: the cache is an
+  // optimization, the provider is the source of truth. Degrade to provider-only
+  // rather than 500ing page 1 because Postgres blinked.
+  let wm = null as Awaited<ReturnType<typeof readWatermark>>
+  try {
+    wm = await readWatermark('address_txs', address)
+  } catch {
+    wm = null
+  }
   const usable = cacheUsable(wm)
 
   // Warm the cache for pagination on a first human view (fire-and-forget).
@@ -95,10 +103,18 @@ export async function GET(
     if (outage && usable && cur.source === 'head') {
       const { rows, lastBoundary, hasMore } = await serveLocalAddressTxs(address, TOP_BOUNDARY)
       if (rows.length > 0) {
+        // Continue the same way the normal local path does: more cached rows,
+        // else resume the provider tail. Returning null here would make a cache
+        // of 1-25 rows look permanently exhausted.
+        const fbNext = hasMore && lastBoundary
+          ? encodeCursor({ source: 'local', ...lastBoundary })
+          : (wm && wm.status !== 'complete' && wm.oldestCursor
+              ? encodeCursor({ source: 'provider', providerCursor: wm.oldestCursor })
+              : null)
         return NextResponse.json(
           {
             result: rows,
-            cursor: hasMore && lastBoundary ? encodeCursor({ source: 'local', ...lastBoundary }) : null,
+            cursor: fbNext,
             source: 'local',
             stale: true,
             complete: false,
@@ -120,9 +136,12 @@ export async function GET(
   // Step 2 — hand off to the cache iff it actually holds rows below this page.
   if (cur.source === 'head' && usable && rows.length > 0) {
     const oldest = rows[rows.length - 1]
-    const boundary = { blockNumber: Number(oldest.blockNumber), txHash: oldest.hash }
-    if (await hasLocalRowsBelow(address, boundary.blockNumber, boundary.txHash)) {
-      next = encodeCursor({ source: 'local', ...boundary })
+    const oldestBlock = Number(oldest.blockNumber)
+    // Hand off ONLY if the cache is contiguous with this page — see
+    // cacheCoversFrom. Existence of rows *below* is not enough; it silently
+    // skips everything indexed after the last backfill run.
+    if (Number.isFinite(oldestBlock) && await cacheCoversFrom(address, oldestBlock).catch(() => false)) {
+      next = encodeCursor({ source: 'local', blockNumber: oldestBlock, txHash: oldest.hash })
     }
   }
   if (!next && result.data.cursor) {

@@ -146,3 +146,55 @@ describe('A4b-1 enabled — the cursor contract changes deliberately', () => {
     expect(body.source).toBe('provider')
   })
 })
+
+/**
+ * Regression: the head→cache handoff must require CONTIGUITY.
+ *
+ * The bug this pins (found by codex review of A4b-1): the gate used to be
+ * "does the cache hold any row below page 1's oldest?", which is true even when
+ * the cache starts far below the live head. Backfill runs at 100 txs, 60 new
+ * txs arrive, page 1 shows txs 1-25, the cache begins at tx 61 — handing off
+ * there drops txs 26-60 from the UI with no error anywhere.
+ */
+describe('A4b-1 head→cache handoff requires contiguity', () => {
+  const ADDR = '0x3333333333333333333333333333333333333333'
+  const params = Promise.resolve({ address: ADDR })
+
+  async function loadWithCoverage(covers: boolean) {
+    const p = makeProvider()
+    vi.resetModules()
+    vi.doMock('@/lib/providers', () => ({
+      getDataProvider: () => p.adapter, isBotRequest: () => false,
+    }))
+    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+    vi.doMock('@/lib/backfill-trigger', () => ({
+      backfillEnabled: () => true, enqueueBackfill: async () => {}, shouldEnqueueBackfill: () => false,
+    }))
+    vi.doMock('@/lib/backfill-serve', async (orig) => {
+      const actual = await (orig() as Promise<Record<string, unknown>>)
+      return {
+        ...actual,
+        readWatermark: vi.fn(async () => ({
+          status: 'partial', backfilledThroughBlock: 50, oldestCursor: 'WORKER_STOPPED_HERE',
+        })),
+        // The whole question: is the cache contiguous with the live page?
+        cacheCoversFrom: vi.fn(async () => covers),
+      }
+    })
+    const { GET } = await import('@/app/api/internal/address/[address]/history/route')
+    return await (await GET(new Request(`https://x.test/api/internal/address/${ADDR}/history`), { params })).json()
+  }
+
+  it('hands off to the cache when it is contiguous with the live page', async () => {
+    const body = await loadWithCoverage(true)
+    const decoded = JSON.parse(Buffer.from(body.cursor, 'base64url').toString('utf8'))
+    expect(decoded.source).toBe('local')
+  })
+
+  it('does NOT hand off when the cache starts below the live page — it would skip rows', async () => {
+    const body = await loadWithCoverage(false)
+    const decoded = JSON.parse(Buffer.from(body.cursor, 'base64url').toString('utf8'))
+    // Must stay on the provider so the intervening rows are actually served.
+    expect(decoded).toEqual({ source: 'provider', providerCursor: 'NEXT_PROVIDER_CURSOR' })
+  })
+})
