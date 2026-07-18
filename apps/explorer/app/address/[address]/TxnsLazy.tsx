@@ -3,15 +3,24 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
-import type { ProviderTx } from '@/lib/providers'
+import type { HistoryRow } from '@/lib/providers'
 import { formatNumber, timeAgo } from '@/lib/format'
 
 type HistoryResponse = {
-  result: ProviderTx[]
+  // HistoryRow, not ProviderTx: the route serves a reduced projection so a
+  // backfilled row and a live provider row are the same shape. This component
+  // only ever read these fields, so it is a tightening, not a change.
+  result: HistoryRow[]
   cursor: string | null
   totalTxs?: number
   limited?: boolean
   reason?: string
+  /** Which side served this page. Absent when backfill is disabled (A4a). */
+  source?: 'local' | 'provider'
+  /** True only when the cached tail is exhausted AND the entity is fully backfilled. */
+  complete?: boolean
+  /** Set when the provider was unreachable and we served the cache instead. */
+  stale?: boolean
 }
 
 export function TxnsLazy({ addr }: { addr: string }) {
@@ -71,7 +80,13 @@ export function TxnsLazy({ addr }: { addr: string }) {
           <path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/>
         </svg>
         <span>
-          Showing transaction history via Moralis
+          {data.stale
+            ? 'Showing cached transaction history — live lookup is temporarily unavailable'
+            : data.source === 'local'
+              ? (data.complete
+                  ? 'Showing full transaction history from our local index'
+                  : 'Showing older transaction history from our local index')
+              : 'Showing transaction history via Moralis'}
           {total > 0 && ` — ${formatNumber(total)} total transactions`}
         </span>
       </div>

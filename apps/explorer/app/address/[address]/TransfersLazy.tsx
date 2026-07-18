@@ -3,11 +3,18 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
-import type { ProviderTokenTransfer } from '@/lib/providers'
+import type { TokenTransferRow } from '@/lib/providers'
 import { timeAgo, formatAddress } from '@/lib/format'
 
 type TransfersResponse = {
-  transfers: ProviderTokenTransfer[]
+  // TokenTransferRow, not ProviderTokenTransfer: the route serves a reduced
+  // projection (no tokenName — the backfill table does not store it). This
+  // component reads only txHash/blockTimestamp/from/to/tokenAddress/
+  // tokenSymbol/valueFormatted, all of which the row carries.
+  transfers: TokenTransferRow[]
+  source?: 'local' | 'provider'
+  complete?: boolean
+  stale?: boolean
   cursor: string | null
   limited?: boolean
   reason?: string

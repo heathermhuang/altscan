@@ -64,6 +64,8 @@ export type {
   ProviderTokenBalance,
   ProviderTokenTransfer,
   ProviderTx,
+  HistoryRow,
+  TokenTransferRow,
   TokenHoldersPage,
   TokenTransfersPage,
 } from '@altscan/providers'
