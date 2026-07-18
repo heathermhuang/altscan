@@ -54,9 +54,19 @@ export function abbreviate(n: number): string {
  * Replaces common Cyrillic/Greek lookalikes with ASCII equivalents, then
  * strips anything outside printable ASCII + basic Latin-1.
  *
- * Server-safe home for the provider package + indexer (@altscan/providers imports
- * it here). The explorer keeps its own client-bundle copy in apps/explorer/lib/format.ts.
+ * Single source of truth: @altscan/providers, the indexer, AND the explorer all
+ * use this one (apps/explorer/lib/format.ts re-exports it). It used to be
+ * duplicated, which is a bad shape for a security-relevant sanitizer — a fix
+ * applied to one copy silently leaves the other exploitable.
+ *
+ * Returns '' when nothing survives sanitization. It deliberately does NOT fall
+ * back to the raw input: an all-confusable string (emoji-only, zero-width, or
+ * bidi overrides like U+202E) cleans to empty, and returning the original there
+ * would hand back exactly the characters this function exists to remove.
+ * Callers already handle the empty case with their own placeholder.
  */
+const MAX_SYMBOL_LEN = 128
+
 export function sanitizeSymbol(raw: string): string {
   // Map common homoglyphs to ASCII (explicit \u escapes — the chars are
   // visually identical to ASCII, so keep them unambiguous, never literal)
@@ -72,10 +82,15 @@ export function sanitizeSymbol(raw: string): string {
     '\u2112': 'L', '\u2113': 'l', '\u2115': 'N', '\u2119': 'P', '\u211A': 'Q',
     '\u211B': 'R', '\u211C': 'R', '\u211D': 'R',
   }
+  // Bound the work before iterating: `raw` is attacker-controlled (a token
+  // symbol straight off-chain) and the loop below builds a string per char.
+  const bounded = raw.length > MAX_SYMBOL_LEN ? raw.slice(0, MAX_SYMBOL_LEN) : raw
   let cleaned = ''
-  for (const ch of raw) {
+  for (const ch of bounded) {
     cleaned += homoglyphs[ch] ?? ch
   }
-  // Strip non-printable and non-ASCII (keep basic Latin, digits, common symbols)
-  return cleaned.replace(/[^\x20-\x7E]/g, '').trim() || raw.trim()
+  // Strip non-printable and non-ASCII (keep basic Latin, digits, common symbols).
+  // No raw fallback — see the doc comment: returning `raw` on an all-confusable
+  // input restores the very characters we just stripped.
+  return cleaned.replace(/[^\x20-\x7E]/g, '').trim()
 }

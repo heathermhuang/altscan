@@ -2,7 +2,7 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatNativeToken, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbol } from '@/lib/format'
+import { formatNativeToken, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbolOr } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
@@ -590,11 +590,11 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                     href={`/token/${t.tokenAddress}`}
                     className={`${chainConfig.theme.linkText} hover:underline`}
                   >
-                    {tokenInfoMap.get(t.tokenAddress)?.symbol
-                      ? sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.symbol)
-                      : tokenInfoMap.get(t.tokenAddress)?.name
-                        ? sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.name)
-                        : formatAddress(t.tokenAddress)}
+                    {sanitizeSymbolOr(
+                      tokenInfoMap.get(t.tokenAddress)?.symbol,
+                      sanitizeSymbolOr(
+                        tokenInfoMap.get(t.tokenAddress)?.name,
+                        formatAddress(t.tokenAddress)))}
                   </Link>
                 </td>
                 <td className="px-4 py-2 text-xs">
@@ -607,9 +607,10 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                     }
                     return raw.slice(0, 12)
                   })()}
-                  {tokenInfoMap.get(t.tokenAddress)?.symbol
-                    ? ` ${sanitizeSymbol(tokenInfoMap.get(t.tokenAddress)!.symbol)}`
-                    : ''}
+                  {(() => {
+                    const sym = sanitizeSymbolOr(tokenInfoMap.get(t.tokenAddress)?.symbol, '')
+                    return sym ? ` ${sym}` : ''
+                  })()}
                 </td>
               </tr>
             ))}
@@ -708,12 +709,12 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
               <tr key={h.tokenAddress} className="hover:bg-gray-50">
                 <td className="px-4 py-2">
                   <Link href={`/token/${h.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline font-medium`}>
-                    {h.name ? sanitizeSymbol(h.name) : h.tokenAddress.slice(0, 14) + '…'}
+                    {sanitizeSymbolOr(h.name, h.tokenAddress.slice(0, 14) + '…')}
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-600">{h.symbol ? sanitizeSymbol(h.symbol) : '—'}</td>
+                <td className="px-4 py-2 text-gray-600">{sanitizeSymbolOr(h.symbol, '—')}</td>
                 <td className="px-4 py-2">
-                  {displayBalance} {h.symbol ? sanitizeSymbol(h.symbol) : ''}
+                  {displayBalance} {sanitizeSymbolOr(h.symbol, '')}
                 </td>
               </tr>
             )

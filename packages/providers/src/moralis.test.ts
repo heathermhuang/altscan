@@ -142,8 +142,9 @@ describe('createMoralisAdapter — A4b-0 host context', () => {
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.data.transfers[0].logIndex).toBe('7')
-      // upstream omitted it → '' so the A4b worker can skip rather than collide
-      expect(r.data.transfers[1].logIndex).toBe('')
+      // upstream omitted it → null (NOT '') so it cannot type-check as a usable
+      // PK component; the A4b worker skips these rather than colliding.
+      expect(r.data.transfers[1].logIndex).toBeNull()
     }
   })
 })

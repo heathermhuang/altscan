@@ -158,6 +158,30 @@ function summarizeMoralisHistory(t: {
 }
 
 /**
+ * Normalize an upstream `log_index` into a stable primary-key component.
+ *
+ * A4b (R3) keys backfilled token transfers on (scope_address, tx_hash,
+ * log_index). Returning a sentinel string here would be unsafe: `''` satisfies
+ * the `string` type, so two absent values within one tx would type-check and
+ * then collide on the PK. `null` makes absence unrepresentable as a key and
+ * forces every consumer to decide.
+ *
+ * Accepts only a non-negative integer (as number or decimal string) and
+ * canonicalizes it, so `7`, `'7'` and `'007'` all map to `'7'`. Rejects
+ * absent, empty, whitespace, negative, fractional, and non-numeric input.
+ */
+export function normalizeLogIndex(raw: string | number | null | undefined): string | null {
+  if (raw == null) return null
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && raw >= 0 ? String(raw) : null
+  }
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const n = Number(trimmed)
+  return Number.isSafeInteger(n) ? String(n) : null
+}
+
+/**
  * Rate limiter — PER-FEATURE budgets so a spike/abuse in one feature can't starve the others.
  * Buckets:
  *   - history : getAddressHistory                                        (~25 CU/call)
@@ -336,6 +360,21 @@ export function createMoralisAdapter(
 ): ProviderAdapter {
   const CHAIN = cfg.moralisChain
   const CURRENCY = ctx?.currency ?? ''
+  /**
+   * Cache-key namespace. Every provider cache key MUST carry this prefix.
+   *
+   * Without it, keys were bare (`history:0xabc:`) while `kvGet`/`kvSet` pass the
+   * key straight to Redis. Two hosts sharing one Redis would then collide: from
+   * A4b-2 the indexer resolves its own adapter against the SAME `REDIS_URL` as
+   * the web (`apps/indexer/src/queue.ts`), and it passes no `currency` ctx —
+   * so whichever host wrote first would decide the other's rendered summary
+   * (`"1.5 BNB transfer"` vs `"1.5 transfer"`, see summarize* below).
+   *
+   * `v2` also retires pre-`logIndex` cached transfer pages, whose JSON
+   * deserializes with `logIndex === undefined` and would otherwise be trusted
+   * as a well-formed TokenTransfersPage for the whole TTL.
+   */
+  const NS = `moralis:v2:${CHAIN}:${CURRENCY}`
   return {
     kind: 'moralis',
 
@@ -344,7 +383,7 @@ export function createMoralisAdapter(
      * so no separate stats call is needed. Cost: ~25 CU.
      */
     async getAddressHistory(address: string, cursor?: string): Promise<ProviderResult<AddressHistoryPage>> {
-      const cacheKey = `history:${address}:${cursor ?? ''}`
+      const cacheKey = `${NS}:history:${address}:${cursor ?? ''}`
       const cached = await cacheGetJson<AddressHistoryPage>(cacheKey)
       if (cached !== undefined) {
         // null = cached negative (a recent failed upstream attempt)
@@ -433,7 +472,7 @@ export function createMoralisAdapter(
     },
 
     async getAddressTokenBalances(address: string): Promise<ProviderResult<ProviderTokenBalance[]>> {
-      const cacheKey = `balances:${address}`
+      const cacheKey = `${NS}:balances:${address}`
       const cached = await cacheGetJson<ProviderTokenBalance[]>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -477,7 +516,7 @@ export function createMoralisAdapter(
      * ERC-20 token transfer history for an address. Cost: ~25 CU.
      */
     async getAddressTokenTransfers(address: string, cursor?: string): Promise<ProviderResult<TokenTransfersPage>> {
-      const cacheKey = `transfers:${address}:${cursor ?? ''}`
+      const cacheKey = `${NS}:transfers:${address}:${cursor ?? ''}`
       const cached = await cacheGetJson<TokenTransfersPage>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -518,9 +557,12 @@ export function createMoralisAdapter(
         const txResult: TokenTransfersPage = {
           transfers: data.result.map(t => ({
             txHash: t.transaction_hash,
-            // '' when upstream omits it — A4b's worker must skip such rows rather
-            // than collide on the (scope, tx_hash, log_index) primary key.
-            logIndex: t.log_index != null ? String(t.log_index) : '',
+            // null unless upstream gives a genuine non-negative integer. A4b keys
+            // backfilled transfers on (scope, tx_hash, log_index), so anything
+            // else — absent, '', whitespace, negative, '1.5', 'abc' — MUST NOT
+            // reach the PK; the worker skips null rows instead of colliding.
+            // Normalized through Number so '007' and 7 agree on one key.
+            logIndex: normalizeLogIndex(t.log_index),
             blockNumber: t.block_number,
             blockTimestamp: t.block_timestamp,
             fromAddress: t.from_address,
@@ -542,7 +584,7 @@ export function createMoralisAdapter(
     },
 
     async getAddressNfts(address: string): Promise<ProviderResult<ProviderNft[]>> {
-      const cacheKey = `nfts:${address}`
+      const cacheKey = `${NS}:nfts:${address}`
       const cached = await cacheGetJson<ProviderNft[]>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -591,7 +633,7 @@ export function createMoralisAdapter(
      * their local estimate exactly as they did under the null contract.
      */
     async getTokenHolders(tokenAddress: string): Promise<ProviderResult<TokenHoldersPage>> {
-      const cacheKey = `owners:${tokenAddress}`
+      const cacheKey = `${NS}:owners:${tokenAddress}`
       const cached = await cacheGetJson<TokenHoldersPage>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -623,7 +665,7 @@ export function createMoralisAdapter(
      * Total holder count of an ERC20 token (Moralis holder-stats). Cost: ~50 CU.
      */
     async getTokenHolderCount(tokenAddress: string): Promise<ProviderResult<number>> {
-      const cacheKey = `holdercount:${tokenAddress}`
+      const cacheKey = `${NS}:holdercount:${tokenAddress}`
       const cached = await cacheGetJson<number>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
