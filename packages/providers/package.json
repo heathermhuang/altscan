@@ -1,0 +1,19 @@
+{
+  "name": "@altscan/providers",
+  "version": "0.0.1",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "dependencies": {
+    "@altscan/chain-config": "workspace:*",
+    "@altscan/explorer-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

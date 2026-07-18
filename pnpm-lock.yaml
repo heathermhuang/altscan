@@ -100,6 +100,9 @@ importers:
       '@altscan/explorer-core':
         specifier: workspace:*
         version: link:../../packages/explorer-core
+      '@altscan/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@altscan/settings-schema':
         specifier: workspace:*
         version: link:../../packages/settings-schema
@@ -155,6 +158,9 @@ importers:
       '@altscan/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@altscan/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@altscan/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -230,6 +236,19 @@ importers:
       ioredis:
         specifier: 5.9.3
         version: 5.9.3
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/providers:
+    dependencies:
+      '@altscan/chain-config':
+        specifier: workspace:*
+        version: link:../chain-config
+      '@altscan/explorer-core':
+        specifier: workspace:*
+        version: link:../explorer-core
     devDependencies:
       typescript:
         specifier: ^5.4.0

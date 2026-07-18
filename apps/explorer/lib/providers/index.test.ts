@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { isBotRequest, resolveDataProvider } from './index'
+import { isBotRequest } from './index'
 
-describe('resolveDataProvider', () => {
-  it('returns null when the chain configures no provider', () => {
-    expect(resolveDataProvider(null)).toBeNull()
-  })
-  it('builds a moralis adapter from a moralis config', () => {
-    const p = resolveDataProvider({ kind: 'moralis', moralisChain: '0x38' })
-    expect(p?.kind).toBe('moralis')
-  })
-})
-
+// resolveDataProvider's tests moved to packages/providers/src/registry.test.ts
+// with the adapter (A4b-0). Bot detection stays here — it's about inbound web
+// requests, which only the explorer has.
 describe('isBotRequest', () => {
   it('flags crawlers and user-triggered AI fetchers', () => {
     expect(isBotRequest('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)')).toBe(true)

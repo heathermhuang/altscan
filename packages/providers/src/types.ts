@@ -55,6 +55,11 @@ export type ProviderTokenBalance = {
 
 export type ProviderTokenTransfer = {
   txHash: string
+  /** Provider log index within the tx. A4b (R3) keys backfilled transfers on
+   *  (scope_address, tx_hash, log_index) — a stable identity that survives
+   *  re-paging, unlike a positional counter. Empty string when the upstream
+   *  row omits it; A4b's worker must skip such rows rather than collide. */
+  logIndex: string
   blockNumber: string
   blockTimestamp: string
   fromAddress: string

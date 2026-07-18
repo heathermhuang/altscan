@@ -1,0 +1,12 @@
+{
+  "//": "Test-aware type-check config. The production `build` (tsconfig.json) excludes",
+  "//2": "test files so Render's indexer build stays on a pure ES2020 lib. This config",
+  "//3": "re-includes them and adds DOM so vitest's transitive vite types (importGlob.d.ts",
+  "//4": "references `Worker`) resolve — restoring static type-checking of the tests.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src"],
+  "exclude": []
+}
