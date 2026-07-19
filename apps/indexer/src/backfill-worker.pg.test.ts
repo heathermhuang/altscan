@@ -125,6 +125,7 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
   /** Seed one watermark row; interval strings offset the clocks from now(). */
   async function seed(over: {
     entity?: string
+    type?: string
     status?: string
     attemptAgoSec?: number | null
     createdAgoSec?: number
@@ -133,6 +134,7 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
   }) {
     const {
       entity = '0x' + 'a'.repeat(40),
+      type = 'address_txs',
       status = 'pending',
       attemptAgoSec = null,
       createdAgoSec = 0,
@@ -143,7 +145,7 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
       INSERT INTO backfill_watermarks
         (entity_type, entity_id, status, rows_written, attempts, last_attempt_at, created_at)
       VALUES
-        ('address_txs', '${entity}', '${status}', ${rowsWritten}, ${attempts},
+        ('${type}', '${entity}', '${status}', ${rowsWritten}, ${attempts},
          ${attemptAgoSec === null ? 'NULL' : `now() - interval '${attemptAgoSec} seconds'`},
          now() - interval '${createdAgoSec} seconds')`)
   }
@@ -179,6 +181,17 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     await seed({ entity: '0x' + 'b'.repeat(40), status: 'pending', attemptAgoSec: null, createdAgoSec: 3600 })
     await seed({ entity: '0x' + 'c'.repeat(40), status: 'partial', attemptAgoSec: 60, rowsWritten: 50 })
     const claimed = await claimNextEntity(db)
+    expect(claimed!.entity_id).toBe('0x' + 'c'.repeat(40))
+  })
+
+  it('bucket exclusion: a hot bucket cannot starve the other — its partial rows are simply ineligible', async () => {
+    // Without exclusion the hot partial transfer outranks the cold pending
+    // address (partial-first ordering) on every poll, forever.
+    await seed({ entity: '0x' + 'b'.repeat(40), type: 'token_transfers', status: 'partial', attemptAgoSec: 60, rowsWritten: 50 })
+    await seed({ entity: '0x' + 'c'.repeat(40), type: 'address_txs', status: 'pending', attemptAgoSec: null })
+    const claimed = await claimNextEntity(db, ['token_transfers'])
+    expect(claimed).not.toBeNull()
+    expect(claimed!.entity_type).toBe('address_txs')
     expect(claimed!.entity_id).toBe('0x' + 'c'.repeat(40))
   })
 

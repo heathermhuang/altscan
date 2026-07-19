@@ -71,15 +71,25 @@ export type ClaimedEntity = {
  *   deliberately lifts only 'partial'.
  * - Errored rows re-enter after an exponential cooldown capped at 1800s,
  *   mirroring backoffMs().
+ * - `excludeTypes` makes bucket politeness part of ELIGIBILITY: a hot bucket's
+ *   entities are simply not claimable, so its `partial` rows (which outrank
+ *   every `pending` row) cannot starve the other bucket's work by being
+ *   claimed-and-released in a loop.
  */
-export function buildClaimSql(): string {
+export function buildClaimSql(
+  excludeTypes: ReadonlyArray<ClaimedEntity['entity_type']> = [],
+): string {
+  // Values come from the closed entity-type vocabulary, never user input.
+  const exclude = excludeTypes.length
+    ? `\n        AND entity_type NOT IN (${excludeTypes.map((t) => `'${t}'`).join(',')})`
+    : ''
   return `
     UPDATE backfill_watermarks SET status = 'running', last_attempt_at = date_trunc('milliseconds', now()), updated_at = now()
     WHERE id = (
       SELECT id FROM backfill_watermarks
-      WHERE status IN ('pending','partial')
+      WHERE (status IN ('pending','partial')
          OR (status = 'running' AND last_attempt_at < now() - (${cfg.leaseSec} * INTERVAL '1 second'))
-         OR (status = 'error' AND (last_attempt_at IS NULL OR last_attempt_at < now() - (LEAST(pow(2, attempts), 1800) * INTERVAL '1 second')))
+         OR (status = 'error' AND (last_attempt_at IS NULL OR last_attempt_at < now() - (LEAST(pow(2, attempts), 1800) * INTERVAL '1 second'))))${exclude}
       ORDER BY (status = 'partial') DESC, last_attempt_at ASC NULLS FIRST, created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -87,8 +97,11 @@ export function buildClaimSql(): string {
     RETURNING *`
 }
 
-export async function claimNextEntity(db: WorkerDb): Promise<ClaimedEntity | null> {
-  const res = await db.execute(sql.raw(buildClaimSql()))
+export async function claimNextEntity(
+  db: WorkerDb,
+  excludeTypes: ReadonlyArray<ClaimedEntity['entity_type']> = [],
+): Promise<ClaimedEntity | null> {
+  const res = await db.execute(sql.raw(buildClaimSql(excludeTypes)))
   return (Array.from(res)[0] as ClaimedEntity | undefined) ?? null
 }
 
@@ -349,8 +362,11 @@ export async function processOnePage(
       const minBlock = provRows.length
         ? Math.min(...provRows.map((r) => Number(r.blockNumber)))
         : entity.backfilled_through_block
+      // An exhausted provider cursor is `complete` even at the row cap: `capped`
+      // promises the serve path a provider continuation (oldest_cursor), and a
+      // null cursor has none to offer.
       const status: PageStatus =
-        total >= cfg.maxRowsPerEntity ? 'capped' : !page.cursor ? 'complete' : 'partial'
+        !page.cursor ? 'complete' : total >= cfg.maxRowsPerEntity ? 'capped' : 'partial'
 
       const moved = await fencedUpdate(
         tx,
@@ -423,6 +439,11 @@ export function bucketFor(entityType: ClaimedEntity['entity_type']): ProviderBuc
   return entityType === 'address_txs' ? 'history' : 'assets'
 }
 
+const ENTITY_TYPES: ReadonlyArray<ClaimedEntity['entity_type']> = [
+  'address_txs',
+  'token_transfers',
+]
+
 /** BNB politeness: yield while the fleet-shared bucket this page would spend
  *  from is already busy serving humans. Reads the same counters /api/health
  *  reads (plain GETs, no INCR, so it never consumes budget). Without a live
@@ -485,17 +506,21 @@ export async function startBackfillWorker(): Promise<void> {
         lastPressure = null
       }
 
-      const entity = await claimNextEntity(db)
-      if (!entity) {
+      // BNB politeness BEFORE the claim, as claim ELIGIBILITY: a hot bucket's
+      // entity types are excluded outright, so its partial rows (which outrank
+      // pending) cannot starve the other bucket by claim-release cycling.
+      // No-op on ETH (no fleet counter → nothing hot).
+      const excluded: ClaimedEntity['entity_type'][] = []
+      for (const t of ENTITY_TYPES) {
+        if (await sharedBucketOverHeadroom(bucketFor(t))) excluded.push(t)
+      }
+      if (excluded.length === ENTITY_TYPES.length) {
         await sleep(cfg.pollMs)
         continue
       }
 
-      // BNB politeness AFTER the claim, so the check watches the bucket THIS
-      // entity's page would spend from (transfers hit `assets`, not `history`).
-      // No-op on ETH (no fleet counter).
-      if (await sharedBucketOverHeadroom(bucketFor(entity.entity_type))) {
-        await releaseClaim(db, entity)
+      const entity = await claimNextEntity(db, excluded)
+      if (!entity) {
         await sleep(cfg.pollMs)
         continue
       }
@@ -504,6 +529,15 @@ export async function startBackfillWorker(): Promise<void> {
       // no-op poll. If the reserve is denied we hand the entity straight back.
       if (!(await reservePage(db))) {
         await releaseClaim(db, entity)
+        await sleep(cfg.pollMs)
+        continue
+      }
+
+      // The reserve could in principle stall past the lease; re-verify
+      // ownership (fenced no-op) before spending provider quota, so a zombie
+      // never burns a shared-bucket call. The reserved slot stays spent —
+      // budget bounds attempts, not successes.
+      if (!(await fencedUpdate(db, entity, sql`updated_at=now()`))) {
         await sleep(cfg.pollMs)
         continue
       }

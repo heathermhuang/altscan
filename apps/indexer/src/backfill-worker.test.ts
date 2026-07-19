@@ -52,6 +52,15 @@ describe('buildClaimSql — the shipped claim statement', () => {
     )
   })
 
+  it('bucket exclusion ANDs against the parenthesized eligibility block', () => {
+    // Without the parens the NOT IN would bind to the last OR arm only, and a
+    // hot bucket's pending/partial rows would still be claimable.
+    expect(text).toContain(`WHERE (status IN ('pending','partial')`)
+    expect(text).not.toContain('NOT IN')
+    const excluded = buildClaimSql(['token_transfers'])
+    expect(excluded).toContain(`AND entity_type NOT IN ('token_transfers')`)
+  })
+
   it('claiming renews the lease with a millisecond-exact stamp and returns the full row', () => {
     // date_trunc to ms: the stamp round-trips through a JS Date losslessly, so
     // it doubles as the FENCING TOKEN every later transition must present.
@@ -211,6 +220,17 @@ describe('processOnePage — status machine', () => {
       }),
     })
     expect(await processOnePage(db, provider, entity({ rows_written: cfg.maxRowsPerEntity - 10 }))).toBe('capped')
+  })
+
+  it('an exhausted cursor is complete even at the cap — capped must promise a provider continuation', async () => {
+    const { db } = fakeDb()
+    const provider = providerOf({
+      getAddressHistory: async () => ({
+        ok: true,
+        data: { txs: Array.from({ length: 25 }, (_, i) => tx({ hash: `0xh${i}` })), cursor: null, totalTxs: 9999 },
+      }),
+    })
+    expect(await processOnePage(db, provider, entity({ rows_written: cfg.maxRowsPerEntity - 10 }))).toBe('complete')
   })
 
   it('a rate-limited page releases the claim back to pending/partial without burning attempts', async () => {
