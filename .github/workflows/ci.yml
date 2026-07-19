@@ -53,8 +53,11 @@ jobs:
       # ("tsc || true") and workspace packages ship TS source, so type errors
       # in the indexer program surface nowhere else. strictNullChecks (A4b-2)
       # is load-bearing for ProviderResult narrowing — enforce it here.
+      # @altscan/db is the one BUILT workspace package (main -> dist/, which is
+      # gitignored): vitest aliases it to source, but bare tsc resolves the
+      # package types from dist — build it first.
       - name: Typecheck indexer
-        run: pnpm --filter @altscan/indexer exec tsc --noEmit
+        run: pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer exec tsc --noEmit
 
       - name: Create seam-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
