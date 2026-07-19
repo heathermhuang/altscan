@@ -285,40 +285,92 @@ const EMERGENCY_RETENTION_MIN_DAYS = 1
  * can legitimately happen on a fresh DB with no data older than the retention
  * cutoff, but can also hide a disk about to fill up).
  */
+const SIZE_REPORT_TABLES = [
+  'transactions', 'token_transfers', 'blocks', 'logs', 'token_balances', 'dex_trades',
+  // gas_history is retention-pruned like the others but was never on the line.
+  // addresses is NOT retention-managed and probed at 16.3GB on prod BNB
+  // (2026-07-19) — the 3rd-largest object in the DB, previously visible only
+  // inside total=. With both named, the line's terms account for the whole DB.
+  'gas_history', 'addresses',
+  // A4b: READ-ONLY observability for the immortal backfill tables — the ONLY
+  // backfill_ identifiers permitted in this file (a test pins that they never
+  // appear in a destructive statement). to_regclass in the size query keeps
+  // them null-safe before ensure-schema has created them.
+  'backfill_address_txs', 'backfill_token_transfers',
+] as const
+
+/**
+ * Partition-aware size query for the tables on the sizes line.
+ *
+ * pg_total_relation_size() on a partitioned PARENT counts only the parent's
+ * own storage — which is zero — so BNB's line reported tt=0MB while the
+ * token_transfers partitions held ~55GB, the largest object in the DB,
+ * invisible everywhere except total=. Walk the inheritance tree via
+ * pg_inherits instead and sum every relation under each named root: the
+ * parent contributes 0, so plain (unpartitioned) tables report byte-identical
+ * to the old query — ETH's confirmed-plateau numbers don't shift.
+ *
+ * to_regclass resolves through search_path exactly like the bare names did
+ * and yields NULL for tables that don't exist, so those drop out of the
+ * result set (reportSizes falls back to 0) instead of throwing mid-report.
+ * Deliberately NOT tied to ALLOWED_TABLES — that whitelist gates destructive
+ * statements; this list only ever reaches the read-only query below.
+ * Exported for tests.
+ */
+export function sizeReportSql(tables: readonly string[]): string {
+  for (const t of tables) {
+    // Same shape rule as assertAllowedIdentifier: compile-time constants, but
+    // they are embedded via sql.raw, so refuse anything that is not a bare
+    // lowercase identifier.
+    if (!/^[a-z_]+$/.test(t)) {
+      throw new Error(`[retention] invalid size-report table: "${t}"`)
+    }
+  }
+  // De-dup: a repeated VALUES row would traverse the same tree twice and
+  // double-count every byte under that root.
+  const values = [...new Set(tables)].map(t => `('${t}')`).join(', ')
+  return `
+    WITH RECURSIVE rels(root, oid) AS (
+      SELECT v.name, to_regclass(v.name)::oid
+        FROM (VALUES ${values}) AS v(name)
+       WHERE to_regclass(v.name) IS NOT NULL
+      UNION ALL
+      SELECT r.root, i.inhrelid
+        FROM pg_inherits i
+        JOIN rels r ON i.inhparent = r.oid
+    )
+    SELECT root, SUM(pg_total_relation_size(oid))::bigint AS bytes
+      FROM rels
+     GROUP BY root
+  `
+}
+
 async function reportSizes(): Promise<number> {
   const db = getMaintenanceDb()
-  const result = await db.execute(sql`
-    SELECT
-      pg_database_size(current_database())::bigint                           AS db_bytes,
-      COALESCE((SELECT pg_total_relation_size('transactions')), 0)::bigint   AS tx_bytes,
-      COALESCE((SELECT pg_total_relation_size('token_transfers')), 0)::bigint AS tt_bytes,
-      COALESCE((SELECT pg_total_relation_size('blocks')), 0)::bigint         AS bl_bytes,
-      COALESCE((SELECT pg_total_relation_size('logs')), 0)::bigint           AS lg_bytes,
-      COALESCE((SELECT pg_total_relation_size('token_balances')), 0)::bigint AS tb_bytes,
-      COALESCE((SELECT pg_total_relation_size('dex_trades')), 0)::bigint     AS dx_bytes,
-      -- A4b: READ-ONLY observability for the immortal backfill tables. These are
-      -- the ONLY backfill_ identifiers permitted in this file, and a test pins
-      -- that they never appear in a destructive statement. to_regclass keeps
-      -- this null-safe before ensure-schema has created them (bare
-      -- pg_total_relation_size throws on a missing relation and would take the
-      -- whole retention run down with it).
-      COALESCE(pg_total_relation_size(to_regclass('backfill_address_txs')), 0)::bigint     AS bf_addr_bytes,
-      COALESCE(pg_total_relation_size(to_regclass('backfill_token_transfers')), 0)::bigint AS bf_tt_bytes
-  `)
-  const row = Array.from(result)[0] as Record<string, unknown>
-  const mb = (b: unknown) => Math.round(Number(b) / 1024 / 1024)
-  const dbGB = Number(row.db_bytes) / 1024 / 1024 / 1024
+  const totalResult = await db.execute(
+    sql`SELECT pg_database_size(current_database())::bigint AS db_bytes`
+  )
+  const totalRow = Array.from(totalResult)[0] as Record<string, unknown>
+  const sizeResult = await db.execute(sql.raw(sizeReportSql(SIZE_REPORT_TABLES)))
+  const bytes = new Map<string, number>()
+  for (const r of Array.from(sizeResult) as Record<string, unknown>[]) {
+    bytes.set(String(r.root), Number(r.bytes))
+  }
+  const mb = (table: string) => Math.round((bytes.get(table) ?? 0) / 1024 / 1024)
+  const dbGB = Number(totalRow.db_bytes) / 1024 / 1024 / 1024
   const parts = [
     `total=${dbGB.toFixed(2)}GB`,
-    `tx=${mb(row.tx_bytes)}MB`,
-    `tt=${mb(row.tt_bytes)}MB`,
-    `blocks=${mb(row.bl_bytes)}MB`,
-    `logs=${mb(row.lg_bytes)}MB`,
-    `tb=${mb(row.tb_bytes)}MB`,
-    `dex=${mb(row.dx_bytes)}MB`,
+    `tx=${mb('transactions')}MB`,
+    `tt=${mb('token_transfers')}MB`,
+    `blocks=${mb('blocks')}MB`,
+    `logs=${mb('logs')}MB`,
+    `tb=${mb('token_balances')}MB`,
+    `dex=${mb('dex_trades')}MB`,
+    `gas=${mb('gas_history')}MB`,
+    `addr=${mb('addresses')}MB`,
     // Immortal + retention-exempt, so this only ever grows. The worker's own
     // size/disk ceilings are the brake; this term is how you watch them work.
-    `bf=${mb(row.bf_addr_bytes) + mb(row.bf_tt_bytes)}MB`,
+    `bf=${mb('backfill_address_txs') + mb('backfill_token_transfers')}MB`,
   ]
   if (DB_DISK_GB > 0) {
     const pct = (dbGB / DB_DISK_GB) * 100
