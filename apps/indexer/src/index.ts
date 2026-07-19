@@ -28,6 +28,7 @@ import {
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
+import { startBackfillWorker } from './backfill-worker'
 import { ensureSchema } from './ensure-schema'
 import { getDb, schema } from './db'
 import { desc, sql } from 'drizzle-orm'
@@ -89,6 +90,10 @@ async function main() {
   }
 
   startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
+
+  // Track A4b lazy backfill — gated on chain-config `provider.backfill.enabled`
+  // (false on both chains until A4b-2 rollout) + the BACKFILL_ENABLED=0 kill switch.
+  startBackfillWorker().catch(err => console.error('[backfill] fatal:', err))
 
   // One provider per RPC URL. We round-robin `processBlock` across this pool
   // so 8 concurrent block fetches get distributed across N endpoints instead
@@ -222,7 +227,10 @@ async function main() {
       const total = to - from + 1
       // 0 = pending, 1 = in-flight, 2 = done, 3 = failed
       const blockStatus = new Uint8Array(total)
-      let failure: { block: number; err: unknown } | null = null
+      // Initialized via cast: workers assign it inside closures, which outer
+      // control-flow analysis cannot see — a bare `= null` pins the outer read
+      // at line ~305 to type `null` under strictNullChecks.
+      let failure = null as { block: number; err: unknown } | null
       let nextIdx = 0
       let windowStart = Date.now()
       let windowBlocks = 0

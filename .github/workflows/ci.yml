@@ -14,6 +14,22 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Throwaway Postgres for the PG-gated suites (fence/atomicity proofs the
+    # string-pin tests cannot express). Two databases because the explorer seam
+    # suite and the indexer worker suite share BACKFILL_TEST_PG_URL but clash
+    # on table names — they run as separate steps against separate DBs.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: x
+          POSTGRES_DB: worker_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -32,6 +48,32 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      # The indexer's deploy build deliberately swallows tsc failures
+      # ("tsc || true") and workspace packages ship TS source, so type errors
+      # in the indexer program surface nowhere else. strictNullChecks (A4b-2)
+      # is load-bearing for ProviderResult narrowing — enforce it here.
+      # @altscan/db is the one BUILT workspace package (main -> dist/, which is
+      # gitignored): vitest aliases it to source, but bare tsc resolves the
+      # package types from dist — build it first.
+      - name: Typecheck indexer
+        run: pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer exec tsc --noEmit
+
+      - name: Create seam-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
+
+      # The sizes suite isolates itself in its own schema, so it can share the
+      # worker database.
+      - name: PG-gated indexer suites (worker fence/atomicity + partition sizes)
+        env:
+          BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+          SIZES_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/indexer/src/backfill-worker.pg.test.ts apps/indexer/src/retention-sizes.pg.test.ts
+
+      - name: PG-gated explorer suite (O1 seam)
+        env:
+          BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/seam_test
+        run: npx vitest run apps/explorer/lib/backfill-serve.pg.test.ts
 
       # apps/altscan-site ships its own tsx harness (excluded from the root
       # vitest run); run it here so its chain-payload tests still gate PRs.
