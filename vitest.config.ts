@@ -10,6 +10,11 @@ export default defineConfig({
       // does not exist in CI → "Failed to resolve entry for package @altscan/db".
       // Pointing at the source lets vitest transform it on the fly (build-free).
       '@altscan/db': fileURLToPath(new URL('./packages/db/client.ts', import.meta.url)),
+      // Mirror apps/explorer's tsconfig `@/* -> ./*` path alias so tests can
+      // import route handlers and libs the same way the app does. The alias is
+      // explorer-only (no other workspace uses `@/`), so a global mapping is
+      // unambiguous. Trailing slash makes this a prefix replacement.
+      '@/': fileURLToPath(new URL('./apps/explorer/', import.meta.url)),
     },
   },
   test: {

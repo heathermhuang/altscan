@@ -292,6 +292,11 @@ const SIZE_REPORT_TABLES = [
   // (2026-07-19) — the 3rd-largest object in the DB, previously visible only
   // inside total=. With both named, the line's terms account for the whole DB.
   'gas_history', 'addresses',
+  // A4b: READ-ONLY observability for the immortal backfill tables — the ONLY
+  // backfill_ identifiers permitted in this file (a test pins that they never
+  // appear in a destructive statement). to_regclass in the size query keeps
+  // them null-safe before ensure-schema has created them.
+  'backfill_address_txs', 'backfill_token_transfers',
 ] as const
 
 /**
@@ -363,6 +368,9 @@ async function reportSizes(): Promise<number> {
     `dex=${mb('dex_trades')}MB`,
     `gas=${mb('gas_history')}MB`,
     `addr=${mb('addresses')}MB`,
+    // Immortal + retention-exempt, so this only ever grows. The worker's own
+    // size/disk ceilings are the brake; this term is how you watch them work.
+    `bf=${mb('backfill_address_txs') + mb('backfill_token_transfers')}MB`,
   ]
   if (DB_DISK_GB > 0) {
     const pct = (dbGB / DB_DISK_GB) * 100

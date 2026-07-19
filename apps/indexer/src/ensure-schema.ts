@@ -238,6 +238,79 @@ export async function ensureSchema(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS explorer_settings_audit_key_idx ON explorer_settings_audit (key, id DESC)`,
   ))
 
+  // ── Track A4b: lazy provider backfill (immortal — retention NEVER lists these) ──
+  //
+  // Mirrors packages/db/schema.ts. Retention exemption is BY CONSTRUCTION:
+  // these names appear in neither retention-policy.ts's manifests nor
+  // retention-cleanup.ts's ALLOWED_TABLES, and a test pins that.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS backfill_address_txs (
+      address         VARCHAR(42) NOT NULL,
+      tx_hash         VARCHAR(66) NOT NULL,
+      block_number    BIGINT NOT NULL,
+      block_timestamp TIMESTAMPTZ NOT NULL,
+      from_address    VARCHAR(42) NOT NULL,
+      to_address      VARCHAR(42),
+      value           NUMERIC(78,0) NOT NULL DEFAULT 0,
+      category        VARCHAR(64),
+      summary         TEXT,
+      possible_spam   BOOLEAN NOT NULL DEFAULT false,
+      PRIMARY KEY (address, tx_hash)
+    )
+  `))
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS backfill_address_txs_addr_block_idx ON backfill_address_txs (address, block_number DESC)`,
+  ))
+
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS backfill_token_transfers (
+      scope_address   VARCHAR(42) NOT NULL,
+      tx_hash         VARCHAR(66) NOT NULL,
+      log_index       INTEGER NOT NULL,
+      token_address   VARCHAR(42) NOT NULL,
+      from_address    VARCHAR(42) NOT NULL,
+      to_address      VARCHAR(42) NOT NULL,
+      value           NUMERIC(78,0) NOT NULL DEFAULT 0,
+      value_formatted TEXT,
+      token_symbol    VARCHAR(64),
+      token_decimals  INTEGER,
+      block_number    BIGINT NOT NULL,
+      block_timestamp TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (scope_address, tx_hash, log_index)
+    )
+  `))
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS backfill_token_transfers_scope_block_idx ON backfill_token_transfers (scope_address, block_number DESC)`,
+  ))
+
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS backfill_watermarks (
+      id                       SERIAL PRIMARY KEY,
+      entity_type              VARCHAR(24) NOT NULL,
+      entity_id                VARCHAR(42) NOT NULL,
+      status                   VARCHAR(12) NOT NULL DEFAULT 'pending',
+      backfilled_through_block BIGINT,
+      oldest_cursor            TEXT,
+      rows_written             INTEGER NOT NULL DEFAULT 0,
+      attempts                 INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at          TIMESTAMPTZ,
+      last_error               TEXT,
+      created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CONSTRAINT backfill_watermarks_entity_unique UNIQUE (entity_type, entity_id)
+    )
+  `))
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS backfill_watermarks_claim_idx ON backfill_watermarks (status, last_attempt_at)`,
+  ))
+
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS backfill_budget (
+      bucket_hour TIMESTAMPTZ PRIMARY KEY,
+      pages_used  INTEGER NOT NULL DEFAULT 0
+    )
+  `))
+
   // Column migrations — idempotent ADD COLUMN IF NOT EXISTS for schema evolution.
   //
   // CRITICAL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes an

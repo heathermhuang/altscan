@@ -55,6 +55,16 @@ export type DataProviderConfig = {
   kind: 'moralis'
   /** Moralis chain identifier (hex chain id), e.g. "0x38" */
   moralisChain: string
+  /** Lazy provider backfill (Track A4b). Absent or false = provider-live
+   *  passthrough only (A4a behavior). true = the indexer worker caches deep
+   *  history into the immortal `backfill_*` tables and the explorer serves
+   *  `live head ∪ cached tail`.
+   *
+   *  Absent MUST behave exactly like false: a new chain that never sets this
+   *  field must not silently opt into provider spend. Read it as
+   *  `provider?.backfill?.enabled === true`, never as a truthiness check on
+   *  the `backfill` object itself. */
+  backfill?: { enabled: boolean }
 }
 
 export type ChainConfig = {
@@ -147,7 +157,7 @@ export const BSC: ChainConfig = {
   externalExplorer: 'BscScan',
   externalExplorerUrl: 'https://bscscan.com',
   notAffiliatedWith: 'BscScan or Binance',
-  provider: { kind: 'moralis', moralisChain: '0x38' },
+  provider: { kind: 'moralis', moralisChain: '0x38', backfill: { enabled: false } },
   coingeckoPlatform: 'binance-smart-chain',
   dexscreenerChain: 'bsc',
   theme: {
@@ -202,7 +212,7 @@ export const ETH: ChainConfig = {
   externalExplorer: 'Etherscan',
   externalExplorerUrl: 'https://etherscan.io',
   notAffiliatedWith: 'Etherscan or the Ethereum Foundation',
-  provider: { kind: 'moralis', moralisChain: '0x1' },
+  provider: { kind: 'moralis', moralisChain: '0x1', backfill: { enabled: false } },
   coingeckoPlatform: 'ethereum',
   dexscreenerChain: 'ethereum',
   theme: {

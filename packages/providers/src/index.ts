@@ -50,6 +50,8 @@ export type {
   ProviderTokenBalance,
   ProviderTokenTransfer,
   ProviderTx,
+  HistoryRow,
+  TokenTransferRow,
   TokenHoldersPage,
   TokenTransfersPage,
 } from './types'

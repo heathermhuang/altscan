@@ -80,6 +80,26 @@ export type ProviderTokenTransfer = {
   valueFormatted: string
 }
 
+/**
+ * The reduced projection the history API actually serves.
+ *
+ * Both provider-mapped and backfill-mapped rows are exactly this shape, so a
+ * cached row and a live row are indistinguishable to the client and neither has
+ * to fabricate fields the other lacks (the backfill tables never stored
+ * gasPrice/gasUsed/erc20Transfers, and inventing gasPrice:'0' would be a lie
+ * the UI could render).
+ */
+export type HistoryRow = Pick<ProviderTx,
+  'hash' | 'blockNumber' | 'blockTimestamp' | 'fromAddress' | 'toAddress' |
+  'value' | 'category' | 'summary' | 'possibleSpam'>
+
+/** Same idea for token transfers. `tokenName` is deliberately absent: the
+ *  backfill table does not store it, so serving it would be a lie on the
+ *  cached path. */
+export type TokenTransferRow = Pick<ProviderTokenTransfer,
+  'txHash' | 'logIndex' | 'blockNumber' | 'blockTimestamp' | 'fromAddress' |
+  'toAddress' | 'tokenAddress' | 'tokenSymbol' | 'tokenDecimals' | 'value' | 'valueFormatted'>
+
 export type ProviderNft = {
   tokenAddress: string
   tokenId: string
