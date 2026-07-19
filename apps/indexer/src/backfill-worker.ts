@@ -185,8 +185,10 @@ async function upsertAddressTxs(ex: Executor, rows: HistoryInsertRow[]): Promise
   if (rows.length === 0) return 0
   const values = sql.join(
     rows.map(
+      // Date params crash drizzle's raw-sql path (postgres-js Bind gets the
+      // object unserialized) — bind ISO text and cast.
       (r) => sql`(
-        ${r.address}, ${r.txHash}, ${r.blockNumber}, ${r.blockTimestamp},
+        ${r.address}, ${r.txHash}, ${r.blockNumber}, ${r.blockTimestamp.toISOString()}::timestamptz,
         ${r.fromAddress}, ${r.toAddress}, ${r.value}, ${r.category}, ${r.summary}, ${r.possibleSpam}
       )`,
     ),
@@ -208,7 +210,7 @@ async function upsertTokenTransfers(ex: Executor, rows: TransferInsertRow[]): Pr
       (r) => sql`(
         ${r.scopeAddress}, ${r.txHash}, ${r.logIndex}, ${r.tokenAddress},
         ${r.fromAddress}, ${r.toAddress}, ${r.value}, ${r.valueFormatted},
-        ${r.tokenSymbol}, ${r.tokenDecimals}, ${r.blockNumber}, ${r.blockTimestamp}
+        ${r.tokenSymbol}, ${r.tokenDecimals}, ${r.blockNumber}, ${r.blockTimestamp.toISOString()}::timestamptz
       )`,
     ),
     sql`, `,

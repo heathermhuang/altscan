@@ -31,7 +31,16 @@ const DISPOSABLE = /test/.test(DB_NAME)
 // tests race on genuinely separate connections).
 if (PG_URL && DISPOSABLE) process.env.BACKFILL_WORKER_TEST_DB = PG_URL
 
-import { claimNextEntity } from './backfill-worker'
+import {
+  backfillPressure,
+  claimNextEntity,
+  processOnePage,
+  releaseClaim,
+  reservePage,
+  type WorkerDb,
+} from './backfill-worker'
+import { cfg } from './backfill-budget'
+import type { ProviderAdapter, ProviderTx, ProviderTokenTransfer } from '@altscan/providers'
 
 const TABLES =
   'backfill_watermarks, backfill_budget, backfill_address_txs, backfill_token_transfers'
@@ -184,5 +193,222 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     const claimed = await claimNextEntity(db)
     expect(claimed).not.toBeNull()
     expect(claimed!.entity_id).toBe('0x' + 'd'.repeat(40))
+  })
+
+  it('releaseClaim hands a running row back to pending/partial, and only a running row', async () => {
+    await seed({ status: 'pending' })
+    const claimed = (await claimNextEntity(db))!
+    await releaseClaim(db, claimed)
+    let [row] = await raw.unsafe(`SELECT status FROM backfill_watermarks WHERE id = ${claimed.id}`)
+    expect(row.status).toBe('pending')
+
+    await raw.unsafe(`UPDATE backfill_watermarks SET status = 'complete' WHERE id = ${claimed.id}`)
+    await releaseClaim(db, claimed) // guard: must not clobber a non-running status
+    ;[row] = await raw.unsafe(`SELECT status FROM backfill_watermarks WHERE id = ${claimed.id}`)
+    expect(row.status).toBe('complete')
+  })
+
+  // ── Task 2.4: crash-resume + idempotency ──
+
+  const ENTITY = '0x' + 'e'.repeat(40)
+  // O1: provider hashes arrive in whatever case the vendor emits; the cache
+  // must store them lowercase or the serve path's keyset/exclusion compares break.
+  const MIXED_HASHES = ['0xAbC1' + '0'.repeat(60), '0xAbC2' + '0'.repeat(60), '0xAbC3' + '0'.repeat(60)]
+
+  const historyTx = (hash: string, block: number): ProviderTx => ({
+    hash,
+    blockNumber: String(block),
+    blockTimestamp: '2026-07-01T00:00:00.000Z',
+    fromAddress: '0xf',
+    toAddress: '0xt',
+    value: '1',
+    gasPrice: '0',
+    gasUsed: '0',
+    category: 'send',
+    summary: 's',
+    possibleSpam: false,
+    erc20Transfers: [],
+  })
+
+  const HISTORY_PAGE = {
+    ok: true as const,
+    data: {
+      txs: [historyTx(MIXED_HASHES[0], 120), historyTx(MIXED_HASHES[1], 119), historyTx(MIXED_HASHES[2], 118)],
+      cursor: 'more',
+      totalTxs: 3,
+    },
+  }
+  const historyProvider = { kind: 'fake', getAddressHistory: async () => HISTORY_PAGE } as unknown as ProviderAdapter
+
+  /** Wrap the real db so the SECOND statement inside the page transaction (the
+   *  watermark UPDATE) throws — modelling a crash between the row insert and
+   *  the cursor advance, inside a genuine Postgres transaction. */
+  function watermarkThrowingDb(): WorkerDb {
+    return {
+      execute: db.execute.bind(db),
+      transaction: (fn: (tx: { execute: (q: unknown) => Promise<unknown> }) => Promise<unknown>) =>
+        db.transaction((tx) => {
+          let calls = 0
+          return fn({
+            execute: (q: unknown) => {
+              if (++calls === 2) throw new Error('injected watermark failure')
+              return tx.execute(q as never)
+            },
+          }) as never
+        }),
+    } as unknown as WorkerDb
+  }
+
+  it('R2: a thrown watermark UPDATE rolls back the rows too — no torn page', async () => {
+    await seed({ entity: ENTITY, status: 'pending' })
+    const claimed = (await claimNextEntity(db))!
+
+    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).rejects.toThrow(
+      'injected watermark failure',
+    )
+
+    const [{ n }] = await raw.unsafe(
+      `SELECT count(*)::int AS n FROM backfill_address_txs WHERE address = '${ENTITY}'`,
+    )
+    expect(n).toBe(0)
+    const [wm] = await raw.unsafe(
+      `SELECT oldest_cursor, rows_written FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.oldest_cursor).toBeNull()
+    expect(wm.rows_written).toBe(0)
+  })
+
+  it('R2: the re-claimed page then lands exactly once, lowercase, cursor advanced', async () => {
+    await seed({ entity: ENTITY, status: 'pending' })
+    const claimed = (await claimNextEntity(db))!
+    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).rejects.toThrow()
+
+    // The crashed claim stays 'running' until its lease expires — expire it, re-claim, re-page.
+    await raw.unsafe(
+      `UPDATE backfill_watermarks SET last_attempt_at = now() - interval '600 seconds' WHERE id = ${claimed.id}`,
+    )
+    const reclaimed = (await claimNextEntity(db))!
+    expect(reclaimed.id).toBe(claimed.id)
+    expect(reclaimed.rows_written).toBe(0) // the rollback preserved the pre-crash value
+
+    expect(await processOnePage(db, historyProvider, reclaimed)).toBe('partial')
+
+    const rows = await raw.unsafe(
+      `SELECT tx_hash FROM backfill_address_txs WHERE address = '${ENTITY}' ORDER BY tx_hash`,
+    )
+    expect(rows.map((r: { tx_hash: string }) => r.tx_hash)).toEqual(
+      [...MIXED_HASHES].map((h) => h.toLowerCase()).sort(),
+    )
+    const [wm] = await raw.unsafe(
+      `SELECT oldest_cursor, rows_written, backfilled_through_block, status, attempts, last_error
+       FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.oldest_cursor).toBe('more')
+    expect(wm.rows_written).toBe(3)
+    expect(Number(wm.backfilled_through_block)).toBe(118)
+    expect(wm.status).toBe('partial')
+    expect(wm.attempts).toBe(0)
+    expect(wm.last_error).toBeNull()
+  })
+
+  it('re-paging an identical page dedups on the PK but still advances the cap counter', async () => {
+    await seed({ entity: ENTITY, status: 'pending' })
+    const claimed = (await claimNextEntity(db))!
+    expect(await processOnePage(db, historyProvider, claimed)).toBe('partial')
+    const again = { ...claimed, rows_written: 3, oldest_cursor: 'more' }
+    expect(await processOnePage(db, historyProvider, again)).toBe('partial')
+
+    const [{ n }] = await raw.unsafe(
+      `SELECT count(*)::int AS n FROM backfill_address_txs WHERE address = '${ENTITY}'`,
+    )
+    expect(n).toBe(3) // PK dedup — not 6
+    const [wm] = await raw.unsafe(
+      `SELECT rows_written FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.rows_written).toBe(6) // intentional: the cap bounds provider WORK, not stored rows
+  })
+
+  it('an errored entity recovers through the cooldown to partial on the next good page', async () => {
+    await seed({ entity: ENTITY, status: 'error', attempts: 1, attemptAgoSec: 10 }) // 2^1=2s cooldown elapsed
+    const claimed = (await claimNextEntity(db))!
+    expect(claimed.status).toBe('running')
+    expect(await processOnePage(db, historyProvider, claimed)).toBe('partial')
+    const [wm] = await raw.unsafe(
+      `SELECT status, attempts, last_error FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.status).toBe('partial')
+    expect(wm.attempts).toBe(0)
+    expect(wm.last_error).toBeNull()
+  })
+
+  it('O1: transfers pages skip unusable log_index rows and store hashes lowercase', async () => {
+    const transfer = (hash: string, logIndex: string | null, block: number): ProviderTokenTransfer => ({
+      txHash: hash,
+      logIndex,
+      blockNumber: String(block),
+      blockTimestamp: '2026-07-01T00:00:00.000Z',
+      fromAddress: '0xf',
+      toAddress: '0xt',
+      tokenAddress: '0xtok',
+      tokenName: 'T',
+      tokenSymbol: 'TKN',
+      tokenDecimals: '18',
+      value: '5',
+      valueFormatted: '0.000005',
+    })
+    const provider = {
+      kind: 'fake',
+      getAddressTokenTransfers: async () => ({
+        ok: true as const,
+        data: {
+          transfers: [
+            transfer(MIXED_HASHES[0], '292', 120),
+            transfer(MIXED_HASHES[0], '289', 120), // same tx, second transfer — the R3 case
+            transfer(MIXED_HASHES[1], null, 119), // unusable — skipped, never invented
+          ],
+          cursor: null,
+        },
+      }),
+    } as unknown as ProviderAdapter
+
+    await raw.unsafe(`
+      INSERT INTO backfill_watermarks (entity_type, entity_id, status)
+      VALUES ('token_transfers', '${ENTITY}', 'pending')`)
+    const claimed = (await claimNextEntity(db))!
+    expect(await processOnePage(db, provider, claimed)).toBe('complete')
+
+    const rows = await raw.unsafe(
+      `SELECT tx_hash, log_index FROM backfill_token_transfers WHERE scope_address = '${ENTITY}' ORDER BY log_index`,
+    )
+    expect(rows.map((r: { tx_hash: string; log_index: number }) => [r.tx_hash, r.log_index])).toEqual([
+      [MIXED_HASHES[0].toLowerCase(), 289],
+      [MIXED_HASHES[0].toLowerCase(), 292],
+    ])
+    const [wm] = await raw.unsafe(
+      `SELECT rows_written, status FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.rows_written).toBe(2) // the skipped row is not progress
+  })
+
+  // ── Invariant #3 (R4): the budget is only testable against a real counter ──
+
+  it('R4: two concurrent reserves at cap-1 admit exactly one', async () => {
+    await raw.unsafe(`
+      INSERT INTO backfill_budget (bucket_hour, pages_used)
+      VALUES (date_trunc('hour', now()), ${cfg.maxPagesPerHour - 1})`)
+    const [a, b] = await Promise.all([reservePage(db), reservePage(db)])
+    expect([a, b].filter(Boolean).length).toBe(1)
+    const [row] = await raw.unsafe(`SELECT pages_used FROM backfill_budget`)
+    expect(row.pages_used).toBe(cfg.maxPagesPerHour)
+  })
+
+  it('R4: the first reserve of an hour inserts the bucket at 1', async () => {
+    expect(await reservePage(db)).toBe(true)
+    const [row] = await raw.unsafe(`SELECT pages_used FROM backfill_budget`)
+    expect(row.pages_used).toBe(1)
+  })
+
+  it('R5: backfillPressure runs its real query quietly on a tiny database', async () => {
+    expect(await backfillPressure(db)).toBeNull()
   })
 })
