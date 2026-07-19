@@ -6,6 +6,10 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": false,
+    // Required since A4b-2: the worker consumes @altscan/providers' discriminated
+    // ProviderResult unions, and without strictNullChecks the `ok: true` arm is
+    // implicitly nullable, so `!res.ok` cannot exclude it (TS2339 on `.reason`).
+    "strictNullChecks": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
