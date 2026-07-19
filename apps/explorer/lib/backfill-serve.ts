@@ -31,12 +31,71 @@ import type { ProviderTx, HistoryRow } from '@altscan/providers'
 const PAGE = 25
 
 /**
+ * O1 — the live/local seam ordering contract.
+ *
+ * Moralis is never asked for a sort order; the local keyset orders by
+ * (block_number, tx_hash) DESC. Cross-block the provider is block-DESC, but
+ * WITHIN the boundary block (the block holding the live page's oldest row)
+ * provider order ≠ hash order, so a tuple cursor anchored at the oldest row
+ * both skips boundary-block rows the provider happened not to serve (hash
+ * above the anchor) and re-serves ones it did (hash below it). Block-exclusive
+ * handoff is not an option either: a fixed page size MUST split any block
+ * holding more same-address rows than one page (airdrops, MEV bots), so its
+ * boundary-block rows would be dropped outright.
+ *
+ * The exact fix: the handoff cursor anchors at (boundaryBlock, TOP_HASH) —
+ * i.e. "everything at or below the boundary block" — and carries the hashes
+ * the live page already served IN that block as an exclusion list. The
+ * exclusion must KEEP riding the cursor while local pagination remains inside
+ * the boundary block (excluding only on the first local page re-serves a seen
+ * row one page later, when the keyset descends past its hash); once the
+ * keyset moves below the boundary block the fields are dropped — see
+ * carrySeamExclusions.
+ */
+
+/**
+ * Ceiling on carried exclusions. A live page cannot contribute more rows than
+ * it holds (25 today, ≤100 for any plausible provider page), so anything
+ * larger is a forged cursor; and the mint side skips the handoff instead of
+ * exceeding it — the provider's own cursor is always a correct fallback.
+ */
+export const SEEN_CAP = 100
+
+/** Lexical top for VARCHAR(66) hash columns — no real hash sorts at or above
+ *  it, so `(block, hash) < (B, TOP_HASH)` reads "every row of block B". */
+export const TOP_HASH = '0x' + 'f'.repeat(64)
+
+/**
+ * Top sentinel for the INTEGER log_index column — int4 max, NOT
+ * Number.MAX_SAFE_INTEGER: a parameter beyond int4 range makes Postgres throw
+ * 22003 (numeric_value_out_of_range) on the row-value comparison, observed
+ * live against PG 16. Every cursor logIndex must stay inside this domain.
+ */
+export const TOP_LOG_INDEX = 0x7fffffff
+
+const HASH_RE = /^0x[0-9a-fA-F]{1,64}$/
+
+/**
  * Three cursor states. `head` is the live provider page and is the ONLY thing a
  * null or malformed cursor may decode to — see decodeCursor.
  */
 export type ServeCursor =
   | { source: 'head' }
-  | { source: 'local'; blockNumber: number; txHash: string; logIndex?: number }
+  | {
+      source: 'local'
+      blockNumber: number
+      txHash: string
+      logIndex?: number
+      /** O1 seam carry: the handoff block whose provider-served rows are
+       *  excluded below. Present only while the keyset is inside that block. */
+      boundaryBlock?: number
+      /** Address-txs exclusions: tx hashes the live page served in
+       *  boundaryBlock. Stored lowercase; compared exactly. */
+      seenTxHashes?: string[]
+      /** Transfer exclusions: (tx_hash, log_index) pairs — hash alone would
+       *  also drop UNSEEN sibling transfers of the same transaction. */
+      seenTransferKeys?: { h: string; i: number }[]
+    }
   | { source: 'provider'; providerCursor: string }
 
 export function encodeCursor(c: ServeCursor): string {
@@ -67,11 +126,66 @@ export function decodeCursor(raw: string | null | undefined): ServeCursor {
       const blk = c.blockNumber
       const hash = c.txHash
       if (!Number.isSafeInteger(blk) || (blk as number) < 0) return { source: 'head' }
-      if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(hash)) return { source: 'head' }
-      const base = { source: 'local' as const, blockNumber: blk as number, txHash: hash }
-      if (c.logIndex === undefined) return base
-      if (!Number.isSafeInteger(c.logIndex) || (c.logIndex as number) < 0) return { source: 'head' }
-      return { ...base, logIndex: c.logIndex as number }
+      if (typeof hash !== 'string' || !HASH_RE.test(hash)) return { source: 'head' }
+      const base: Extract<ServeCursor, { source: 'local' }> = {
+        source: 'local',
+        blockNumber: blk as number,
+        txHash: hash,
+      }
+      if (c.logIndex !== undefined) {
+        // Bounded to the int4 column domain — see TOP_LOG_INDEX.
+        if (
+          !Number.isSafeInteger(c.logIndex) ||
+          (c.logIndex as number) < 0 ||
+          (c.logIndex as number) > TOP_LOG_INDEX
+        ) {
+          return { source: 'head' }
+        }
+        base.logIndex = c.logIndex as number
+      }
+
+      // O1 seam fields — all-or-nothing: a boundary block plus EXACTLY ONE
+      // non-empty exclusion list (we never mint both kinds on one cursor).
+      // Anything malformed falls back to head like every other invalid cursor.
+      const hasSeam =
+        c.boundaryBlock !== undefined ||
+        c.seenTxHashes !== undefined ||
+        c.seenTransferKeys !== undefined
+      if (!hasSeam) return base
+      if (!Number.isSafeInteger(c.boundaryBlock) || (c.boundaryBlock as number) < 0) {
+        return { source: 'head' }
+      }
+      const rawHashes = c.seenTxHashes
+      const rawKeys = c.seenTransferKeys
+      if ((rawHashes === undefined) === (rawKeys === undefined)) return { source: 'head' }
+      base.boundaryBlock = c.boundaryBlock as number
+      if (rawHashes !== undefined) {
+        if (!Array.isArray(rawHashes) || rawHashes.length === 0 || rawHashes.length > SEEN_CAP) {
+          return { source: 'head' }
+        }
+        const seen: string[] = []
+        for (const h of rawHashes) {
+          if (typeof h !== 'string' || !HASH_RE.test(h)) return { source: 'head' }
+          seen.push(h.toLowerCase())
+        }
+        base.seenTxHashes = seen
+      } else {
+        if (!Array.isArray(rawKeys) || rawKeys.length === 0 || rawKeys.length > SEEN_CAP) {
+          return { source: 'head' }
+        }
+        const seen: { h: string; i: number }[] = []
+        for (const k of rawKeys) {
+          if (typeof k !== 'object' || k === null || Array.isArray(k)) return { source: 'head' }
+          const { h, i } = k as Record<string, unknown>
+          if (typeof h !== 'string' || !HASH_RE.test(h)) return { source: 'head' }
+          if (!Number.isSafeInteger(i) || (i as number) < 0 || (i as number) > TOP_LOG_INDEX) {
+            return { source: 'head' }
+          }
+          seen.push({ h: h.toLowerCase(), i: i as number })
+        }
+        base.seenTransferKeys = seen
+      }
+      return base
     }
     if (c.source === 'provider' && typeof c.providerCursor === 'string' && c.providerCursor) {
       return { source: 'provider', providerCursor: c.providerCursor }
@@ -187,12 +301,22 @@ export async function serveLocalAddressTxs(
   lastBoundary: { blockNumber: number; txHash: string } | null
   hasMore: boolean
 }> {
+  // O1: subtract the boundary-block rows the live page already served. Applies
+  // only to rows of boundaryBlock, so the filter vanishes naturally once the
+  // keyset descends past it (and the route stops carrying the fields).
+  const seamFilter =
+    cur.boundaryBlock !== undefined && cur.seenTxHashes && cur.seenTxHashes.length > 0
+      ? sql` AND NOT (block_number = ${cur.boundaryBlock} AND tx_hash IN (${sql.join(
+          cur.seenTxHashes.map(h => sql`${h}`),
+          sql`, `,
+        )}))`
+      : sql.raw('')
   const res = await getDb().execute(sql`
     SELECT tx_hash, block_number, block_timestamp, from_address, to_address,
            value, category, summary, possible_spam
     FROM backfill_address_txs
     WHERE address = ${address.toLowerCase()}
-      AND (block_number, tx_hash) < (${cur.blockNumber}, ${cur.txHash})
+      AND (block_number, tx_hash) < (${cur.blockNumber}, ${cur.txHash})${seamFilter}
     ORDER BY block_number DESC, tx_hash DESC
     LIMIT ${PAGE + 1}
   `)
@@ -215,7 +339,42 @@ export async function serveLocalAddressTxs(
 export const TOP_BOUNDARY: Extract<ServeCursor, { source: 'local' }> = {
   source: 'local',
   blockNumber: Number.MAX_SAFE_INTEGER,
-  txHash: '0x' + 'f'.repeat(64),
+  txHash: TOP_HASH,
+}
+
+/**
+ * O1: which seam fields (if any) the NEXT local cursor must carry.
+ *
+ * While the page ends inside the boundary block, the exclusion list must ride
+ * along — the next tuple boundary sits below some seen hashes, and without the
+ * list they would be re-served as duplicates. The moment the keyset descends
+ * past the boundary block, every one of its rows is accounted for (served or
+ * excluded) and the fields are dropped for good.
+ */
+export function carrySeamExclusions(
+  cur: Extract<ServeCursor, { source: 'local' }>,
+  lastBoundaryBlock: number,
+): Partial<
+  Pick<
+    Extract<ServeCursor, { source: 'local' }>,
+    'boundaryBlock' | 'seenTxHashes' | 'seenTransferKeys'
+  >
+> {
+  if (cur.boundaryBlock === undefined || lastBoundaryBlock !== cur.boundaryBlock) return {}
+  const out: ReturnType<typeof carrySeamExclusions> = { boundaryBlock: cur.boundaryBlock }
+  if (cur.seenTxHashes && cur.seenTxHashes.length > 0) out.seenTxHashes = cur.seenTxHashes
+  if (cur.seenTransferKeys && cur.seenTransferKeys.length > 0) {
+    out.seenTransferKeys = cur.seenTransferKeys
+  }
+  return out
+}
+
+/** O1 mint-side: the live page's tx hashes inside the boundary block,
+ *  lowercased to match how the worker stores provider hashes. */
+export function collectSeenTxHashes(rows: HistoryRow[], boundaryBlock: number): string[] {
+  return rows
+    .filter(r => Number(r.blockNumber) === boundaryBlock)
+    .map(r => r.hash.toLowerCase())
 }
 
 // ── Token transfers ────────────────────────────────────────────────────────
@@ -281,13 +440,23 @@ export async function serveLocalTokenTransfers(
   lastBoundary: { blockNumber: number; txHash: string; logIndex: number } | null
   hasMore: boolean
 }> {
-  const logIdx = cur.logIndex ?? Number.MAX_SAFE_INTEGER
+  const logIdx = cur.logIndex ?? TOP_LOG_INDEX
+  // O1: pair-precise exclusion — see serveLocalAddressTxs. Pairs, not hashes:
+  // one transaction can carry many transfers, and excluding by hash alone
+  // would drop the UNSEEN siblings of a seen transfer.
+  const seamFilter =
+    cur.boundaryBlock !== undefined && cur.seenTransferKeys && cur.seenTransferKeys.length > 0
+      ? sql` AND NOT (block_number = ${cur.boundaryBlock} AND (tx_hash, log_index) IN (${sql.join(
+          cur.seenTransferKeys.map(k => sql`(${k.h}, ${k.i})`),
+          sql`, `,
+        )}))`
+      : sql.raw('')
   const res = await getDb().execute(sql`
     SELECT tx_hash, log_index, block_number, block_timestamp, from_address, to_address,
            token_address, token_symbol, token_decimals, value, value_formatted
     FROM backfill_token_transfers
     WHERE scope_address = ${scope.toLowerCase()}
-      AND (block_number, tx_hash, log_index) < (${cur.blockNumber}, ${cur.txHash}, ${logIdx})
+      AND (block_number, tx_hash, log_index) < (${cur.blockNumber}, ${cur.txHash}, ${logIdx})${seamFilter}
     ORDER BY block_number DESC, tx_hash DESC, log_index DESC
     LIMIT ${PAGE + 1}
   `)
@@ -308,8 +477,35 @@ export async function serveLocalTokenTransfers(
   }
 }
 
-/** Top-of-cache boundary for transfers (outage fallback only). */
+/** Top-of-cache boundary for transfers (outage fallback only). Its logIndex
+ *  MUST be TOP_LOG_INDEX — the MAX_SAFE_INTEGER it originally carried threw
+ *  22003 on the int4 log_index comparison, which would have 500'd the outage
+ *  fallback the first time it ran. Caught by backfill-serve.pg.test.ts. */
 export const TOP_TRANSFER_BOUNDARY: Extract<ServeCursor, { source: 'local' }> = {
   ...TOP_BOUNDARY,
-  logIndex: Number.MAX_SAFE_INTEGER,
+  logIndex: TOP_LOG_INDEX,
+}
+
+/**
+ * O1 mint-side for transfers: (hash, logIndex) pairs of the live page's
+ * boundary-block rows. A transfer whose logIndex is null/empty/non-numeric is
+ * dropped rather than coerced — such a row cannot exist in the cache anyway
+ * (log_index is NOT NULL and part of the PK), so nothing cached can collide
+ * with it and excluding it would only risk dropping a real (hash, 0) row via
+ * a fabricated index. The A4b-2 worker must uphold the same reading: skip
+ * provider rows with a null log_index instead of inventing one.
+ */
+export function collectSeenTransferKeys(
+  rows: TokenTransferRow[],
+  boundaryBlock: number,
+): { h: string; i: number }[] {
+  const keys: { h: string; i: number }[] = []
+  for (const t of rows) {
+    if (Number(t.blockNumber) !== boundaryBlock) continue
+    if (t.logIndex == null || t.logIndex === '') continue
+    const i = Number(t.logIndex)
+    if (!Number.isSafeInteger(i) || i < 0) continue
+    keys.push({ h: t.txHash.toLowerCase(), i })
+  }
+  return keys
 }

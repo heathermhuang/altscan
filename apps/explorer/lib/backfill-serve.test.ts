@@ -113,3 +113,145 @@ describe('cursor codec — hostile input (these cursors are forgeable)', () => {
       .toEqual({ source: 'local', blockNumber: 0, txHash: '0xAB', logIndex: 0 })
   })
 })
+
+// ── O1: the live/local seam ordering contract ──────────────────────────────
+//
+// Moralis specifies no within-block order, so the handoff cursor anchors at
+// (boundaryBlock, TOP_HASH) and carries the live page's boundary-block rows as
+// an exclusion list. These tests pin the codec, the carry rule, and the
+// mint-side collectors; the end-to-end predicate behavior (no skips, no dups,
+// pair precision) runs against a real Postgres in backfill-serve.pg.test.ts.
+import {
+  carrySeamExclusions,
+  collectSeenTransferKeys,
+  collectSeenTxHashes,
+  SEEN_CAP,
+  TOP_HASH,
+  TOP_LOG_INDEX,
+} from './backfill-serve'
+
+describe('O1 cursor codec — seam fields', () => {
+  const enc = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url')
+
+  it('round-trips a seen-hash handoff cursor, lowercasing the hashes', () => {
+    const c = encodeCursor({
+      source: 'local', blockNumber: 100, txHash: TOP_HASH,
+      boundaryBlock: 100, seenTxHashes: ['0xAA', '0xbb'],
+    })
+    expect(decodeCursor(c)).toEqual({
+      source: 'local', blockNumber: 100, txHash: TOP_HASH,
+      boundaryBlock: 100, seenTxHashes: ['0xaa', '0xbb'],
+    })
+  })
+
+  it('round-trips a seen-pair transfer cursor', () => {
+    const c = encodeCursor({
+      source: 'local', blockNumber: 100, txHash: TOP_HASH, logIndex: TOP_LOG_INDEX,
+      boundaryBlock: 100, seenTransferKeys: [{ h: '0xAA', i: 3 }],
+    })
+    expect(decodeCursor(c)).toEqual({
+      source: 'local', blockNumber: 100, txHash: TOP_HASH, logIndex: TOP_LOG_INDEX,
+      boundaryBlock: 100, seenTransferKeys: [{ h: '0xaa', i: 3 }],
+    })
+  })
+
+  it('the TOP_HASH sentinel itself is a valid txHash', () => {
+    expect(decodeCursor(enc({ source: 'local', blockNumber: 1, txHash: TOP_HASH })))
+      .toEqual({ source: 'local', blockNumber: 1, txHash: TOP_HASH })
+  })
+
+  it('rejects seam fields that do not form a coherent set', () => {
+    const base = { source: 'local', blockNumber: 100, txHash: TOP_HASH }
+    for (const extra of [
+      { boundaryBlock: 100 },                                        // block, no list
+      { seenTxHashes: ['0xaa'] },                                    // list, no block
+      { seenTransferKeys: [{ h: '0xaa', i: 1 }] },                   // list, no block
+      { boundaryBlock: 100, seenTxHashes: [] },                      // empty list
+      { boundaryBlock: 100, seenTransferKeys: [] },                  // empty list
+      { boundaryBlock: -1, seenTxHashes: ['0xaa'] },                 // bad block
+      { boundaryBlock: 1.5, seenTxHashes: ['0xaa'] },                // bad block
+      { boundaryBlock: 100, seenTxHashes: ['0xaa'], seenTransferKeys: [{ h: '0xaa', i: 1 }] }, // both kinds
+    ]) {
+      expect(decodeCursor(enc({ ...base, ...extra })), JSON.stringify(extra))
+        .toEqual({ source: 'head' })
+    }
+  })
+
+  it('rejects hostile exclusion entries', () => {
+    const base = { source: 'local', blockNumber: 100, txHash: TOP_HASH, boundaryBlock: 100 }
+    for (const seenTxHashes of [
+      ["0xab'; DROP TABLE--"], ['nope'], [42], ['0xaa', ''], 'not-an-array',
+      Array.from({ length: SEEN_CAP + 1 }, () => '0xaa'),            // over cap
+    ]) {
+      expect(decodeCursor(enc({ ...base, seenTxHashes })), JSON.stringify(seenTxHashes).slice(0, 60))
+        .toEqual({ source: 'head' })
+    }
+    for (const seenTransferKeys of [
+      [{ h: 'nope', i: 1 }], [{ h: '0xaa', i: -1 }], [{ h: '0xaa', i: 1.5 }],
+      [{ h: '0xaa', i: '2' }], [{ h: '0xaa' }], ['0xaa'], [null],
+      Array.from({ length: SEEN_CAP + 1 }, () => ({ h: '0xaa', i: 1 })),
+    ]) {
+      expect(decodeCursor(enc({ ...base, seenTransferKeys })), JSON.stringify(seenTransferKeys).slice(0, 60))
+        .toEqual({ source: 'head' })
+    }
+  })
+})
+
+describe('O1 carrySeamExclusions — the exclusion must outlive the first local page', () => {
+  const cur = {
+    source: 'local' as const, blockNumber: 100, txHash: TOP_HASH,
+    boundaryBlock: 100, seenTxHashes: ['0xaa', '0xbb'],
+  }
+
+  it('carries the fields while the page still ends inside the boundary block', () => {
+    // Dropping them here is the bug class: the next page's tuple boundary sits
+    // below some seen hashes, which would then be re-served as duplicates.
+    expect(carrySeamExclusions(cur, 100))
+      .toEqual({ boundaryBlock: 100, seenTxHashes: ['0xaa', '0xbb'] })
+  })
+
+  it('drops the fields once the keyset descends below the boundary block', () => {
+    expect(carrySeamExclusions(cur, 99)).toEqual({})
+  })
+
+  it('is a no-op for cursors that never had seam fields', () => {
+    expect(carrySeamExclusions({ source: 'local', blockNumber: 100, txHash: '0xaa' }, 100))
+      .toEqual({})
+  })
+
+  it('carries transfer pairs the same way', () => {
+    const tcur = {
+      source: 'local' as const, blockNumber: 100, txHash: TOP_HASH,
+      logIndex: TOP_LOG_INDEX,
+      boundaryBlock: 100, seenTransferKeys: [{ h: '0xaa', i: 1 }],
+    }
+    expect(carrySeamExclusions(tcur, 100))
+      .toEqual({ boundaryBlock: 100, seenTransferKeys: [{ h: '0xaa', i: 1 }] })
+    expect(carrySeamExclusions(tcur, 42)).toEqual({})
+  })
+})
+
+describe('O1 mint-side collectors', () => {
+  it('collectSeenTxHashes takes only boundary-block rows, lowercased', () => {
+    const rows = [
+      { blockNumber: '101', hash: '0xAA' },
+      { blockNumber: '100', hash: '0xBB' },
+      { blockNumber: '100', hash: '0xcc' },
+    ] as never[]
+    expect(collectSeenTxHashes(rows, 100)).toEqual(['0xbb', '0xcc'])
+  })
+
+  it('collectSeenTransferKeys drops null/empty/non-numeric logIndex instead of coercing', () => {
+    // Number('') is 0 — coercing would fabricate a (hash, 0) exclusion and
+    // silently drop a real cached row. Such rows also cannot exist in the
+    // cache (log_index is NOT NULL in the PK), so skipping them is lossless.
+    const rows = [
+      { blockNumber: '100', txHash: '0xAA', logIndex: '3' },
+      { blockNumber: '100', txHash: '0xbb', logIndex: null },
+      { blockNumber: '100', txHash: '0xcc', logIndex: '' },
+      { blockNumber: '100', txHash: '0xdd', logIndex: 'x' },
+      { blockNumber: '99', txHash: '0xee', logIndex: '1' },
+    ] as never[]
+    expect(collectSeenTransferKeys(rows, 100)).toEqual([{ h: '0xaa', i: 3 }])
+  })
+})

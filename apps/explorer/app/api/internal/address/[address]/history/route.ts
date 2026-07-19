@@ -4,13 +4,17 @@ import { guardInternalAddress } from '@/lib/internal-guard'
 import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/backfill-trigger'
 import {
   cacheUsable,
+  carrySeamExclusions,
+  collectSeenTxHashes,
   decodeCursor,
   encodeCursor,
   cacheCoversFrom,
   readWatermark,
   serveLocalAddressTxs,
   txToHistoryRow,
+  SEEN_CAP,
   TOP_BOUNDARY,
+  TOP_HASH,
 } from '@/lib/backfill-serve'
 
 export const dynamic = 'force-dynamic'
@@ -74,7 +78,14 @@ export async function GET(
     const { rows, lastBoundary, hasMore } = await serveLocalAddressTxs(address, cur)
     let next: string | null = null
     if (hasMore && lastBoundary) {
-      next = encodeCursor({ source: 'local', ...lastBoundary })
+      // O1: while the page still ends inside the handoff's boundary block, the
+      // seen-hash exclusions must ride the next cursor or they resurface as
+      // duplicates one page later.
+      next = encodeCursor({
+        source: 'local',
+        ...lastBoundary,
+        ...carrySeamExclusions(cur, lastBoundary.blockNumber),
+      })
     } else if (wm!.status !== 'complete' && wm!.oldestCursor) {
       // capped|partial → resume the deep tail where the WORKER stopped.
       next = encodeCursor({ source: 'provider', providerCursor: wm!.oldestCursor })
@@ -141,7 +152,21 @@ export async function GET(
     // cacheCoversFrom. Existence of rows *below* is not enough; it silently
     // skips everything indexed after the last backfill run.
     if (Number.isFinite(oldestBlock) && await cacheCoversFrom(address, oldestBlock).catch(() => false)) {
-      next = encodeCursor({ source: 'local', blockNumber: oldestBlock, txHash: oldest.hash })
+      // O1: anchor at (boundary, TOP_HASH) — "everything at or below this
+      // block" — and exclude the hashes this page already served in it.
+      // Anchoring at the oldest row's own hash instead would both skip
+      // boundary-block rows the provider didn't serve and re-serve ones it
+      // did, because provider order ≠ hash order within a block.
+      const seen = collectSeenTxHashes(rows, oldestBlock)
+      if (seen.length > 0 && seen.length <= SEEN_CAP) {
+        next = encodeCursor({
+          source: 'local',
+          blockNumber: oldestBlock,
+          txHash: TOP_HASH,
+          boundaryBlock: oldestBlock,
+          seenTxHashes: seen,
+        })
+      }
     }
   }
   if (!next && result.data.cursor) {

@@ -4,12 +4,17 @@ import { guardInternalAddress } from '@/lib/internal-guard'
 import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/backfill-trigger'
 import {
   cacheUsable,
+  carrySeamExclusions,
+  collectSeenTransferKeys,
   decodeCursor,
   encodeCursor,
   transferCacheCoversFrom,
   readWatermark,
   serveLocalTokenTransfers,
   transferToRow,
+  SEEN_CAP,
+  TOP_HASH,
+  TOP_LOG_INDEX,
   TOP_TRANSFER_BOUNDARY,
 } from '@/lib/backfill-serve'
 
@@ -67,7 +72,13 @@ export async function GET(
     const { rows, lastBoundary, hasMore } = await serveLocalTokenTransfers(address, cur)
     let next: string | null = null
     if (hasMore && lastBoundary) {
-      next = encodeCursor({ source: 'local', ...lastBoundary })
+      // O1: carry the seam exclusions while still inside the boundary block —
+      // see history/route.ts.
+      next = encodeCursor({
+        source: 'local',
+        ...lastBoundary,
+        ...carrySeamExclusions(cur, lastBoundary.blockNumber),
+      })
     } else if (wm!.status !== 'complete' && wm!.oldestCursor) {
       next = encodeCursor({ source: 'provider', providerCursor: wm!.oldestCursor })
     }
@@ -119,24 +130,34 @@ export async function GET(
   const rows = result.data.transfers.map(transferToRow)
   let next: string | null = null
 
-  // Hand off to the cache iff it holds rows below this page. A transfer whose
-  // logIndex is null cannot anchor a keyset boundary, so skip the handoff
-  // rather than coerce it — the provider cursor is always a correct fallback.
+  // Hand off to the cache iff it holds rows below this page.
   if (cur.source === 'head' && usable && rows.length > 0) {
     const oldest = rows[rows.length - 1]
-    const oldestLogIndex = oldest.logIndex == null ? null : Number(oldest.logIndex)
     const oldestBlock = Number(oldest.blockNumber)
-    // A null logIndex cannot anchor a keyset boundary, so skip the handoff
-    // rather than coerce it — the provider cursor is always a correct fallback.
-    if (oldestLogIndex != null && Number.isSafeInteger(oldestLogIndex) && Number.isFinite(oldestBlock)) {
+    if (Number.isFinite(oldestBlock)) {
       // Contiguity, not mere existence below — see transferCacheCoversFrom.
       if (await transferCacheCoversFrom(address, oldestBlock).catch(() => false)) {
-        next = encodeCursor({
-          source: 'local',
-          blockNumber: oldestBlock,
-          txHash: oldest.txHash,
-          logIndex: oldestLogIndex,
-        })
+        // O1: sentinel-anchored handoff with pair-precise exclusions — see
+        // history/route.ts. The oldest row's own logIndex no longer anchors
+        // anything, so a null there no longer blocks the handoff; null-index
+        // rows are simply left out of the seen list (they cannot exist in the
+        // cache — log_index is NOT NULL in its PK — so nothing cached can
+        // duplicate them).
+        const seenKeys = collectSeenTransferKeys(rows, oldestBlock)
+        if (seenKeys.length <= SEEN_CAP) {
+          // An empty seen list (every boundary-block row had a null index)
+          // mints a plain sentinel cursor: there is nothing to exclude, and a
+          // boundaryBlock with no list is the decode-invalid shape.
+          next = encodeCursor({
+            source: 'local',
+            blockNumber: oldestBlock,
+            txHash: TOP_HASH,
+            logIndex: TOP_LOG_INDEX,
+            ...(seenKeys.length > 0
+              ? { boundaryBlock: oldestBlock, seenTransferKeys: seenKeys }
+              : {}),
+          })
+        }
       }
     }
   }
