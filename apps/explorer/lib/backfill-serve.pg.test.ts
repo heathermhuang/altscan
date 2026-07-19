@@ -9,8 +9,8 @@ import { createMaintenanceConnection } from '@altscan/db'
  * Gated on BACKFILL_TEST_PG_URL because CI has no Postgres. Run locally with:
  *
  *   docker run -d --rm --name pg-seamtest -e POSTGRES_PASSWORD=x \
- *     -p 127.0.0.1:5440:5432 postgres:16
- *   BACKFILL_TEST_PG_URL=postgres://postgres:x@127.0.0.1:5440/postgres \
+ *     -e POSTGRES_DB=seam_test -p 127.0.0.1:5440:5432 postgres:16
+ *   BACKFILL_TEST_PG_URL=postgres://postgres:x@127.0.0.1:5440/seam_test \
  *     npx vitest run lib/backfill-serve.pg.test.ts
  *
  * The fixture reproduces the O1 failure: the provider's within-block order is
@@ -19,10 +19,22 @@ import { createMaintenanceConnection } from '@altscan/db'
  * above that hash and re-served seen rows below it.
  */
 const PG_URL = process.env.BACKFILL_TEST_PG_URL
+// FAIL CLOSED: this suite creates and DROPs production-named tables in
+// whatever database the URL references. Refuse anything whose database name
+// does not contain "test", so a mistyped staging/prod URL cannot lose data.
+const DB_NAME = (() => {
+  try {
+    return PG_URL ? new URL(PG_URL).pathname.replace(/^\//, '') : ''
+  } catch {
+    return ''
+  }
+})()
+const DISPOSABLE = /test/.test(DB_NAME)
 // getDb() initializes lazily on first call, so pointing DATABASE_URL at the
 // test instance here (before any serve call) routes the SHIPPED functions —
-// not a reimplementation — at the fixture. Gated: no-op in CI.
-if (PG_URL) process.env.DATABASE_URL = PG_URL
+// not a reimplementation — at the fixture. Gated: no-op in CI, and never
+// pointed at a non-disposable database.
+if (PG_URL && DISPOSABLE) process.env.DATABASE_URL = PG_URL
 
 import {
   carrySeamExclusions,
@@ -59,6 +71,12 @@ describe.skipIf(!PG_URL)('O1 seam — shipped predicates against real Postgres',
   const OLDEST = h(16)
 
   beforeAll(async () => {
+    if (!DISPOSABLE) {
+      throw new Error(
+        `refusing to run: BACKFILL_TEST_PG_URL database "${DB_NAME}" is not disposable — ` +
+          `the name must contain "test" (this suite drops production-named tables)`,
+      )
+    }
     await sql.unsafe(`DROP TABLE IF EXISTS backfill_address_txs, backfill_token_transfers`)
     await sql.unsafe(`
       CREATE TABLE backfill_address_txs (
@@ -114,7 +132,11 @@ describe.skipIf(!PG_URL)('O1 seam — shipped predicates against real Postgres',
   })
 
   afterAll(async () => {
-    await sql.unsafe(`DROP TABLE IF EXISTS backfill_address_txs, backfill_token_transfers`)
+    // Runs even when beforeAll threw the disposability error — never DROP on a
+    // database we refused to touch.
+    if (DISPOSABLE) {
+      await sql.unsafe(`DROP TABLE IF EXISTS backfill_address_txs, backfill_token_transfers`)
+    }
     await sql.end({ timeout: 5 })
   })
 

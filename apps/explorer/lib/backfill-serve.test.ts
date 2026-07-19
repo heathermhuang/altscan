@@ -125,6 +125,7 @@ import {
   carrySeamExclusions,
   collectSeenTransferKeys,
   collectSeenTxHashes,
+  transferHandoffKeys,
   SEEN_CAP,
   TOP_HASH,
   TOP_LOG_INDEX,
@@ -165,11 +166,18 @@ describe('O1 cursor codec — seam fields', () => {
     for (const extra of [
       { boundaryBlock: 100 },                                        // block, no list
       { seenTxHashes: ['0xaa'] },                                    // list, no block
-      { seenTransferKeys: [{ h: '0xaa', i: 1 }] },                   // list, no block
+      { logIndex: 1, seenTransferKeys: [{ h: '0xaa', i: 1 }] },      // list, no block
       { boundaryBlock: 100, seenTxHashes: [] },                      // empty list
-      { boundaryBlock: 100, seenTransferKeys: [] },                  // empty list
+      { boundaryBlock: 100, logIndex: 1, seenTransferKeys: [] },     // empty list
       { boundaryBlock: -1, seenTxHashes: ['0xaa'] },                 // bad block
       { boundaryBlock: 1.5, seenTxHashes: ['0xaa'] },                // bad block
+      // only ever minted with boundaryBlock === blockNumber — a forged
+      // mismatch could apply the exclusions to an unrelated block
+      { boundaryBlock: 99, seenTxHashes: ['0xaa'] },
+      // exclusion kind must match the endpoint: hashes ride tx cursors
+      // (no logIndex), pairs ride transfer cursors (logIndex present)
+      { logIndex: 1, boundaryBlock: 100, seenTxHashes: ['0xaa'] },
+      { boundaryBlock: 100, seenTransferKeys: [{ h: '0xaa', i: 1 }] },
       { boundaryBlock: 100, seenTxHashes: ['0xaa'], seenTransferKeys: [{ h: '0xaa', i: 1 }] }, // both kinds
     ]) {
       expect(decodeCursor(enc({ ...base, ...extra })), JSON.stringify(extra))
@@ -178,20 +186,22 @@ describe('O1 cursor codec — seam fields', () => {
   })
 
   it('rejects hostile exclusion entries', () => {
-    const base = { source: 'local', blockNumber: 100, txHash: TOP_HASH, boundaryBlock: 100 }
+    const hashBase = { source: 'local', blockNumber: 100, txHash: TOP_HASH, boundaryBlock: 100 }
     for (const seenTxHashes of [
       ["0xab'; DROP TABLE--"], ['nope'], [42], ['0xaa', ''], 'not-an-array',
       Array.from({ length: SEEN_CAP + 1 }, () => '0xaa'),            // over cap
     ]) {
-      expect(decodeCursor(enc({ ...base, seenTxHashes })), JSON.stringify(seenTxHashes).slice(0, 60))
+      expect(decodeCursor(enc({ ...hashBase, seenTxHashes })), JSON.stringify(seenTxHashes).slice(0, 60))
         .toEqual({ source: 'head' })
     }
+    const pairBase = { ...hashBase, logIndex: TOP_LOG_INDEX }
     for (const seenTransferKeys of [
       [{ h: 'nope', i: 1 }], [{ h: '0xaa', i: -1 }], [{ h: '0xaa', i: 1.5 }],
-      [{ h: '0xaa', i: '2' }], [{ h: '0xaa' }], ['0xaa'], [null],
+      [{ h: '0xaa', i: '2' }], [{ h: '0xaa', i: TOP_LOG_INDEX + 1 }], // beyond int4
+      [{ h: '0xaa' }], ['0xaa'], [null],
       Array.from({ length: SEEN_CAP + 1 }, () => ({ h: '0xaa', i: 1 })),
     ]) {
-      expect(decodeCursor(enc({ ...base, seenTransferKeys })), JSON.stringify(seenTransferKeys).slice(0, 60))
+      expect(decodeCursor(enc({ ...pairBase, seenTransferKeys })), JSON.stringify(seenTransferKeys).slice(0, 60))
         .toEqual({ source: 'head' })
     }
   })
@@ -232,26 +242,48 @@ describe('O1 carrySeamExclusions — the exclusion must outlive the first local 
 })
 
 describe('O1 mint-side collectors', () => {
-  it('collectSeenTxHashes takes only boundary-block rows, lowercased', () => {
+  it('collectSeenTxHashes takes only boundary-block rows, lowercased, de-duplicated', () => {
     const rows = [
       { blockNumber: '101', hash: '0xAA' },
       { blockNumber: '100', hash: '0xBB' },
+      { blockNumber: '100', hash: '0xbb' },
       { blockNumber: '100', hash: '0xcc' },
     ] as never[]
     expect(collectSeenTxHashes(rows, 100)).toEqual(['0xbb', '0xcc'])
   })
 
-  it('collectSeenTransferKeys drops null/empty/non-numeric logIndex instead of coercing', () => {
+  it('collectSeenTransferKeys drops null/empty/non-numeric/beyond-int4 logIndex instead of coercing', () => {
     // Number('') is 0 — coercing would fabricate a (hash, 0) exclusion and
-    // silently drop a real cached row. Such rows also cannot exist in the
-    // cache (log_index is NOT NULL in the PK), so skipping them is lossless.
+    // silently drop a real cached row; a beyond-int4 value would mint a
+    // cursor decodeCursor rejects on the next request.
     const rows = [
       { blockNumber: '100', txHash: '0xAA', logIndex: '3' },
+      { blockNumber: '100', txHash: '0xaa', logIndex: '3' },
       { blockNumber: '100', txHash: '0xbb', logIndex: null },
       { blockNumber: '100', txHash: '0xcc', logIndex: '' },
       { blockNumber: '100', txHash: '0xdd', logIndex: 'x' },
+      { blockNumber: '100', txHash: '0xdd', logIndex: String(TOP_LOG_INDEX + 1) },
       { blockNumber: '99', txHash: '0xee', logIndex: '1' },
     ] as never[]
     expect(collectSeenTransferKeys(rows, 100)).toEqual([{ h: '0xaa', i: 3 }])
+  })
+
+  it('transferHandoffKeys is ALL-OR-SKIP: one invalid boundary row kills the handoff', () => {
+    // A row null HERE may sit in the cache under a valid index from an
+    // earlier fetch (Moralis returns indexes inconsistently); an exclusion
+    // list that silently omitted it would re-serve it as a seam duplicate.
+    const good = [
+      { blockNumber: '100', txHash: '0xAA', logIndex: '2' },
+      { blockNumber: '100', txHash: '0xbb', logIndex: '0' },
+      { blockNumber: '99', txHash: '0xee', logIndex: null }, // below boundary — irrelevant
+    ] as never[]
+    expect(transferHandoffKeys(good, 100)).toEqual([
+      { h: '0xaa', i: 2 },
+      { h: '0xbb', i: 0 },
+    ])
+    for (const bad of [null, '', 'x', String(TOP_LOG_INDEX + 1)]) {
+      const rows = [...good, { blockNumber: '100', txHash: '0xcc', logIndex: bad }] as never[]
+      expect(transferHandoffKeys(rows, 100), JSON.stringify(bad)).toBeNull()
+    }
   })
 })

@@ -5,12 +5,12 @@ import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/b
 import {
   cacheUsable,
   carrySeamExclusions,
-  collectSeenTransferKeys,
   decodeCursor,
   encodeCursor,
   transferCacheCoversFrom,
   readWatermark,
   serveLocalTokenTransfers,
+  transferHandoffKeys,
   transferToRow,
   SEEN_CAP,
   TOP_HASH,
@@ -138,24 +138,21 @@ export async function GET(
       // Contiguity, not mere existence below — see transferCacheCoversFrom.
       if (await transferCacheCoversFrom(address, oldestBlock).catch(() => false)) {
         // O1: sentinel-anchored handoff with pair-precise exclusions — see
-        // history/route.ts. The oldest row's own logIndex no longer anchors
-        // anything, so a null there no longer blocks the handoff; null-index
-        // rows are simply left out of the seen list (they cannot exist in the
-        // cache — log_index is NOT NULL in its PK — so nothing cached can
-        // duplicate them).
-        const seenKeys = collectSeenTransferKeys(rows, oldestBlock)
-        if (seenKeys.length <= SEEN_CAP) {
-          // An empty seen list (every boundary-block row had a null index)
-          // mints a plain sentinel cursor: there is nothing to exclude, and a
-          // boundaryBlock with no list is the decode-invalid shape.
+        // history/route.ts. ALL-OR-SKIP: transferHandoffKeys returns null if
+        // ANY boundary-block row lacks a valid logIndex — Moralis has returned
+        // indexes inconsistently across calls, so a row null HERE may sit in
+        // the cache under a valid index from an earlier fetch, and omitting it
+        // from the exclusions would re-serve it as a seam duplicate. No
+        // handoff then; the provider cursor below is always correct.
+        const seenKeys = transferHandoffKeys(rows, oldestBlock)
+        if (seenKeys && seenKeys.length > 0 && seenKeys.length <= SEEN_CAP) {
           next = encodeCursor({
             source: 'local',
             blockNumber: oldestBlock,
             txHash: TOP_HASH,
             logIndex: TOP_LOG_INDEX,
-            ...(seenKeys.length > 0
-              ? { boundaryBlock: oldestBlock, seenTransferKeys: seenKeys }
-              : {}),
+            boundaryBlock: oldestBlock,
+            seenTransferKeys: seenKeys,
           })
         }
       }

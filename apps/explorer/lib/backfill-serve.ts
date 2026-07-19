@@ -54,12 +54,14 @@ const PAGE = 25
  */
 
 /**
- * Ceiling on carried exclusions. A live page cannot contribute more rows than
- * it holds (25 today, ≤100 for any plausible provider page), so anything
- * larger is a forged cursor; and the mint side skips the handoff instead of
- * exceeding it — the provider's own cursor is always a correct fallback.
+ * Ceiling on carried exclusions. The Moralis adapter requests pages of 10-25
+ * rows, so a live page can contribute at most 25 boundary-block entries; 30
+ * leaves headroom without letting cursors grow past ~3KB encoded (a 100-entry
+ * list would push the request line past common URL limits). Anything larger is
+ * a forged cursor, and the mint side skips the handoff instead of exceeding
+ * it — the provider's own cursor is always a correct fallback.
  */
-export const SEEN_CAP = 100
+export const SEEN_CAP = 30
 
 /** Lexical top for VARCHAR(66) hash columns — no real hash sorts at or above
  *  it, so `(block, hash) < (B, TOP_HASH)` reads "every row of block B". */
@@ -144,20 +146,24 @@ export function decodeCursor(raw: string | null | undefined): ServeCursor {
         base.logIndex = c.logIndex as number
       }
 
-      // O1 seam fields — all-or-nothing: a boundary block plus EXACTLY ONE
-      // non-empty exclusion list (we never mint both kinds on one cursor).
-      // Anything malformed falls back to head like every other invalid cursor.
+      // O1 seam fields — only the exact shapes the routes mint are accepted:
+      // a boundary block EQUAL to the cursor's own blockNumber (the exclusions
+      // are only ever carried while the keyset is inside that block, so a
+      // forged mismatch could apply them to an unrelated block), plus EXACTLY
+      // ONE non-empty exclusion list, of the kind matching the endpoint —
+      // hash lists ride tx cursors (no logIndex), pair lists ride transfer
+      // cursors (logIndex present). Anything else falls back to head.
       const hasSeam =
         c.boundaryBlock !== undefined ||
         c.seenTxHashes !== undefined ||
         c.seenTransferKeys !== undefined
       if (!hasSeam) return base
-      if (!Number.isSafeInteger(c.boundaryBlock) || (c.boundaryBlock as number) < 0) {
-        return { source: 'head' }
-      }
+      if (c.boundaryBlock !== base.blockNumber) return { source: 'head' }
       const rawHashes = c.seenTxHashes
       const rawKeys = c.seenTransferKeys
       if ((rawHashes === undefined) === (rawKeys === undefined)) return { source: 'head' }
+      if (rawHashes !== undefined && base.logIndex !== undefined) return { source: 'head' }
+      if (rawKeys !== undefined && base.logIndex === undefined) return { source: 'head' }
       base.boundaryBlock = c.boundaryBlock as number
       if (rawHashes !== undefined) {
         if (!Array.isArray(rawHashes) || rawHashes.length === 0 || rawHashes.length > SEEN_CAP) {
@@ -370,11 +376,14 @@ export function carrySeamExclusions(
 }
 
 /** O1 mint-side: the live page's tx hashes inside the boundary block,
- *  lowercased to match how the worker stores provider hashes. */
+ *  lowercased to match how the worker stores provider hashes, de-duplicated
+ *  (a repeated entry would only bloat the cursor). */
 export function collectSeenTxHashes(rows: HistoryRow[], boundaryBlock: number): string[] {
-  return rows
-    .filter(r => Number(r.blockNumber) === boundaryBlock)
-    .map(r => r.hash.toLowerCase())
+  return [
+    ...new Set(
+      rows.filter(r => Number(r.blockNumber) === boundaryBlock).map(r => r.hash.toLowerCase()),
+    ),
+  ]
 }
 
 // ── Token transfers ────────────────────────────────────────────────────────
@@ -488,24 +497,58 @@ export const TOP_TRANSFER_BOUNDARY: Extract<ServeCursor, { source: 'local' }> = 
 
 /**
  * O1 mint-side for transfers: (hash, logIndex) pairs of the live page's
- * boundary-block rows. A transfer whose logIndex is null/empty/non-numeric is
- * dropped rather than coerced — such a row cannot exist in the cache anyway
- * (log_index is NOT NULL and part of the PK), so nothing cached can collide
- * with it and excluding it would only risk dropping a real (hash, 0) row via
- * a fabricated index. The A4b-2 worker must uphold the same reading: skip
- * provider rows with a null log_index instead of inventing one.
+ * boundary-block rows, de-duplicated. A logIndex that is null/empty/
+ * non-numeric or outside the int4 column domain yields NO pair — coercing
+ * would fabricate an exclusion that silently drops a real cached row, and a
+ * beyond-int4 value would mint a cursor decodeCursor rejects next request.
  */
+/** A provider logIndex usable as an exclusion pair: numeric, non-negative,
+ *  inside the int4 column domain. Null/empty/beyond-int4 → null (a fabricated
+ *  or out-of-domain index would either drop a real cached row or mint a
+ *  cursor decodeCursor rejects on the next request). */
+function validLogIndex(v: string | null | undefined): number | null {
+  if (v == null || v === '') return null
+  const i = Number(v)
+  return Number.isSafeInteger(i) && i >= 0 && i <= TOP_LOG_INDEX ? i : null
+}
+
 export function collectSeenTransferKeys(
   rows: TokenTransferRow[],
   boundaryBlock: number,
 ): { h: string; i: number }[] {
   const keys: { h: string; i: number }[] = []
+  const dedup = new Set<string>()
   for (const t of rows) {
     if (Number(t.blockNumber) !== boundaryBlock) continue
-    if (t.logIndex == null || t.logIndex === '') continue
-    const i = Number(t.logIndex)
-    if (!Number.isSafeInteger(i) || i < 0) continue
-    keys.push({ h: t.txHash.toLowerCase(), i })
+    const i = validLogIndex(t.logIndex)
+    if (i === null) continue
+    const h = t.txHash.toLowerCase()
+    const key = `${h}:${i}`
+    if (dedup.has(key)) continue
+    dedup.add(key)
+    keys.push({ h, i })
   }
   return keys
+}
+
+/**
+ * O1 handoff gate for transfers: the exclusion pairs, or null if the handoff
+ * must not happen at all.
+ *
+ * ALL-OR-SKIP: if ANY boundary-block row lacks a valid (hash, logIndex) pair,
+ * the whole handoff is off and pagination stays on the provider cursor.
+ * `log_index NOT NULL` in the cache's PK only proves the null-keyed
+ * REPRESENTATION was never cached — Moralis has returned indexes
+ * inconsistently across calls (the A4b-0 ''-sentinel history), so the same
+ * transfer may sit in the cache under a valid index from an earlier fetch,
+ * and an exclusion list that silently omitted it would re-serve it as a
+ * seam duplicate. Skipping the handoff loses nothing but cache hits.
+ */
+export function transferHandoffKeys(
+  rows: TokenTransferRow[],
+  boundaryBlock: number,
+): { h: string; i: number }[] | null {
+  const boundaryRows = rows.filter(t => Number(t.blockNumber) === boundaryBlock)
+  if (!boundaryRows.every(t => validLogIndex(t.logIndex) !== null)) return null
+  return collectSeenTransferKeys(rows, boundaryBlock)
 }
