@@ -293,10 +293,10 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
 
     expect(await processOnePage(db, historyProvider, reclaimed)).toBe('partial')
 
-    const rows = await raw.unsafe(
+    const rows = (await raw.unsafe(
       `SELECT tx_hash FROM backfill_address_txs WHERE address = '${ENTITY}' ORDER BY tx_hash`,
-    )
-    expect(rows.map((r: { tx_hash: string }) => r.tx_hash)).toEqual(
+    )) as unknown as { tx_hash: string }[]
+    expect(rows.map((r) => r.tx_hash)).toEqual(
       [...MIXED_HASHES].map((h) => h.toLowerCase()).sort(),
     )
     const [wm] = await raw.unsafe(
@@ -377,10 +377,10 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     const claimed = (await claimNextEntity(db))!
     expect(await processOnePage(db, provider, claimed)).toBe('complete')
 
-    const rows = await raw.unsafe(
+    const rows = (await raw.unsafe(
       `SELECT tx_hash, log_index FROM backfill_token_transfers WHERE scope_address = '${ENTITY}' ORDER BY log_index`,
-    )
-    expect(rows.map((r: { tx_hash: string; log_index: number }) => [r.tx_hash, r.log_index])).toEqual([
+    )) as unknown as { tx_hash: string; log_index: number }[]
+    expect(rows.map((r) => [r.tx_hash, r.log_index])).toEqual([
       [MIXED_HASHES[0].toLowerCase(), 289],
       [MIXED_HASHES[0].toLowerCase(), 292],
     ])
