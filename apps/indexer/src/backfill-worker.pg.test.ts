@@ -315,7 +315,10 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     await seed({ entity: ENTITY, status: 'pending' })
     const claimed = (await claimNextEntity(db))!
     expect(await processOnePage(db, historyProvider, claimed)).toBe('partial')
-    const again = { ...claimed, rows_written: 3, oldest_cursor: 'more' }
+    // Re-claim (the fence refuses a re-page under a spent lease — by design),
+    // then process the identical provider page again.
+    const again = (await claimNextEntity(db))!
+    expect(again.rows_written).toBe(3)
     expect(await processOnePage(db, historyProvider, again)).toBe('partial')
 
     const [{ n }] = await raw.unsafe(
@@ -341,21 +344,22 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     expect(wm.last_error).toBeNull()
   })
 
-  it('O1: transfers pages skip unusable log_index rows and store hashes lowercase', async () => {
-    const transfer = (hash: string, logIndex: string | null, block: number): ProviderTokenTransfer => ({
-      txHash: hash,
-      logIndex,
-      blockNumber: String(block),
-      blockTimestamp: '2026-07-01T00:00:00.000Z',
-      fromAddress: '0xf',
-      toAddress: '0xt',
-      tokenAddress: '0xtok',
-      tokenName: 'T',
-      tokenSymbol: 'TKN',
-      tokenDecimals: '18',
-      value: '5',
-      valueFormatted: '0.000005',
-    })
+  const transfer = (hash: string, logIndex: string | null, block: number): ProviderTokenTransfer => ({
+    txHash: hash,
+    logIndex,
+    blockNumber: String(block),
+    blockTimestamp: '2026-07-01T00:00:00.000Z',
+    fromAddress: '0xf',
+    toAddress: '0xt',
+    tokenAddress: '0xtok',
+    tokenName: 'T',
+    tokenSymbol: 'TKN',
+    tokenDecimals: '18',
+    value: '5',
+    valueFormatted: '0.000005',
+  })
+
+  it('O1/R3: a clean transfers page lands with provider log_index identity, hashes lowercase', async () => {
     const provider = {
       kind: 'fake',
       getAddressTokenTransfers: async () => ({
@@ -364,7 +368,6 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
           transfers: [
             transfer(MIXED_HASHES[0], '292', 120),
             transfer(MIXED_HASHES[0], '289', 120), // same tx, second transfer — the R3 case
-            transfer(MIXED_HASHES[1], null, 119), // unusable — skipped, never invented
           ],
           cursor: null,
         },
@@ -387,7 +390,85 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     const [wm] = await raw.unsafe(
       `SELECT rows_written, status FROM backfill_watermarks WHERE id = ${claimed.id}`,
     )
-    expect(wm.rows_written).toBe(2) // the skipped row is not progress
+    expect(wm.rows_written).toBe(2)
+  })
+
+  it('O1 all-or-skip: a page with an unusable log_index caps the entity, writes nothing, keeps the cursor', async () => {
+    // Advancing past a skipped row would punch a permanent hole in the cached
+    // tail (serve resumes from oldest_cursor, or stops at complete). Capping
+    // with the INCOMING cursor makes the provider serve this page onward.
+    const provider = {
+      kind: 'fake',
+      getAddressTokenTransfers: async () => ({
+        ok: true as const,
+        data: {
+          transfers: [
+            transfer(MIXED_HASHES[0], '292', 120),
+            transfer(MIXED_HASHES[1], null, 119), // unusable — page must not be cached
+          ],
+          cursor: 'deeper',
+        },
+      }),
+    } as unknown as ProviderAdapter
+
+    await raw.unsafe(`
+      INSERT INTO backfill_watermarks (entity_type, entity_id, status, rows_written, oldest_cursor)
+      VALUES ('token_transfers', '${ENTITY}', 'partial', 26, 'page-n-cursor')`)
+    const claimed = (await claimNextEntity(db))!
+    expect(await processOnePage(db, provider, claimed)).toBe('capped')
+
+    const [{ n }] = await raw.unsafe(
+      `SELECT count(*)::int AS n FROM backfill_token_transfers WHERE scope_address = '${ENTITY}'`,
+    )
+    expect(n).toBe(0)
+    const [wm] = await raw.unsafe(
+      `SELECT status, oldest_cursor, rows_written FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.status).toBe('capped')
+    expect(wm.oldest_cursor).toBe('page-n-cursor') // NOT advanced to 'deeper'
+    expect(wm.rows_written).toBe(26)
+  })
+
+  it('fence: a zombie claimant cannot overwrite a newer claim, and its page rolls back', async () => {
+    await seed({ entity: ENTITY, status: 'pending' })
+    const zombie = (await claimNextEntity(db))!
+    // A newer worker reclaims: re-stamp the lease (what a later claim does).
+    await raw.unsafe(`
+      UPDATE backfill_watermarks
+      SET last_attempt_at = date_trunc('milliseconds', now() + interval '5 milliseconds')
+      WHERE id = ${zombie.id}`)
+
+    expect(await processOnePage(db, historyProvider, zombie)).toBe('lease_lost')
+
+    const [{ n }] = await raw.unsafe(
+      `SELECT count(*)::int AS n FROM backfill_address_txs WHERE address = '${ENTITY}'`,
+    )
+    expect(n).toBe(0) // the zombie's rows rolled back with its refused watermark write
+    const [wm] = await raw.unsafe(
+      `SELECT status, oldest_cursor, rows_written FROM backfill_watermarks WHERE id = ${zombie.id}`,
+    )
+    expect(wm.status).toBe('running') // the newer claim's state is untouched
+    expect(wm.oldest_cursor).toBeNull()
+    expect(wm.rows_written).toBe(0)
+  })
+
+  it('error transitions reset the retry clock so cooldowns measure from the failure', async () => {
+    await seed({ entity: ENTITY, status: 'pending' })
+    const claimed = (await claimNextEntity(db))!
+    const boom = {
+      kind: 'fake',
+      getAddressHistory: async () => {
+        throw new Error('slow provider blew up')
+      },
+    } as unknown as ProviderAdapter
+    expect(await processOnePage(db, boom, claimed)).toBe('error')
+    const [wm] = await raw.unsafe(
+      `SELECT status, attempts, extract(epoch from now() - last_attempt_at) AS age
+       FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.status).toBe('error')
+    expect(wm.attempts).toBe(1)
+    expect(Number(wm.age)).toBeLessThan(2) // stamped at failure time, not claim time
   })
 
   // ── Invariant #3 (R4): the budget is only testable against a real counter ──

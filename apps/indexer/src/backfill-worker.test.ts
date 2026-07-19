@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
+  bucketFor,
   buildClaimSql,
   mapHistoryRows,
   mapTransferRows,
@@ -51,9 +52,11 @@ describe('buildClaimSql — the shipped claim statement', () => {
     )
   })
 
-  it('claiming renews the lease and returns the full row', () => {
+  it('claiming renews the lease with a millisecond-exact stamp and returns the full row', () => {
+    // date_trunc to ms: the stamp round-trips through a JS Date losslessly, so
+    // it doubles as the FENCING TOKEN every later transition must present.
     expect(text).toMatch(
-      /UPDATE backfill_watermarks SET status = 'running', last_attempt_at = now\(\), updated_at = now\(\)/,
+      /UPDATE backfill_watermarks SET status = 'running', last_attempt_at = date_trunc\('milliseconds', now\(\)\), updated_at = now\(\)/,
     )
     expect(text).toContain('RETURNING *')
   })
@@ -143,18 +146,21 @@ describe('mapTransferRows — O1: skip rows with no usable log_index, never inve
 
 // ── Task 2.3: processOnePage status machine (fake db — effects proven in the PG suite) ──
 
-function fakeDb() {
+function fakeDb(opts: { fenceMatches?: boolean } = {}) {
+  // Guarded UPDATEs use RETURNING id — a matched fence returns a row, a lost
+  // lease returns none.
+  const guardRow = opts.fenceMatches === false ? [] : [{ id: 1 }]
   const executed: unknown[] = []
   const db = {
     execute: vi.fn(async (q: unknown) => {
       executed.push(q)
-      return []
+      return guardRow
     }),
     transaction: vi.fn(async (fn: (txx: { execute: (q: unknown) => Promise<unknown[]> }) => Promise<unknown>) =>
       fn({
         execute: async (q: unknown) => {
           executed.push(q)
-          return []
+          return guardRow
         },
       }),
     ),
@@ -171,7 +177,7 @@ const entity = (over: Partial<ClaimedEntity> = {}): ClaimedEntity => ({
   oldest_cursor: null,
   rows_written: 0,
   attempts: 0,
-  last_attempt_at: null,
+  last_attempt_at: new Date(), // the claim stamp — doubles as the fence token
   last_error: null,
   ...over,
 })
@@ -251,6 +257,44 @@ describe('processOnePage — status machine', () => {
     expect(await processOnePage(db, provider, entity({ entity_type: 'token_transfers' }))).toBe('complete')
     expect(getAddressTokenTransfers).toHaveBeenCalledWith(ADDR.toLowerCase(), undefined)
   })
+
+  it('caps WITHOUT writing when a transfers page contains an unusable log_index (no torn coverage)', async () => {
+    // Worker-side twin of the A4b-1 serve ALL-OR-SKIP rule: advancing the
+    // cursor past a skipped row would leave a permanent hole in the cached
+    // tail. The page is left uncached and the entity capped, so serving falls
+    // through to the provider exactly at this page.
+    const { db, raw } = fakeDb()
+    const provider = providerOf({
+      getAddressTokenTransfers: async () => ({
+        ok: true,
+        data: { transfers: [transfer(), transfer({ logIndex: null, txHash: '0xother' })], cursor: 'next' },
+      }),
+    })
+    expect(await processOnePage(db, provider, entity({ entity_type: 'token_transfers' }))).toBe('capped')
+    expect(raw.transaction).not.toHaveBeenCalled() // nothing written, cursor untouched
+  })
+
+  it('reports lease_lost instead of writing when the fence no longer matches', async () => {
+    const lost = fakeDb({ fenceMatches: false })
+    expect(
+      await processOnePage(
+        lost.db,
+        providerOf({ getAddressHistory: async () => ({ ok: false, reason: 'upstream_error' }) }),
+        entity(),
+      ),
+    ).toBe('lease_lost')
+
+    const lostTxn = fakeDb({ fenceMatches: false })
+    expect(
+      await processOnePage(
+        lostTxn.db,
+        providerOf({
+          getAddressHistory: async () => ({ ok: true, data: { txs: [tx()], cursor: null, totalTxs: 1 } }),
+        }),
+        entity(),
+      ),
+    ).toBe('lease_lost')
+  })
 })
 
 // ── Task 2.3: R5 pressure + BNB headroom politeness ──
@@ -287,20 +331,35 @@ describe('backfillPressure (R5)', () => {
   })
 })
 
-describe('sharedBucketOverHeadroom — BNB politeness, inert without a fleet signal', () => {
-  const healthWith = (history: Record<string, unknown> | undefined) => async () =>
-    ({ buckets: history ? { history } : {} }) as Record<string, unknown>
+describe('sharedBucketOverHeadroom — BNB politeness, per-bucket, inert without a fleet signal', () => {
+  const healthWith = (buckets: Record<string, unknown>) => async () =>
+    ({ buckets }) as Record<string, unknown>
 
-  it('yields once the shared history bucket crosses headroom × cap', async () => {
-    expect(await sharedBucketOverHeadroom(healthWith({ hourly: 280, hourlyMax: 700 }))).toBe(true)
-    expect(await sharedBucketOverHeadroom(healthWith({ hourly: 279, hourlyMax: 700 }))).toBe(false)
+  it('yields once the checked bucket crosses headroom × cap', async () => {
+    expect(await sharedBucketOverHeadroom('history', healthWith({ history: { hourly: 280, hourlyMax: 700 } }))).toBe(true)
+    expect(await sharedBucketOverHeadroom('history', healthWith({ history: { hourly: 279, hourlyMax: 700 } }))).toBe(false)
+  })
+
+  it('checks the bucket the claimed entity will actually spend from', async () => {
+    // Transfers spend the assets bucket, not history (moralis acquire('assets')).
+    const health = healthWith({
+      history: { hourly: 0, hourlyMax: 700 },
+      assets: { hourly: 400, hourlyMax: 400 },
+    })
+    expect(await sharedBucketOverHeadroom('assets', health)).toBe(true)
+    expect(await sharedBucketOverHeadroom('history', health)).toBe(false)
+  })
+
+  it('maps entity types to their provider buckets', () => {
+    expect(bucketFor('address_txs')).toBe('history')
+    expect(bucketFor('token_transfers')).toBe('assets')
   })
 
   it('returns false when there is no counter (no Redis — ETH), no bucket, or a health error', async () => {
-    expect(await sharedBucketOverHeadroom(healthWith({ hourly: null, hourlyMax: 700 }))).toBe(false)
-    expect(await sharedBucketOverHeadroom(healthWith(undefined))).toBe(false)
+    expect(await sharedBucketOverHeadroom('history', healthWith({ history: { hourly: null, hourlyMax: 700 } }))).toBe(false)
+    expect(await sharedBucketOverHeadroom('history', healthWith({}))).toBe(false)
     expect(
-      await sharedBucketOverHeadroom(async () => {
+      await sharedBucketOverHeadroom('history', async () => {
         throw new Error('redis blip')
       }),
     ).toBe(false)

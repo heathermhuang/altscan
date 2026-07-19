@@ -33,6 +33,13 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      # The indexer's deploy build deliberately swallows tsc failures
+      # ("tsc || true") and workspace packages ship TS source, so type errors
+      # in the indexer program surface nowhere else. strictNullChecks (A4b-2)
+      # is load-bearing for ProviderResult narrowing — enforce it here.
+      - name: Typecheck indexer
+        run: pnpm --filter @altscan/indexer exec tsc --noEmit
+
       # apps/altscan-site ships its own tsx harness (excluded from the root
       # vitest run); run it here so its chain-payload tests still gate PRs.
       - name: Run altscan-site tests

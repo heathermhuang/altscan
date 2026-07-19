@@ -17,6 +17,7 @@
  *      break both the keyset ordering and the dedup compare.
  */
 import { sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
 import { resolveDataProvider, getDataProviderHealth } from '@altscan/providers'
@@ -36,7 +37,9 @@ import { getMaintenanceDb } from './db'
 export type Executor = Pick<Db, 'execute'>
 export type WorkerDb = Pick<Db, 'execute' | 'transaction'>
 
-type PageStatus = 'partial' | 'pending' | 'complete' | 'capped' | 'error'
+/** `lease_lost` is a return value only, never a stored watermark status: the
+ *  fence refused a write because a newer claim owns the row. */
+type PageStatus = 'partial' | 'pending' | 'complete' | 'capped' | 'error' | 'lease_lost'
 
 /** A `backfill_watermarks` row as RETURNING * hands it back (snake_case; BIGINT
  *  columns arrive as strings from postgres-js). */
@@ -71,7 +74,7 @@ export type ClaimedEntity = {
  */
 export function buildClaimSql(): string {
   return `
-    UPDATE backfill_watermarks SET status = 'running', last_attempt_at = now(), updated_at = now()
+    UPDATE backfill_watermarks SET status = 'running', last_attempt_at = date_trunc('milliseconds', now()), updated_at = now()
     WHERE id = (
       SELECT id FROM backfill_watermarks
       WHERE status IN ('pending','partial')
@@ -225,7 +228,33 @@ async function upsertTokenTransfers(ex: Executor, rows: TransferInsertRow[]): Pr
   return rows.length
 }
 
-// ── One page of work (Task 2.3) — atomic per page (R2) ──
+// ── Fenced watermark transitions ──
+//
+// The lease (claim stamp) is also a FENCING TOKEN: a worker that stalls past
+// `leaseSec` loses the row to a reclaim, and every one of its later writes must
+// be refused or it would overwrite the newer claim's cursor/status. The claim
+// stamps `last_attempt_at` at millisecond precision (date_trunc) precisely so
+// the stamp survives the postgres-js Date round-trip and can be presented back
+// verbatim.
+
+class LeaseLostError extends Error {}
+
+const stampOf = (entity: ClaimedEntity): string | null =>
+  entity.last_attempt_at ? new Date(entity.last_attempt_at).toISOString() : null
+
+/** Apply `set` only if this claim still holds the lease. True = the row moved. */
+async function fencedUpdate(ex: Executor, entity: ClaimedEntity, set: SQL): Promise<boolean> {
+  const stamp = stampOf(entity)
+  if (!stamp) return false
+  const res = await ex.execute(sql`
+    UPDATE backfill_watermarks SET ${set}
+    WHERE id=${entity.id} AND status='running' AND last_attempt_at=${stamp}::timestamptz
+    RETURNING id
+  `)
+  return Array.from(res).length > 0
+}
+
+// ── One page of work (Task 2.3) — atomic per page (R2), fenced per lease ──
 
 export async function processOnePage(
   db: WorkerDb,
@@ -244,65 +273,98 @@ export async function processOnePage(
         ? await provider.getAddressHistory(entity.entity_id, cursor)
         : await provider.getAddressTokenTransfers(entity.entity_id, cursor)
   } catch (err) {
-    await db.execute(sql`
-      UPDATE backfill_watermarks
-      SET status='error', attempts=attempts+1, last_error=${String(err)}, updated_at=now()
-      WHERE id=${entity.id}
-    `)
-    return 'error'
+    // last_attempt_at=now(): the retry cooldown must measure from the FAILURE,
+    // not the claim — a slow failed request would otherwise eat its own cooldown.
+    const moved = await fencedUpdate(
+      db,
+      entity,
+      sql`status='error', attempts=attempts+1, last_error=${String(err)}, last_attempt_at=now(), updated_at=now()`,
+    )
+    return moved ? 'error' : 'lease_lost'
   }
 
   if (!res.ok) {
-    // rate_limited is not a failure — release the claim and retry on a later pass.
+    // rate_limited is not a failure — release the claim and retry on a later
+    // pass (the fresh stamp also sorts it behind entities not yet throttled).
     const status: PageStatus = res.reason === 'rate_limited' ? idle : 'error'
-    await db.execute(sql`
-      UPDATE backfill_watermarks
-      SET status=${status}, attempts=attempts+${status === 'error' ? 1 : 0},
-          last_error=${res.reason}, updated_at=now()
-      WHERE id=${entity.id}
-    `)
-    return status
+    const moved = await fencedUpdate(
+      db,
+      entity,
+      sql`status=${status}, attempts=attempts+${status === 'error' ? 1 : 0},
+          last_error=${res.reason}, last_attempt_at=now(), updated_at=now()`,
+    )
+    return moved ? status : 'lease_lost'
   }
 
   const page = res.data
 
+  // Map OUTSIDE the transaction — pure work, and the all-or-skip decision below
+  // must happen before anything is written.
+  let historyRows: HistoryInsertRow[] = []
+  let transferRows: TransferInsertRow[] = []
+  if ('txs' in page) {
+    historyRows = mapHistoryRows(entity.entity_id, page.txs)
+  } else {
+    const { rows, skipped } = mapTransferRows(entity.entity_id, page.transfers)
+    if (skipped > 0) {
+      // ALL-OR-SKIP (worker-side twin of the A4b-1 serve seam rule): caching
+      // the usable rows and advancing the cursor would leave the skipped
+      // transfer permanently missing from the cached tail — serve resumes from
+      // oldest_cursor (or stops entirely at 'complete'), so the hole would be
+      // invisible and unfixable. Instead the page is left UNCACHED and the
+      // entity capped with its cursor un-advanced: local pages drain to the
+      // previous page's last row, then the provider serves this page onward.
+      console.warn(
+        `[backfill] page for scope ${entity.entity_id} has ${skipped} transfer row(s) with no usable ` +
+          `log_index — leaving the page uncached and capping (tail serves live from the provider)`,
+      )
+      const moved = await fencedUpdate(
+        db,
+        entity,
+        sql`status='capped', last_error=${`uncacheable page: ${skipped} row(s) without usable log_index`}, updated_at=now()`,
+      )
+      return moved ? 'capped' : 'lease_lost'
+    }
+    transferRows = rows
+  }
+
   // ── R2: rows AND watermark advance commit together, or neither does. ──
   // A crash anywhere inside rolls back both, so oldest_cursor never points past
-  // uncommitted rows; the re-claim re-pages this exact page and the PK dedups it.
-  return await db.transaction(async (tx) => {
-    let written: number
-    if ('txs' in page) {
-      written = await upsertAddressTxs(tx, mapHistoryRows(entity.entity_id, page.txs))
-    } else {
-      const { rows, skipped } = mapTransferRows(entity.entity_id, page.transfers)
-      if (skipped > 0) {
-        console.warn(
-          `[backfill] skipped ${skipped} transfer row(s) with no usable log_index (scope ${entity.entity_id})`,
-        )
-      }
-      written = await upsertTokenTransfers(tx, rows)
-    }
+  // uncommitted rows; the re-claim re-pages this exact page and the PK dedups
+  // it. A refused fence inside the transaction throws, rolling the rows back
+  // with it — a zombie's page leaves no trace.
+  try {
+    return await db.transaction(async (tx) => {
+      const written =
+        'txs' in page
+          ? await upsertAddressTxs(tx, historyRows)
+          : await upsertTokenTransfers(tx, transferRows)
 
-    // rows_written counts rows RETURNED by the provider path (mapped), not rows
-    // newly inserted — an overlapping re-page the PK dedups still advances the
-    // count, which is intentional: the cap bounds provider work, and treating a
-    // duplicate page as progress is what stops a pathological loop paging forever.
-    const total = entity.rows_written + written
-    const provRows: { blockNumber: string }[] = 'txs' in page ? page.txs : page.transfers
-    const minBlock = provRows.length
-      ? Math.min(...provRows.map((r) => Number(r.blockNumber)))
-      : entity.backfilled_through_block
-    const status: PageStatus =
-      total >= cfg.maxRowsPerEntity ? 'capped' : !page.cursor ? 'complete' : 'partial'
+      // rows_written counts rows RETURNED by the provider path (mapped), not rows
+      // newly inserted — an overlapping re-page the PK dedups still advances the
+      // count, which is intentional: the cap bounds provider work, and treating a
+      // duplicate page as progress is what stops a pathological loop paging forever.
+      const total = entity.rows_written + written
+      const provRows: { blockNumber: string }[] = 'txs' in page ? page.txs : page.transfers
+      const minBlock = provRows.length
+        ? Math.min(...provRows.map((r) => Number(r.blockNumber)))
+        : entity.backfilled_through_block
+      const status: PageStatus =
+        total >= cfg.maxRowsPerEntity ? 'capped' : !page.cursor ? 'complete' : 'partial'
 
-    await tx.execute(sql`
-      UPDATE backfill_watermarks
-      SET status=${status}, rows_written=${total}, oldest_cursor=${page.cursor ?? null},
-          backfilled_through_block=${minBlock}, attempts=0, last_error=NULL, updated_at=now()
-      WHERE id=${entity.id}
-    `)
-    return status
-  })
+      const moved = await fencedUpdate(
+        tx,
+        entity,
+        sql`status=${status}, rows_written=${total}, oldest_cursor=${page.cursor ?? null},
+            backfilled_through_block=${minBlock}, attempts=0, last_error=NULL, updated_at=now()`,
+      )
+      if (!moved) throw new LeaseLostError('lease lost mid-page')
+      return status
+    })
+  } catch (err) {
+    if (err instanceof LeaseLostError) return 'lease_lost'
+    throw err
+  }
 }
 
 // ── Budget + bounds (Task 2.3, steps R4/R5) ──
@@ -343,21 +405,32 @@ export async function backfillPressure(db: WorkerDb): Promise<string | null> {
   return null
 }
 
-/** Release a claim we took but decided not to spend a page on. */
+/** Release a claim we took but decided not to spend a page on (fenced — only
+ *  if we still hold it). */
 export async function releaseClaim(db: WorkerDb, entity: ClaimedEntity): Promise<void> {
-  await db.execute(sql`
-    UPDATE backfill_watermarks
-    SET status=${entity.rows_written > 0 ? 'partial' : 'pending'}, updated_at=now()
-    WHERE id=${entity.id} AND status='running'
-  `)
+  await fencedUpdate(
+    db,
+    entity,
+    sql`status=${entity.rows_written > 0 ? 'partial' : 'pending'}, updated_at=now()`,
+  )
 }
 
-/** BNB politeness: yield while the fleet-shared `history` bucket is already
- *  busy serving humans. Reads the same counters /api/health reads (plain GETs,
- *  no INCR, so it never consumes budget). Without a live Redis the counter is
- *  null (ETH, or a blip) → false: there is no fleet signal to be polite to,
- *  and the standalone hourly cap (R4) is the sole gate. */
+/** The provider bucket an entity's page will actually spend from: address
+ *  history acquires `history`, token transfers acquire `assets` (see the
+ *  Moralis adapter). Politeness must watch the matching counter. */
+export type ProviderBucket = 'history' | 'assets'
+export function bucketFor(entityType: ClaimedEntity['entity_type']): ProviderBucket {
+  return entityType === 'address_txs' ? 'history' : 'assets'
+}
+
+/** BNB politeness: yield while the fleet-shared bucket this page would spend
+ *  from is already busy serving humans. Reads the same counters /api/health
+ *  reads (plain GETs, no INCR, so it never consumes budget). Without a live
+ *  Redis the counter is null (ETH, or a blip) → false: there is no fleet
+ *  signal to be polite to, and the standalone hourly cap (R4) is the sole
+ *  gate. */
 export async function sharedBucketOverHeadroom(
+  bucket: ProviderBucket,
   healthFn: () => Promise<Record<string, unknown>> = getDataProviderHealth,
 ): Promise<boolean> {
   try {
@@ -365,7 +438,7 @@ export async function sharedBucketOverHeadroom(
     const buckets = health?.buckets as
       | Record<string, { hourly?: number | null; hourlyMax?: number }>
       | undefined
-    const b = buckets?.history
+    const b = buckets?.[bucket]
     if (!b || b.hourly == null || !b.hourlyMax) return false
     return b.hourly >= cfg.budgetHeadroom * b.hourlyMax
   } catch {
@@ -412,14 +485,17 @@ export async function startBackfillWorker(): Promise<void> {
         lastPressure = null
       }
 
-      // BNB politeness: back off while the shared history bucket is busy (no-op on ETH).
-      if (await sharedBucketOverHeadroom()) {
+      const entity = await claimNextEntity(db)
+      if (!entity) {
         await sleep(cfg.pollMs)
         continue
       }
 
-      const entity = await claimNextEntity(db)
-      if (!entity) {
+      // BNB politeness AFTER the claim, so the check watches the bucket THIS
+      // entity's page would spend from (transfers hit `assets`, not `history`).
+      // No-op on ETH (no fleet counter).
+      if (await sharedBucketOverHeadroom(bucketFor(entity.entity_type))) {
+        await releaseClaim(db, entity)
         await sleep(cfg.pollMs)
         continue
       }
