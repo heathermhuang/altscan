@@ -86,3 +86,65 @@ describe('createMoralisAdapter — success mapping', () => {
     expect(r2).toEqual({ ok: false, reason: 'upstream_error' })
   })
 })
+
+describe('createMoralisAdapter — A4b-0 host context', () => {
+  it('uses the host-supplied native currency in the native-transfer summary', async () => {
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    // No erc20 legs and a blank Moralis prose → falls through to the native-value branch,
+    // which is the only place `currency` is used.
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      result: [{
+        hash: '0xh2', block_number: '9', block_timestamp: '2026-07-16T05:25:06Z',
+        from_address: '0xf', to_address: '0xt', value: '2000000000000000000',
+        gas_price: '5', receipt_gas_used: '21000', category: 'send',
+        summary: '', possible_spam: false,
+      }],
+      cursor: null,
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const r = await createMoralisAdapter(CFG, { currency: 'BNB' }).getAddressHistory('0xa4a-cur')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data.txs[0].summary).toBe('2 BNB transfer')
+  })
+
+  it('omits the ticker when no currency is supplied (indexer default)', async () => {
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      result: [{
+        hash: '0xh3', block_number: '9', block_timestamp: '2026-07-16T05:25:06Z',
+        from_address: '0xf', to_address: '0xt', value: '2000000000000000000',
+        gas_price: '5', receipt_gas_used: '21000', category: 'send',
+        summary: '', possible_spam: false,
+      }],
+      cursor: null,
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const r = await createMoralisAdapter(CFG).getAddressHistory('0xa4a-nocur')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data.txs[0].summary).toBe('2 transfer')
+  })
+
+  it('carries the provider log index onto transfers (A4b R3 stable identity)', async () => {
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      result: [
+        { transaction_hash: '0xt1', log_index: 7, block_number: '5', block_timestamp: '2026-07-16T05:25:06Z',
+          from_address: '0xf', to_address: '0xt', address: '0xc', token_name: 'T', token_symbol: 'T',
+          token_decimals: '18', value: '1', value_decimal: '1' },
+        { transaction_hash: '0xt2', block_number: '5', block_timestamp: '2026-07-16T05:25:06Z',
+          from_address: '0xf', to_address: '0xt', address: '0xc', token_name: 'T', token_symbol: 'T',
+          token_decimals: '18', value: '1', value_decimal: '1' },
+      ],
+      cursor: null,
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const r = await createMoralisAdapter(CFG).getAddressTokenTransfers('0xa4a-logidx')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.transfers[0].logIndex).toBe('7')
+      // upstream omitted it → null (NOT '') so it cannot type-check as a usable
+      // PK component; the A4b worker skips these rather than colliding.
+      expect(r.data.transfers[1].logIndex).toBeNull()
+    }
+  })
+})

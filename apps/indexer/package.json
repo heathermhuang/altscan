@@ -13,6 +13,7 @@
   "dependencies": {
     "@altscan/chain-config": "workspace:*",
     "@altscan/db": "workspace:*",
+    "@altscan/providers": "workspace:*",
     "@altscan/types": "workspace:*",
     "axios": "^1.18.1",
     "bullmq": "^5.4.0",

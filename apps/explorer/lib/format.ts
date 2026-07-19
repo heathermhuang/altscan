@@ -73,27 +73,30 @@ export function formatHash(hash: string, chars = 16): string {
 
 /**
  * Sanitize token symbol/name to strip homoglyph/confusable Unicode characters.
- * Replaces common Cyrillic/Greek lookalikes with ASCII equivalents, then
- * strips anything outside printable ASCII + basic Latin-1.
+ *
+ * Re-exported from @altscan/explorer-core rather than duplicated. A4b-0 briefly
+ * had two byte-identical copies of this \u2014 a bad shape for a security-relevant
+ * sanitizer, since a fix landing in one copy leaves the other exploitable. It is
+ * a pure string function with no server-only imports, so it bundles fine on the
+ * client. Note it now returns '' (not the raw input) when nothing survives.
+ *
+ * Imported via the `/format` SUBPATH, never the package barrel: the barrel
+ * re-exports ./redis-client, so `from '@altscan/explorer-core'` here would drag
+ * ioredis into the client bundle of every 'use client' consumer of this file
+ * (TxnsLazy, TransfersLazy, HoldersLazy all import it).
  */
-export function sanitizeSymbol(raw: string): string {
-  // Map common homoglyphs to ASCII
-  const homoglyphs: Record<string, string> = {
-    '\u0410': 'A', '\u0412': 'B', '\u0421': 'C', '\u0415': 'E', '\u041D': 'H',
-    '\u041A': 'K', '\u041C': 'M', '\u041E': 'O', '\u0420': 'P', '\u0422': 'T',
-    '\u0425': 'X', '\u0430': 'a', '\u0435': 'e', '\u043E': 'o', '\u0440': 'p',
-    '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u0455': 's',
-    '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0397': 'H', '\u0399': 'I',
-    '\u039A': 'K', '\u039C': 'M', '\u039D': 'N', '\u039F': 'O', '\u03A1': 'P',
-    '\u03A4': 'T', '\u03A5': 'Y', '\u03A7': 'X', '\u03B5': 'e', '\u03BF': 'o',
-    '\u210B': 'H', '\u210C': 'H', '\u210D': 'H', '\u210E': 'h', '\u2110': 'I',
-    '\u2112': 'L', '\u2113': 'l', '\u2115': 'N', '\u2119': 'P', '\u211A': 'Q',
-    '\u211B': 'R', '\u211C': 'R', '\u211D': 'R',
-  }
-  let cleaned = ''
-  for (const ch of raw) {
-    cleaned += homoglyphs[ch] ?? ch
-  }
-  // Strip non-printable and non-ASCII (keep basic Latin, digits, common symbols)
-  return cleaned.replace(/[^\x20-\x7E]/g, '').trim() || raw.trim()
+export { sanitizeSymbol } from '@altscan/explorer-core/format'
+
+import { sanitizeSymbol as _sanitizeSymbol } from '@altscan/explorer-core/format'
+
+/**
+ * `sanitizeSymbol` with an explicit fallback for the all-confusable case.
+ *
+ * Call sites used to branch on the truthiness of the RAW value
+ * (`h.symbol ? sanitizeSymbol(h.symbol) : '—'`), which silently renders blank
+ * now that sanitizeSymbol returns '' instead of handing back the raw input. The
+ * decision has to be made on the SANITIZED result, so make it once here.
+ */
+export function sanitizeSymbolOr(raw: string | null | undefined, fallback: string): string {
+  return (raw ? _sanitizeSymbol(raw) : '') || fallback
 }

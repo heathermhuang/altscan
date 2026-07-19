@@ -1,11 +1,19 @@
 /**
  * Moralis implementation of ProviderAdapter — the ONLY file that talks to
- * deep-index.moralis.io (guardrail-tested). All original protections move
- * here unchanged from the old lib/moralis.ts: Redis/kv response cache
- * (off-heap, shared across instances), per-bucket fleet-wide rate limiter
- * (moralis:rl:v7 keys), MORALIS_DISABLED kill switch, bot policy (now in
- * ./index). Delta vs the old module: methods return ProviderResult<T> with
- * an honest failure reason instead of an ambiguous null/[].
+ * deep-index.moralis.io (guardrail-tested). All original protections are
+ * unchanged from apps/explorer/lib/providers/moralis.ts: Redis/kv response
+ * cache (off-heap, shared across instances), per-bucket fleet-wide rate
+ * limiter (moralis:rl:v7 keys), MORALIS_DISABLED kill switch. Bot policy
+ * stays in the explorer shim.
+ *
+ * A4b-0: lifted into @altscan/providers so the indexer can import it. Three
+ * deltas vs the explorer copy, all mechanical:
+ *   - `currency` (native ticker, summaries only) is passed in by the host
+ *     instead of read from the explorer's chain singleton.
+ *   - `sanitizeSymbol` comes from @altscan/explorer-core.
+ *   - the cache-registry side effect moved to the explorer shim: this module
+ *     must stay side-effect-free because the indexer has no cache registry.
+ *     The explorer still registers `getKvFallbackSize` for its memory monitor.
  *
  * CU BUDGET — Free tier: 40,000 CU/day
  * Strategy:
@@ -14,12 +22,9 @@
  *   - Small page sizes (limit=10-25) — enough to show useful data, minimizes CU
  *   - exclude_spam=true on token endpoints to skip noise
  *   - Only fetch for the active tab, never prefetch other tabs
- *   - Bot detection (in ./index) skips the provider entirely for crawlers
+ *   - Bot detection (explorer shim) skips the provider entirely for crawlers
  */
-import { chainConfig } from '../chain'   // display currency for summaries only
-import { sanitizeSymbol } from '../format'
-import { registerCache } from '../cache-registry'
-import { kvGet, kvSet, getKvFallbackSize, getRedis, isRedisUnavailable } from '@altscan/explorer-core'
+import { kvGet, kvSet, getRedis, isRedisUnavailable, sanitizeSymbol } from '@altscan/explorer-core'
 import type { DataProviderConfig } from '@altscan/chain-config'
 import type {
   AddressHistoryPage,
@@ -48,10 +53,6 @@ const CACHE_TTL = 2 * 60 * 60_000    // 2 hours for positive results. Idle walle
                                      // Capped at 2h (not 24h) because bnbscan-redis is a starter
                                      // instance with noeviction — an over-full cache would fail the
                                      // rate-limiter INCR too.
-
-// Report the in-memory fallback size to the health endpoint / memory monitor. This is 0
-// whenever Redis is serving the cache (BNBScan), and bounded otherwise (EthScan).
-registerCache('moralis', getKvFallbackSize)
 
 /**
  * Read a cached JSON value.
@@ -82,6 +83,9 @@ async function cacheSetNull(key: string): Promise<void> {
  * "Swapped 0.134 WBNB and 0.134 BNB for 0.134 WBNB and 0.134 BNB" (same tokens
  * and amounts on both sides). We rebuild swaps from the structured
  * erc20_transfers and only fall back to Moralis's prose for simple cases.
+ *
+ * `currency` is the host chain's native ticker, supplied by the caller (the
+ * package has no chain singleton). Empty string simply omits the ticker.
  */
 function summarizeMoralisHistory(t: {
   category: string
@@ -93,7 +97,7 @@ function summarizeMoralisHistory(t: {
     value_formatted: string
     direction: string
   }>
-}): string {
+}, currency: string): string {
   const transfers = t.erc20_transfers ?? []
   const fmtAmt = (v: string): string => {
     const n = Number(v)
@@ -147,9 +151,34 @@ function summarizeMoralisHistory(t: {
   // Native-value transfer with no token legs, else humanized category.
   const nativeVal = Number(t.value) / 1e18
   if (nativeVal > 0) {
-    return `${nativeVal.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${chainConfig.currency} transfer`
+    const amount = nativeVal.toLocaleString('en-US', { maximumFractionDigits: 6 })
+    return currency ? `${amount} ${currency} transfer` : `${amount} transfer`
   }
   return humanizeCategory(t.category)
+}
+
+/**
+ * Normalize an upstream `log_index` into a stable primary-key component.
+ *
+ * A4b (R3) keys backfilled token transfers on (scope_address, tx_hash,
+ * log_index). Returning a sentinel string here would be unsafe: `''` satisfies
+ * the `string` type, so two absent values within one tx would type-check and
+ * then collide on the PK. `null` makes absence unrepresentable as a key and
+ * forces every consumer to decide.
+ *
+ * Accepts only a non-negative integer (as number or decimal string) and
+ * canonicalizes it, so `7`, `'7'` and `'007'` all map to `'7'`. Rejects
+ * absent, empty, whitespace, negative, fractional, and non-numeric input.
+ */
+export function normalizeLogIndex(raw: string | number | null | undefined): string | null {
+  if (raw == null) return null
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && raw >= 0 ? String(raw) : null
+  }
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const n = Number(trimmed)
+  return Number.isSafeInteger(n) ? String(n) : null
 }
 
 /**
@@ -325,8 +354,27 @@ export function mapMoralisOwners(items: RawOwner[]): TokenHoldersPage['holders']
     }))
 }
 
-export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
+export function createMoralisAdapter(
+  cfg: DataProviderConfig,
+  ctx?: { currency?: string },
+): ProviderAdapter {
   const CHAIN = cfg.moralisChain
+  const CURRENCY = ctx?.currency ?? ''
+  /**
+   * Cache-key namespace. Every provider cache key MUST carry this prefix.
+   *
+   * Without it, keys were bare (`history:0xabc:`) while `kvGet`/`kvSet` pass the
+   * key straight to Redis. Two hosts sharing one Redis would then collide: from
+   * A4b-2 the indexer resolves its own adapter against the SAME `REDIS_URL` as
+   * the web (`apps/indexer/src/queue.ts`), and it passes no `currency` ctx —
+   * so whichever host wrote first would decide the other's rendered summary
+   * (`"1.5 BNB transfer"` vs `"1.5 transfer"`, see summarize* below).
+   *
+   * `v2` also retires pre-`logIndex` cached transfer pages, whose JSON
+   * deserializes with `logIndex === undefined` and would otherwise be trusted
+   * as a well-formed TokenTransfersPage for the whole TTL.
+   */
+  const NS = `moralis:v2:${CHAIN}:${CURRENCY}`
   return {
     kind: 'moralis',
 
@@ -335,7 +383,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
      * so no separate stats call is needed. Cost: ~25 CU.
      */
     async getAddressHistory(address: string, cursor?: string): Promise<ProviderResult<AddressHistoryPage>> {
-      const cacheKey = `history:${address}:${cursor ?? ''}`
+      const cacheKey = `${NS}:history:${address}:${cursor ?? ''}`
       const cached = await cacheGetJson<AddressHistoryPage>(cacheKey)
       if (cached !== undefined) {
         // null = cached negative (a recent failed upstream attempt)
@@ -354,7 +402,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
           headers: auth.headers,
           next: { revalidate: 300 },
           signal: AbortSignal.timeout(10000),
-        })
+        } as RequestInit)
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
 
         const data = (await res.json()) as {
@@ -397,7 +445,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
             gasPrice: t.gas_price,
             gasUsed: t.receipt_gas_used,
             category: t.category,
-            summary: summarizeMoralisHistory(t),
+            summary: summarizeMoralisHistory(t, CURRENCY),
             possibleSpam: t.possible_spam,
             erc20Transfers: (t.erc20_transfers ?? []).map(e => ({
               fromAddress: e.from_address,
@@ -424,7 +472,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
     },
 
     async getAddressTokenBalances(address: string): Promise<ProviderResult<ProviderTokenBalance[]>> {
-      const cacheKey = `balances:${address}`
+      const cacheKey = `${NS}:balances:${address}`
       const cached = await cacheGetJson<ProviderTokenBalance[]>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -434,7 +482,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
       try {
         const res = await fetch(
           `${BASE}/${address}/erc20?chain=${CHAIN}&limit=20&exclude_spam=true`,
-          { headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) },
+          { headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) } as RequestInit,
         )
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
         const data = (await res.json()) as Array<{
@@ -468,7 +516,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
      * ERC-20 token transfer history for an address. Cost: ~25 CU.
      */
     async getAddressTokenTransfers(address: string, cursor?: string): Promise<ProviderResult<TokenTransfersPage>> {
-      const cacheKey = `transfers:${address}:${cursor ?? ''}`
+      const cacheKey = `${NS}:transfers:${address}:${cursor ?? ''}`
       const cached = await cacheGetJson<TokenTransfersPage>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -485,12 +533,13 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
           headers: auth.headers,
           next: { revalidate: 300 },
           signal: AbortSignal.timeout(10000),
-        })
+        } as RequestInit)
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
 
         const data = (await res.json()) as {
           result: Array<{
             transaction_hash: string
+            log_index?: string | number    // A4b R3: stable per-tx identity for backfill upserts
             block_number: string
             block_timestamp: string
             from_address: string
@@ -508,6 +557,12 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
         const txResult: TokenTransfersPage = {
           transfers: data.result.map(t => ({
             txHash: t.transaction_hash,
+            // null unless upstream gives a genuine non-negative integer. A4b keys
+            // backfilled transfers on (scope, tx_hash, log_index), so anything
+            // else — absent, '', whitespace, negative, '1.5', 'abc' — MUST NOT
+            // reach the PK; the worker skips null rows instead of colliding.
+            // Normalized through Number so '007' and 7 agree on one key.
+            logIndex: normalizeLogIndex(t.log_index),
             blockNumber: t.block_number,
             blockTimestamp: t.block_timestamp,
             fromAddress: t.from_address,
@@ -529,7 +584,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
     },
 
     async getAddressNfts(address: string): Promise<ProviderResult<ProviderNft[]>> {
-      const cacheKey = `nfts:${address}`
+      const cacheKey = `${NS}:nfts:${address}`
       const cached = await cacheGetJson<ProviderNft[]>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -539,7 +594,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
       try {
         const res = await fetch(
           `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
-          { headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) },
+          { headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) } as RequestInit,
         )
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
         const data = (await res.json()) as {
@@ -578,7 +633,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
      * their local estimate exactly as they did under the null contract.
      */
     async getTokenHolders(tokenAddress: string): Promise<ProviderResult<TokenHoldersPage>> {
-      const cacheKey = `owners:${tokenAddress}`
+      const cacheKey = `${NS}:owners:${tokenAddress}`
       const cached = await cacheGetJson<TokenHoldersPage>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -591,7 +646,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
         url.searchParams.set('limit', '25')
         const res = await fetch(url.toString(), {
           headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000),
-        })
+        } as RequestInit)
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
         const data = (await res.json()) as { total_supply?: string | null; result?: RawOwner[] }
         const result: TokenHoldersPage = {
@@ -610,7 +665,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
      * Total holder count of an ERC20 token (Moralis holder-stats). Cost: ~50 CU.
      */
     async getTokenHolderCount(tokenAddress: string): Promise<ProviderResult<number>> {
-      const cacheKey = `holdercount:${tokenAddress}`
+      const cacheKey = `${NS}:holdercount:${tokenAddress}`
       const cached = await cacheGetJson<number>(cacheKey)
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
@@ -620,7 +675,7 @@ export function createMoralisAdapter(cfg: DataProviderConfig): ProviderAdapter {
       try {
         const res = await fetch(`${BASE}/erc20/${tokenAddress}/holders?chain=${CHAIN}`, {
           headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000),
-        })
+        } as RequestInit)
         if (!res.ok) { await cacheSetNull(cacheKey); return fail('upstream_error') }
         const data = (await res.json()) as { totalHolders?: number }
         if (typeof data.totalHolders !== 'number') { await cacheSetNull(cacheKey); return fail('upstream_error') }
