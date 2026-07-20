@@ -20,7 +20,14 @@ import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
-import { resolveDataProvider, getDataProviderHealth } from '@altscan/providers'
+// ⚠ @altscan/providers is imported LAZILY (see loadProviders) and only as
+// types here. The package ships TS source (`main: src/index.ts`) with
+// extension-less relative imports; the indexer runs compiled CommonJS under
+// plain node, whose type-stripping require() can load a single-file TS package
+// (chain-config) but NOT one with relative imports — a top-level import here
+// crash-looped both prod indexers at boot on 2026-07-19 (~10.5h outage).
+// Dark mode must never touch the package; enabling requires the packaging fix
+// (a real dist build for providers + explorer-core, or a tsx runtime) FIRST.
 import type {
   AddressHistoryPage,
   ProviderAdapter,
@@ -29,6 +36,13 @@ import type {
   ProviderTx,
   TokenTransfersPage,
 } from '@altscan/providers'
+
+type ProvidersModule = typeof import('@altscan/providers')
+let providersModule: ProvidersModule | null = null
+async function loadProviders(): Promise<ProvidersModule> {
+  if (!providersModule) providersModule = await import('@altscan/providers')
+  return providersModule
+}
 import { cfg } from './backfill-budget'
 import { getMaintenanceDb } from './db'
 
@@ -452,10 +466,13 @@ const ENTITY_TYPES: ReadonlyArray<ClaimedEntity['entity_type']> = [
  *  gate. */
 export async function sharedBucketOverHeadroom(
   bucket: ProviderBucket,
-  healthFn: () => Promise<Record<string, unknown>> = getDataProviderHealth,
+  healthFn?: () => Promise<Record<string, unknown>>,
 ): Promise<boolean> {
   try {
-    const health = await healthFn()
+    // Default resolves lazily so the module graph stays provider-free while
+    // the worker is dark (only the running loop ever takes this path).
+    const fn = healthFn ?? (await loadProviders()).getDataProviderHealth
+    const health = await fn()
     const buckets = health?.buckets as
       | Record<string, { hourly?: number | null; hourlyMax?: number }>
       | undefined
@@ -475,6 +492,9 @@ export async function startBackfillWorker(): Promise<void> {
     console.log('[backfill] disabled — worker not started')
     return
   }
+  // Past the gate: the provider package loads here, and ONLY here (see the
+  // import note at the top of this file).
+  const { resolveDataProvider } = await loadProviders()
   const provider = resolveDataProvider(chain.provider, { currency: chain.currency })
   if (!provider) {
     console.log('[backfill] no provider — worker not started')
