@@ -1,12 +1,31 @@
 {
+  // Production BUILD config. Emits CommonJS + .d.ts to ./dist so plain-node
+  // consumers can require() this package — specifically the compiled CJS
+  // indexer, which reaches it transitively through @altscan/providers
+  // (providers/src/moralis.ts value-imports the barrel). Mirrors @altscan/db,
+  // the repo's original built package.
+  //
+  // Before this, main/exports pointed at ./src/*.ts and the barrel re-exports
+  // four sibling modules with extension-less specifiers; node's CJS resolver
+  // looks for ./format.js and finds only ./format.ts → "Cannot find module".
+  // That is the #78 crash-loop, one level down.
+  //
+  // Tests are EXCLUDED so the emitted build stays on a pure ES2020 lib: a
+  // *.test.ts in src pulls `import 'vitest'` → vite/types/importGlob.d.ts →
+  // references `Worker` → TS2304 with no DOM lib, which fails ONLY the indexer
+  // deploy build (PR #73). tsconfig.typecheck.json re-includes them.
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "declaration": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["**/*.test.ts", "**/*.spec.ts"]
 }

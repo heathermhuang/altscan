@@ -10,6 +10,19 @@ export default defineConfig({
       // does not exist in CI → "Failed to resolve entry for package @altscan/db".
       // Pointing at the source lets vitest transform it on the fly (build-free).
       '@altscan/db': fileURLToPath(new URL('./packages/db/client.ts', import.meta.url)),
+      // Same reason as @altscan/db above: these two now ship built as well
+      // (main/exports -> ./dist, gitignored, and CI runs vitest with no build
+      // step). Without these aliases the suite dies on "Failed to resolve entry
+      // for package @altscan/explorer-core" — apps/explorer/lib/body-cache.test.ts
+      // value-imports the barrel, and the explorer's provider shim reaches both.
+      //
+      // ORDER IS LOAD-BEARING: Vite matches string aliases by PREFIX, so a bare
+      // '@altscan/explorer-core' entry placed first would rewrite the subpath
+      // '@altscan/explorer-core/format' into '<...>/src/index.ts/format'. The
+      // more specific key must come first.
+      '@altscan/explorer-core/format': fileURLToPath(new URL('./packages/explorer-core/src/format.ts', import.meta.url)),
+      '@altscan/explorer-core': fileURLToPath(new URL('./packages/explorer-core/src/index.ts', import.meta.url)),
+      '@altscan/providers': fileURLToPath(new URL('./packages/providers/src/index.ts', import.meta.url)),
       // Mirror apps/explorer's tsconfig `@/* -> ./*` path alias so tests can
       // import route handlers and libs the same way the app does. The alias is
       // explorer-only (no other workspace uses `@/`), so a global mapping is

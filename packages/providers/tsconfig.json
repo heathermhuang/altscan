@@ -1,12 +1,27 @@
 {
+  // Production BUILD config. Emits CommonJS + .d.ts to ./dist so the compiled
+  // CJS indexer can require() this package. Previously `build` was
+  // `tsc --noEmit` and main/exports pointed at ./src/index.ts, which imports
+  // './moralis' extension-less — node's CJS resolver looks for ./moralis.js,
+  // finds only ./moralis.ts, and crash-loops. That is #78's root cause;
+  // chain-config survives the same treatment only because it is a single file
+  // with no relative imports for node to resolve.
+  //
+  // Tests stay EXCLUDED from the emitted build (PR #73): a *.test.ts in src
+  // pulls `import 'vitest'` → vite/types/importGlob.d.ts → `Worker` → TS2304
+  // under a pure ES2020 lib, failing the indexer deploy build only.
+  // tsconfig.typecheck.json re-includes them with DOM.
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "declaration": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
   "include": ["src"],
   "exclude": ["**/*.test.ts", "**/*.spec.ts"]

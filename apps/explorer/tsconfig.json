@@ -17,7 +17,17 @@
     "paths": {
       "@/*": ["./*"],
       "@altscan/db": ["../../packages/db/client.ts"],
-      "@altscan/types": ["../../packages/types/index.ts"]
+      "@altscan/types": ["../../packages/types/index.ts"],
+      // Same reason as @altscan/db above: these ship built (main/exports ->
+      // ./dist) for the compiled-CJS indexer, but dist/ is gitignored and the
+      // webs' Render build is `pnpm --filter @altscan/explorer build`, which
+      // has no `^build` and never builds workspace deps. Without these aliases
+      // that build dies on "Module not found: Can't resolve
+      // '@altscan/explorer-core'". Next applies tsconfig paths to webpack, so
+      // the webs compile these from source and never need dist at all.
+      "@altscan/explorer-core": ["../../packages/explorer-core/src/index.ts"],
+      "@altscan/explorer-core/format": ["../../packages/explorer-core/src/format.ts"],
+      "@altscan/providers": ["../../packages/providers/src/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
