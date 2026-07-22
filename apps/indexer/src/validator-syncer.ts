@@ -1,6 +1,7 @@
 import { Contract, formatEther } from 'ethers'
 import { getDb, schema } from './db'
 import { getProvider } from './provider'
+import { STAKE_HUB_ABI, STAKE_HUB_ADDRESS, toCommissionFraction } from './validator-stakehub'
 
 const provider = getProvider()
 
@@ -11,15 +12,7 @@ const VALIDATOR_SET_ABI = [
   'function currentValidatorSetMap(address) view returns (uint256)',
 ]
 
-// BSC StakeHub contract (BEP-294 / Fusion)
-const STAKE_HUB_ADDRESS = '0x0000000000000000000000000000000000002002'
-const STAKE_HUB_ABI = [
-  'function getValidatorElectionInfo(uint256 offset, uint256 limit) view returns (address[] consensusAddrs, uint256[] votingPowers, bytes[] voteAddrs, uint256 totalLength)',
-  'function getValidatorDescription(address operatorAddress) view returns (string moniker, string identity, string website, string details)',
-  'function getValidatorCommission(address operatorAddress) view returns (uint64 rate, uint64 maxRate, uint64 maxChangeRate)',
-  'function getValidatorConsensusKeyByOperator(address operatorAddress) view returns (address consensusAddr)',
-  'function getOperatorAddressByConsensusAddress(address consensusAddr) view returns (address operatorAddr)',
-]
+// BSC StakeHub contract (BEP-294 / Fusion) — address + ABI in ./validator-stakehub
 
 // Known validator names as fallback (top BSC validators by consensus address)
 const KNOWN_VALIDATORS: Record<string, string> = {
@@ -98,12 +91,13 @@ async function resolveOperatorAddresses(
   const map = new Map<string, string>()
   let resolved = 0
   let failed = 0
+  let firstFailure: string | null = null
 
   // Batch in groups of 10 to avoid RPC rate limits
   for (let i = 0; i < consensusAddrs.length; i += 10) {
     const batch = consensusAddrs.slice(i, i + 10)
     const results = await Promise.allSettled(
-      batch.map(addr => stakeHub.getOperatorAddressByConsensusAddress(addr))
+      batch.map(addr => stakeHub.consensusToOperator(addr))
     )
     for (let j = 0; j < results.length; j++) {
       const r = results[j]
@@ -112,11 +106,23 @@ async function resolveOperatorAddresses(
         resolved++
       } else {
         failed++
+        // Surface why. Without this the counter alone hid a reverting selector
+        // for weeks: every failure looked identical to a zero-address result.
+        if (!firstFailure) {
+          firstFailure = r.status === 'rejected'
+            ? `${(r.reason as { code?: string })?.code ?? 'error'}: ${
+                (r.reason as { shortMessage?: string; message?: string })?.shortMessage
+                ?? (r.reason as Error)?.message ?? String(r.reason)}`
+            : `returned zero address for ${batch[j]}`
+        }
       }
     }
   }
 
   console.log(`[validator-syncer] Resolved ${resolved}/${consensusAddrs.length} operator addresses (${failed} failed)`)
+  if (firstFailure) {
+    console.warn(`[validator-syncer] first operator-resolution failure — ${firstFailure}`)
+  }
   return map
 }
 
@@ -153,7 +159,7 @@ async function upsertValidators(
 
         try {
           const comm = await stakeHub.getValidatorCommission(operatorAddr)
-          commission = (Number(comm.rate) / 1e18).toFixed(4)
+          commission = toCommissionFraction(comm.rate)
         } catch { /* commission not available */ }
       }
     }
