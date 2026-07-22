@@ -20,14 +20,19 @@ import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
-// ⚠ @altscan/providers is imported LAZILY (see loadProviders) and only as
-// types here. The package ships TS source (`main: src/index.ts`) with
+// @altscan/providers is imported LAZILY (see loadProviders) and only as types
+// here. HISTORY: the package used to ship TS source (`main: src/index.ts`) with
 // extension-less relative imports; the indexer runs compiled CommonJS under
 // plain node, whose type-stripping require() can load a single-file TS package
 // (chain-config) but NOT one with relative imports — a top-level import here
 // crash-looped both prod indexers at boot on 2026-07-19 (~10.5h outage).
-// Dark mode must never touch the package; enabling requires the packaging fix
-// (a real dist build for providers + explorer-core, or a tsx runtime) FIRST.
+//
+// RESOLVED: @altscan/providers and @altscan/explorer-core (which providers
+// value-imports) now ship real CommonJS dist builds with exports maps, so
+// require() resolves them like any other package. Verified by booting the
+// compiled artifact with the gate ON: "[backfill] worker ON", no module error.
+// The lazy import is KEPT as defense in depth — it costs nothing and keeps
+// dark mode from touching the package at all.
 import type {
   AddressHistoryPage,
   ProviderAdapter,
