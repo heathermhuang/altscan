@@ -73,8 +73,13 @@ describe.skipIf(!PG_URL)('partition DROP is schema-qualified — real Postgres',
   })
 
   afterAll(async () => {
-    await raw.unsafe(`DROP TABLE IF EXISTS token_transfers CASCADE`)
-    await raw.unsafe(`DROP SCHEMA IF EXISTS ${DECOY_SCHEMA} CASCADE`)
+    // Vitest runs afterAll even when beforeAll THREW — so a set-but-non-disposable
+    // URL (rejected in beforeAll) must NOT reach these production-named DROPs. Guard
+    // them behind DISPOSABLE, mirroring the fail-closed intent. raw.end() is always safe.
+    if (DISPOSABLE) {
+      await raw.unsafe(`DROP TABLE IF EXISTS token_transfers CASCADE`)
+      await raw.unsafe(`DROP SCHEMA IF EXISTS ${DECOY_SCHEMA} CASCADE`)
+    }
     await raw.end({ timeout: 5 })
   })
 
