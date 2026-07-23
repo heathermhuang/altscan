@@ -65,19 +65,34 @@ export function reportIndexerLag(lag: number): void {
 }
 
 /**
- * Whitelist of allowed table names and timestamp columns.
- * Using sql.raw() with string interpolation for identifiers is inherently
- * dangerous — we mitigate by strictly validating against this whitelist.
- * PostgreSQL parameterized queries ($1) cannot be used for identifiers
- * (table/column names), only for values.
+ * Whitelist of table names and timestamp columns the retention job may name in a
+ * destructive statement. Interpolating identifiers with sql.raw() is inherently
+ * dangerous (parameterized queries can't bind identifiers), so it is gated three
+ * ways, strongest first:
+ *   1. `AllowedTable` — a compile-time union. A name outside it (any `backfill_*`
+ *      table, say) is a TYPE ERROR at the call site, not a runtime hope.
+ *   2. `tableIdent` / `partitionIdent` — the ONLY constructors of the `SafeIdent`
+ *      that every destructive primitive requires; both re-check at runtime.
+ *   3. the `^[a-z_]+$` shape check — defense-in-depth against injection.
+ *
+ * This list lives HERE, not in retention-policy.ts, on purpose: it is the SECOND,
+ * INDEPENDENT gate to buildRetentionPlan() (A4b invariant 1 — a backfill table
+ * would have to defeat both, and it is absent from both by construction).
  */
-const ALLOWED_TABLES = new Set([
+const ALLOWED_TABLES = [
   'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs', 'token_balances',
-])
+] as const
+type AllowedTable = typeof ALLOWED_TABLES[number]
+const ALLOWED_TABLE_SET: ReadonlySet<string> = new Set(ALLOWED_TABLES)
 const ALLOWED_COLUMNS = new Set(['timestamp', 'block_number'])
 
+/** Runtime narrowing of a policy-derived string to the exec whitelist. */
+function isAllowedTable(t: string): t is AllowedTable {
+  return ALLOWED_TABLE_SET.has(t)
+}
+
 function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void {
-  const allowed = kind === 'table' ? ALLOWED_TABLES : ALLOWED_COLUMNS
+  const allowed = kind === 'table' ? ALLOWED_TABLE_SET : ALLOWED_COLUMNS
   if (!allowed.has(value)) {
     throw new Error(`[retention] Refused ${kind} identifier: "${value}" — not in whitelist`)
   }
@@ -86,6 +101,44 @@ function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void 
     throw new Error(`[retention] Invalid ${kind} identifier: "${value}" — must be lowercase alpha/underscore only`)
   }
 }
+
+/**
+ * An identifier proven safe to interpolate into a destructive statement. Its
+ * brand is module-private, so the ONLY ways to obtain one are the two
+ * constructors below — never a bare string, a `sql.raw(...)` fragment, or a
+ * `backfill_*` name. Every DELETE / DROP / UPDATE / VACUUM primitive takes a
+ * `SafeIdent`, so the compiler enforces the whitelist alongside the runtime set.
+ */
+declare const SAFE_IDENT: unique symbol
+type SafeIdent = string & { readonly [SAFE_IDENT]: true }
+
+/** A whitelisted base table → SafeIdent. Compile-time union + runtime re-check. */
+function tableIdent(table: AllowedTable): SafeIdent {
+  assertAllowedIdentifier(table, 'table')
+  return table as SafeIdent
+}
+
+/**
+ * A token_transfers RANGE partition (`token_transfers_legacy`,
+ * `token_transfers_p_111000000`, …) → SafeIdent. The mandatory `token_transfers_`
+ * prefix is what makes a partition name un-spoofable as a `backfill_*` table
+ * (which is not an AllowedTable either). listTokenTransferPartitions only ever
+ * yields children of token_transfers, all of which carry this prefix — so this
+ * both admits every real partition and excludes everything else.
+ */
+function partitionIdent(name: string): SafeIdent {
+  if (!/^token_transfers_[a-z0-9_]+$/.test(name)) {
+    throw new Error(`[retention] Refused partition identifier: "${name}" — not a token_transfers partition`)
+  }
+  return name as SafeIdent
+}
+
+/** The single choke point turning a proven-safe identifier into raw SQL. */
+function identSql(safe: SafeIdent): SQL {
+  return sql.raw(safe)
+}
+
+export { tableIdent, partitionIdent }
 
 /**
  * Translate a timestamp cutoff into a block_number cutoff via the
@@ -138,12 +191,14 @@ async function cutoffBlockNumber(cutoff: Date, days: number): Promise<number | n
  *
  * Uses `ctid IN (SELECT ctid … LIMIT n)` — the LIMIT short-circuits, and the inner
  * scan uses whatever index `where` supports (all callers filter on an indexed
- * column). `ident` MUST already be a safe identifier fragment (caller validates);
- * ctid is only unique within a single physical table, so for partitioned data the
- * caller passes the child partition, never the parent.
+ * column). `table` is a `SafeIdent`, so the whitelist / partition check is
+ * enforced by the type — not a caller convention. ctid is only unique within a
+ * single physical table, so for partitioned data the caller passes the child
+ * partition (`partitionIdent`), never the parent.
  */
-async function deleteBatchLoop(ident: SQL, where: SQL): Promise<number> {
+async function deleteBatchLoop(table: SafeIdent, where: SQL): Promise<number> {
   const db = getMaintenanceDb()
+  const ident = identSql(table)
   let total = 0
   for (;;) {
     const result = await db.execute(sql`
@@ -160,9 +215,8 @@ async function deleteBatchLoop(ident: SQL, where: SQL): Promise<number> {
   return total
 }
 
-async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<number> {
-  assertAllowedIdentifier(table, 'table')
-  return deleteBatchLoop(sql.raw(table), sql`block_number < ${cutoffBlock}`)
+async function deleteByBlockNumber(table: AllowedTable, cutoffBlock: number): Promise<number> {
+  return deleteBatchLoop(tableIdent(table), sql`block_number < ${cutoffBlock}`)
 }
 
 /**
@@ -183,8 +237,9 @@ async function deleteByBlockNumber(table: string, cutoffBlock: number): Promise<
  * fraction — and rows are processed oldest-first, which makes interrupted runs
  * resume deterministically.
  */
-async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL, orderBy?: SQL): Promise<number> {
+async function nullColumnBatchLoop(table: SafeIdent, setSql: SQL, where: SQL, orderBy?: SQL): Promise<number> {
   const db = getMaintenanceDb()
+  const ident = identSql(table)
   const orderClause = orderBy ? sql` ORDER BY ${orderBy}` : sql.raw('')
   let total = 0
   for (;;) {
@@ -215,7 +270,7 @@ async function nullColumnBatchLoop(ident: SQL, setSql: SQL, where: SQL, orderBy?
  */
 async function pruneTransactionBodies(cutoffBlock: number): Promise<number> {
   return nullColumnBatchLoop(
-    sql.raw('transactions'),
+    tableIdent('transactions'),
     sql`input = '0x', body_pruned = true`,
     sql`block_number < ${cutoffBlock} AND body_pruned = false`,
     sql.raw('block_number'),
@@ -233,16 +288,22 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
   const parts = await listTokenTransferPartitions()
   let dropped = 0
   for (const p of parts) {
-    // Defense-in-depth: partition names come from the pg catalog, but we build the
-    // DROP with sql.raw, so refuse anything that isn't a simple identifier.
-    if (!/^[a-z_][a-z0-9_]*$/.test(p.name)) {
+    // partitionIdent enforces the `token_transfers_` prefix (+ injection shape),
+    // so a mis-named relation is skipped and never reaches a DROP/DELETE. A
+    // backfill_* table can't arrive here anyway (it is not a token_transfers
+    // child, so listTokenTransferPartitions never yields it), and its name lacks
+    // the prefix — belt and suspenders.
+    let partId: SafeIdent
+    try {
+      partId = partitionIdent(p.name)
+    } catch {
       console.warn(`[retention] skipping partition with unexpected name: "${p.name}"`)
       continue
     }
     if (p.hi <= cutoffBlock) {
       // Entire partition is older than the cutoff → drop it outright.
       try {
-        await db.execute(sql.raw(`DROP TABLE IF EXISTS ${p.name}`))
+        await db.execute(sql`DROP TABLE IF EXISTS ${identSql(partId)}`)
         console.log(`[retention] dropped token_transfers partition ${p.name} (blocks ${p.lo}–${p.hi - 1})`)
         dropped++
       } catch (err) {
@@ -255,7 +316,7 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
       // must target the physical partition. Every row here is in [p.lo, p.hi), so
       // `block_number < cutoffBlock` selects exactly the below-cutoff rows.
       try {
-        const n = await deleteBatchLoop(sql.raw(p.name), sql`block_number < ${cutoffBlock}`)
+        const n = await deleteBatchLoop(partId, sql`block_number < ${cutoffBlock}`)
         if (n > 0) console.log(`[retention] boundary partition ${p.name}: deleted ${n} rows below block ${cutoffBlock}`)
       } catch (err) {
         console.warn(`[retention] boundary delete on ${p.name} failed:`, err instanceof Error ? err.message : err)
@@ -422,6 +483,10 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   if (cutoffBlock !== null && cutoffBlock > 0) {
     // Body row-deletes (refetchable / secondary tables only).
     for (const table of blockNumberTables) {
+      if (!isAllowedTable(table)) {
+        console.error(`[retention] refusing non-whitelisted body table "${table}"`)
+        continue
+      }
       try {
         console.log(`[retention] Deleting old rows from ${table} (block_number < ${cutoffBlock})...`)
         const deleted = await deleteByBlockNumber(table, cutoffBlock)
@@ -471,6 +536,10 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
       // rows below the body cutoff are already gone, so on the normal path
       // (compact ≥ body window) this finds ~nothing.
       for (const table of plan.bodyDeleteTables) {
+        if (!isAllowedTable(table)) {
+          console.error(`[retention] [compact] refusing non-whitelisted body table "${table}"`)
+          continue
+        }
         try {
           const n = await deleteByBlockNumber(table, compactCutoffBlock)
           if (n > 0) console.log(`[retention] [compact] ${table}: deleted ${n} rows (body sweep to compact cutoff)`)
@@ -503,7 +572,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
       // blocks last — childless only.
       try {
         const n = await deleteBatchLoop(
-          sql.raw('blocks'),
+          tableIdent('blocks'),
           sql`number < ${compactCutoffBlock} AND NOT EXISTS (SELECT 1 FROM transactions WHERE block_number = blocks.number)`,
         )
         if (n > 0) console.log(`[retention] [compact] blocks: deleted ${n} rows`)
@@ -524,9 +593,9 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   // single bounded statement on the isolated maintenance connection.
   try {
     const db = getMaintenanceDb()
-    const zbResult = await db.execute(sql.raw(`
-      DELETE FROM token_balances WHERE balance <= 0
-    `))
+    const zbResult = await db.execute(
+      sql`DELETE FROM ${identSql(tableIdent('token_balances'))} WHERE balance <= 0`
+    )
     const zbCount = (zbResult as any).count ?? (zbResult as any).rowCount ?? 0
     if (zbCount > 0) console.log(`[retention] token_balances: deleted ${zbCount} zero-balance rows`)
     totalDeleted += zbCount
@@ -554,13 +623,12 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     const db = getMaintenanceDb()
     // When token_transfers is partitioned, DROP PARTITION already returned its space
     // to the OS — no VACUUM needed (and we avoid scanning a multi-GB partitioned table).
-    const highVolumeTables = ttPartitioned
+    const highVolumeTables: AllowedTable[] = ttPartitioned
       ? ['transactions', 'logs', 'dex_trades', 'gas_history', 'token_balances']
       : ['transactions', 'token_transfers', 'logs', 'dex_trades', 'gas_history', 'token_balances']
     for (const t of highVolumeTables) {
-      assertAllowedIdentifier(t, 'table')
       try {
-        await db.execute(sql`VACUUM ANALYZE ${sql.raw(t)}`)
+        await db.execute(sql`VACUUM ANALYZE ${identSql(tableIdent(t))}`)
         console.log(`[retention] VACUUM ANALYZE ${t} done`)
       } catch (err) {
         console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
@@ -592,13 +660,12 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
 
 async function runVacuumFull(): Promise<void> {
   const db = getMaintenanceDb()
-  const tables = ['token_transfers', 'transactions', 'blocks', 'logs', 'dex_trades', 'gas_history', 'token_balances']
+  const tables: AllowedTable[] = ['token_transfers', 'transactions', 'blocks', 'logs', 'dex_trades', 'gas_history', 'token_balances']
   console.log('[retention] VACUUM FULL requested — this will lock tables and take several minutes')
   for (const t of tables) {
-    assertAllowedIdentifier(t, 'table')
     try {
       console.log(`[retention] VACUUM FULL ANALYZE ${t} starting...`)
-      await db.execute(sql`VACUUM FULL ANALYZE ${sql.raw(t)}`)
+      await db.execute(sql`VACUUM FULL ANALYZE ${identSql(tableIdent(t))}`)
       console.log(`[retention] VACUUM FULL ANALYZE ${t} done`)
     } catch (err) {
       console.warn(`[retention] VACUUM FULL ${t} failed:`, err instanceof Error ? err.message : err)

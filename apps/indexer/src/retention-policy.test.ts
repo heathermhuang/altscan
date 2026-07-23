@@ -181,8 +181,8 @@ describe('A4b invariant 1 — backfill tables are retention-exempt by constructi
     // is asserted against it. A backfill table landing here would make the
     // hardcoded paths above reachable.
     const src = readRetentionSource('retention-cleanup.ts')
-    const block = src.match(/const ALLOWED_TABLES = new Set\(\[([\s\S]*?)\]\)/)
-    expect(block, 'ALLOWED_TABLES set not found — did it get renamed?').toBeTruthy()
+    const block = src.match(/const ALLOWED_TABLES = \[([\s\S]*?)\] as const/)
+    expect(block, 'ALLOWED_TABLES array not found — did it get renamed?').toBeTruthy()
     expect(block![1]).not.toMatch(/backfill/)
   })
 })
