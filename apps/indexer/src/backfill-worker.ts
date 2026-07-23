@@ -19,7 +19,7 @@
 import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
-import { getChainConfig } from '@altscan/chain-config'
+import { getChainConfig, isBackfillEnabled } from '@altscan/chain-config'
 // @altscan/providers is imported LAZILY (see loadProviders) and only as types
 // here. HISTORY: the package used to ship TS source (`main: src/index.ts`) with
 // extension-less relative imports; the indexer runs compiled CommonJS under
@@ -493,7 +493,7 @@ export async function sharedBucketOverHeadroom(
 
 export async function startBackfillWorker(): Promise<void> {
   const chain = getChainConfig()
-  if (cfg.enabledEnvOff || chain.provider?.backfill?.enabled !== true) {
+  if (!isBackfillEnabled(chain)) {
     console.log('[backfill] disabled — worker not started')
     return
   }

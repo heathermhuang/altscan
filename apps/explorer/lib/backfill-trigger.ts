@@ -8,6 +8,7 @@
  * CU, and resilient if the provider is down later).
  */
 import { getDb, schema } from '@altscan/db'
+import { isBackfillEnabled } from '@altscan/chain-config'
 import { chainConfig } from './chain'
 
 /** Pure decision — the part worth testing. */
@@ -20,16 +21,13 @@ export function shouldEnqueueBackfill(o: {
 }
 
 /**
- * Whether backfill is on for THIS deployment.
- *
- * Two independent gates, both of which must allow it: the per-chain config
- * flag, and a `BACKFILL_ENABLED=0` env kill switch so a chain can be turned off
- * without a code deploy. Read as `=== true` so an absent `backfill` object is
- * as safe as an explicit false.
+ * Whether backfill is on for THIS deployment — the per-chain config flag with a
+ * `BACKFILL_ENABLED` env override (see isBackfillEnabled in @altscan/chain-config).
+ * The indexer worker gate reads the SAME helper, so both sides of A4b flip
+ * together on a single env change per service — no code deploy, symmetric rollback.
  */
 export function backfillEnabled(): boolean {
-  if (process.env.BACKFILL_ENABLED === '0') return false
-  return chainConfig.provider?.backfill?.enabled === true
+  return isBackfillEnabled(chainConfig)
 }
 
 /**

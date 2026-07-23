@@ -15,7 +15,6 @@ const float = (v: string | undefined, d: number) => {
 }
 
 export const cfg = {
-  enabledEnvOff:   process.env.BACKFILL_ENABLED === '0',
   pollMs:          int(process.env.BACKFILL_POLL_MS, 15_000),
   pageSleepMs:     int(process.env.BACKFILL_PAGE_SLEEP_MS, 2_000),
   maxRowsPerEntity: int(process.env.BACKFILL_MAX_ROWS_PER_ENTITY, 3_000),  // doc target 10k; start low

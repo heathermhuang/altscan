@@ -255,6 +255,30 @@ export function getChainConfig(key?: string): ChainConfig {
   return config
 }
 
+/**
+ * Whether lazy backfill (Track A4b) is ON, resolving the per-chain config flag
+ * against an optional `BACKFILL_ENABLED` env override:
+ *
+ *   'true' | '1'  → ON  — a no-deploy enable (config flag stays false; env drives)
+ *   'false' | '0' → OFF — a no-deploy kill switch ('0' is the historical value,
+ *                         kept for back-compat with the earlier explorer/worker gates)
+ *   unset / other → the per-chain `provider.backfill.enabled`, read strictly as
+ *                   `=== true` so an absent `backfill` object is as safe as false
+ *
+ * Read this on BOTH A4b gates — the explorer serve path and the indexer worker —
+ * so a chain flips on or off (or rolls back) with one env change on its two
+ * services: no code deploy, no chain-config edit, symmetric in both directions.
+ */
+export function isBackfillEnabled(
+  config: ChainConfig,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const override = env.BACKFILL_ENABLED
+  if (override === 'true' || override === '1') return true
+  if (override === 'false' || override === '0') return false
+  return config.provider?.backfill?.enabled === true
+}
+
 /** Get all theme classes for Tailwind safelist */
 export function getAllThemeClasses(): string[] {
   return Object.values(CHAINS).flatMap(c => Object.values(c.theme))
