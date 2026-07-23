@@ -108,37 +108,70 @@ function assertAllowedIdentifier(value: string, kind: 'table' | 'column'): void 
  * constructors below — never a bare string, a `sql.raw(...)` fragment, or a
  * `backfill_*` name. Every DELETE / DROP / UPDATE / VACUUM primitive takes a
  * `SafeIdent`, so the compiler enforces the whitelist alongside the runtime set.
+ *
+ * `schema` is null for base tables — they resolve through `search_path`, exactly
+ * like the app's own writes, so there is nothing to diverge from. It is set for
+ * token_transfers partitions, which are DISCOVERED by OID (pg_inherits) but must
+ * be EXECUTED against by schema-qualified name, so `search_path` can never
+ * redirect the DROP/DELETE to a same-named relation in another schema (O2 P1).
  */
 declare const SAFE_IDENT: unique symbol
-type SafeIdent = string & { readonly [SAFE_IDENT]: true }
+type SafeIdent = {
+  readonly [SAFE_IDENT]: true
+  readonly schema: string | null
+  readonly name: string
+}
 
-/** A whitelisted base table → SafeIdent. Compile-time union + runtime re-check. */
+/** A whitelisted base table → SafeIdent (unqualified; resolves via search_path). */
 function tableIdent(table: AllowedTable): SafeIdent {
   assertAllowedIdentifier(table, 'table')
-  return table as SafeIdent
+  return { schema: null, name: table } as unknown as SafeIdent
+}
+
+/**
+ * Defense-in-depth shape check for a discovered schema name. Like the table/column
+ * guards, this is belt-and-suspenders — the schema comes from pg_namespace, never
+ * user input — but it keeps `identSql` from ever emitting an unexpected qualifier.
+ * A malformed schema makes the partition op throw (caught → skipped + logged),
+ * which fails CLOSED: we never drop the wrong relation, we just skip this one.
+ */
+function assertSchemaShape(schema: string): void {
+  if (!/^[a-z_][a-z0-9_]*$/.test(schema)) {
+    throw new Error(`[retention] Refused schema identifier: "${schema}" — must be lowercase alpha/underscore`)
+  }
 }
 
 /**
  * A token_transfers RANGE partition (`token_transfers_legacy`,
- * `token_transfers_p_111000000`, …) → SafeIdent. The mandatory `token_transfers_`
- * prefix is what makes a partition name un-spoofable as a `backfill_*` table
- * (which is not an AllowedTable either). listTokenTransferPartitions only ever
- * yields children of token_transfers, all of which carry this prefix — so this
- * both admits every real partition and excludes everything else.
+ * `token_transfers_p_111000000`, …) in schema `schema` → SafeIdent. The mandatory
+ * `token_transfers_` prefix is what makes a partition name un-spoofable as a
+ * `backfill_*` table (which is not an AllowedTable either). listTokenTransferPartitions
+ * only ever yields children of token_transfers, all of which carry this prefix — so
+ * this both admits every real partition and excludes everything else. `schema` comes
+ * from the same catalog row as the name, so the DROP/DELETE targets the exact
+ * relation that was discovered, not whatever `search_path` resolves the bare name to.
  */
-function partitionIdent(name: string): SafeIdent {
+function partitionIdent(name: string, schema: string): SafeIdent {
   if (!/^token_transfers_[a-z0-9_]+$/.test(name)) {
     throw new Error(`[retention] Refused partition identifier: "${name}" — not a token_transfers partition`)
   }
-  return name as SafeIdent
+  assertSchemaShape(schema)
+  return { schema, name } as unknown as SafeIdent
 }
 
-/** The single choke point turning a proven-safe identifier into raw SQL. */
+/**
+ * The single choke point turning a proven-safe identifier into SQL. Uses
+ * `sql.identifier` (quoted) rather than `sql.raw`, and schema-qualifies when the
+ * SafeIdent carries a schema — so a partition DROP/DELETE hits the discovered
+ * relation regardless of `search_path`.
+ */
 function identSql(safe: SafeIdent): SQL {
-  return sql.raw(safe)
+  return safe.schema === null
+    ? sql`${sql.identifier(safe.name)}`
+    : sql`${sql.identifier(safe.schema)}.${sql.identifier(safe.name)}`
 }
 
-export { tableIdent, partitionIdent }
+export { tableIdent, partitionIdent, identSql }
 
 /**
  * Translate a timestamp cutoff into a block_number cutoff via the
@@ -295,9 +328,9 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
     // the prefix — belt and suspenders.
     let partId: SafeIdent
     try {
-      partId = partitionIdent(p.name)
+      partId = partitionIdent(p.name, p.schema)
     } catch {
-      console.warn(`[retention] skipping partition with unexpected name: "${p.name}"`)
+      console.warn(`[retention] skipping partition with unexpected name/schema: "${p.schema}"."${p.name}"`)
       continue
     }
     if (p.hi <= cutoffBlock) {

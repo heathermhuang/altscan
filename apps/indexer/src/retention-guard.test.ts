@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { tableIdent, partitionIdent } from './retention-cleanup'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import { tableIdent, partitionIdent, identSql } from './retention-cleanup'
 
 /**
  * O2 (plan §OPEN DESIGN DECISIONS): the retention job's destructive statements
@@ -10,7 +11,18 @@ import { tableIdent, partitionIdent } from './retention-cleanup'
  * the primitives accept nothing else (enforced by the compiler), no backfill
  * table can reach a DELETE / DROP / UPDATE / VACUUM. These are the runtime half
  * of that guarantee; the type half is pinned by @ts-expect-error below.
+ *
+ * O2 P1 (codex round 3): a partition is discovered by OID (pg_inherits) but a
+ * bare, unqualified DROP/DELETE re-resolves the name through `search_path` — a
+ * same-named table in an earlier schema could be dropped instead. So a partition
+ * SafeIdent now carries its discovered schema and `identSql` renders it
+ * SCHEMA-QUALIFIED. The rendering tests below pin that: discovery and execution
+ * target the same physical relation, no search_path redirection.
  */
+
+const dialect = new PgDialect()
+/** The exact identifier SQL a SafeIdent interpolates into a destructive statement. */
+const renderIdent = (ident: Parameters<typeof identSql>[0]) => dialect.sqlToQuery(identSql(ident)).sql
 
 const BACKFILL_TABLES = [
   'backfill_address_txs',
@@ -23,10 +35,15 @@ const ALLOWED = [
   'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs', 'token_balances',
 ] as const
 
-describe('tableIdent — whitelisted base tables only', () => {
-  it('accepts every whitelisted table and yields its identifier', () => {
+describe('tableIdent — whitelisted base tables only, unqualified (search_path)', () => {
+  it('accepts every whitelisted table and renders it as a bare quoted identifier', () => {
     for (const t of ALLOWED) {
-      expect(tableIdent(t)).toBe(t)
+      const id = tableIdent(t)
+      expect(id.name).toBe(t)
+      // Base tables stay bare: they are the same names the app writes via
+      // search_path, and there is no OID-discovery step to diverge from.
+      expect(id.schema).toBeNull()
+      expect(renderIdent(id)).toBe(`"${t}"`)
     }
   })
 
@@ -42,28 +59,44 @@ describe('tableIdent — whitelisted base tables only', () => {
   })
 })
 
-describe('partitionIdent — token_transfers child partitions only', () => {
-  it('accepts the real partition names this codebase creates', () => {
+describe('partitionIdent — token_transfers child partitions, schema-qualified', () => {
+  it('accepts the real partition names this codebase creates and carries the discovered schema', () => {
     for (const name of ['token_transfers_legacy', 'token_transfers_p_111000000', 'token_transfers_p0']) {
-      expect(partitionIdent(name)).toBe(name)
+      const id = partitionIdent(name, 'public')
+      expect(id.name).toBe(name)
+      expect(id.schema).toBe('public')
     }
+  })
+
+  it('renders SCHEMA-QUALIFIED so DROP/DELETE cannot be redirected by search_path (O2 P1 fix)', () => {
+    expect(renderIdent(partitionIdent('token_transfers_p0', 'public')))
+      .toBe('"public"."token_transfers_p0"')
+    // A non-default schema must be honored exactly — discovery and execution agree.
+    expect(renderIdent(partitionIdent('token_transfers_legacy', 'analytics')))
+      .toBe('"analytics"."token_transfers_legacy"')
   })
 
   it('rejects every backfill table', () => {
     for (const t of BACKFILL_TABLES) {
-      expect(() => partitionIdent(t), t).toThrow(/partition/i)
+      expect(() => partitionIdent(t, 'public'), t).toThrow(/partition/i)
     }
   })
 
   it('rejects a non-token_transfers base table (no prefix)', () => {
     for (const t of ['transactions', 'blocks', 'token_transfers']) {
-      expect(() => partitionIdent(t), t).toThrow(/partition/i)
+      expect(() => partitionIdent(t, 'public'), t).toThrow(/partition/i)
     }
   })
 
-  it('rejects injection-shaped names', () => {
+  it('rejects injection-shaped partition names', () => {
     for (const bad of ['token_transfers_p1; DROP TABLE blocks;--', 'token_transfers_p 1', 'Token_Transfers_p1', '']) {
-      expect(() => partitionIdent(bad), JSON.stringify(bad)).toThrow()
+      expect(() => partitionIdent(bad, 'public'), JSON.stringify(bad)).toThrow(/partition/i)
+    }
+  })
+
+  it('rejects injection-shaped, empty, or non-lowercase schema names', () => {
+    for (const badSchema of ['public; DROP TABLE blocks;--', 'pub lic', 'pu"blic', '', 'Public', '1public']) {
+      expect(() => partitionIdent('token_transfers_p0', badSchema), JSON.stringify(badSchema)).toThrow(/schema/i)
     }
   })
 })
