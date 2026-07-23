@@ -49,8 +49,7 @@ describe('backfill budget — env parsing edges', () => {
     expect((await freshCfg()).budgetHeadroom).toBe(0.6)
   })
 
-  it('BACKFILL_ENABLED=0 is the kill switch', async () => {
-    vi.stubEnv('BACKFILL_ENABLED', '0')
-    expect((await freshCfg()).enabledEnvOff).toBe(true)
-  })
+  // The BACKFILL_ENABLED gate now lives in @altscan/chain-config's
+  // isBackfillEnabled (read by both the explorer serve gate and the worker),
+  // tested there — the worker config no longer carries an enabledEnvOff field.
 })

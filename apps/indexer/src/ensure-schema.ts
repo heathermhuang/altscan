@@ -493,21 +493,26 @@ export async function isPartitioned(table: string): Promise<boolean> {
  * sorted ascending. Skips a DEFAULT partition (no FROM..TO). Used by both forward-
  * partition creation and DROP-PARTITION retention.
  */
-export async function listTokenTransferPartitions(): Promise<Array<{ name: string; lo: number; hi: number }>> {
-  const db = getDb()
+export async function listTokenTransferPartitions(
+  db: ReturnType<typeof getDb> = getDb(),
+): Promise<Array<{ name: string; schema: string; lo: number; hi: number }>> {
+  // Return each child's schema (nspname) alongside its name: retention discovers
+  // partitions by OID here but DROPs/DELETEs them by name, so it must qualify with
+  // the schema from THIS row or search_path could redirect the op (retention O2 P1).
   const res = await db.execute(sql`
-    SELECT c.relname AS name, pg_get_expr(c.relpartbound, c.oid) AS bound
+    SELECT c.relname AS name, n.nspname AS schema, pg_get_expr(c.relpartbound, c.oid) AS bound
     FROM pg_inherits i
     JOIN pg_class c ON c.oid = i.inhrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE i.inhparent = 'token_transfers'::regclass
   `)
-  const out: Array<{ name: string; lo: number; hi: number }> = []
+  const out: Array<{ name: string; schema: string; lo: number; hi: number }> = []
   for (const row of Array.from(res) as Array<Record<string, unknown>>) {
     const bound = String(row.bound ?? '')
     // e.g. "FOR VALUES FROM ('0') TO ('192000')" or "... FROM (0) TO (192000)"
     const m = bound.match(/FROM \('?(\d+)'?\) TO \('?(\d+)'?\)/)
     if (!m) continue
-    out.push({ name: String(row.name), lo: Number(m[1]), hi: Number(m[2]) })
+    out.push({ name: String(row.name), schema: String(row.schema), lo: Number(m[1]), hi: Number(m[2]) })
   }
   return out.sort((a, b) => a.lo - b.lo)
 }
