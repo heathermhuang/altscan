@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Mock BEFORE importing the module under test. `./chain` stands in for an ETH
 // deployment (dbEnvVar = ETH_DATABASE_URL) so the regression test below can prove
 // the trigger asks for THAT pool, not the DATABASE_URL default.
-vi.mock('./chain', () => ({ chainConfig: { dbEnvVar: 'ETH_DATABASE_URL' } }))
+vi.mock('./chain', () => ({ chainConfig: { key: 'eth', dbEnvVar: 'ETH_DATABASE_URL' } }))
 
 const onConflictDoNothing = vi.fn().mockResolvedValue(undefined)
 const values = vi.fn(() => ({ onConflictDoNothing }))
