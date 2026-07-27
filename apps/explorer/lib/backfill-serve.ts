@@ -25,7 +25,23 @@
  * provider, so it takes the step-3 handoff.
  */
 import { getDb } from '@altscan/db'
+import { chainConfig } from './chain'
 import { sql } from 'drizzle-orm'
+
+/**
+ * Chain-aware DB handle, resolved LAZILY on each call.
+ *
+ * Both parts matter:
+ *  - `chainConfig.dbEnvVar` is required — bare `getDb()` defaults to DATABASE_URL,
+ *    which is UNSET on eth-web (it uses ETH_DATABASE_URL). In production that
+ *    THROWS, and every A4b caller swallows it (readWatermark degrades to null,
+ *    enqueueBackfill is best-effort) — so ETH silently served provider-only
+ *    forever and the backfill worker sat idle with nothing to claim.
+ *  - it stays a FUNCTION, not a module-level const, because `./db`'s eager
+ *    `getDb(...)` at import time would run before backfill-serve.pg.test.ts
+ *    points DATABASE_URL at its fixture (ESM hoists imports above that line).
+ */
+const chainDb = () => getDb(chainConfig.dbEnvVar)
 import type { ProviderTx, HistoryRow } from '@altscan/providers'
 
 const PAGE = 25
@@ -245,7 +261,7 @@ export async function readWatermark(
   entityType: string,
   entityId: string,
 ): Promise<BackfillWatermark | null> {
-  const res = await getDb().execute(sql`
+  const res = await chainDb().execute(sql`
     SELECT status, backfilled_through_block, oldest_cursor
     FROM backfill_watermarks
     WHERE entity_type = ${entityType} AND entity_id = ${entityId.toLowerCase()}
@@ -283,7 +299,7 @@ export function cacheUsable(wm: BackfillWatermark | null): boolean {
  * served and what the cache can serve next.
  */
 export async function cacheCoversFrom(address: string, oldestBlock: number): Promise<boolean> {
-  const res = await getDb().execute(sql`
+  const res = await chainDb().execute(sql`
     SELECT 1 FROM backfill_address_txs
     WHERE address = ${address.toLowerCase()}
       AND block_number >= ${oldestBlock}
@@ -317,7 +333,7 @@ export async function serveLocalAddressTxs(
           sql`, `,
         )}))`
       : sql.raw('')
-  const res = await getDb().execute(sql`
+  const res = await chainDb().execute(sql`
     SELECT tx_hash, block_number, block_timestamp, from_address, to_address,
            value, category, summary, possible_spam
     FROM backfill_address_txs
@@ -432,7 +448,7 @@ function rowToTransferRow(r: Record<string, unknown>): TokenTransferRow {
 
 /** Transfers equivalent of cacheCoversFrom — same contiguity requirement. */
 export async function transferCacheCoversFrom(scope: string, oldestBlock: number): Promise<boolean> {
-  const res = await getDb().execute(sql`
+  const res = await chainDb().execute(sql`
     SELECT 1 FROM backfill_token_transfers
     WHERE scope_address = ${scope.toLowerCase()}
       AND block_number >= ${oldestBlock}
@@ -460,7 +476,7 @@ export async function serveLocalTokenTransfers(
           sql`, `,
         )}))`
       : sql.raw('')
-  const res = await getDb().execute(sql`
+  const res = await chainDb().execute(sql`
     SELECT tx_hash, log_index, block_number, block_timestamp, from_address, to_address,
            token_address, token_symbol, token_decimals, value, value_formatted
     FROM backfill_token_transfers

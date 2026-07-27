@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createMaintenanceConnection } from '@altscan/db'
+import { chainConfig } from './chain'
 
 /**
  * O1 seam behavior against a REAL Postgres — the pure tests pin the codec and
@@ -30,11 +31,17 @@ const DB_NAME = (() => {
   }
 })()
 const DISPOSABLE = /test/.test(DB_NAME)
-// getDb() initializes lazily on first call, so pointing DATABASE_URL at the
+// getDb() initializes lazily on first call, so pointing the DB env var at the
 // test instance here (before any serve call) routes the SHIPPED functions —
 // not a reimplementation — at the fixture. Gated: no-op in CI, and never
 // pointed at a non-disposable database.
-if (PG_URL && DISPOSABLE) process.env.DATABASE_URL = PG_URL
+//
+// Must key off chainConfig.dbEnvVar, NOT a hardcoded DATABASE_URL: the serve
+// functions resolve their pool per-chain, so under CHAIN=eth a hardcoded
+// DATABASE_URL would leave them pointed at ETH_DATABASE_URL — some other pool,
+// or none — and this suite would silently stop testing its own fixture. Same
+// trap as the prod P0 this file's sibling fix addresses.
+if (PG_URL && DISPOSABLE) process.env[chainConfig.dbEnvVar] = PG_URL
 
 import {
   carrySeamExclusions,

@@ -44,11 +44,37 @@ export async function enqueueBackfill(
   entityId: string,
 ): Promise<void> {
   try {
-    await getDb()
+    // MUST pass the chain's dbEnvVar: bare getDb() defaults to DATABASE_URL, which
+    // is UNSET on eth-web (it uses ETH_DATABASE_URL) — so in production it threw,
+    // the best-effort catch below swallowed it, and NOTHING was ever enqueued on
+    // ETH. Symptom: worker ON but permanently idle. Do not "simplify" this back.
+    await getDb(chainConfig.dbEnvVar)
       .insert(schema.backfillWatermarks)
       .values({ entityType, entityId: entityId.toLowerCase(), status: 'pending' })
       .onConflictDoNothing()
-  } catch {
-    /* best-effort by design — see doc comment */
+  } catch (err) {
+    /* best-effort by design — see doc comment. Still NEVER rethrow: the request
+     * must survive. But do not swallow SILENTLY: this catch is why a wrong DB
+     * env var went unnoticed for weeks (A4b was inert on ETH while the worker
+     * logged "ON"). A misconfig, a missing table, and a healthy-but-empty queue
+     * were indistinguishable from the outside. Throttled so a sustained outage
+     * cannot flood the log. */
+    warnEnqueueFailure(err)
   }
+}
+
+/** Log at most one enqueue failure per THROTTLE_MS, with a drop count. */
+const THROTTLE_MS = 60_000
+let lastWarnAt = 0
+let suppressed = 0
+function warnEnqueueFailure(err: unknown): void {
+  const now = Date.now()
+  if (now - lastWarnAt < THROTTLE_MS) { suppressed++; return }
+  const also = suppressed > 0 ? ` (+${suppressed} suppressed in the last ${THROTTLE_MS / 1000}s)` : ''
+  lastWarnAt = now
+  suppressed = 0
+  console.warn(
+    `[backfill] enqueue FAILED for chain=${chainConfig.key} db=${chainConfig.dbEnvVar}${also}: ` +
+    (err instanceof Error ? err.message : String(err)),
+  )
 }
