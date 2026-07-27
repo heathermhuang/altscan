@@ -44,7 +44,11 @@ export async function enqueueBackfill(
   entityId: string,
 ): Promise<void> {
   try {
-    await getDb()
+    // MUST pass the chain's dbEnvVar: bare getDb() defaults to DATABASE_URL, which
+    // is UNSET on eth-web (it uses ETH_DATABASE_URL) — so in production it threw,
+    // the best-effort catch below swallowed it, and NOTHING was ever enqueued on
+    // ETH. Symptom: worker ON but permanently idle. Do not "simplify" this back.
+    await getDb(chainConfig.dbEnvVar)
       .insert(schema.backfillWatermarks)
       .values({ entityType, entityId: entityId.toLowerCase(), status: 'pending' })
       .onConflictDoNothing()
