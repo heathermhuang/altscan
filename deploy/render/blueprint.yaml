@@ -1,0 +1,112 @@
+# Altscan — single-chain Render blueprint (self-hosting template).
+#
+# This is NOT the file that deploys bnbscan.com / ethscan.io — that is the
+# production two-chain config in the repository root (`render.yaml`). This one is a
+# minimal starting point for deploying your own explorer.
+#
+# ── How to use ───────────────────────────────────────────────────────────────
+#   1. Fork this repository.
+#   2. Copy this file over the root render.yaml in your fork:
+#        cp deploy/render/blueprint.yaml render.yaml
+#   3. Edit CHAIN and NEXT_PUBLIC_CHAIN below (both must match).
+#   4. In Render: New → Blueprint → select your fork.
+#   5. Set the RPC URL (and optionally MORALIS_API_KEY) when prompted.
+#
+# Plans below are modest defaults. Check current Render pricing before deploying —
+# a chain-tip indexer plus Postgres is not free to run continuously.
+
+services:
+  - type: web
+    name: altscan-web
+    env: node
+    plan: starter
+    rootDir: apps/explorer
+    buildCommand: >-
+      cd ../.. && pnpm install --no-frozen-lockfile &&
+      pnpm --filter @altscan/explorer build &&
+      cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    startCommand: cd .next/standalone/apps/explorer && node server.js
+    healthCheckPath: /api/ping
+    autoDeploy: true
+    envVars:
+      # ⚠ CHAIN and NEXT_PUBLIC_CHAIN must match. NEXT_PUBLIC_CHAIN is inlined into
+      # the browser bundle at build time; a mismatch renders the wrong chain's
+      # currency and theme against the other chain's data.
+      - key: CHAIN
+        value: bnb
+      - key: NEXT_PUBLIC_CHAIN
+        value: bnb
+      # For CHAIN=eth, rename this key to ETH_DATABASE_URL — getChainConfig() selects
+      # the database env var by chain and will not find DATABASE_URL on an eth build.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: altscan-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: altscan-redis
+          property: connectionString
+      - key: BNB_RPC_URL
+        sync: false
+      - key: MORALIS_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"
+      - key: HOSTNAME
+        value: "0.0.0.0"
+
+  - type: worker
+    name: altscan-indexer
+    env: node
+    plan: starter
+    rootDir: apps/indexer
+    buildCommand: >-
+      cd ../.. && pnpm install --no-frozen-lockfile &&
+      pnpm --filter @altscan/chain-config build &&
+      pnpm --filter @altscan/db build &&
+      pnpm --filter @altscan/indexer build
+    startCommand: node dist/index.js
+    autoDeploy: true
+    envVars:
+      - key: CHAIN
+        value: bnb
+      - key: DATABASE_URL
+        fromDatabase:
+          name: altscan-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: altscan-redis
+          property: connectionString
+      - key: BNB_RPC_URL
+        sync: false
+      # ⚠ SET THIS. Leaving it unset starts at block 38,000,000 on BNB or block 0 on
+      # ETH — tens of millions of blocks behind the head. Use a recent block number:
+      #   curl -s -X POST <your-rpc-url> -H 'content-type: application/json' \
+      #     -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+      # (the result is hex; subtract ~1000 for a little history on first load)
+      - key: START_BLOCK
+        sync: false
+      - key: RETENTION_DAYS
+        value: "7"
+      - key: DB_POOL_SIZE
+        value: "8"
+      - key: NODE_ENV
+        value: production
+
+  - type: redis
+    name: altscan-redis
+    plan: starter
+    ipAllowList: []
+
+databases:
+  - name: altscan-db
+    databaseName: altscan
+    user: altscan
+    plan: basic-1gb

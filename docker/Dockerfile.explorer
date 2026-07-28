@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1
+#
+# Altscan explorer (Next.js, standalone output).
+#
+#   docker build -f docker/Dockerfile.explorer --build-arg CHAIN=bnb -t altscan-explorer:bnb .
+#
+# ⚠ CHAIN IS A BUILD ARGUMENT, NOT JUST A RUNTIME ONE.
+# NEXT_PUBLIC_CHAIN is inlined into the client bundle by Next at build time, so one
+# image serves exactly one chain. Building with CHAIN=bnb and running it with
+# CHAIN=eth yields a server that reads ETH data while the browser renders BNB
+# labels and theme. Build a separate image per chain.
+
+FROM node:22-alpine AS base
+RUN corepack enable
+WORKDIR /app
+
+# ── Build ────────────────────────────────────────────────────────────────────
+FROM base AS build
+
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+ARG CHAIN=bnb
+ENV CHAIN=${CHAIN}
+ENV NEXT_PUBLIC_CHAIN=${CHAIN}
+
+# Next prerenders the ISR pages during build. getDb() throws when NODE_ENV=production
+# and the chain's DB env var is unset, so both are set to a syntactically valid
+# placeholder. The database does NOT need to be reachable — pages that fail to query
+# at build time fall back to on-demand rendering. Real values are supplied at run time.
+ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
+ENV ETH_DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
+
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @altscan/explorer build
+
+# Next's standalone bundle omits the static assets; copy them alongside the server.
+RUN cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+FROM base AS runtime
+ENV NODE_ENV=production
+
+ARG CHAIN=bnb
+ENV CHAIN=${CHAIN}
+ENV NEXT_PUBLIC_CHAIN=${CHAIN}
+
+# Standalone server binds to localhost by default, which is unreachable from outside
+# the container.
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+
+RUN apk add --no-cache libc6-compat \
+ && addgroup -S altscan && adduser -S altscan -G altscan
+
+COPY --from=build --chown=altscan:altscan /app/apps/explorer/.next/standalone ./
+
+USER altscan
+WORKDIR /app/apps/explorer
+
+EXPOSE 3000
+CMD ["node", "server.js"]
