@@ -38,6 +38,19 @@ CHAIN=bnb pnpm --filter @altscan/indexer dev          # BNB indexer
 
 Open a GitHub issue with steps to reproduce, expected vs. actual behavior, and the chain/page affected. For security-sensitive reports, please disclose privately rather than in a public issue.
 
-## License
+## Contributor License Agreement
 
-By contributing, you agree that your contributions are licensed under [AGPL-3.0](LICENSE).
+Altscan is dual licensed: open source under [AGPL-3.0](LICENSE), plus a commercial
+licence for organisations that cannot use AGPL code. See [LICENSING.md](LICENSING.md).
+
+To keep that possible, contributions are accepted under our
+[Contributor License Agreement](CLA.md). **You keep ownership of your work** — the CLA is
+a licence grant, not a copyright assignment, and you remain free to use your
+contributions anywhere else.
+
+**To accept:** add your name to [`CONTRIBUTORS.md`](CONTRIBUTORS.md) in your first pull
+request. That's the whole process — one line, no forms, no email. It covers every
+contribution you make, then and later.
+
+If you're contributing on behalf of an employer, please confirm you're authorised to do
+so and note the organisation alongside your name.

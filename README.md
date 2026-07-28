@@ -111,14 +111,32 @@ altscan/
 
 ## Getting Started
 
-### Prerequisites
+### Run your own explorer (Docker)
+
+```bash
+git clone https://github.com/heathermhuang/altscan.git
+cd altscan
+cp .env.docker.example .env
+docker compose up -d
+```
+
+Open <http://localhost:3000>. That's Postgres, Redis, the indexer, and the explorer —
+no configuration required to start, and the indexer creates its own schema on first
+boot. Set `CHAIN=eth` in `.env` and re-run with `--build` for Ethereum.
+
+Full guide, including Render deployment, retention tuning, and limitations:
+**[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)**.
+
+### Develop locally (without Docker)
+
+#### Prerequisites
 
 - **Node.js** 18+ 
 - **pnpm** 10+
 - **PostgreSQL** 14+
 - **Redis** 6+ (for indexer job queues and rate limiting)
 
-### Installation
+#### Installation
 
 ```bash
 # Clone the repo
@@ -217,14 +235,21 @@ git push origin main
 |---------|------|-------|
 | `bnbscan-web` | Pro (2GB) | `CHAIN=bnb`, rootDir: `apps/explorer` |
 | `ethscan-web` | Pro (2GB) | `CHAIN=eth`, rootDir: `apps/explorer` |
-| `bnbscan-indexer` | Worker | `CHAIN=bnb`, 7-day data retention |
-| `eth-indexer` | Worker | `CHAIN=eth`, 7-day data retention |
+| `bnbscan-indexer` | Worker | `CHAIN=bnb`, 1-day body retention |
+| `eth-indexer` | Worker | `CHAIN=eth`, 3-day body retention |
 | BNB Postgres | Basic 1GB | 150GB disk, autoscaling off |
-| ETH Postgres | Basic 1GB | 30GB disk, autoscaling off |
+| ETH Postgres | Basic 1GB | 50GB disk, autoscaling off |
 
 ### Data Retention
 
-Indexers enforce a **7-day rolling retention** window, running cleanup every 6 hours. Database size scales with chain throughput and the retention window — typically tens of GB per chain.
+Indexers prune **transaction bodies** on a rolling window (`RETENTION_DAYS`, default 7),
+running cleanup every 6 hours. Transactions stay queryable — only the refetchable body is
+dropped, and it is refetched on demand. Database size scales with chain throughput and
+the window: BNB Chain writes roughly 12–15 GB per month at full retention, Ethereum 6–8 GB.
+
+The production deployments run tighter windows than the default — 1 day on BNB, 3 on
+Ethereum — because their disks are the binding constraint. Self-hosted installs default
+to 7; see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#retention-and-disk).
 
 To manually trigger cleanup:
 ```bash
@@ -234,10 +259,20 @@ curl -X POST "https://bnbscan.com/api/admin/db-prune?days=7" \
 
 ## Known Limitations
 
-- **No reorg handling** — indexers advance by block height without canonical chain validation
-- **Token balances not live-updated** — holder counts and balances refresh on indexer pass
-- **Historical coverage** — starts from a recent block, not genesis
-- **Bot detection disabled** — turned off to enable ISR caching
+- **Not a genesis archive** — the indexer advances forward from its start block. Older
+  address and token history is fetched on demand from a provider and cached, rather than
+  indexed locally. A full historical archive is a different architecture.
+- **Deep history needs a Moralis key** — without one, address history is limited to
+  locally indexed blocks and holder counts fall back to an estimate shown with a caveat.
+  This is the only third-party commercial dependency.
+- **Holder counts are eventually consistent** — recomputed every 5 minutes rather than
+  per block, a deliberate trade for indexer throughput. Token pages can be briefly stale.
+- **One chain per deployment** — `NEXT_PUBLIC_CHAIN` is inlined into the client bundle at
+  build time, so switching chains requires a rebuild, not just a restart.
+- **Two chains supported** — BNB Chain and Ethereum. Adding a third currently requires
+  code changes rather than configuration.
+- **Contract verification is Sourcify-only.**
+- **Bot detection disabled** — turned off to enable ISR caching.
 
 ## Contributing
 
@@ -249,8 +284,30 @@ Contributions are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** fo
 4. Run the test suite: `pnpm test`
 5. Submit a pull request against `main`
 
+First-time contributors: add your name to **[CONTRIBUTORS.md](CONTRIBUTORS.md)** in your
+first PR to accept the **[Contributor License Agreement](CLA.md)**. You keep ownership of
+your work — the CLA is a licence grant, not a copyright assignment, and it's what lets us
+offer the commercial licence described below.
+
 Found a security vulnerability? Please follow our **[Security Policy](SECURITY.md)** — do not open a public issue.
 
 ## License
 
-Licensed under [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.en.html). © Measurable Data Token (MDT).
+**Open source under [AGPL-3.0](LICENSE)** — an OSI-approved licence. Free, forever, for
+everyone:
+
+- **Run it** for any purpose, including commercially and as a paid service
+- **Fork it**, modify it, and distribute your fork
+- **Sell services around it** — hosting, support, consulting, managed deployments, RaaS
+- The grant is **irrevocable** — published releases stay AGPL-3.0, and we cannot take
+  that back
+
+AGPL asks one thing in return: if you modify Altscan and offer it to others over a
+network, offer those users your modified source too. Run it unmodified, or keep your
+changes internal, and you owe nothing.
+
+A **commercial licence** is available for organisations that cannot use AGPL code or need
+warranty and support terms. See **[LICENSING.md](LICENSING.md)** for what that covers and
+how the terms compare to source-available alternatives.
+
+© Measurable Data Token (MDT).

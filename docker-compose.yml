@@ -1,0 +1,109 @@
+# Altscan — self-hosted single-chain explorer.
+#
+#   cp .env.docker.example .env
+#   docker compose up -d
+#   open http://localhost:3000
+#
+# Runs one chain at a time. Switch chains by setting CHAIN in .env and re-running
+# `docker compose up -d --build` (the explorer image bakes the chain in at build time —
+# see docker/Dockerfile.explorer).
+#
+# Full guide: docs/SELF_HOSTING.md
+
+name: altscan
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-altscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-altscan}
+      POSTGRES_DB: ${POSTGRES_DB:-altscan}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Exposed so you can inspect the database with psql. Remove in production.
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-altscan} -d ${POSTGRES_DB:-altscan}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  indexer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.indexer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      CHAIN: ${CHAIN:-bnb}
+      # Both are set to the same database on purpose. getChainConfig() picks the env
+      # var by chain (bnb -> DATABASE_URL, eth -> ETH_DATABASE_URL); setting only one
+      # makes the other chain fail at runtime in ways that are silently swallowed.
+      DATABASE_URL: &db_url postgresql://${POSTGRES_USER:-altscan}:${POSTGRES_PASSWORD:-altscan}@postgres:5432/${POSTGRES_DB:-altscan}
+      ETH_DATABASE_URL: *db_url
+      REDIS_URL: redis://redis:6379
+      BNB_RPC_URL: ${BNB_RPC_URL:-https://bsc-dataseed1.binance.org/}
+      ETH_RPC_URL: ${ETH_RPC_URL:-https://ethereum-rpc.publicnode.com}
+      # "tip" is resolved to a live block number by docker/indexer-entrypoint.sh.
+      # Set a number to start from a specific height instead.
+      START_BLOCK: ${START_BLOCK:-tip}
+      START_BLOCK_LOOKBACK: ${START_BLOCK_LOOKBACK:-1000}
+      INDEX_CONCURRENCY: ${INDEX_CONCURRENCY:-4}
+      DB_POOL_SIZE: ${INDEXER_DB_POOL_SIZE:-8}
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+      MORALIS_API_KEY: ${MORALIS_API_KEY:-}
+
+  explorer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.explorer
+      args:
+        # Build-time: Next inlines NEXT_PUBLIC_CHAIN into the client bundle.
+        CHAIN: ${CHAIN:-bnb}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${EXPLORER_PORT:-3000}:3000"
+    environment:
+      CHAIN: ${CHAIN:-bnb}
+      DATABASE_URL: *db_url
+      ETH_DATABASE_URL: *db_url
+      REDIS_URL: redis://redis:6379
+      BNB_RPC_URL: ${BNB_RPC_URL:-https://bsc-dataseed1.binance.org/}
+      ETH_RPC_URL: ${ETH_RPC_URL:-https://ethereum-rpc.publicnode.com}
+      DB_POOL_SIZE: ${EXPLORER_DB_POOL_SIZE:-5}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
+      # Optional — without it, address history and token holder lists fall back to
+      # locally indexed data only. See docs/SELF_HOSTING.md.
+      MORALIS_API_KEY: ${MORALIS_API_KEY:-}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:

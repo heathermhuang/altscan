@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.docker.example
 *.env.local
 .turbo/
 *.tsbuildinfo

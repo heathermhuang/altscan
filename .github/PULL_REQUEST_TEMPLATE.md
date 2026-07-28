@@ -31,3 +31,10 @@
 - [ ] Client components read chain config from the client helper (`@/lib/chain-client`), not server-only config
 - [ ] Updated docs and `CHANGELOG.md` where relevant
 - [ ] Conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`…)
+
+## Contributor License Agreement
+
+First-time contributors: Altscan is dual licensed (see [LICENSING.md](../LICENSING.md)),
+so we ask contributors to accept the [CLA](../CLA.md). You keep ownership of your work.
+
+- [ ] I have added my name to [`CONTRIBUTORS.md`](../CONTRIBUTORS.md), or I am already listed there

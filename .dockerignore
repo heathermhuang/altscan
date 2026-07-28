@@ -1,0 +1,23 @@
+.git
+.github
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/coverage
+**/.env
+**/.env.local
+**/*.log
+
+# Local-only working docs (see CLAUDE.md) — never bake into an image
+CLAUDE.md
+AGENTS.md
+HANDOFFS.md
+TODOS.md
+QA-*.md
+docs/superpowers
+.render-api-key
+
+# Not needed by explorer/indexer images
+apps/altscan-site
+docs/screenshots
