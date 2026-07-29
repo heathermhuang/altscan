@@ -11,7 +11,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { Contract } from 'ethers'
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
@@ -49,7 +49,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 // not-yet-indexed tokens).
 const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | null> => {
   try {
-    const contract = new Contract(addr, ERC20_ABI, getProvider())
+    const contract = new Contract(addr, ERC20_ABI, await getWebProvider())
     const [name, symbol, decimals, totalSupply] = await Promise.all([
       contract.name().catch(() => null),
       contract.symbol().catch(() => null),

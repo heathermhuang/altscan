@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 
 // Cache gas price for 30 seconds to avoid hitting RPC on every stats request
 let cachedGasPrice = '0'
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
   if (Date.now() - gasPriceCachedAt > GAS_PRICE_TTL) {
     try {
       const feeData = await Promise.race([
-        getProvider().getFeeData(),
+        (await getWebProvider()).getFeeData(),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
       ])
       avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()

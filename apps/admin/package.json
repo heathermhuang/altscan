@@ -11,6 +11,8 @@
     "astro": "astro"
   },
   "dependencies": {
+    "@altscan/chain-config": "workspace:*",
+    "@altscan/settings-schema": "workspace:*",
     "astro": "^5.2.0",
     "@astrojs/cloudflare": "^12.2.0",
     "@astrojs/react": "^4.1.0",

@@ -4,7 +4,7 @@
  * Uses the ETH RPC provider — no separate API key needed.
  * Results are cached for 10 minutes to avoid hammering the provider.
  */
-import { getProvider } from '../rpc'
+import { getWebProvider } from '../rpc'
 import { registerCache } from '../cache-registry'
 
 const cache = new Map<string, { name: string | null; ts: number }>()
@@ -35,7 +35,7 @@ export async function resolveEns(address: string): Promise<string | null> {
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.name
 
   try {
-    const provider = getProvider()
+    const provider = await getWebProvider()
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
     const name = await Promise.race([provider.lookupAddress(address), timeout])
     setCacheEntry(key, name)
@@ -48,7 +48,7 @@ export async function resolveEns(address: string): Promise<string | null> {
 
 export async function resolveEnsToAddress(name: string): Promise<string | null> {
   try {
-    const provider = getProvider()
+    const provider = await getWebProvider()
     return await provider.resolveName(name)
   } catch {
     return null

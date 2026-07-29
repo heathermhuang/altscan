@@ -7,10 +7,48 @@ import {
 } from './index'
 
 describe('settings-schema', () => {
-  it('exposes the three Phase A namespaces', () => {
-    expect(SETTINGS_KEYS.sort()).toEqual(['ads', 'footer', 'links'])
+  it('exposes the Phase A namespaces plus the Phase B rpc namespace', () => {
+    expect(SETTINGS_KEYS.sort()).toEqual(['ads', 'footer', 'links', 'rpc'])
     expect(isSettingsKey('ads')).toBe(true)
-    expect(isSettingsKey('rpc')).toBe(false)
+    expect(isSettingsKey('rpc')).toBe(true)
+    expect(isSettingsKey('style')).toBe(false)
+  })
+
+  describe('rpc namespace', () => {
+    it('accepts an https URL and in-range timeout, and the empty override', () => {
+      expect(parseSetting('rpc', { webRpcUrl: 'https://bsc-dataseed.binance.org' })).toEqual({
+        webRpcUrl: 'https://bsc-dataseed.binance.org',
+      })
+      expect(parseSetting('rpc', { rpcTimeoutMs: 12000 })).toEqual({ rpcTimeoutMs: 12000 })
+      expect(parseSetting('rpc', {})).toEqual({})
+    })
+
+    it('rejects non-https, malformed, and injection-shaped URLs', () => {
+      for (const webRpcUrl of [
+        'http://bsc-dataseed.binance.org', // plaintext
+        'ws://bsc-dataseed.binance.org',
+        'wss://bsc-dataseed.binance.org',
+        '//bsc-dataseed.binance.org', // protocol-relative
+        '/bsc', // relative — not valid for an RPC endpoint
+        'javascript:alert(1)',
+        'https://evil.test\\@good.test', // backslash
+        'https://evil.test\nHost: x', // control char
+        'https://exa mple.test', // space
+        'not a url',
+        '',
+      ]) {
+        expect(parseSetting('rpc', { webRpcUrl })).toBeNull()
+      }
+      expect(parseSetting('rpc', { webRpcUrl: `https://x.test/${'a'.repeat(2048)}` })).toBeNull()
+    })
+
+    it('bounds rpcTimeoutMs to an integer 1000..60000 and rejects unknown keys', () => {
+      expect(parseSetting('rpc', { rpcTimeoutMs: 999 })).toBeNull()
+      expect(parseSetting('rpc', { rpcTimeoutMs: 60001 })).toBeNull()
+      expect(parseSetting('rpc', { rpcTimeoutMs: 1500.5 })).toBeNull()
+      expect(parseSetting('rpc', { rpcTimeoutMs: '8000' })).toBeNull()
+      expect(parseSetting('rpc', { indexerRpcUrl: 'https://x.test' })).toBeNull()
+    })
   })
 
   it('has 20 ad placements including footer_strip', () => {

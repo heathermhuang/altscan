@@ -7,7 +7,7 @@
  * Graceful degradation (design §5.3): every failure returns null; the page renders
  * the compact tx + a note. Already-local data is never affected.
  */
-import { getProvider } from './rpc'
+import { getWebProvider } from './rpc'
 import { kvGet, kvSet } from '@altscan/explorer-core'
 import { bodyCacheKey, serializeTxBody, parseTxBody, type TxBody, type CachedLog } from './body-cache-serde'
 
@@ -18,7 +18,7 @@ const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(7 * 2
 /** Fetch input calldata + receipt logs from the node. Null on any failure. */
 export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
   try {
-    const provider = getProvider()
+    const provider = await getWebProvider()
     const [tx, receipt] = await Promise.all([
       provider.getTransaction(hash),
       provider.getTransactionReceipt(hash),

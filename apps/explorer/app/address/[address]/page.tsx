@@ -17,7 +17,7 @@ import { TxnsLazy } from './TxnsLazy'
 import { TransfersLazy } from './TransfersLazy'
 import { HoldingsLazy } from './HoldingsLazy'
 import { NftsLazy } from './NftsLazy'
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
 import { AbiReader } from '@/components/contracts/AbiReader'
@@ -99,7 +99,7 @@ export default async function AddressPage({
   // view; humans still get the Moralis fallback. (The transfers/holdings/nfts tabs already honor this.)
   const isBot = isBotRequest((await headers()).get('user-agent'))
   const noLocalData = txCount === 0 && !addressInfo
-  const provider = getProvider()
+  const provider = await getWebProvider()
 
   // Batch 1: lightweight lookups (name resolution, risk check, price)
   const [resolvedName, riskData, nativePrice] = await Promise.all([

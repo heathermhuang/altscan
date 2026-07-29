@@ -3,7 +3,19 @@ import { AD_PLACEMENTS, SETTINGS_KEYS } from '@altscan/settings-schema'
 import { db, schema } from '@/lib/db'
 import { isAdminRequest } from '@/lib/admin-auth'
 import { chainConfig } from '@/lib/chain'
-import { DEFAULT_QUICK_LINKS } from '@/lib/settings-defaults'
+import { DEFAULT_QUICK_LINKS, resolveRpc } from '@/lib/settings-defaults'
+
+/** Host only. The effective fallback RPC can be a keyed URL (Chainstack et al
+ *  put the API key in the path), and this payload is readable by every console
+ *  member including viewers — show which endpoint is in effect, not its key. */
+function rpcFallbackHost(): string {
+  const { url } = resolveRpc(null, chainConfig, process.env)
+  try {
+    return new URL(url).host
+  } catch {
+    return 'unknown'
+  }
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +51,7 @@ export async function GET(request: Request) {
       links: { quickLinks: DEFAULT_QUICK_LINKS },
       footer: { tagline: chainConfig.tagline, notAffiliatedWith: chainConfig.notAffiliatedWith },
       ads: { binanceRefCode: chainConfig.key === 'eth' ? 'ETHSCAN' : 'BNBSCAN', placements: {} },
+      rpc: { webRpcHost: rpcFallbackHost(), rpcTimeoutMs: resolveRpc(null, chainConfig, process.env).timeoutMs },
     },
     ...(warning ? { warning } : {}),
   })

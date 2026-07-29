@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { Contract, Interface } from 'ethers'
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 import { authRequest } from '@/lib/api-auth'
 
 export async function POST(
@@ -68,7 +68,7 @@ export async function POST(
       return NextResponse.json({ error: 'Only view and pure functions can be called' }, { status: 400 })
     }
 
-    const ethersContract = new Contract(address, iface, getProvider())
+    const ethersContract = new Contract(address, iface, await getWebProvider())
     const result = await ethersContract[functionName](...args)
     // Serialize result (handle bigints)
     const serialized = JSON.parse(JSON.stringify(result, (_, v) =>

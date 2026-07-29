@@ -5,6 +5,7 @@ import {
   type AdsSettings,
   type FooterSettings,
   type LinksSettings,
+  type RpcSettings,
 } from '@altscan/settings-schema'
 
 /** Mirrors the hardcoded footer links this feature replaces (Footer.tsx). */
@@ -31,6 +32,24 @@ export function resolveFooterText(
   return {
     tagline: override?.tagline ?? chain.tagline,
     notAffiliatedWith: override?.notAffiliatedWith ?? chain.notAffiliatedWith,
+  }
+}
+
+/**
+ * Precedence: console override → env → chain default. Keeping env as the middle
+ * tier means behaviour is byte-identical to the pre-override build whenever no
+ * override row exists. The override reaches here only after Zod validation
+ * (write-side AND read-side), so a malformed URL can never build a provider.
+ */
+export function resolveRpc(
+  override: RpcSettings | null,
+  chain: ChainConfig,
+  env: NodeJS.ProcessEnv,
+): { url: string; timeoutMs: number } {
+  const envTimeout = parseInt(env.RPC_TIMEOUT_MS ?? '8000', 10)
+  return {
+    url: override?.webRpcUrl ?? env[chain.rpcEnvVar] ?? chain.defaultRpcUrl,
+    timeoutMs: override?.rpcTimeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 8000),
   }
 }
 

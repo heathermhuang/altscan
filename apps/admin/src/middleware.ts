@@ -22,7 +22,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (!email) return new Response('Unauthorized', { status: 401 })
   }
 
-  const rows = await getDb(env).select().from(members).where(eq(members.email, email)).limit(1)
+  // ORDER BY id: `members` allows one email in several tenants, and without an
+  // explicit order SQLite may return either row — the same operator could land
+  // in a different tenant between requests. Oldest membership (lowest
+  // autoincrement id) wins, deterministically, until tenant switching exists.
+  const rows = await getDb(env)
+    .select()
+    .from(members)
+    .where(eq(members.email, email))
+    .orderBy(members.id)
+    .limit(1)
   const member = rows[0]
   if (!member) return new Response(`Forbidden: ${email} is not a member`, { status: 403 })
 

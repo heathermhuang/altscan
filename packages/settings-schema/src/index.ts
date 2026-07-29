@@ -88,10 +88,43 @@ export const adsSettingsSchema = z
   .strict()
 export type AdsSettings = z.infer<typeof adsSettingsSchema>
 
+/** https-only, control/space/backslash-free, bounded — the httpsOrRelativeUrl
+ *  ethos minus the relative branch. Server-side RPC calls cross the public
+ *  internet, so http:// (plaintext) is rejected; ws(s):// is out of scope
+ *  because ethers' JsonRpcProvider + FetchRequest is HTTP transport anyway. */
+const httpsUrl = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine(
+    (v) => {
+      for (let i = 0; i < v.length; i++) {
+        const c = v.charCodeAt(i)
+        if (c <= 32 || c === 92) return false // controls + space + backslash
+      }
+      try {
+        return new URL(v).protocol === 'https:'
+      } catch {
+        return false
+      }
+    },
+    { message: 'webRpcUrl must be an https:// URL' },
+  )
+
+export const rpcSettingsSchema = z
+  .object({
+    webRpcUrl: httpsUrl.optional(),
+    rpcTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+  })
+  .strict()
+export type RpcSettings = z.infer<typeof rpcSettingsSchema>
+
 export const SETTINGS_SCHEMAS = {
   links: linksSettingsSchema,
   footer: footerSettingsSchema,
   ads: adsSettingsSchema,
+  rpc: rpcSettingsSchema,
 } as const
 export type SettingsKey = keyof typeof SETTINGS_SCHEMAS
 export const SETTINGS_KEYS = Object.keys(SETTINGS_SCHEMAS) as SettingsKey[]

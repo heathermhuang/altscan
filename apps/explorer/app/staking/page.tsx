@@ -1,4 +1,4 @@
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
@@ -25,7 +25,7 @@ async function fetchBeaconStats(): Promise<{
   try {
     // Beacon chain deposit contract holds staked ETH
     const DEPOSIT_CONTRACT = '0x00000000219ab540356cbb839cbe05303d7705fa'
-    const provider = getProvider()
+    const provider = await getWebProvider()
     const balance = await provider.getBalance(DEPOSIT_CONTRACT)
     // Each validator stakes 32 ETH
     const totalStakedETH = Number(balance) / 1e18

@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { Contract } from 'ethers'
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 
 export type RiskSignal = {
   label: string
@@ -69,7 +69,7 @@ export async function analyzeTokenRisk(tokenAddress: string): Promise<RiskSignal
 
   // 3. Ownership renounced? (call owner() — returns 0x000...000 if renounced)
   try {
-    const c = new Contract(tokenAddress, OWNER_ABI, getProvider())
+    const c = new Contract(tokenAddress, OWNER_ABI, await getWebProvider())
     const owner = await (c.owner as () => Promise<string>)()
     const renounced = owner === '0x0000000000000000000000000000000000000000' || owner === '0x000000000000000000000000000000000000dEaD'
     signals.push({
