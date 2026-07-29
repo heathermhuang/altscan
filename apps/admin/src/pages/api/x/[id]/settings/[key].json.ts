@@ -5,6 +5,7 @@ import { canWrite } from '../../../../../lib/rbac'
 import { json } from '../../../../../lib/http'
 import { redactRpcValue } from '../../../../../lib/redact'
 import { explorerAdminFetch } from '../../../../../lib/upstream'
+import { ownsEveryCreativeKey } from '../../../../../lib/creative-upload'
 
 export const prerender = false
 
@@ -26,6 +27,14 @@ export const PUT: APIRoute = async ({ params, locals, request }) => {
     body = parsed as typeof body
   } catch {
     return json({ error: 'invalid JSON body' }, 400)
+  }
+
+  // The upload route namespaces every key it mints, but this PUT takes an
+  // arbitrary JSON body from a browser — so re-bind the value to this caller's
+  // tenant and explorer here too. Hardening the writer alone would leave the
+  // store wide open (the Task-1 lesson).
+  if (params.key === 'ads' && !ownsEveryCreativeKey(body.value, explorer.tenantId, explorer.id)) {
+    return json({ error: 'imageKey must reference an image uploaded to this explorer' }, 400)
   }
 
   const upstream = await explorerAdminFetch(env, explorer, `/api/admin/settings/${params.key}`, {
