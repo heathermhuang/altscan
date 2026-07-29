@@ -3,6 +3,19 @@ import { isValidCreativeKey } from '@altscan/settings-schema'
 /** 256 KB. An ad creative that needs more than this is the wrong asset. */
 export const MAX_CREATIVE_BYTES = 256 * 1024
 
+/**
+ * Ceiling on stored objects per explorer.
+ *
+ * Uploads are permanent (no delete — audit revert must keep working) and land
+ * on a public bucket, so the endpoint is an unbounded-growth primitive for any
+ * authenticated writer. Content addressing dedupes identical bytes but not
+ * distinct ones, and the schema's 12-creative cap only bounds what is
+ * REFERENCED, not what is STORED. 200 leaves room for years of legitimate
+ * churn (each version of a replaced creative keeps its own key) while turning
+ * a runaway loop into a 429 instead of an unbounded bill.
+ */
+export const MAX_CREATIVE_OBJECTS_PER_EXPLORER = 200
+
 export type CreativeContentType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
 
 const EXTENSION: Record<CreativeContentType, string> = {
@@ -69,6 +82,22 @@ export function buildCreativeKey(
  * of tenant A could reference tenant B's object by typing its key. Same value,
  * different door.
  */
+/** Every imageKey referenced by an `ads` value, deduped. Shape-tolerant: a
+ *  malformed value yields no keys rather than throwing (callers pair this with
+ *  ownsEveryCreativeKey, which rejects malformed shapes outright). */
+export function referencedCreativeKeys(value: unknown): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
+  const creatives = (value as { creatives?: unknown }).creatives
+  if (!Array.isArray(creatives)) return []
+  const keys = new Set<string>()
+  for (const c of creatives) {
+    if (c === null || typeof c !== 'object') continue
+    const key = (c as { imageKey?: unknown }).imageKey
+    if (typeof key === 'string' && isValidCreativeKey(key)) keys.add(key)
+  }
+  return [...keys]
+}
+
 export function ownsEveryCreativeKey(
   value: unknown,
   tenantId: string,

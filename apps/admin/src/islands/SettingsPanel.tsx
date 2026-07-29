@@ -39,6 +39,36 @@ function currentValue<T>(p: SettingsPayload, key: string): T | null {
   return (p.settings[key]?.value as T | undefined) ?? null
 }
 
+/**
+ * Read the creatives array defensively.
+ *
+ * The explorer's settings GET and audit GET both return the stored value RAW —
+ * no schema re-validation — and `restore()` loads a historical value straight
+ * into the draft. A row that predates a schema change, or one written directly
+ * to the DB, can therefore carry a non-array `creatives`. Calling .map() on it
+ * would blank the editor: the one tool you'd use to repair the bad row.
+ */
+function creativeList(v: AdsValue | null | undefined): HouseCreativeValue[] {
+  const c = v?.creatives
+  return Array.isArray(c) ? (c.filter((x) => x && typeof x === 'object') as HouseCreativeValue[]) : []
+}
+
+/** Same defence for a placement's mix. */
+function mixList(v: AdsValue | null | undefined, placement: string): AdSlotValue[] {
+  const m = v?.placements?.[placement]?.mix
+  return Array.isArray(m) ? (m.filter((x) => x && typeof x === 'object') as AdSlotValue[]) : []
+}
+
+/** First free `creative-N`. Numbering from the array LENGTH would collide after
+ *  a middle row is deleted (add 3, delete #2, add → "creative-3" twice), and the
+ *  schema rejects duplicate ids on save. */
+function nextCreativeId(existing: HouseCreativeValue[]): string {
+  const taken = new Set(existing.map((c) => c?.id))
+  for (let n = existing.length + 1; ; n++) {
+    if (!taken.has(`creative-${n}`)) return `creative-${n}`
+  }
+}
+
 /** Module-level (NOT nested in SettingsPanel) so React keeps a stable
  *  component identity across parent re-renders — a nested definition would
  *  remount this subtree on every keystroke. */
@@ -203,16 +233,35 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
 
   function updateCreative(index: number, patch: Partial<HouseCreativeValue>) {
     setAds((prev) => {
-      const creatives = [...(prev.creatives ?? [])]
+      const creatives = [...creativeList(prev)]
       creatives[index] = { ...creatives[index], ...patch }
       return { ...prev, creatives }
     })
   }
 
+  /** Apply a patch by creative IDENTITY, not by array index.
+   *  An upload resolves asynchronously while the operator can still delete rows
+   *  above it; re-using the captured index would attach the artwork to whichever
+   *  creative shifted into that slot. If the row is gone, drop the result. */
+  function updateCreativeById(id: string, patch: Partial<HouseCreativeValue>): boolean {
+    let applied = false
+    setAds((prev) => {
+      const creatives = creativeList(prev)
+      const i = creatives.findIndex((c) => c?.id === id)
+      if (i === -1) return prev
+      applied = true
+      const next = [...creatives]
+      next[i] = { ...next[i], ...patch }
+      return { ...prev, creatives: next }
+    })
+    return applied
+  }
+
   async function uploadCreativeImage(index: number, file: File) {
-    const creative = ads.creatives?.[index]
+    const creative = creativeList(ads)[index]
     if (!creative) return
-    setUploadingId(creative.id)
+    const targetId = creative.id
+    setUploadingId(targetId)
     setMessage(null)
     try {
       const res = await fetch(`/api/x/${explorerId}/creatives.json`, {
@@ -225,8 +274,14 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
         setMessage({ kind: 'err', text: `upload: ${body.error ?? `HTTP ${res.status}`}` })
         return
       }
-      updateCreative(index, { imageKey: body.key })
-      setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
+      if (updateCreativeById(targetId, { imageKey: body.key })) {
+        setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
+      } else {
+        setMessage({
+          kind: 'err',
+          text: `upload finished but creative "${targetId}" is gone — the image was not attached`,
+        })
+      }
     } catch (e) {
       setMessage({ kind: 'err', text: String(e) })
     } finally {
@@ -410,7 +465,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           never deleted, so reverting to an older version always works — but an abandoned draft
           leaves the uploaded file behind.
         </p>
-        {(ads.creatives ?? []).map((c, i) => (
+        {creativeList(ads).map((c, i) => (
           <div className="card" key={i} style={{ marginTop: 8 }}>
             <p className="row">
               <input
@@ -487,7 +542,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                 onClick={() =>
                   setAds((prev) => ({
                     ...prev,
-                    creatives: (prev.creatives ?? []).filter((_, j) => j !== i),
+                    creatives: creativeList(prev).filter((_, j) => j !== i),
                   }))
                 }
               >
@@ -498,14 +553,14 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
         ))}
         <p className="row">
           <button
-            disabled={readOnly || (ads.creatives?.length ?? 0) >= 12}
+            disabled={readOnly || creativeList(ads).length >= 12}
             onClick={() =>
               setAds((prev) => ({
                 ...prev,
                 creatives: [
-                  ...(prev.creatives ?? []),
+                  ...creativeList(prev),
                   {
-                    id: `creative-${(prev.creatives?.length ?? 0) + 1}`,
+                    id: nextCreativeId(creativeList(prev)),
                     headline: '',
                     ctaText: '',
                     ctaUrl: '/',
@@ -542,18 +597,18 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                 />
                 {p}
               </label>
-              {(ads.placements?.[p]?.mix ?? []).map((slot, si) => (
+              {mixList(ads, p).map((slot, si) => (
                 <span className="row" key={si} style={{ gap: 4 }}>
                   <select
                     disabled={readOnly}
                     value={slot.provider}
                     onChange={(e) => {
                       const provider = e.target.value as 'binance' | 'house'
-                      const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                      const mix = [...mixList(ads, p)]
                       mix[si] =
                         provider === 'binance'
                           ? { provider, weight: slot.weight }
-                          : { provider, creativeId: ads.creatives?.[0]?.id ?? '', weight: slot.weight }
+                          : { provider, creativeId: creativeList(ads)[0]?.id ?? '', weight: slot.weight }
                       setMix(p, mix)
                     }}
                   >
@@ -565,13 +620,13 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                       disabled={readOnly}
                       value={slot.creativeId ?? ''}
                       onChange={(e) => {
-                        const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                        const mix = [...mixList(ads, p)]
                         mix[si] = { ...slot, creativeId: e.target.value }
                         setMix(p, mix)
                       }}
                     >
                       <option value="">— pick a creative —</option>
-                      {(ads.creatives ?? []).map((c) => (
+                      {creativeList(ads).map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.id}
                         </option>
@@ -586,7 +641,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                     value={slot.weight}
                     style={{ width: 64 }}
                     onChange={(e) => {
-                      const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                      const mix = [...mixList(ads, p)]
                       mix[si] = { ...slot, weight: Number(e.target.value) }
                       setMix(p, mix)
                     }}
@@ -596,7 +651,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                     onClick={() =>
                       setMix(
                         p,
-                        (ads.placements?.[p]?.mix ?? []).filter((_, j) => j !== si),
+                        mixList(ads, p).filter((_, j) => j !== si),
                       )
                     }
                   >
@@ -605,12 +660,12 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                 </span>
               ))}
               <button
-                disabled={readOnly || (ads.placements?.[p]?.mix?.length ?? 0) >= 6}
+                disabled={readOnly || mixList(ads, p).length >= 6}
                 onClick={() =>
-                  setMix(p, [...(ads.placements?.[p]?.mix ?? []), { provider: 'binance', weight: 1 }])
+                  setMix(p, [...mixList(ads, p), { provider: 'binance', weight: 1 }])
                 }
               >
-                {ads.placements?.[p]?.mix?.length ? '+ slot' : 'customise (Binance only)'}
+                {mixList(ads, p).length ? '+ slot' : 'customise (Binance only)'}
               </button>
             </div>
           ))}

@@ -5,6 +5,7 @@ import { canWrite } from '../../../../lib/rbac'
 import { json } from '../../../../lib/http'
 import {
   MAX_CREATIVE_BYTES,
+  MAX_CREATIVE_OBJECTS_PER_EXPLORER,
   buildCreativeKey,
   sha256Hex,
   sniffImageType,
@@ -60,6 +61,28 @@ export const POST: APIRoute = async ({ params, locals, request }) => {
     contentType,
   )
   if (!key) return json({ error: 'could not build a valid object key' }, 500)
+
+  // Quota. Uploads are permanent (deleting would break audit revert) and land on
+  // a public bucket, so without a ceiling any authenticated writer — or a stolen
+  // session — can loop this endpoint into an unbounded bill. Checked AFTER the
+  // key is computed so a re-upload of existing bytes is free: content addressing
+  // means it targets a key that already exists and cannot grow the count.
+  const prefix = `${locals.member.tenantId}/${explorer.id}/`
+  const existing = await env.CREATIVES.head(key)
+  if (!existing) {
+    const listed = await env.CREATIVES.list({
+      prefix,
+      limit: MAX_CREATIVE_OBJECTS_PER_EXPLORER,
+    })
+    if (listed.truncated || listed.objects.length >= MAX_CREATIVE_OBJECTS_PER_EXPLORER) {
+      return json(
+        {
+          error: `storage quota reached (${MAX_CREATIVE_OBJECTS_PER_EXPLORER} images for this explorer) — images are never deleted so that audit revert keeps working`,
+        },
+        429,
+      )
+    }
+  }
 
   await env.CREATIVES.put(key, bytes, {
     httpMetadata: {

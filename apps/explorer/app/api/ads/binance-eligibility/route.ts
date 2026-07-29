@@ -20,6 +20,11 @@ function getCountry(request: NextRequest): string | null {
  *  an https origin before it builds any URL from it. */
 const CREATIVES_BASE_URL = process.env.CREATIVES_BASE_URL ?? 'https://creatives.altscan.io'
 
+/** Object-key prefix this deployment owns, e.g. "altscan/bnb/". The explorer has
+ *  no tenant table, so the value is supplied per service. Unset ⇒ no ownership
+ *  check (behaviour before this feature); set it on both web services. */
+const CREATIVES_KEY_PREFIX = process.env.CREATIVES_KEY_PREFIX ?? null
+
 /**
  * Ad config for the client ad components: geo eligibility (as before) plus
  * settings-driven fields — referral code, disabled placements, and the
@@ -30,6 +35,7 @@ export async function GET(request: NextRequest) {
   const config = buildAdConfig(await getSetting('ads'), {
     binanceRestricted: isBinanceRestrictedCountry(country),
     creativesBaseUrl: CREATIVES_BASE_URL,
+    creativesKeyPrefix: CREATIVES_KEY_PREFIX,
   })
 
   return NextResponse.json(config, {

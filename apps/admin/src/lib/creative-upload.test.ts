@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  referencedCreativeKeys,
   buildCreativeKey,
   ownsEveryCreativeKey,
   sha256Hex,
@@ -128,5 +129,36 @@ describe('ownsEveryCreativeKey', () => {
     expect(ownsEveryCreativeKey(null, 'altscan', 'bnb')).toBe(true) // nothing to own
     expect(ownsEveryCreativeKey({ creatives: 'nope' }, 'altscan', 'bnb')).toBe(false)
     expect(ownsEveryCreativeKey({ creatives: [{ imageKey: 42 }] }, 'altscan', 'bnb')).toBe(false)
+  })
+})
+
+describe('referencedCreativeKeys', () => {
+  const hash = (c: string) => c.repeat(64)
+  const creative = (imageKey?: string) => ({
+    id: 'x',
+    headline: 'h',
+    ctaText: 'c',
+    ctaUrl: '/x',
+    ...(imageKey ? { imageKey, imageAlt: 'a' } : {}),
+  })
+
+  it('collects valid keys and dedupes them', () => {
+    const k = `altscan/bnb/${hash('a')}.png`
+    expect(referencedCreativeKeys({ creatives: [creative(k), creative(k)] })).toEqual([k])
+  })
+
+  it('ignores creatives with no image', () => {
+    expect(referencedCreativeKeys({ creatives: [creative()] })).toEqual([])
+  })
+
+  it('ignores malformed keys rather than passing them to a head() lookup', () => {
+    expect(referencedCreativeKeys({ creatives: [creative('../evil.png')] })).toEqual([])
+    expect(referencedCreativeKeys({ creatives: [{ imageKey: 42 }] })).toEqual([])
+  })
+
+  it('returns nothing for shapes that are not an ads value', () => {
+    for (const v of [null, undefined, 'str', 42, [], {}, { creatives: 'nope' }]) {
+      expect(referencedCreativeKeys(v)).toEqual([])
+    }
   })
 })

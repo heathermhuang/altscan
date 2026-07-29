@@ -104,8 +104,16 @@ function toHouseCandidate(
   creative: HouseCreative,
   weight: number,
   creativesBaseUrl: string,
+  keyPrefix: string | null,
 ): HouseCandidate {
-  const imageUrl = creative.imageKey ? safeImageUrl(creativesBaseUrl, creative.imageKey) : undefined
+  // The shared schema proves the key is WELL-FORMED; only this deployment knows
+  // which tenant/explorer prefix is legitimately ITS OWN. Without this check the
+  // console's ownership fence is the only one, and a direct ADMIN_SECRET write,
+  // a migration, or a row copied between explorers would render another
+  // explorer's artwork here. Drop just the image, not the whole ad.
+  const ownKey = !creative.imageKey || !keyPrefix || creative.imageKey.startsWith(keyPrefix)
+  const imageUrl =
+    creative.imageKey && ownKey ? safeImageUrl(creativesBaseUrl, creative.imageKey) : undefined
   return {
     kind: 'house',
     weight,
@@ -129,7 +137,13 @@ function toHouseCandidate(
  */
 export function buildAdConfig(
   override: AdsSettings | null,
-  opts: { binanceRestricted: boolean; creativesBaseUrl: string },
+  opts: {
+    binanceRestricted: boolean
+    creativesBaseUrl: string
+    /** Prefix this explorer owns, e.g. "altscan/bnb/". null ⇒ no ownership
+     *  check (back-compatible when CREATIVES_KEY_PREFIX is unset). */
+    creativesKeyPrefix?: string | null
+  },
 ): AdConfigPayload {
   const { refCode, disabled } = resolveAds(override)
   const byId = new Map((override?.creatives ?? []).map((c) => [c.id, c]))
@@ -147,7 +161,16 @@ export function buildAdConfig(
       // Defensive: Zod already rejects a dangling reference on write and on
       // read. If one ever gets through, drop the slot — never render a
       // headline-less ad.
-      if (creative) candidates.push(toHouseCandidate(creative, slot.weight, opts.creativesBaseUrl))
+      if (creative) {
+        candidates.push(
+          toHouseCandidate(
+            creative,
+            slot.weight,
+            opts.creativesBaseUrl,
+            opts.creativesKeyPrefix ?? null,
+          ),
+        )
+      }
     }
     placements[placement as AdPlacement] = { candidates }
   }

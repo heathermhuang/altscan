@@ -198,3 +198,44 @@ describe('buildAdConfig', () => {
     expect(out.placements.gas_top!.candidates).toEqual([])
   })
 })
+
+describe('buildAdConfig — creative key ownership (codex P1 #1)', () => {
+  const BASE = 'https://creatives.altscan.io'
+  const HASH = 'f'.repeat(64)
+  const OWN = `altscan/bnb/${HASH}.png`
+  const FOREIGN = `altscan/eth/${HASH}.png`
+  const creative = (imageKey: string) => ({
+    id: 'promo',
+    headline: 'Try the API',
+    ctaText: 'Read docs',
+    ctaUrl: '/api-docs',
+    imageKey,
+    imageAlt: 'Promo',
+  })
+  const build = (imageKey: string, creativesKeyPrefix: string | null) =>
+    buildAdConfig(
+      {
+        creatives: [creative(imageKey)],
+        placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'promo', weight: 1 }] } },
+      },
+      { binanceRestricted: false, creativesBaseUrl: BASE, creativesKeyPrefix },
+    ).placements.gas_top!.candidates[0] as { imageUrl?: string; headline: string }
+
+  it('serves an image whose key is under this explorer prefix', () => {
+    expect(build(OWN, 'altscan/bnb/').imageUrl).toBe(`${BASE}/${OWN}`)
+  })
+
+  it("drops the image of another explorer's key but keeps the ad text", () => {
+    const c = build(FOREIGN, 'altscan/bnb/')
+    expect(c.imageUrl).toBeUndefined()
+    expect(c.headline).toBe('Try the API')
+  })
+
+  it('rejects a prefix-lookalike', () => {
+    expect(build(`altscan/bnb2/${HASH}.png`, 'altscan/bnb/').imageUrl).toBeUndefined()
+  })
+
+  it('skips the check when no prefix is configured (back-compat)', () => {
+    expect(build(FOREIGN, null).imageUrl).toBe(`${BASE}/${FOREIGN}`)
+  })
+})
