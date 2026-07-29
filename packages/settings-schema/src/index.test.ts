@@ -150,6 +150,131 @@ describe('settings-schema', () => {
     expect(parseSetting('ads', null)).toBeNull()
   })
 
+  describe('ads namespace — house creatives and mixes', () => {
+    const HASH = 'b'.repeat(64)
+    const KEY = `altscan/bnb/${HASH}.png`
+    const CREATIVE = {
+      id: 'launch',
+      headline: 'Try the API',
+      ctaText: 'Read docs',
+      ctaUrl: '/api-docs',
+    }
+
+    it('still accepts a pre-Phase-B ads value unchanged (back-compat)', () => {
+      const legacy = { binanceRefCode: 'BNBSCAN', placements: { gas_top: { enabled: false } } }
+      expect(parseSetting('ads', legacy)).toEqual(legacy)
+      expect(parseSetting('ads', {})).toEqual({})
+    })
+
+    it('accepts creatives with a relative or https CTA and an image key', () => {
+      const value = {
+        creatives: [
+          CREATIVE,
+          {
+            ...CREATIVE,
+            id: 'promo',
+            ctaUrl: 'https://example.com/x',
+            body: 'Body copy',
+            imageKey: KEY,
+            imageAlt: 'Promo banner',
+          },
+        ],
+        placements: {
+          home_after_stats: {
+            mix: [
+              { provider: 'binance', weight: 1 },
+              { provider: 'house', creativeId: 'promo', weight: 3 },
+            ],
+          },
+        },
+      }
+      expect(parseSetting('ads', value)).toEqual(value)
+    })
+
+    it('requires imageAlt whenever imageKey is set', () => {
+      expect(parseSetting('ads', { creatives: [{ ...CREATIVE, imageKey: KEY }] })).toBeNull()
+      expect(
+        parseSetting('ads', { creatives: [{ ...CREATIVE, imageKey: KEY, imageAlt: 'alt' }] }),
+      ).not.toBeNull()
+    })
+
+    it('rejects an invalid image key through the creative schema', () => {
+      expect(
+        parseSetting('ads', {
+          creatives: [{ ...CREATIVE, imageKey: 'https://evil.example/x.png', imageAlt: 'a' }],
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects a javascript: or protocol-relative ctaUrl', () => {
+      for (const ctaUrl of ['javascript:alert(1)', '//evil.example', 'http://x.example']) {
+        expect(parseSetting('ads', { creatives: [{ ...CREATIVE, ctaUrl }] })).toBeNull()
+      }
+    })
+
+    it('rejects duplicate creative ids', () => {
+      expect(parseSetting('ads', { creatives: [CREATIVE, { ...CREATIVE }] })).toBeNull()
+    })
+
+    it('rejects a mix referencing an unknown creativeId', () => {
+      expect(
+        parseSetting('ads', {
+          creatives: [CREATIVE],
+          placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'nope', weight: 1 }] } },
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects a house slot with no creativeId and a binance slot carrying one', () => {
+      expect(
+        parseSetting('ads', {
+          placements: { gas_top: { mix: [{ provider: 'house', weight: 1 }] } },
+        }),
+      ).toBeNull()
+      expect(
+        parseSetting('ads', {
+          creatives: [CREATIVE],
+          placements: {
+            gas_top: { mix: [{ provider: 'binance', creativeId: 'launch', weight: 1 }] },
+          },
+        }),
+      ).toBeNull()
+    })
+
+    it('enforces weight, mix-length and creative-count bounds', () => {
+      const mix = (weight: number) => ({
+        placements: { gas_top: { mix: [{ provider: 'binance', weight }] } },
+      })
+      expect(parseSetting('ads', mix(0))).toBeNull()
+      expect(parseSetting('ads', mix(101))).toBeNull()
+      expect(parseSetting('ads', mix(1.5))).toBeNull()
+      expect(parseSetting('ads', { placements: { gas_top: { mix: [] } } })).toBeNull()
+      expect(
+        parseSetting('ads', {
+          placements: {
+            gas_top: { mix: Array.from({ length: 7 }, () => ({ provider: 'binance', weight: 1 })) },
+          },
+        }),
+      ).toBeNull()
+      expect(
+        parseSetting('ads', {
+          creatives: Array.from({ length: 13 }, (_, i) => ({ ...CREATIVE, id: `c${i}` })),
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects unknown fields and unknown placements (strict)', () => {
+      expect(parseSetting('ads', { creatives: [{ ...CREATIVE, extra: 1 }] })).toBeNull()
+      expect(parseSetting('ads', { placements: { not_a_placement: { enabled: true } } })).toBeNull()
+    })
+
+    it('rejects a malformed creative id', () => {
+      for (const id of ['', 'Has Caps', 'has space', '-leading', 'x'.repeat(33)]) {
+        expect(parseSetting('ads', { creatives: [{ ...CREATIVE, id }] })).toBeNull()
+      }
+    })
+  })
+
   describe('isValidCreativeKey', () => {
     const HASH = 'a'.repeat(64)
 
