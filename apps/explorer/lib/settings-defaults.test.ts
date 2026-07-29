@@ -239,3 +239,26 @@ describe('buildAdConfig — creative key ownership (codex P1 #1)', () => {
     expect(build(FOREIGN, null).imageUrl).toBe(`${BASE}/${FOREIGN}`)
   })
 })
+
+describe('buildAdConfig — key prefix normalisation', () => {
+  const BASE = 'https://creatives.altscan.io'
+  const HASH = '9'.repeat(64)
+  const build = (imageKey: string, creativesKeyPrefix: string) =>
+    buildAdConfig(
+      {
+        creatives: [
+          { id: 'p', headline: 'h', ctaText: 'c', ctaUrl: '/x', imageKey, imageAlt: 'a' },
+        ],
+        placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'p', weight: 1 }] } },
+      },
+      { binanceRestricted: false, creativesBaseUrl: BASE, creativesKeyPrefix },
+    ).placements.gas_top!.candidates[0] as { imageUrl?: string }
+
+  it('a prefix missing its trailing slash still rejects the lookalike sibling', () => {
+    expect(build(`altscan/bnb2/${HASH}.png`, 'altscan/bnb')).toBeDefined()
+    expect(build(`altscan/bnb2/${HASH}.png`, 'altscan/bnb').imageUrl).toBeUndefined()
+    expect(build(`altscan/bnb/${HASH}.png`, 'altscan/bnb').imageUrl).toBe(
+      `${BASE}/altscan/bnb/${HASH}.png`,
+    )
+  })
+})

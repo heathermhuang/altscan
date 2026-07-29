@@ -111,7 +111,11 @@ function toHouseCandidate(
   // console's ownership fence is the only one, and a direct ADMIN_SECRET write,
   // a migration, or a row copied between explorers would render another
   // explorer's artwork here. Drop just the image, not the whole ad.
-  const ownKey = !creative.imageKey || !keyPrefix || creative.imageKey.startsWith(keyPrefix)
+  // Normalise the trailing slash. A prefix set as "altscan/bnb" (no slash) would
+  // also match "altscan/bnb2/…" — the exact lookalike this check exists to stop —
+  // and the mistake is invisible until another explorer's artwork shows up.
+  const prefix = keyPrefix ? (keyPrefix.endsWith('/') ? keyPrefix : `${keyPrefix}/`) : null
+  const ownKey = !creative.imageKey || !prefix || creative.imageKey.startsWith(prefix)
   const imageUrl =
     creative.imageKey && ownKey ? safeImageUrl(creativesBaseUrl, creative.imageKey) : undefined
   return {

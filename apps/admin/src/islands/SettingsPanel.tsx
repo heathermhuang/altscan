@@ -470,7 +470,9 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             <p className="row">
               <input
                 placeholder="id (a-z0-9-_)"
-                disabled={readOnly}
+                // Locked during upload: the in-flight response re-finds this
+                // creative BY ID, so renaming mid-upload would orphan the image.
+                disabled={readOnly || uploadingId === c.id}
                 value={c.id}
                 onChange={(e) => updateCreative(i, { id: e.target.value })}
               />
@@ -538,7 +540,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             </p>
             <p className="row">
               <button
-                disabled={readOnly}
+                disabled={readOnly || uploadingId === c.id}
                 onClick={() =>
                   setAds((prev) => ({
                     ...prev,
