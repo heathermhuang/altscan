@@ -1,6 +1,8 @@
 import type { APIRoute } from 'astro'
 import { getExplorer } from '../../../../lib/db'
 import { json } from '../../../../lib/http'
+import { canWrite } from '../../../../lib/rbac'
+import { redactSettingsPayload } from '../../../../lib/redact'
 import { explorerAdminFetch } from '../../../../lib/upstream'
 
 export const prerender = false
@@ -15,5 +17,8 @@ export const GET: APIRoute = async ({ params, locals }) => {
   if (!upstream.ok) {
     return json({ error: upstream.error ?? 'upstream error', upstreamStatus: upstream.status }, 502)
   }
-  return json({ ...(upstream.body as Record<string, unknown>), role: locals.member.role })
+  const body = upstream.body as Record<string, unknown>
+  // A stored rpc.webRpcUrl can embed an API key; viewers get the host only.
+  const safe = canWrite(locals.member.role) ? body : redactSettingsPayload(body)
+  return json({ ...safe, role: locals.member.role })
 }

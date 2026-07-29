@@ -88,10 +88,36 @@ export const adsSettingsSchema = z
   .strict()
 export type AdsSettings = z.infer<typeof adsSettingsSchema>
 
-/** https-only, control/space/backslash-free, bounded — the httpsOrRelativeUrl
- *  ethos minus the relative branch. Server-side RPC calls cross the public
- *  internet, so http:// (plaintext) is rejected; ws(s):// is out of scope
- *  because ethers' JsonRpcProvider + FetchRequest is HTTP transport anyway. */
+/**
+ * Hosts an operator-supplied endpoint may never point at.
+ *
+ * This lives in the SCHEMA, not in the console's probe, so it binds every path
+ * that handles the value: the probe, the settings PUT, and the read side that
+ * builds a provider from it. Hardening only the probe would leave the actual
+ * fetch path (getWebProvider on the explorer, which runs inside a hosting
+ * provider's network) reachable by a direct PUT or a "save anyway" confirm.
+ *
+ * Known residual: a PUBLIC DNS name that resolves to a private address still
+ * passes — closing that needs resolution-aware egress control, which neither
+ * the Workers nor the Node fetch surface exposes.
+ */
+export function isBlockedRpcHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
+    return true
+  }
+  // Any IPv6 literal, and any IPv4 literal. A legitimate public RPC endpoint is
+  // a DNS name; an IP literal is the shape used to address infrastructure
+  // directly (loopback, RFC1918, and 169.254.169.254 cloud metadata included).
+  if (h.includes(':')) return true
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
+}
+
+/** https-only, control/space/backslash-free, bounded, and never pointed at a
+ *  blocked host — the httpsOrRelativeUrl ethos minus the relative branch.
+ *  Server-side RPC calls cross the public internet, so http:// (plaintext) is
+ *  rejected; ws(s):// is out of scope because ethers' JsonRpcProvider +
+ *  FetchRequest is HTTP transport anyway. */
 const httpsUrl = z
   .string()
   .trim()
@@ -104,12 +130,13 @@ const httpsUrl = z
         if (c <= 32 || c === 92) return false // controls + space + backslash
       }
       try {
-        return new URL(v).protocol === 'https:'
+        const u = new URL(v)
+        return u.protocol === 'https:' && !isBlockedRpcHost(u.hostname)
       } catch {
         return false
       }
     },
-    { message: 'webRpcUrl must be an https:// URL' },
+    { message: 'webRpcUrl must be an https:// URL pointing at a public host' },
   )
 
 export const rpcSettingsSchema = z

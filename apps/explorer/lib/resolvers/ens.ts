@@ -35,9 +35,14 @@ export async function resolveEns(address: string): Promise<string | null> {
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.name
 
   try {
-    const provider = await getWebProvider()
+    // Acquisition inside the race — it awaits a (bounded) settings lookup, and
+    // outside the race that latency would add to the 5s budget rather than
+    // count against it.
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
-    const name = await Promise.race([provider.lookupAddress(address), timeout])
+    const name = await Promise.race([
+      (async () => (await getWebProvider()).lookupAddress(address))(),
+      timeout,
+    ])
     setCacheEntry(key, name)
     return name
   } catch {

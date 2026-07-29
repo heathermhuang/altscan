@@ -3,7 +3,7 @@ import { MAX_RESPONSE_BYTES, probeRpc, validateRpcUrl } from './rpc-probe'
 
 /** Fetch stub that answers per JSON-RPC method. */
 function fetchStub(
-  byMethod: Record<string, { status?: number; body: string; contentLength?: string; stream?: boolean }>,
+  byMethod: Record<string, { status?: number; body: string; contentLength?: string; noBody?: boolean }>,
   seen?: RequestInit[],
 ): typeof fetch {
   return vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -11,31 +11,28 @@ function fetchStub(
     const method = JSON.parse(String(init?.body)).method as string
     const reply = byMethod[method] ?? { status: 500, body: '{}' }
     const headers = { get: (k: string) => (k.toLowerCase() === 'content-length' ? (reply.contentLength ?? null) : null) }
-    // `stream: true` exercises the bounded reader path; otherwise the stub has
-    // no body and the helper falls back to text().
-    const body = reply.stream
-      ? {
+    // Always a ReadableStream, like the real runtime — the probe deliberately
+    // has no unbounded text() fallback, so a stub without a body would only
+    // ever exercise the empty-body path.
+    const body = reply.noBody
+      ? undefined
+      : {
           getReader: () => {
-            let sent = false
+            // Two chunks so the running byte cap is exercised mid-read rather
+            // than only at the end.
+            const chunks = [reply.body.slice(0, 8), reply.body.slice(8)].filter((c) => c.length > 0)
+            let i = 0
             return {
-              read: async () => {
-                if (sent) return { done: true, value: undefined }
-                sent = true
-                return { done: false, value: new TextEncoder().encode(reply.body) }
-              },
+              read: async () =>
+                i < chunks.length
+                  ? { done: false, value: new TextEncoder().encode(chunks[i++]) }
+                  : { done: true, value: undefined },
               cancel: async () => {},
               releaseLock: () => {},
             }
           },
         }
-      : undefined
-    return {
-      ok: (reply.status ?? 200) < 400,
-      status: reply.status ?? 200,
-      headers,
-      body,
-      text: async () => reply.body,
-    }
+    return { ok: (reply.status ?? 200) < 400, status: reply.status ?? 200, headers, body }
   }) as unknown as typeof fetch
 }
 
@@ -131,18 +128,10 @@ describe('probeRpc', () => {
     expect(r.error).toBe('endpoint did not return JSON')
   })
 
-  it('refuses to read an oversized body', async () => {
-    const huge = { body: JSON.stringify({ result: '0x38', pad: 'a'.repeat(MAX_RESPONSE_BYTES) }) }
-    const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: huge, eth_blockNumber: huge }))
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('too large')
-  })
-
   it('rejects on content-length before reading a single byte of the body', async () => {
     const lying = {
       body: '{"result":"0x38"}',
       contentLength: String(MAX_RESPONSE_BYTES + 1),
-      stream: true,
     }
     const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: lying, eth_blockNumber: lying }))
     expect(r.ok).toBe(false)
@@ -150,14 +139,14 @@ describe('probeRpc', () => {
   })
 
   it('caps a streamed body that exceeds the limit mid-read', async () => {
-    const huge = { body: 'a'.repeat(MAX_RESPONSE_BYTES + 100), stream: true }
+    const huge = { body: 'a'.repeat(MAX_RESPONSE_BYTES + 100) }
     const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: huge, eth_blockNumber: huge }))
     expect(r.ok).toBe(false)
     expect(r.error).toContain('too large')
   })
 
   it('reads a normal streamed body', async () => {
-    const ok38 = { body: JSON.stringify({ result: '0x38' }), stream: true }
+    const ok38 = { body: JSON.stringify({ result: '0x38' }) }
     const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: ok38, eth_blockNumber: ok38 }))
     expect(r.ok).toBe(true)
     expect(r.chainId).toBe(56)

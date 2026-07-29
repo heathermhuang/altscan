@@ -21,21 +21,19 @@ type CallOk = { result: string; latencyMs: number }
 type CallErr = { error: string }
 
 /**
- * Read at most MAX_RESPONSE_BYTES, without buffering the whole body first.
+ * Read at most MAX_RESPONSE_BYTES, without ever buffering the whole body.
  * `res.text()` would pull an unbounded response into worker memory before any
- * length check could reject it. Returns null when the cap is exceeded.
+ * length check could reject it, so there is deliberately NO text() fallback
+ * here — a missing body reads as empty rather than as "read it all". Counts
+ * BYTES off the wire, not UTF-16 code units. Returns null when the cap is
+ * exceeded.
  */
 async function readCapped(res: Response): Promise<string | null> {
   const declared = Number(res.headers?.get?.('content-length') ?? '')
   if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) return null
 
   const reader = res.body?.getReader?.()
-  // No streaming body available (test doubles, or a runtime without it): fall
-  // back to text() but still enforce the cap on the result.
-  if (!reader) {
-    const text = await res.text()
-    return text.length > MAX_RESPONSE_BYTES ? null : text
-  }
+  if (!reader) return ''
 
   const decoder = new TextDecoder()
   let out = ''
@@ -58,38 +56,13 @@ async function readCapped(res: Response): Promise<string | null> {
 }
 
 /**
- * Hosts the probe refuses outright. The Workers runtime has no route to a
- * private network, but that is a platform property, not an application
- * control — assert it here so the guarantee survives a runtime change, and so
- * an IP literal can't be used to sidestep DNS-name expectations.
- */
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
-    return true
-  }
-  // IPv6 literal (any) and IPv4 literal (any) — a legitimate public RPC is a
-  // DNS name; an IP literal is the shape used to reach infrastructure directly.
-  if (h.includes(':')) return true
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
-}
-
-/**
- * Validate a candidate RPC URL through the REAL settings schema, so the probe
- * can never accept a URL the write path would reject (or vice versa), then
- * additionally refuse hosts the probe must never dial.
- * Returns null when invalid.
+ * Validate a candidate RPC URL through the REAL settings schema — which now
+ * carries the blocked-host rule itself, so probe and save enforce one policy
+ * and cannot drift apart. Returns null when invalid.
  */
 export function validateRpcUrl(url: unknown): string | null {
   const parsed = rpcSettingsSchema.safeParse({ webRpcUrl: url })
-  const value = parsed.success ? (parsed.data.webRpcUrl ?? null) : null
-  if (!value) return null
-  try {
-    if (isBlockedHost(new URL(value).hostname)) return null
-  } catch {
-    return null
-  }
-  return value
+  return parsed.success ? (parsed.data.webRpcUrl ?? null) : null
 }
 
 /**

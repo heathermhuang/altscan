@@ -42,6 +42,31 @@ describe('settings-schema', () => {
       expect(parseSetting('rpc', { webRpcUrl: `https://x.test/${'a'.repeat(2048)}` })).toBeNull()
     })
 
+    // The blocked-host rule lives in the SCHEMA so it binds the settings PUT
+    // and the provider build path too — not only the console's probe. Without
+    // it, a direct PUT (or the console's "save anyway" confirm) could persist
+    // an internal address that the explorer then fetches server-side.
+    it('rejects hosts an RPC override must never point at', () => {
+      for (const webRpcUrl of [
+        'https://localhost:8545',
+        'https://LOCALHOST/rpc',
+        'https://api.localhost/rpc',
+        'https://db.internal/rpc',
+        'https://printer.local/rpc',
+        'https://127.0.0.1:8545',
+        'https://169.254.169.254/latest/meta-data', // cloud metadata
+        'https://10.0.0.5/rpc',
+        'https://172.16.0.1/rpc',
+        'https://192.168.1.1/rpc',
+        'https://[::1]:8545',
+        'https://[fd00::1]/rpc',
+      ]) {
+        expect(parseSetting('rpc', { webRpcUrl })).toBeNull()
+      }
+      // A normal public endpoint is unaffected.
+      expect(parseSetting('rpc', { webRpcUrl: 'https://bsc-dataseed.binance.org' })).not.toBeNull()
+    })
+
     it('bounds rpcTimeoutMs to an integer 1000..60000 and rejects unknown keys', () => {
       expect(parseSetting('rpc', { rpcTimeoutMs: 999 })).toBeNull()
       expect(parseSetting('rpc', { rpcTimeoutMs: 60001 })).toBeNull()

@@ -52,8 +52,11 @@ export async function GET(request: Request) {
   let avgGasPrice = cachedGasPrice
   if (Date.now() - gasPriceCachedAt > GAS_PRICE_TTL) {
     try {
+      // Provider acquisition is INSIDE the race: it now awaits a (bounded)
+      // settings lookup, and leaving it outside would stack that latency on
+      // top of the 3s budget instead of within it.
       const feeData = await Promise.race([
-        (await getWebProvider()).getFeeData(),
+        (async () => (await getWebProvider()).getFeeData())(),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
       ])
       avgGasPrice = (feeData.gasPrice ?? BigInt(0)).toString()
