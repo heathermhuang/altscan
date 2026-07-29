@@ -111,11 +111,19 @@ function toHouseCandidate(
   // console's ownership fence is the only one, and a direct ADMIN_SECRET write,
   // a migration, or a row copied between explorers would render another
   // explorer's artwork here. Drop just the image, not the whole ad.
-  // Normalise the trailing slash. A prefix set as "altscan/bnb" (no slash) would
-  // also match "altscan/bnb2/…" — the exact lookalike this check exists to stop —
-  // and the mistake is invisible until another explorer's artwork shows up.
-  const prefix = keyPrefix ? (keyPrefix.endsWith('/') ? keyPrefix : `${keyPrefix}/`) : null
-  const ownKey = !creative.imageKey || !prefix || creative.imageKey.startsWith(prefix)
+  // Three cases, and the difference between the last two is the whole point:
+  //   null/undefined → not configured at all; no check (the route always passes
+  //                    a derived prefix, so this is library back-compat only).
+  //   ""             → configured but BLANK. A misconfiguration, and every key
+  //                    startsWith("") — so treating it as a prefix would allow
+  //                    everything. Fail CLOSED: serve no image at all.
+  //   "altscan/bnb"  → normalise the trailing slash, or it also matches the
+  //                    "altscan/bnb2/…" lookalike this check exists to stop.
+  const configured = keyPrefix?.trim()
+  const prefix =
+    keyPrefix == null ? null : configured ? (configured.endsWith('/') ? configured : `${configured}/`) : ''
+  const ownKey =
+    !creative.imageKey || prefix === null || (prefix !== '' && creative.imageKey.startsWith(prefix))
   const imageUrl =
     creative.imageKey && ownKey ? safeImageUrl(creativesBaseUrl, creative.imageKey) : undefined
   return {

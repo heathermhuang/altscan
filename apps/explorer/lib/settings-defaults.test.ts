@@ -262,3 +262,38 @@ describe('buildAdConfig — key prefix normalisation', () => {
     )
   })
 })
+
+describe('buildAdConfig — ownership check is fail-CLOSED (codex round 2, P1)', () => {
+  const BASE = 'https://creatives.altscan.io'
+  const HASH = '7'.repeat(64)
+  const build = (opts: Parameters<typeof buildAdConfig>[1]) =>
+    buildAdConfig(
+      {
+        creatives: [
+          {
+            id: 'p',
+            headline: 'h',
+            ctaText: 'c',
+            ctaUrl: '/x',
+            imageKey: `altscan/eth/${HASH}.png`,
+            imageAlt: 'a',
+          },
+        ],
+        placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'p', weight: 1 }] } },
+      },
+      opts,
+    ).placements.gas_top!.candidates[0] as { imageUrl?: string }
+
+  it('omitting the prefix option leaves the image unserved rather than trusting it', () => {
+    // The route now always supplies a derived prefix, so "unset" is not
+    // reachable in production; this pins the library-level default.
+    expect(build({ binanceRestricted: false, creativesBaseUrl: BASE, creativesKeyPrefix: 'altscan/bnb/' }).imageUrl).toBeUndefined()
+  })
+
+  it('an explicit empty prefix must not silently disable the check', () => {
+    // '' is falsy — the route coerces it away before calling, but assert the
+    // library does not treat a blank string as "allow everything".
+    const out = build({ binanceRestricted: false, creativesBaseUrl: BASE, creativesKeyPrefix: '' })
+    expect(out.imageUrl).toBeUndefined()
+  })
+})

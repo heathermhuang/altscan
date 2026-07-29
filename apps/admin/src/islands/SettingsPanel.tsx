@@ -40,23 +40,62 @@ function currentValue<T>(p: SettingsPayload, key: string): T | null {
 }
 
 /**
- * Read the creatives array defensively.
+ * Read stored settings values defensively.
  *
  * The explorer's settings GET and audit GET both return the stored value RAW —
  * no schema re-validation — and `restore()` loads a historical value straight
  * into the draft. A row that predates a schema change, or one written directly
- * to the DB, can therefore carry a non-array `creatives`. Calling .map() on it
- * would blank the editor: the one tool you'd use to repair the bad row.
+ * to the DB, can therefore carry anything at all. Calling .map() on it would
+ * blank the editor: the one tool you'd use to repair the bad row.
+ *
+ * Every field is NORMALISED, not merely shape-checked. An element-level
+ * `typeof === 'object'` filter still lets `{id: {bad: true}}` through, and React
+ * throws "Objects are not valid as a React child" the moment that id renders —
+ * blanking the editor just as surely as a non-array would.
  */
+const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
+const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
 function creativeList(v: AdsValue | null | undefined): HouseCreativeValue[] {
-  const c = v?.creatives
-  return Array.isArray(c) ? (c.filter((x) => x && typeof x === 'object') as HouseCreativeValue[]) : []
+  // Start from `unknown`: the declared element type is a claim about data we
+  // have not validated, and the runtime predicates below must be well-typed.
+  const c: unknown = v?.creatives
+  if (!Array.isArray(c)) return []
+  return (c as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({
+      id: str(x.id),
+      headline: str(x.headline),
+      body: optStr(x.body),
+      ctaText: str(x.ctaText),
+      ctaUrl: str(x.ctaUrl, '/'),
+      imageKey: optStr(x.imageKey),
+      imageAlt: optStr(x.imageAlt),
+    }))
 }
 
 /** Same defence for a placement's mix. */
 function mixList(v: AdsValue | null | undefined, placement: string): AdSlotValue[] {
-  const m = v?.placements?.[placement]?.mix
-  return Array.isArray(m) ? (m.filter((x) => x && typeof x === 'object') as AdSlotValue[]) : []
+  const m: unknown = v?.placements?.[placement]?.mix
+  if (!Array.isArray(m)) return []
+  return (m as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({
+      provider: x.provider === 'house' ? ('house' as const) : ('binance' as const),
+      creativeId: optStr(x.creativeId),
+      weight: typeof x.weight === 'number' && Number.isFinite(x.weight) ? x.weight : 1,
+    }))
+}
+
+/** The links namespace is read raw from the same unvalidated GET. Codex flagged
+ *  that `links.quickLinks.map(...)` can blank the whole editor for exactly the
+ *  same reason — guard it too rather than fix only the namespace I touched. */
+function quickLinkList(v: LinksValue | null | undefined): QuickLink[] {
+  const q: unknown = v?.quickLinks
+  if (!Array.isArray(q)) return []
+  return (q as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({ label: str(x.label), href: str(x.href, '/') }))
 }
 
 /** First free `creative-N`. Numbering from the array LENGTH would collide after
@@ -120,7 +159,10 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   // after a successful test invalidates the "already verified" save path.
   const [probe, setProbe] = useState<{ forUrl: string; result: RpcProbe } | null>(null)
   const [probing, setProbing] = useState(false)
-  const [uploadingId, setUploadingId] = useState<string | null>(null)
+  // A SET, not a single id: with one slot, starting a second upload replaced the
+  // first and silently unlocked its row mid-flight (codex round 2, P2).
+  const [uploadingIds, setUploadingIds] = useState<ReadonlySet<string>>(new Set())
+  const isUploading = (id: string) => uploadingIds.has(id)
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [auditKey, setAuditKey] = useState<string | null>(null)
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
@@ -131,7 +173,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((p: SettingsPayload) => {
         setPayload(p)
-        setLinks(currentValue<LinksValue>(p, 'links') ?? { quickLinks: [] })
+        setLinks({ quickLinks: quickLinkList(currentValue<LinksValue>(p, 'links')) })
         setFooter(currentValue<FooterValue>(p, 'footer') ?? {})
         setAds(currentValue<AdsValue>(p, 'ads') ?? {})
         setRpc(currentValue<RpcValue>(p, 'rpc') ?? {})
@@ -191,7 +233,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   }
 
   function restore(entry: AuditEntry) {
-    if (auditKey === 'links') setLinks(entry.value as LinksValue)
+    if (auditKey === 'links') setLinks({ quickLinks: quickLinkList(entry.value as LinksValue) })
     if (auditKey === 'footer') setFooter(entry.value as FooterValue)
     if (auditKey === 'ads') setAds(entry.value as AdsValue)
     if (auditKey === 'rpc') {
@@ -240,28 +282,41 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   }
 
   /** Apply a patch by creative IDENTITY, not by array index.
-   *  An upload resolves asynchronously while the operator can still delete rows
-   *  above it; re-using the captured index would attach the artwork to whichever
-   *  creative shifted into that slot. If the row is gone, drop the result. */
-  function updateCreativeById(id: string, patch: Partial<HouseCreativeValue>): boolean {
-    let applied = false
+   *  An upload resolves asynchronously while the operator can still reorder rows;
+   *  re-using the captured index would attach the artwork to whichever creative
+   *  shifted into that slot. If the row is gone, the update no-ops.
+   *
+   *  Returns nothing on purpose. An earlier revision set a flag inside the
+   *  updater and read it right after setAds() to report success — React does not
+   *  promise the updater has run by then, so that report was a coin flip. */
+  function updateCreativeById(id: string, patch: Partial<HouseCreativeValue>): void {
     setAds((prev) => {
       const creatives = creativeList(prev)
-      const i = creatives.findIndex((c) => c?.id === id)
+      const i = creatives.findIndex((c) => c.id === id)
       if (i === -1) return prev
-      applied = true
       const next = [...creatives]
       next[i] = { ...next[i], ...patch }
       return { ...prev, creatives: next }
     })
-    return applied
   }
 
   async function uploadCreativeImage(index: number, file: File) {
-    const creative = creativeList(ads)[index]
+    const creatives = creativeList(ads)
+    const creative = creatives[index]
     if (!creative) return
     const targetId = creative.id
-    setUploadingId(targetId)
+    // An id is the upload's only handle on its row. If two drafts share one,
+    // findIndex would attach the artwork to whichever comes first — refuse
+    // rather than silently pick. (The save would fail Zod on duplicates anyway.)
+    if (creatives.filter((c) => c.id === targetId).length > 1) {
+      setMessage({ kind: 'err', text: `duplicate creative id "${targetId}" — rename it before uploading` })
+      return
+    }
+    if (!targetId) {
+      setMessage({ kind: 'err', text: 'give the creative an id before uploading an image' })
+      return
+    }
+    setUploadingIds((prev) => new Set(prev).add(targetId))
     setMessage(null)
     try {
       const res = await fetch(`/api/x/${explorerId}/creatives.json`, {
@@ -274,18 +329,16 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
         setMessage({ kind: 'err', text: `upload: ${body.error ?? `HTTP ${res.status}`}` })
         return
       }
-      if (updateCreativeById(targetId, { imageKey: body.key })) {
-        setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
-      } else {
-        setMessage({
-          kind: 'err',
-          text: `upload finished but creative "${targetId}" is gone — the image was not attached`,
-        })
-      }
+      updateCreativeById(targetId, { imageKey: body.key })
+      setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
     } catch (e) {
       setMessage({ kind: 'err', text: String(e) })
     } finally {
-      setUploadingId(null)
+      setUploadingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(targetId)
+        return next
+      })
     }
   }
 
@@ -472,7 +525,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
                 placeholder="id (a-z0-9-_)"
                 // Locked during upload: the in-flight response re-finds this
                 // creative BY ID, so renaming mid-upload would orphan the image.
-                disabled={readOnly || uploadingId === c.id}
+                disabled={readOnly || isUploading(c.id)}
                 value={c.id}
                 onChange={(e) => updateCreative(i, { id: e.target.value })}
               />
@@ -507,13 +560,13 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif"
-                disabled={readOnly || uploadingId === c.id}
+                disabled={readOnly || isUploading(c.id)}
                 onChange={(e) => {
                   const file = e.target.files?.[0]
                   if (file) void uploadCreativeImage(i, file)
                 }}
               />
-              {uploadingId === c.id && <span>uploading…</span>}
+              {isUploading(c.id) && <span>uploading…</span>}
               {c.imageKey && (
                 <>
                   <img
@@ -540,7 +593,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             </p>
             <p className="row">
               <button
-                disabled={readOnly || uploadingId === c.id}
+                disabled={readOnly || isUploading(c.id)}
                 onClick={() =>
                   setAds((prev) => ({
                     ...prev,
