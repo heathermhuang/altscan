@@ -2,6 +2,8 @@
 
 type Env = {
   DB: D1Database
+  /** House-ad creative images; public reads go via creatives.altscan.io. */
+  CREATIVES: R2Bucket
   RENDER_API_KEY: string
   ADMIN_SECRET_BNB: string
   ADMIN_SECRET_ETH: string
