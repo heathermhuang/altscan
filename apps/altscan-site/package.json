@@ -19,7 +19,7 @@
     "@fontsource/jetbrains-mono": "^5.1.0"
   },
   "devDependencies": {
-    "wrangler": "^3.100.0",
+    "wrangler": "^4.115.0",
     "tsx": "^4.19.0"
   }
 }

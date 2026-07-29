@@ -20,10 +20,10 @@
     "jose": "^5.9.0"
   },
   "devDependencies": {
-    "wrangler": "^3.100.0",
+    "wrangler": "^4.115.0",
     "typescript": "^5.4.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "@cloudflare/workers-types": "^4.20250109.0"
+    "@cloudflare/workers-types": "^5.20260729.1"
   }
 }
