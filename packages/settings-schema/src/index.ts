@@ -120,6 +120,27 @@ export function isBlockedRpcHost(hostname: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
 }
 
+/**
+ * Object-key form for a house-creative image: <tenant>/<explorer>/<sha256>.<ext>.
+ *
+ * This lives in the SCHEMA, not in the upload route, so every path that handles
+ * the value inherits it: the upload, the settings PUT, the read-back GET, and
+ * the explorer's render path that prefixes it with the public bucket base.
+ * Hardening only the upload would leave the PUT — which accepts an arbitrary
+ * JSON body from a browser — free to store whatever it likes.
+ *
+ * The grammar is deliberately narrower than "a path": no scheme, no '//', no
+ * '..', no query, no control characters, exactly three segments. A key that
+ * cannot contain ':' or '//' cannot widen into an off-origin URL when the
+ * explorer concatenates it onto the bucket base.
+ */
+const CREATIVE_KEY_RE =
+  /^[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9_-]{1,64}\/[0-9a-f]{64}\.(png|jpg|webp|gif)$/
+
+export function isValidCreativeKey(k: unknown): boolean {
+  return typeof k === 'string' && k.length <= 200 && CREATIVE_KEY_RE.test(k)
+}
+
 /** https-only, control/space/backslash-free, bounded, and never pointed at a
  *  blocked host — the httpsOrRelativeUrl ethos minus the relative branch.
  *  Server-side RPC calls cross the public internet, so http:// (plaintext) is

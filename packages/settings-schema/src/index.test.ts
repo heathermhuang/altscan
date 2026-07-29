@@ -3,6 +3,7 @@ import {
   AD_PLACEMENTS,
   SETTINGS_KEYS,
   isSettingsKey,
+  isValidCreativeKey,
   parseSetting,
 } from './index'
 
@@ -147,5 +148,41 @@ describe('settings-schema', () => {
   it('returns null (never throws) on garbage', () => {
     expect(parseSetting('links', 42)).toBeNull()
     expect(parseSetting('ads', null)).toBeNull()
+  })
+
+  describe('isValidCreativeKey', () => {
+    const HASH = 'a'.repeat(64)
+
+    it('accepts a well-formed tenant/explorer/hash.ext key', () => {
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.png`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.jpg`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.webp`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.gif`)).toBe(true)
+      expect(isValidCreativeKey(`t-1_x/e-2_y/${HASH}.png`)).toBe(true)
+    })
+
+    it('rejects anything that could widen into an off-origin URL or escape the prefix', () => {
+      for (const k of [
+        `https://evil.example/${HASH}.png`, // absolute URL
+        `//evil.example/a/${HASH}.png`, // protocol-relative
+        `altscan/../other/${HASH}.png`, // traversal
+        `altscan//bnb/${HASH}.png`, // empty segment
+        `/altscan/bnb/${HASH}.png`, // leading slash
+        `altscan/bnb/${HASH}.png/x`, // extra segment
+        `altscan/${HASH}.png`, // too few segments
+        `altscan/bnb/${HASH}.svg`, // script-capable type
+        `altscan/bnb/${HASH}.PNG`, // uppercase ext
+        `altscan/bnb/${'a'.repeat(63)}.png`, // short hash
+        `altscan/bnb/${'a'.repeat(65)}.png`, // long hash
+        `altscan/bnb/${'g'.repeat(64)}.png`, // non-hex hash
+        `altscan/bnb/${HASH}`, // no extension
+        `altscan/bnb/${HASH}.png\n`, // control char
+        `altscan/bnb/${HASH}.png?x=1`, // query
+        `${'a'.repeat(190)}/bnb/${HASH}.png`, // over 200 chars
+        '',
+      ]) {
+        expect(isValidCreativeKey(k)).toBe(false)
+      }
+    })
   })
 })
