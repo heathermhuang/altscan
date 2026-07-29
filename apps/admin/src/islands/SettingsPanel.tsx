@@ -18,7 +18,21 @@ type AuditEntry = { id: number; version: number; value: unknown; updatedAt: stri
 type QuickLink = { label: string; href: string }
 type LinksValue = { quickLinks: QuickLink[] }
 type FooterValue = { tagline?: string; notAffiliatedWith?: string }
-type AdsValue = { binanceRefCode?: string; placements?: Record<string, { enabled: boolean }> }
+type HouseCreativeValue = {
+  id: string
+  headline: string
+  body?: string
+  ctaText: string
+  ctaUrl: string
+  imageKey?: string
+  imageAlt?: string
+}
+type AdSlotValue = { provider: 'binance' | 'house'; creativeId?: string; weight: number }
+type AdsValue = {
+  binanceRefCode?: string
+  creatives?: HouseCreativeValue[]
+  placements?: Record<string, { enabled?: boolean; mix?: AdSlotValue[] }>
+}
 type RpcValue = { webRpcUrl?: string; rpcTimeoutMs?: number }
 
 function currentValue<T>(p: SettingsPayload, key: string): T | null {
@@ -76,6 +90,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   // after a successful test invalidates the "already verified" save path.
   const [probe, setProbe] = useState<{ forUrl: string; result: RpcProbe } | null>(null)
   const [probing, setProbing] = useState(false)
+  const [uploadingId, setUploadingId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [auditKey, setAuditKey] = useState<string | null>(null)
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
@@ -180,6 +195,58 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
     } finally {
       setProbing(false)
     }
+  }
+
+  /** Public bucket domain — display and preview only. The explorer builds its
+   *  own URL from the stored key, so nothing here is trusted downstream. */
+  const PUBLIC_CREATIVE_BASE = 'https://creatives.altscan.io'
+
+  function updateCreative(index: number, patch: Partial<HouseCreativeValue>) {
+    setAds((prev) => {
+      const creatives = [...(prev.creatives ?? [])]
+      creatives[index] = { ...creatives[index], ...patch }
+      return { ...prev, creatives }
+    })
+  }
+
+  async function uploadCreativeImage(index: number, file: File) {
+    const creative = ads.creatives?.[index]
+    if (!creative) return
+    setUploadingId(creative.id)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/x/${explorerId}/creatives.json`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      const body = (await res.json().catch(() => ({}))) as { key?: string; error?: string }
+      if (!res.ok) {
+        setMessage({ kind: 'err', text: `upload: ${body.error ?? `HTTP ${res.status}`}` })
+        return
+      }
+      updateCreative(index, { imageKey: body.key })
+      setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
+    } catch (e) {
+      setMessage({ kind: 'err', text: String(e) })
+    } finally {
+      setUploadingId(null)
+    }
+  }
+
+  /** Writes a placement's mix while PRESERVING its `enabled` flag, and prunes
+   *  the placement entry entirely once neither field is set — so a pristine
+   *  panel stays non-dirty. */
+  function setMix(placement: string, mix: AdSlotValue[] | undefined) {
+    setAds((prev) => {
+      const placements = { ...(prev.placements ?? {}) }
+      const current = { ...(placements[placement] ?? {}) }
+      if (mix && mix.length > 0) current.mix = mix
+      else delete current.mix
+      if (current.enabled === undefined && current.mix === undefined) delete placements[placement]
+      else placements[placement] = current
+      return { ...prev, placements }
+    })
   }
 
   /**
@@ -336,20 +403,216 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             />
           </dd>
         </dl>
-        <p>placements (unchecked = hidden):</p>
-        <div className="toggle-grid">
-          {payload.adPlacements.map((p) => (
-            <label className="toggle" key={p}>
+        <h4 style={{ marginBottom: 4 }}>House creatives</h4>
+        <p className="hint">
+          Uploaded images are stored on a <strong>public</strong> bucket and are readable by anyone
+          at {PUBLIC_CREATIVE_BASE}. Upload only artwork intended for the live site. Images are
+          never deleted, so reverting to an older version always works — but an abandoned draft
+          leaves the uploaded file behind.
+        </p>
+        {(ads.creatives ?? []).map((c, i) => (
+          <div className="card" key={i} style={{ marginTop: 8 }}>
+            <p className="row">
               <input
-                type="checkbox"
+                placeholder="id (a-z0-9-_)"
                 disabled={readOnly}
-                checked={placementEnabled(p)}
-                onChange={(e) =>
-                  setAds({ ...ads, placements: { ...(ads.placements ?? {}), [p]: { enabled: e.target.checked } } })
-                }
+                value={c.id}
+                onChange={(e) => updateCreative(i, { id: e.target.value })}
               />
-              {p}
-            </label>
+              <input
+                placeholder="headline"
+                disabled={readOnly}
+                value={c.headline}
+                onChange={(e) => updateCreative(i, { headline: e.target.value })}
+              />
+            </p>
+            <p className="row">
+              <input
+                placeholder="body (optional)"
+                disabled={readOnly}
+                value={c.body ?? ''}
+                onChange={(e) => updateCreative(i, { body: e.target.value || undefined })}
+              />
+              <input
+                placeholder="CTA text"
+                disabled={readOnly}
+                value={c.ctaText}
+                onChange={(e) => updateCreative(i, { ctaText: e.target.value })}
+              />
+              <input
+                placeholder="CTA url (/path or https://)"
+                disabled={readOnly}
+                value={c.ctaUrl}
+                onChange={(e) => updateCreative(i, { ctaUrl: e.target.value })}
+              />
+            </p>
+            <p className="row">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                disabled={readOnly || uploadingId === c.id}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void uploadCreativeImage(i, file)
+                }}
+              />
+              {uploadingId === c.id && <span>uploading…</span>}
+              {c.imageKey && (
+                <>
+                  <img
+                    src={`${PUBLIC_CREATIVE_BASE}/${c.imageKey}`}
+                    alt=""
+                    width={36}
+                    height={36}
+                    style={{ objectFit: 'cover', borderRadius: 6 }}
+                  />
+                  <input
+                    placeholder="image alt text (required)"
+                    disabled={readOnly}
+                    value={c.imageAlt ?? ''}
+                    onChange={(e) => updateCreative(i, { imageAlt: e.target.value || undefined })}
+                  />
+                  <button
+                    disabled={readOnly}
+                    onClick={() => updateCreative(i, { imageKey: undefined, imageAlt: undefined })}
+                  >
+                    remove image
+                  </button>
+                </>
+              )}
+            </p>
+            <p className="row">
+              <button
+                disabled={readOnly}
+                onClick={() =>
+                  setAds((prev) => ({
+                    ...prev,
+                    creatives: (prev.creatives ?? []).filter((_, j) => j !== i),
+                  }))
+                }
+              >
+                remove creative
+              </button>
+            </p>
+          </div>
+        ))}
+        <p className="row">
+          <button
+            disabled={readOnly || (ads.creatives?.length ?? 0) >= 12}
+            onClick={() =>
+              setAds((prev) => ({
+                ...prev,
+                creatives: [
+                  ...(prev.creatives ?? []),
+                  {
+                    id: `creative-${(prev.creatives?.length ?? 0) + 1}`,
+                    headline: '',
+                    ctaText: '',
+                    ctaUrl: '/',
+                  },
+                ],
+              }))
+            }
+          >
+            + add creative
+          </button>
+          <span>max 12</span>
+        </p>
+
+        <p>placements (unchecked = hidden; no slots = Binance only):</p>
+        <div>
+          {payload.adPlacements.map((p) => (
+            <div className="row" key={p} style={{ alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <label className="toggle" style={{ minWidth: 210 }}>
+                <input
+                  type="checkbox"
+                  disabled={readOnly}
+                  checked={placementEnabled(p)}
+                  onChange={(e) =>
+                    // Spread the existing entry: replacing it wholesale would
+                    // silently drop this placement's mix.
+                    setAds({
+                      ...ads,
+                      placements: {
+                        ...(ads.placements ?? {}),
+                        [p]: { ...(ads.placements?.[p] ?? {}), enabled: e.target.checked },
+                      },
+                    })
+                  }
+                />
+                {p}
+              </label>
+              {(ads.placements?.[p]?.mix ?? []).map((slot, si) => (
+                <span className="row" key={si} style={{ gap: 4 }}>
+                  <select
+                    disabled={readOnly}
+                    value={slot.provider}
+                    onChange={(e) => {
+                      const provider = e.target.value as 'binance' | 'house'
+                      const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                      mix[si] =
+                        provider === 'binance'
+                          ? { provider, weight: slot.weight }
+                          : { provider, creativeId: ads.creatives?.[0]?.id ?? '', weight: slot.weight }
+                      setMix(p, mix)
+                    }}
+                  >
+                    <option value="binance">Binance</option>
+                    <option value="house">House</option>
+                  </select>
+                  {slot.provider === 'house' && (
+                    <select
+                      disabled={readOnly}
+                      value={slot.creativeId ?? ''}
+                      onChange={(e) => {
+                        const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                        mix[si] = { ...slot, creativeId: e.target.value }
+                        setMix(p, mix)
+                      }}
+                    >
+                      <option value="">— pick a creative —</option>
+                      {(ads.creatives ?? []).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    disabled={readOnly}
+                    value={slot.weight}
+                    style={{ width: 64 }}
+                    onChange={(e) => {
+                      const mix = [...(ads.placements?.[p]?.mix ?? [])]
+                      mix[si] = { ...slot, weight: Number(e.target.value) }
+                      setMix(p, mix)
+                    }}
+                  />
+                  <button
+                    disabled={readOnly}
+                    onClick={() =>
+                      setMix(
+                        p,
+                        (ads.placements?.[p]?.mix ?? []).filter((_, j) => j !== si),
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <button
+                disabled={readOnly || (ads.placements?.[p]?.mix?.length ?? 0) >= 6}
+                onClick={() =>
+                  setMix(p, [...(ads.placements?.[p]?.mix ?? []), { provider: 'binance', weight: 1 }])
+                }
+              >
+                {ads.placements?.[p]?.mix?.length ? '+ slot' : 'customise (Binance only)'}
+              </button>
+            </div>
           ))}
         </div>
         <SaveRow
