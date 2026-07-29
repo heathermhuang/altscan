@@ -399,7 +399,9 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           </dd>
         </dl>
         <p className="row">
-          <button onClick={testRpc} disabled={probing || !rpc.webRpcUrl?.trim()}>
+          {/* readOnly too: the probe route is canWrite-gated, so a viewer would
+              only ever get a 403 back from this button. */}
+          <button onClick={testRpc} disabled={readOnly || probing || !rpc.webRpcUrl?.trim()}>
             {probing ? 'testing…' : 'Test RPC'}
           </button>
         </p>

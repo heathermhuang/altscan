@@ -86,6 +86,26 @@ describe('getWebProvider', () => {
     expect(rebuilt).not.toBe(p)
   })
 
+  it('does not block on a stalled settings lookup — serves the last-known-good provider', async () => {
+    const warm = await getWebProvider()
+
+    // Simulate a hung DB read: getSetting never settles.
+    vi.mocked(getSetting).mockReturnValue(new Promise(() => {}) as never)
+    const started = Date.now()
+    const p = await getWebProvider()
+
+    expect(p).toBe(warm)
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
+  it('falls back to env/default when settings stall with no provider built yet', async () => {
+    vi.mocked(getSetting).mockReturnValue(new Promise(() => {}) as never)
+    const p = await getWebProvider()
+
+    expect(asFake(p).req.url).toMatch(/^https:\/\//)
+    expect(asFake(p).req.timeout).toBe(8000)
+  })
+
   it("does not let a stale provider's late error wipe a newer one", async () => {
     const stale = await getWebProvider()
     vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://override.test' } as never)

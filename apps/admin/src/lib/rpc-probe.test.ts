@@ -2,13 +2,38 @@ import { describe, expect, it, vi } from 'vitest'
 import { MAX_RESPONSE_BYTES, probeRpc, validateRpcUrl } from './rpc-probe'
 
 /** Fetch stub that answers per JSON-RPC method. */
-function fetchStub(byMethod: Record<string, { status?: number; body: string }>): typeof fetch {
+function fetchStub(
+  byMethod: Record<string, { status?: number; body: string; contentLength?: string; stream?: boolean }>,
+  seen?: RequestInit[],
+): typeof fetch {
   return vi.fn(async (_url: unknown, init?: RequestInit) => {
+    seen?.push(init ?? {})
     const method = JSON.parse(String(init?.body)).method as string
     const reply = byMethod[method] ?? { status: 500, body: '{}' }
+    const headers = { get: (k: string) => (k.toLowerCase() === 'content-length' ? (reply.contentLength ?? null) : null) }
+    // `stream: true` exercises the bounded reader path; otherwise the stub has
+    // no body and the helper falls back to text().
+    const body = reply.stream
+      ? {
+          getReader: () => {
+            let sent = false
+            return {
+              read: async () => {
+                if (sent) return { done: true, value: undefined }
+                sent = true
+                return { done: false, value: new TextEncoder().encode(reply.body) }
+              },
+              cancel: async () => {},
+              releaseLock: () => {},
+            }
+          },
+        }
+      : undefined
     return {
       ok: (reply.status ?? 200) < 400,
       status: reply.status ?? 200,
+      headers,
+      body,
       text: async () => reply.body,
     }
   }) as unknown as typeof fetch
@@ -33,6 +58,24 @@ describe('validateRpcUrl', () => {
       undefined,
       42,
       { url: 'https://x.test' },
+    ]) {
+      expect(validateRpcUrl(bad)).toBeNull()
+    }
+  })
+
+  it('refuses hosts the probe must never dial', () => {
+    for (const bad of [
+      'https://localhost:8545',
+      'https://LOCALHOST/rpc',
+      'https://api.localhost/rpc',
+      'https://db.internal/rpc',
+      'https://printer.local/rpc',
+      'https://127.0.0.1:8545',
+      'https://169.254.169.254/latest/meta-data', // cloud metadata
+      'https://10.0.0.5/rpc',
+      'https://192.168.1.1/rpc',
+      'https://[::1]:8545',
+      'https://[fd00::1]/rpc',
     ]) {
       expect(validateRpcUrl(bad)).toBeNull()
     }
@@ -93,6 +136,44 @@ describe('probeRpc', () => {
     const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: huge, eth_blockNumber: huge }))
     expect(r.ok).toBe(false)
     expect(r.error).toContain('too large')
+  })
+
+  it('rejects on content-length before reading a single byte of the body', async () => {
+    const lying = {
+      body: '{"result":"0x38"}',
+      contentLength: String(MAX_RESPONSE_BYTES + 1),
+      stream: true,
+    }
+    const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: lying, eth_blockNumber: lying }))
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('too large')
+  })
+
+  it('caps a streamed body that exceeds the limit mid-read', async () => {
+    const huge = { body: 'a'.repeat(MAX_RESPONSE_BYTES + 100), stream: true }
+    const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: huge, eth_blockNumber: huge }))
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('too large')
+  })
+
+  it('reads a normal streamed body', async () => {
+    const ok38 = { body: JSON.stringify({ result: '0x38' }), stream: true }
+    const r = await probeRpc('https://x.test', 56, fetchStub({ eth_chainId: ok38, eth_blockNumber: ok38 }))
+    expect(r.ok).toBe(true)
+    expect(r.chainId).toBe(56)
+  })
+
+  it('does not follow redirects', async () => {
+    const seen: RequestInit[] = []
+    const redirect = { status: 302, body: '' }
+    const r = await probeRpc(
+      'https://x.test',
+      56,
+      fetchStub({ eth_chainId: redirect, eth_blockNumber: redirect }, seen),
+    )
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('redirected')
+    expect(seen[0]?.redirect).toBe('manual')
   })
 
   it('surfaces a JSON-RPC error object', async () => {

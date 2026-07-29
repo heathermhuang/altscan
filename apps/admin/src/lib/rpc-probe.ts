@@ -21,22 +21,84 @@ type CallOk = { result: string; latencyMs: number }
 type CallErr = { error: string }
 
 /**
+ * Read at most MAX_RESPONSE_BYTES, without buffering the whole body first.
+ * `res.text()` would pull an unbounded response into worker memory before any
+ * length check could reject it. Returns null when the cap is exceeded.
+ */
+async function readCapped(res: Response): Promise<string | null> {
+  const declared = Number(res.headers?.get?.('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) return null
+
+  const reader = res.body?.getReader?.()
+  // No streaming body available (test doubles, or a runtime without it): fall
+  // back to text() but still enforce the cap on the result.
+  if (!reader) {
+    const text = await res.text()
+    return text.length > MAX_RESPONSE_BYTES ? null : text
+  }
+
+  const decoder = new TextDecoder()
+  let out = ''
+  let bytes = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value?.byteLength ?? 0
+      if (bytes > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {})
+        return null
+      }
+      out += decoder.decode(value, { stream: true })
+    }
+  } finally {
+    reader.releaseLock?.()
+  }
+  return out + decoder.decode()
+}
+
+/**
+ * Hosts the probe refuses outright. The Workers runtime has no route to a
+ * private network, but that is a platform property, not an application
+ * control — assert it here so the guarantee survives a runtime change, and so
+ * an IP literal can't be used to sidestep DNS-name expectations.
+ */
+function isBlockedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
+    return true
+  }
+  // IPv6 literal (any) and IPv4 literal (any) — a legitimate public RPC is a
+  // DNS name; an IP literal is the shape used to reach infrastructure directly.
+  if (h.includes(':')) return true
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
+}
+
+/**
  * Validate a candidate RPC URL through the REAL settings schema, so the probe
- * can never accept a URL the write path would reject (or vice versa).
+ * can never accept a URL the write path would reject (or vice versa), then
+ * additionally refuse hosts the probe must never dial.
  * Returns null when invalid.
  */
 export function validateRpcUrl(url: unknown): string | null {
   const parsed = rpcSettingsSchema.safeParse({ webRpcUrl: url })
-  return parsed.success ? (parsed.data.webRpcUrl ?? null) : null
+  const value = parsed.success ? (parsed.data.webRpcUrl ?? null) : null
+  if (!value) return null
+  try {
+    if (isBlockedHost(new URL(value).hostname)) return null
+  } catch {
+    return null
+  }
+  return value
 }
 
 /**
  * Single JSON-RPC call against a candidate endpoint.
  *
- * SSRF posture (design §7): https-only (validated above), authenticated console
- * member only, short timeout, capped body read, and ONLY parsed scalars are
- * returned — never the upstream body, headers, or status text. CF Workers have
- * no route to a private network, so this cannot reach internal services.
+ * SSRF posture (design §7, hardened after review): https-only, blocked hosts
+ * rejected, write-capable member only, short timeout, redirects NOT followed,
+ * body read bounded before buffering, and ONLY parsed scalars are returned —
+ * never the upstream body, headers, or status text.
  */
 async function rpcCall(
   url: string,
@@ -51,12 +113,17 @@ async function rpcCall(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }),
       signal,
+      // Do NOT follow redirects: an https URL that 302s to http:// (or to a
+      // host validateRpcUrl would have refused) would otherwise defeat every
+      // check above. A real RPC endpoint does not redirect.
+      redirect: 'manual',
     })
     const latencyMs = Date.now() - startedAt
+    if (res.status >= 300 && res.status < 400) return { error: 'endpoint redirected — not a JSON-RPC endpoint' }
     if (!res.ok) return { error: `endpoint returned HTTP ${res.status}` }
 
-    const text = await res.text()
-    if (text.length > MAX_RESPONSE_BYTES) return { error: 'response too large to be a JSON-RPC reply' }
+    const text = await readCapped(res)
+    if (text === null) return { error: 'response too large to be a JSON-RPC reply' }
 
     let parsed: unknown
     try {
