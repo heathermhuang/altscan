@@ -88,10 +88,77 @@ export const adsSettingsSchema = z
   .strict()
 export type AdsSettings = z.infer<typeof adsSettingsSchema>
 
+/**
+ * Hosts an operator-supplied endpoint may never point at.
+ *
+ * This lives in the SCHEMA, not in the console's probe, so it binds every path
+ * that handles the value: the probe, the settings PUT, and the read side that
+ * builds a provider from it. Hardening only the probe would leave the actual
+ * fetch path (getWebProvider on the explorer, which runs inside a hosting
+ * provider's network) reachable by a direct PUT or a "save anyway" confirm.
+ *
+ * Known residual: a PUBLIC DNS name that resolves to a private address still
+ * passes — closing that needs resolution-aware egress control, which neither
+ * the Workers nor the Node fetch surface exposes.
+ */
+export function isBlockedRpcHost(hostname: string): boolean {
+  // Strip brackets (IPv6 literals) and TRAILING DOTS. `localhost.` is the
+  // fully-qualified form of `localhost` and resolves identically, so leaving
+  // the dot on would let `https://localhost./` walk straight through every
+  // comparison below. Same for `127.0.0.1.` against the IPv4 pattern.
+  const h = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
+    return true
+  }
+  // Any IPv6 literal, and any IPv4 literal. A legitimate public RPC endpoint is
+  // a DNS name; an IP literal is the shape used to address infrastructure
+  // directly (loopback, RFC1918, and 169.254.169.254 cloud metadata included).
+  if (h.includes(':')) return true
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
+}
+
+/** https-only, control/space/backslash-free, bounded, and never pointed at a
+ *  blocked host — the httpsOrRelativeUrl ethos minus the relative branch.
+ *  Server-side RPC calls cross the public internet, so http:// (plaintext) is
+ *  rejected; ws(s):// is out of scope because ethers' JsonRpcProvider +
+ *  FetchRequest is HTTP transport anyway. */
+const httpsUrl = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine(
+    (v) => {
+      for (let i = 0; i < v.length; i++) {
+        const c = v.charCodeAt(i)
+        if (c <= 32 || c === 92) return false // controls + space + backslash
+      }
+      try {
+        const u = new URL(v)
+        return u.protocol === 'https:' && !isBlockedRpcHost(u.hostname)
+      } catch {
+        return false
+      }
+    },
+    { message: 'webRpcUrl must be an https:// URL pointing at a public host' },
+  )
+
+export const rpcSettingsSchema = z
+  .object({
+    webRpcUrl: httpsUrl.optional(),
+    rpcTimeoutMs: z.number().int().min(1000).max(60000).optional(),
+  })
+  .strict()
+export type RpcSettings = z.infer<typeof rpcSettingsSchema>
+
 export const SETTINGS_SCHEMAS = {
   links: linksSettingsSchema,
   footer: footerSettingsSchema,
   ads: adsSettingsSchema,
+  rpc: rpcSettingsSchema,
 } as const
 export type SettingsKey = keyof typeof SETTINGS_SCHEMAS
 export const SETTINGS_KEYS = Object.keys(SETTINGS_SCHEMAS) as SettingsKey[]

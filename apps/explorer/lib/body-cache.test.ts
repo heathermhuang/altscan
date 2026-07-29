@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchTxBodyFromRpc, getTxBody } from './body-cache'
-import { getProvider } from './rpc'
+import { getWebProvider } from './rpc'
 import { kvGet, kvSet } from '@altscan/explorer-core'
 import { serializeTxBody } from './body-cache-serde'
 
-vi.mock('./rpc', () => ({ getProvider: vi.fn() }))
+vi.mock('./rpc', () => ({ getWebProvider: vi.fn() }))
 vi.mock('@altscan/explorer-core', () => ({
   kvGet: vi.fn(async () => null),
   kvSet: vi.fn(async () => {}),
@@ -20,7 +20,7 @@ const rpcLog = {
 }
 
 function mockProvider(opts: { tx?: unknown; receipt?: unknown; throws?: boolean }) {
-  vi.mocked(getProvider).mockReturnValue({
+  vi.mocked(getWebProvider).mockResolvedValue({
     getTransaction: vi.fn(async () => {
       if (opts.throws) throw new Error('rpc down')
       return opts.tx ?? null
@@ -71,7 +71,7 @@ describe('getTxBody caching', () => {
     vi.mocked(kvGet).mockResolvedValue(serializeTxBody({ input: '0x01', logs: [] }))
     mockProvider({ throws: true })
     expect(await getTxBody(HASH)).toEqual({ input: '0x01', logs: [] })
-    expect(getProvider).not.toHaveBeenCalled()
+    expect(getWebProvider).not.toHaveBeenCalled()
   })
 
   it('caches a successful fetch', async () => {

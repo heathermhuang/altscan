@@ -1,4 +1,4 @@
-import { getProvider } from '@/lib/rpc'
+import { getWebProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 }
 
 export default async function GasPage() {
-  const provider = getProvider()
+  const provider = await getWebProvider()
   let baseFee = 0n
   try {
     const feeData = await provider.getFeeData()

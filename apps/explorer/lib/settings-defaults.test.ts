@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getChainConfig } from '@altscan/chain-config'
-import { DEFAULT_QUICK_LINKS, resolveAds, resolveFooterText, resolveLinks } from './settings-defaults'
+import { DEFAULT_QUICK_LINKS, resolveAds, resolveFooterText, resolveLinks, resolveRpc } from './settings-defaults'
 
 const bnb = getChainConfig('bnb')
 
@@ -32,5 +32,47 @@ describe('settings-defaults', () => {
     })
     expect(r.refCode).toBe('XYZ')
     expect(r.disabled).toEqual(['footer_strip'])
+  })
+
+  describe('resolveRpc', () => {
+    const envWith = (e: Record<string, string>) => e as unknown as NodeJS.ProcessEnv
+
+    it('falls back to env then chain default when there is no override', () => {
+      expect(resolveRpc(null, bnb, envWith({ [bnb.rpcEnvVar]: 'https://env.test' }))).toEqual({
+        url: 'https://env.test',
+        timeoutMs: 8000,
+      })
+      expect(resolveRpc(null, bnb, envWith({}))).toEqual({
+        url: bnb.defaultRpcUrl,
+        timeoutMs: 8000,
+      })
+    })
+
+    it('lets the override win over env for both url and timeout', () => {
+      const env = envWith({ [bnb.rpcEnvVar]: 'https://env.test', RPC_TIMEOUT_MS: '5000' })
+      expect(resolveRpc({ webRpcUrl: 'https://override.test', rpcTimeoutMs: 12000 }, bnb, env)).toEqual({
+        url: 'https://override.test',
+        timeoutMs: 12000,
+      })
+    })
+
+    it('resolves each field independently — a url-only override keeps the env timeout', () => {
+      const env = envWith({ [bnb.rpcEnvVar]: 'https://env.test', RPC_TIMEOUT_MS: '5000' })
+      expect(resolveRpc({ webRpcUrl: 'https://override.test' }, bnb, env)).toEqual({
+        url: 'https://override.test',
+        timeoutMs: 5000,
+      })
+      expect(resolveRpc({ rpcTimeoutMs: 3000 }, bnb, env)).toEqual({
+        url: 'https://env.test',
+        timeoutMs: 3000,
+      })
+      expect(resolveRpc({}, bnb, env)).toEqual({ url: 'https://env.test', timeoutMs: 5000 })
+    })
+
+    it('ignores an unparseable or non-positive RPC_TIMEOUT_MS (matches the pre-override build)', () => {
+      for (const RPC_TIMEOUT_MS of ['abc', '', '0', '-1']) {
+        expect(resolveRpc(null, bnb, envWith({ RPC_TIMEOUT_MS })).timeoutMs).toBe(8000)
+      }
+    })
   })
 })

@@ -5,7 +5,7 @@
  * Negative cache: null results are cached for NULL_TTL_MS to prevent repeated
  * RPC calls for the same missing entity within a short window.
  */
-import { getProvider } from './rpc'
+import { getWebProvider } from './rpc'
 import { registerCache } from './cache-registry'
 
 // Shapes that satisfy what the tx and block detail pages render
@@ -78,7 +78,7 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
   if (isNullCached(cacheKey)) return null
 
   try {
-    const provider = getProvider()
+    const provider = await getWebProvider()
     const [tx, receipt] = await Promise.all([
       provider.getTransaction(hash),
       provider.getTransactionReceipt(hash),
@@ -117,7 +117,7 @@ export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock |
   if (isNullCached(cacheKey)) return null
 
   try {
-    const provider = getProvider()
+    const provider = await getWebProvider()
     const block = await provider.getBlock(blockNumber, false)
     if (!block) { setNullCache(cacheKey); return null }
     return {

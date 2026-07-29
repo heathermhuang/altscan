@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+import { canWrite, type Role } from '../lib/rbac'
+// type-only: erased at build, so zod never reaches the client bundle.
+import type { RpcProbeResult as RpcProbe } from '../lib/rpc-probe'
 
 type SettingRow = { value: unknown; version: number; updatedAt: string; updatedBy: string | null }
 type SettingsPayload = {
@@ -7,7 +10,7 @@ type SettingsPayload = {
   adPlacements: string[]
   settings: Record<string, SettingRow>
   defaults: Record<string, unknown>
-  role: 'owner' | 'admin' | 'viewer'
+  role: Role
   warning?: string
 }
 type AuditEntry = { id: number; version: number; value: unknown; updatedAt: string; updatedBy: string | null }
@@ -16,6 +19,7 @@ type QuickLink = { label: string; href: string }
 type LinksValue = { quickLinks: QuickLink[] }
 type FooterValue = { tagline?: string; notAffiliatedWith?: string }
 type AdsValue = { binanceRefCode?: string; placements?: Record<string, { enabled: boolean }> }
+type RpcValue = { webRpcUrl?: string; rpcTimeoutMs?: number }
 
 function currentValue<T>(p: SettingsPayload, key: string): T | null {
   return (p.settings[key]?.value as T | undefined) ?? null
@@ -67,6 +71,11 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   const [links, setLinks] = useState<LinksValue>({ quickLinks: [] })
   const [footer, setFooter] = useState<FooterValue>({})
   const [ads, setAds] = useState<AdsValue>({})
+  const [rpc, setRpc] = useState<RpcValue>({})
+  // Probe result, plus the exact URL it was run against — so editing the field
+  // after a successful test invalidates the "already verified" save path.
+  const [probe, setProbe] = useState<{ forUrl: string; result: RpcProbe } | null>(null)
+  const [probing, setProbing] = useState(false)
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [auditKey, setAuditKey] = useState<string | null>(null)
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
@@ -80,6 +89,8 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
         setLinks(currentValue<LinksValue>(p, 'links') ?? { quickLinks: [] })
         setFooter(currentValue<FooterValue>(p, 'footer') ?? {})
         setAds(currentValue<AdsValue>(p, 'ads') ?? {})
+        setRpc(currentValue<RpcValue>(p, 'rpc') ?? {})
+        setProbe(null)
       })
       .catch((e) => setMessage({ kind: 'err', text: String(e) }))
 
@@ -88,7 +99,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [explorerId])
 
-  const drafts: Record<string, unknown> = { links, footer, ads }
+  const drafts: Record<string, unknown> = { links, footer, ads, rpc }
 
   // "No saved row" compares against the empty draft shape, so a pristine
   // panel is not dirty and Save stays disabled until something changes.
@@ -103,7 +114,10 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   }
 
   if (!payload) return message ? <p className="msg err">{message.text}</p> : <p>loading settings…</p>
-  const readOnly = payload.role === 'viewer'
+  // Derive from canWrite (the same predicate the BFF enforces) rather than
+  // testing for 'viewer' — a role the UI doesn't recognise must render
+  // read-only, not as an editable panel whose Save 403s.
+  const readOnly = !canWrite(payload.role)
 
   async function save(key: string) {
     if (!payload) return
@@ -135,16 +149,70 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
     if (auditKey === 'links') setLinks(entry.value as LinksValue)
     if (auditKey === 'footer') setFooter(entry.value as FooterValue)
     if (auditKey === 'ads') setAds(entry.value as AdsValue)
+    if (auditKey === 'rpc') {
+      setRpc(entry.value as RpcValue)
+      setProbe(null) // a restored URL is unverified until it is tested again
+    }
     setMessage({ kind: 'ok', text: `v${entry.version} loaded into the draft — review the diff, then Save` })
   }
 
   const placementEnabled = (p: string) => ads.placements?.[p]?.enabled !== false
+  // Host + timeout actually in effect when the override is blank. The explorer
+  // deliberately sends the HOST, not the full URL — the fallback can be a keyed
+  // endpoint and this payload is readable by viewers too.
+  const rpcDefaults = (payload.defaults.rpc ?? {}) as { webRpcHost?: string; rpcTimeoutMs?: number }
+
+  async function testRpc() {
+    const url = rpc.webRpcUrl?.trim()
+    if (!url) return
+    setProbing(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/x/${explorerId}/rpc/test.json`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const result = (await res.json().catch(() => ({}))) as RpcProbe
+      setProbe({ forUrl: url, result })
+    } catch (e) {
+      setProbe({ forUrl: url, result: { ok: false, expectedChainId: null, error: String(e) } })
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  /**
+   * Save guard (design §6): a URL that was never tested, failed its probe, or
+   * answered with the WRONG chain id needs an explicit confirm — this is what
+   * stops BNBScan (56) being pointed at an Ethereum (1) endpoint by accident.
+   * Clearing the override is always safe: it just restores the env/default.
+   */
+  async function saveRpc() {
+    const url = rpc.webRpcUrl?.trim()
+    if (url) {
+      const verified =
+        probe?.forUrl === url && probe.result.ok && probe.result.chainIdMatches === true
+      if (!verified) {
+        const reason =
+          probe?.forUrl !== url
+            ? 'This URL has not been tested.'
+            : !probe.result.ok
+              ? `The test failed: ${probe.result.error ?? 'unknown error'}`
+              : probe.result.chainIdMatches === null
+                ? `Chain id ${probe.result.chainId} could not be checked against this explorer.`
+                : `Chain id MISMATCH: endpoint reports ${probe.result.chainId}, this explorer expects ${probe.result.expectedChainId}.`
+        if (!window.confirm(`${reason}\n\nSave it anyway?`)) return
+      }
+    }
+    await save('rpc')
+  }
 
   return (
     <div>
       {payload.warning && <p className="msg err">{payload.warning}</p>}
       {message && <p className={`msg ${message.kind}`}>{message.text}</p>}
-      {readOnly && <p className="msg err">viewer role — read-only</p>}
+      {readOnly && <p className="msg err">{payload.role} role — read-only</p>}
 
       <div className="card">
         <h3>Footer links (namespace: links)</h3>
@@ -294,6 +362,73 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           version={payload.settings.ads?.version}
           onSave={() => save('ads')}
           onHistory={() => showAudit('ads')}
+        />
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>Web RPC (namespace: rpc)</h3>
+        <p>
+          Overrides the endpoint this explorer&apos;s <strong>web reads</strong> use. Blank = the
+          service&apos;s env var, then the chain default. The indexer&apos;s RPC is separate and still
+          env-based.
+        </p>
+        <dl className="kv">
+          <dt>webRpcUrl</dt>
+          <dd>
+            <input
+              type="text"
+              disabled={readOnly}
+              value={rpc.webRpcUrl ?? ''}
+              placeholder={`(default — ${rpcDefaults.webRpcHost ?? 'chain built-in RPC'})`}
+              onChange={(e) => setRpc({ ...rpc, webRpcUrl: e.target.value || undefined })}
+            />
+          </dd>
+          <dt>rpcTimeoutMs</dt>
+          <dd>
+            <input
+              type="number"
+              min={1000}
+              max={60000}
+              disabled={readOnly}
+              value={rpc.rpcTimeoutMs ?? ''}
+              placeholder={String(rpcDefaults.rpcTimeoutMs ?? 8000)}
+              onChange={(e) =>
+                setRpc({ ...rpc, rpcTimeoutMs: e.target.value ? Number(e.target.value) : undefined })
+              }
+            />
+          </dd>
+        </dl>
+        <p className="row">
+          {/* readOnly too: the probe route is canWrite-gated, so a viewer would
+              only ever get a 403 back from this button. */}
+          <button onClick={testRpc} disabled={readOnly || probing || !rpc.webRpcUrl?.trim()}>
+            {probing ? 'testing…' : 'Test RPC'}
+          </button>
+        </p>
+        {probe && probe.forUrl !== rpc.webRpcUrl?.trim() && (
+          <p className="msg err">URL changed since the last test — re-test before saving.</p>
+        )}
+        {probe && probe.forUrl === rpc.webRpcUrl?.trim() && (
+          <p className={`msg ${probe.result.ok && probe.result.chainIdMatches === true ? 'ok' : 'err'}`}>
+            {!probe.result.ok
+              ? `test failed: ${probe.result.error ?? 'unknown error'}`
+              : probe.result.chainIdMatches === false
+                ? `⚠ CHAIN ID MISMATCH — endpoint reports ${probe.result.chainId}, this explorer expects ${probe.result.expectedChainId}. Do not save this unless you mean it.`
+                : probe.result.chainIdMatches === null
+                  ? `chainId ${probe.result.chainId} (no expected id known for this explorer) · block ${probe.result.blockNumber ?? '—'} · ${probe.result.latencyMs}ms`
+                  : `chainId ${probe.result.chainId} ✓ · block ${probe.result.blockNumber ?? '—'} · ${probe.result.latencyMs}ms`}
+          </p>
+        )}
+        <SaveRow
+          k="rpc"
+          saved={payload.settings.rpc?.value}
+          draft={rpc}
+          dirty={isDirty('rpc')}
+          readOnly={readOnly}
+          busy={busy}
+          version={payload.settings.rpc?.version}
+          onSave={saveRpc}
+          onHistory={() => showAudit('rpc')}
         />
       </div>
 

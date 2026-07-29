@@ -3,6 +3,7 @@ import { getDb, getExplorer } from '../../../../../lib/db'
 import { audit } from '../../../../../lib/schema'
 import { canWrite } from '../../../../../lib/rbac'
 import { json } from '../../../../../lib/http'
+import { redactRpcValue } from '../../../../../lib/redact'
 import { explorerAdminFetch } from '../../../../../lib/upstream'
 
 export const prerender = false
@@ -34,6 +35,12 @@ export const PUT: APIRoute = async ({ params, locals, request }) => {
   })
 
   if (upstream.ok) {
+    // An rpc.webRpcUrl can carry an API key in its path/query. This console-side
+    // audit row is a SECOND copy of the value, in D1, read by a different code
+    // path than the redacted settings GET — store the host-only form so the
+    // credential does not come to rest here. The explorer's own versioned
+    // history remains the full-fidelity record for operators who can write.
+    const auditValue = params.key === 'rpc' ? redactRpcValue(body.value ?? null) : (body.value ?? null)
     await getDb(env)
       .insert(audit)
       .values({
@@ -41,7 +48,7 @@ export const PUT: APIRoute = async ({ params, locals, request }) => {
         tenantId: explorer.tenantId,
         explorerId: explorer.id,
         action: `settings.put:${params.key}`,
-        payload: JSON.stringify(body.value ?? null).slice(0, 4000),
+        payload: JSON.stringify(auditValue).slice(0, 4000),
         at: Math.floor(Date.now() / 1000),
       })
   }
