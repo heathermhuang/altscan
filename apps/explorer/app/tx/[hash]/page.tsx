@@ -6,7 +6,7 @@ import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt } from
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
@@ -397,7 +397,7 @@ export default async function TxDetailPage({
       )}
 
       {(!tx.status || (gasPercent != null && gasPercent >= 95)) && (
-        <BinanceReferralAd
+        <AdSlot
           context="tx_failed"
           placement="tx_failed"
           variant="compact"

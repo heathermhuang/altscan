@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { chainConfig } from '@/lib/chain-client'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
@@ -63,7 +63,7 @@ export default function VerifyPage() {
         for existing verifications on {chainConfig.name} (chain ID {chainConfig.chainId}).
       </p>
 
-      <BinanceReferralAd
+      <AdSlot
         context="verify"
         placement="verify_intro"
         variant="compact"

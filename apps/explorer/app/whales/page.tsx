@@ -4,7 +4,7 @@ import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 
 export const revalidate = 300
@@ -175,7 +175,7 @@ export default async function WhalesPage({
         ))}
       </div>
 
-      <BinanceReferralAd
+      <AdSlot
         context="whales"
         placement="whales_before_table"
         variant="compact"

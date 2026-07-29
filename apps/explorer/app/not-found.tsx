@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { SearchBar } from '@/components/layout/SearchBar'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 
 export default function NotFound() {
   return (
@@ -14,7 +14,7 @@ export default function NotFound() {
       <div className="max-w-lg mx-auto mb-8">
         <SearchBar />
       </div>
-      <BinanceReferralAd
+      <AdSlot
         context="not_found"
         placement="not_found"
         variant="compact"

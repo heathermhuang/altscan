@@ -6,7 +6,7 @@ import { formatNumber, formatAddress, formatUsdPrice, formatCompactUsd, formatPe
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
@@ -367,7 +367,7 @@ export default async function TokenDetailPage({
         </div>
       )}
 
-      <BinanceReferralAd
+      <AdSlot
         context={tokenReferralContext}
         placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
         variant="compact"
