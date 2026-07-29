@@ -60,6 +60,16 @@ describe('settings-schema', () => {
         'https://192.168.1.1/rpc',
         'https://[::1]:8545',
         'https://[fd00::1]/rpc',
+        // Trailing dot = the fully-qualified form; resolves identically, so it
+        // must not slip past the comparisons.
+        'https://localhost./rpc',
+        'https://localhost.:8545/rpc',
+        'https://api.localhost./rpc',
+        'https://db.internal./rpc',
+        'https://printer.local./rpc',
+        'https://127.0.0.1./rpc',
+        'https://169.254.169.254./latest/meta-data',
+        'https://10.0.0.5../rpc',
       ]) {
         expect(parseSetting('rpc', { webRpcUrl })).toBeNull()
       }

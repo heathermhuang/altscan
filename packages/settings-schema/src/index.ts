@@ -102,7 +102,14 @@ export type AdsSettings = z.infer<typeof adsSettingsSchema>
  * the Workers nor the Node fetch surface exposes.
  */
 export function isBlockedRpcHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  // Strip brackets (IPv6 literals) and TRAILING DOTS. `localhost.` is the
+  // fully-qualified form of `localhost` and resolves identically, so leaving
+  // the dot on would let `https://localhost./` walk straight through every
+  // comparison below. Same for `127.0.0.1.` against the IPv4 pattern.
+  const h = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '')
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
     return true
   }
