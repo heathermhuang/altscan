@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { isBinanceRestrictedCountry } from '@/lib/binance-referral'
 import { getSetting } from '@/lib/settings'
-import { resolveAds } from '@/lib/settings-defaults'
+import { buildAdConfig } from '@/lib/settings-defaults'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,31 +15,36 @@ function getCountry(request: NextRequest): string | null {
   )
 }
 
+/** Public bucket that serves house-creative images. Overridable per deployment;
+ *  the default is the CF R2 custom domain. buildAdConfig re-checks that this is
+ *  an https origin before it builds any URL from it. */
+const CREATIVES_BASE_URL = process.env.CREATIVES_BASE_URL ?? 'https://creatives.altscan.io'
+
 /**
  * Ad config for the client ad components: geo eligibility (as before) plus
- * settings-driven fields — referral-code override and disabled placements.
+ * settings-driven fields — referral code, disabled placements, and the
+ * per-placement candidate list the client rolls against.
  */
 export async function GET(request: NextRequest) {
   const country = getCountry(request)
-  const eligible = !isBinanceRestrictedCountry(country)
-  const ads = resolveAds(await getSetting('ads'))
+  const config = buildAdConfig(await getSetting('ads'), {
+    binanceRestricted: isBinanceRestrictedCountry(country),
+    creativesBaseUrl: CREATIVES_BASE_URL,
+  })
 
-  return NextResponse.json(
-    { eligible, refCode: ads.refCode, disabled: ads.disabled },
-    {
-      headers: {
-        // Was 3600 for the plain boolean; settings changes should land
-        // reasonably fast, so cap client caching at 5 min (matches the
-        // component's sessionStorage TTL).
-        'Cache-Control': 'private, max-age=300',
-        Vary: [
-          'CF-IPCountry',
-          'X-Vercel-IP-Country',
-          'CloudFront-Viewer-Country',
-          'X-Country-Code',
-          'X-AppEngine-Country',
-        ].join(', '),
-      },
+  return NextResponse.json(config, {
+    headers: {
+      // Was 3600 for the plain boolean; settings changes should land
+      // reasonably fast, so cap client caching at 5 min (matches the
+      // component's sessionStorage TTL).
+      'Cache-Control': 'private, max-age=300',
+      Vary: [
+        'CF-IPCountry',
+        'X-Vercel-IP-Country',
+        'CloudFront-Viewer-Country',
+        'X-Country-Code',
+        'X-AppEngine-Country',
+      ].join(', '),
     },
-  )
+  })
 }
