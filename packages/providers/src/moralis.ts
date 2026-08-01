@@ -15,8 +15,14 @@
  *     must stay side-effect-free because the indexer has no cache registry.
  *     The explorer still registers `getKvFallbackSize` for its memory monitor.
  *
- * CU BUDGET — Free tier: 40,000 CU/day
+ * CU BUDGET — the account is on a plan with a MONTHLY Compute Unit allowance.
+ * (This header said "Free tier: 40,000 CU/day" until 2026-08-01. That was stale
+ * and it mattered: every control below was sized against a DAILY figure that no
+ * longer described the bill.)
  * Strategy:
+ *   - A hard MONTHLY CU ceiling (see monthlyCuMax) — the only control that can
+ *     actually bound a monthly bill. Added 2026-08-01 after A4b backfill stayed
+ *     inside its per-hour cap for 5 days and still ran the account to 100%.
  *   - Strict per-bucket rate limits (history/holders/assets, env-overridable)
  *   - Long cache TTLs (2hr per address) to avoid re-fetches
  *   - Small page sizes (limit=10-25) — enough to show useful data, minimizes CU
@@ -215,6 +221,72 @@ function bucketKeys(bucket: MoralisBucket): { hourly: string; daily: string } {
   return { hourly: `${RL_PREFIX}:${bucket}:hourly`, daily: `${RL_PREFIX}:${bucket}:daily` }
 }
 
+/**
+ * ⚠ UNVERIFIED CU COSTS — read this before trusting any number below.
+ *
+ * These were prose comments ("Cost: ~25 CU") that had never been checked against
+ * Moralis's published rate table. They are now DATA, debited from a real budget,
+ * so a wrong number produces a wrong ceiling rather than a wrong sentence. Two
+ * things are still unknown and BOTH need Moralis console access to settle:
+ *   1. the true per-endpoint CU rate, and
+ *   2. whether these endpoints bill per REQUEST or per RESULT. If per result,
+ *      `limit` does not reduce spend for a fixed volume of data, and the small
+ *      page sizes below buy nothing — they just split the same bill into more
+ *      requests. A4b backfill pulled 273,622 rows in 5 days; under per-result
+ *      billing that row count, not the 15,306 request count, is the bill.
+ *
+ * Every entry is env-overridable so the real rates can be applied WITHOUT a
+ * deploy, the same no-deploy property that let the backfill flag flip.
+ */
+export const CU_COST = {
+  addressHistory:   envInt('MORALIS_CU_ADDRESS_HISTORY', 25),
+  addressBalances:  envInt('MORALIS_CU_ADDRESS_BALANCES', 25),
+  addressTransfers: envInt('MORALIS_CU_ADDRESS_TRANSFERS', 25),
+  addressNfts:      envInt('MORALIS_CU_ADDRESS_NFTS', 25),
+  tokenHolders:     envInt('MORALIS_CU_TOKEN_HOLDERS', 50),
+  tokenHolderCount: envInt('MORALIS_CU_TOKEN_HOLDER_COUNT', 50),
+} as const
+
+/**
+ * Account-wide monthly CU ceiling. This is the control that did not exist
+ * before 2026-08-01, and its absence is why the account hit 100% of plan.
+ *
+ * Hourly and daily CALL caps cannot bound a MONTHLY CU bill. Backfill never
+ * once exceeded its 300-pages/hour reserve; it simply ran at that reserve for
+ * five days. Every per-request control was green the entire time.
+ *
+ * Default is ~4x the measured pre-incident fleet baseline (~450k CU/month at
+ * the estimated rates), which leaves real traffic untouched while hard-stopping
+ * a runaway in days rather than never. Raise it once the true plan allowance is
+ * known — that is a one-line env change.
+ */
+const DEFAULT_MONTHLY_CU_MAX = 2_000_000
+const MONTHLY_TTL = 35 * 86400_000  // key is month-stamped; TTL only reaps old months
+
+/**
+ * FAIL-CLOSED config read. Unset, blank, whitespace, zero, negative, or
+ * unparseable all fall back to the default ceiling. There is deliberately NO
+ * value that DISABLES the ceiling.
+ *
+ * This is the direct lesson of the CREATIVES_KEY_PREFIX finding: a check that
+ * reads config and treats "unset" as "skip" ships the hole it was written to
+ * close. If you want more headroom, raise the number; you cannot switch the
+ * meter off.
+ */
+export function monthlyCuMax(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.MORALIS_MONTHLY_CU_MAX
+  if (raw == null) return DEFAULT_MONTHLY_CU_MAX
+  const n = parseInt(raw.trim(), 10)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MONTHLY_CU_MAX
+}
+
+/** Calendar-month key, UTC. Month-stamped so rollover needs no scheduled reset
+ *  and a stale key cannot silently carry last month's spend into this month. */
+export function monthKey(now: Date = new Date()): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+}
+const cuKey = (now?: Date): string => `moralis:cu:v1:${monthKey(now)}`
+
 // In-memory fallback — per bucket, used only when Redis is unavailable (e.g. EthScan has no Redis,
 // or a Redis blip). Per-instance, so with numInstances > 1 the effective cap is N×; acceptable.
 type MemCounter = { hourly: number; hourlyStart: number; daily: number; dailyStart: number }
@@ -224,14 +296,30 @@ const memCounters: Record<MoralisBucket, MemCounter> = {
   assets:  { hourly: 0, hourlyStart: Date.now(), daily: 0, dailyStart: Date.now() },
 }
 
-function isRateLimitedMemory(bucket: MoralisBucket): boolean {
+/** Per-process monthly CU tally, used when Redis is absent (EthScan). */
+let memCu: { month: string; used: number } = { month: monthKey(), used: 0 }
+
+/** Roll expired windows for one bucket. Split out so the health readout can
+ *  report in-memory counters without also mutating spend. */
+function rollMemWindows(bucket: MoralisBucket): MemCounter {
   const now = Date.now()
   const c = memCounters[bucket]
-  const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
   if (now - c.hourlyStart > HOURLY_WINDOW) { c.hourly = 0; c.hourlyStart = now }
   if (now - c.dailyStart > DAILY_WINDOW) { c.daily = 0; c.dailyStart = now }
+  const mk = monthKey()
+  if (memCu.month !== mk) memCu = { month: mk, used: 0 }
+  return c
+}
+
+/** Check ALL ceilings BEFORE mutating any of them, so a denial can never leave
+ *  a partial debit behind (the Redis path has to refund for the same reason). */
+function isRateLimitedMemory(bucket: MoralisBucket, cuCost: number): boolean {
+  const c = rollMemWindows(bucket)
+  const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
+  if (memCu.used + cuCost > monthlyCuMax()) return true
   if (c.daily >= dailyMax) return true
   if (c.hourly >= hourlyMax) return true
+  memCu.used += cuCost
   c.hourly++; c.daily++
   return false
 }
@@ -241,26 +329,39 @@ function isRateLimitedMemory(bucket: MoralisBucket): boolean {
  * inflating the counter (the old code's INCR-before-check let a blocked feature climb to 3× its cap
  * and made the health readout lie). Always guarantees a TTL: set on first INCR, re-arm if PTTL<0.
  */
-async function isRateLimited(bucket: MoralisBucket): Promise<boolean> {
+async function isRateLimited(bucket: MoralisBucket, cuCost: number): Promise<boolean> {
   const r = getRedis()
   if (r && !isRedisUnavailable()) {
     try {
+      // Monthly CU ceiling FIRST — it is the one that bounds the bill, so it
+      // must deny before any per-window counter is touched. Every later denial
+      // refunds it, otherwise a bucket-throttled call would permanently consume
+      // monthly budget it never actually spent at the provider.
+      const cKey = cuKey()
+      const cuMax = monthlyCuMax()
+      const cuUsed = await r.incrby(cKey, cuCost)
+      if (cuUsed === cuCost) await r.pexpire(cKey, MONTHLY_TTL)
+      else if ((await r.pttl(cKey)) < 0) await r.pexpire(cKey, MONTHLY_TTL)
+      if (cuUsed > cuMax) { await r.decrby(cKey, cuCost); return true }
+
       const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
       const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
       const hourly = await r.incr(hKey)
       if (hourly === 1) await r.pexpire(hKey, HOURLY_WINDOW)
       else if ((await r.pttl(hKey)) < 0) await r.pexpire(hKey, HOURLY_WINDOW)
-      if (hourly > hourlyMax) { await r.decr(hKey); return true }
+      if (hourly > hourlyMax) { await r.decr(hKey); await r.decrby(cKey, cuCost); return true }
       const daily = await r.incr(dKey)
       if (daily === 1) await r.pexpire(dKey, DAILY_WINDOW)
       else if ((await r.pttl(dKey)) < 0) await r.pexpire(dKey, DAILY_WINDOW)
-      if (daily > dailyMax) { await r.decr(dKey); await r.decr(hKey); return true }
+      if (daily > dailyMax) {
+        await r.decr(dKey); await r.decr(hKey); await r.decrby(cKey, cuCost); return true
+      }
       return false
     } catch {
       // Redis blip — fall through to in-memory
     }
   }
-  return isRateLimitedMemory(bucket)
+  return isRateLimitedMemory(bucket, cuCost)
 }
 
 /** Pure assembler for one bucket's health row. Exported for the standalone logic test. */
@@ -286,25 +387,69 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
   const buckets: Record<string, unknown> = {}
   let anyLimited = false
   const r = getRedis()
+  const redisLive = !!r && !isRedisUnavailable()
+  let source: 'redis' | 'memory' = redisLive ? 'redis' : 'memory'
+
   for (const bucket of ['history', 'holders', 'assets'] as MoralisBucket[]) {
     let hourly: number | null = null
     let daily: number | null = null
-    if (r && !isRedisUnavailable()) {
+    if (redisLive) {
       try {
         const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
-        const [h, d] = await Promise.all([r.get(hKey), r.get(dKey)])
+        const [h, d] = await Promise.all([r!.get(hKey), r!.get(dKey)])
         hourly = h ? Number(h) : 0
         daily = d ? Number(d) : 0
-      } catch { /* Redis blip — report unknown */ }
+      } catch { /* Redis blip — fall through to the in-memory tally below */ }
+    }
+    // No Redis (EthScan) or a blip: report THIS PROCESS's in-memory counters
+    // instead of null. Reporting null was not merely a gap — buildBucketState
+    // computes `limited` as `hourly !== null && hourly >= max`, so a null made
+    // `limited` UNCONDITIONALLY false. EthScan therefore reported "not limited"
+    // no matter how much it had spent, and the same null made the worker's
+    // sharedBucketOverHeadroom() politeness check return false, removing its
+    // only brake. One missing value silently disabled both the alarm and the
+    // governor. Per-process (not fleet-wide) numbers, hence `source`.
+    if (hourly === null) {
+      const c = rollMemWindows(bucket)
+      hourly = c.hourly
+      daily = c.daily
+      source = 'memory'
     }
     const state = buildBucketState(hourly, daily, BUCKET_CAPS[bucket])
     if (state.limited) anyLimited = true
     buckets[bucket] = state
   }
+
+  // Monthly CU ledger — the number that actually maps to the invoice.
+  const cuMax = monthlyCuMax()
+  let cuUsed = 0
+  if (redisLive) {
+    try {
+      const v = await r!.get(cuKey())
+      cuUsed = v ? Number(v) : 0
+    } catch { cuUsed = memCu.used }
+  } else {
+    cuUsed = memCu.used
+  }
+  const cuLimited = cuUsed >= cuMax
+  if (cuLimited) anyLimited = true
+
   return {
     disabled: process.env.MORALIS_DISABLED === 'true',
     keyPresent: !!process.env.MORALIS_API_KEY,
     buckets,
+    /** 'memory' means per-process and NOT fleet-wide — with no Redis these
+     *  ceilings are enforced N times over for N processes. */
+    source,
+    monthlyCu: {
+      month: monthKey(),
+      used: cuUsed,
+      max: cuMax,
+      pctUsed: cuMax > 0 ? Math.round((cuUsed / cuMax) * 1000) / 10 : null,
+      limited: cuLimited,
+      /** Costs are estimates until confirmed in the Moralis console. */
+      estimated: true,
+    },
     limited: anyLimited,
   }
 }
@@ -317,11 +462,15 @@ type Acquired = { ok: true; headers: Record<string, string> } | { ok: false; rea
  * 2. Redis-backed response cache (off-heap, shared across instances)
  * 3. Redis-backed PER-BUCKET rate limiter (history / holders / assets, fleet-wide)
  */
-async function acquire(bucket: MoralisBucket): Promise<Acquired> {
+async function acquire(bucket: MoralisBucket, cuCost: number): Promise<Acquired> {
   if (process.env.MORALIS_DISABLED === 'true') return { ok: false, reason: 'disabled' }
   const key = process.env.MORALIS_API_KEY
   if (!key) return { ok: false, reason: 'not_configured' }
-  if (await isRateLimited(bucket)) return { ok: false, reason: 'rate_limited' }
+  // A monthly-ceiling stop reports 'rate_limited' deliberately: every caller
+  // already degrades that to the local-index view, which is exactly the right
+  // behavior when the budget is gone. A new reason would need an exhaustive
+  // sweep of four Lazy components for no user-visible difference.
+  if (await isRateLimited(bucket, cuCost)) return { ok: false, reason: 'rate_limited' }
   return { ok: true, headers: { 'X-API-Key': key, 'Accept': 'application/json' } }
 }
 
@@ -389,7 +538,7 @@ export function createMoralisAdapter(
         // null = cached negative (a recent failed upstream attempt)
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('history')
+      const auth = await acquire('history', CU_COST.addressHistory)
       if (!auth.ok) return auth
       try {
         const url = new URL(`${BASE}/wallets/${address}/history`)
@@ -477,7 +626,7 @@ export function createMoralisAdapter(
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('assets')
+      const auth = await acquire('assets', CU_COST.addressBalances)
       if (!auth.ok) return auth
       try {
         const res = await fetch(
@@ -521,7 +670,7 @@ export function createMoralisAdapter(
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('assets')
+      const auth = await acquire('assets', CU_COST.addressTransfers)
       if (!auth.ok) return auth
       try {
         const url = new URL(`${BASE}/${address}/erc20/transfers`)
@@ -589,7 +738,7 @@ export function createMoralisAdapter(
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('assets')
+      const auth = await acquire('assets', CU_COST.addressNfts)
       if (!auth.ok) return auth
       try {
         const res = await fetch(
@@ -638,7 +787,7 @@ export function createMoralisAdapter(
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('holders')
+      const auth = await acquire('holders', CU_COST.tokenHolders)
       if (!auth.ok) return auth
       try {
         const url = new URL(`${BASE}/erc20/${tokenAddress}/owners`)
@@ -670,7 +819,7 @@ export function createMoralisAdapter(
       if (cached !== undefined) {
         return cached === null ? fail('upstream_error') : { ok: true, data: cached }
       }
-      const auth = await acquire('holders')
+      const auth = await acquire('holders', CU_COST.tokenHolderCount)
       if (!auth.ok) return auth
       try {
         const res = await fetch(`${BASE}/erc20/${tokenAddress}/holders?chain=${CHAIN}`, {
