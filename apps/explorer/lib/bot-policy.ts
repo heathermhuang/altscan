@@ -59,7 +59,16 @@ export const TRAINING_BLOCKED = [
  *  Home is ISR-cached and doesn't need throttling. The /md/tx/ and /md/block/
  *  mirrors are listed explicitly — an aggressive crawler can request those
  *  directly, bypassing the canonical-path check, and each hit runs a DB
- *  lookup in the /md route handler. */
+ *  lookup in the /md route handler.
+ *
+ *  `/api/internal/` is the MOST expensive prefix here and was missing until
+ *  the 2026-08-01 Moralis CU incident: it is the unauthenticated Moralis proxy
+ *  behind the lazy address/token tabs. A crawler hitting it does not just run a
+ *  DB query, it spends metered provider quota, and with A4b backfill on, a
+ *  first-time address view also ENQUEUES an entity worth up to 120-300 further
+ *  provider calls. The canonical pages (/address/, /token/) were throttled but
+ *  the XHR endpoint they call was not, so the throttle only ever covered the
+ *  cheap half of the request pair. */
 export const HEAVY_PATH_PREFIXES = [
   '/blocks',
   '/txs',
@@ -67,6 +76,7 @@ export const HEAVY_PATH_PREFIXES = [
   '/address/',
   '/token/',
   '/block/',
+  '/api/internal/',
   '/api/v1/blocks',
   '/api/v1/transactions',
   '/api/v1/addresses',

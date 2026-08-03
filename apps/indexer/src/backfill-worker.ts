@@ -463,12 +463,30 @@ const ENTITY_TYPES: ReadonlyArray<ClaimedEntity['entity_type']> = [
   'token_transfers',
 ]
 
-/** BNB politeness: yield while the fleet-shared bucket this page would spend
- *  from is already busy serving humans. Reads the same counters /api/health
- *  reads (plain GETs, no INCR, so it never consumes budget). Without a live
- *  Redis the counter is null (ETH, or a blip) → false: there is no fleet
- *  signal to be polite to, and the standalone hourly cap (R4) is the sole
- *  gate. */
+/** Politeness: yield while the bucket this page would spend from is already
+ *  busy serving humans. Reads the same counters /api/health reads (plain GETs,
+ *  no INCR, so it never consumes budget).
+ *
+ *  ⚠ CHANGED 2026-08-01. This used to read "no-op on ETH": without Redis the
+ *  counter was null and this returned false, so the brake was silently absent
+ *  on the one chain that had no other brake either. That was not a considered
+ *  trade — the same null also forced /api/health to report `limited: false`
+ *  forever, so nothing surfaced it. getMoralisHealthState now falls back to the
+ *  in-process in-memory counters (source:'memory'), which in the WORKER process
+ *  are the worker's own spend — precisely the right thing to be polite about.
+ *
+ *  Practical effect on ETH: backfill now yields at budgetHeadroom × hourlyMax
+ *  (0.4 × 700 = 280 history calls/hr) instead of running to the 300-pages/hr
+ *  reserve. Slightly slower, and bounded by an actual signal. A genuine absence
+ *  of any counter still returns false.
+ *
+ *  ⚠ But on ETH this is SELF-throttling, not politeness. With no Redis the
+ *  worker reads its OWN process counters, so it cannot see the web process at
+ *  all: if web serves 600 history calls and the worker has spent 279, the
+ *  worker sees 279 < 280 and keeps going while the real total is 879 against a
+ *  700 cap. The phrase "yield while busy serving humans" is only true on BNB,
+ *  where a shared Redis makes the counter fleet-wide. Same root cause as the
+ *  per-ledger CU ceiling, same fix: give ETH a Redis (Track C1). */
 export async function sharedBucketOverHeadroom(
   bucket: ProviderBucket,
   healthFn?: () => Promise<Record<string, unknown>>,
@@ -531,10 +549,11 @@ export async function startBackfillWorker(): Promise<void> {
         lastPressure = null
       }
 
-      // BNB politeness BEFORE the claim, as claim ELIGIBILITY: a hot bucket's
+      // Politeness BEFORE the claim, as claim ELIGIBILITY: a hot bucket's
       // entity types are excluded outright, so its partial rows (which outrank
       // pending) cannot starve the other bucket by claim-release cycling.
-      // No-op on ETH (no fleet counter → nothing hot).
+      // Now active on ETH too (see sharedBucketOverHeadroom) — it was a silent
+      // no-op there until 2026-08-01.
       const excluded: ClaimedEntity['entity_type'][] = []
       for (const t of ENTITY_TYPES) {
         if (await sharedBucketOverHeadroom(bucketFor(t))) excluded.push(t)

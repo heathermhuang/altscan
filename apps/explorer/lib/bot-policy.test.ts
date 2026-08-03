@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { RETRIEVAL_ALLOWED, TRAINING_BLOCKED, isTrainingBot } from './bot-policy'
+import {
+  HEAVY_PATH_PREFIXES,
+  RETRIEVAL_ALLOWED,
+  TRAINING_BLOCKED,
+  isTrainingBot,
+} from './bot-policy'
 
 // Real-world UA strings for the allowed tier (from vendor docs). These must
 // NEVER be throttled: isTrainingBot does substring matching, which is
@@ -56,5 +61,40 @@ describe('bot-policy', () => {
   it('treats missing UA as not-a-training-bot', () => {
     expect(isTrainingBot(null)).toBe(false)
     expect(isTrainingBot('')).toBe(false)
+  })
+})
+
+describe('HEAVY_PATH_PREFIXES — provider-spending paths', () => {
+  // middleware.ts matches with `pathname === p || pathname.startsWith(p)`.
+  const covered = (pathname: string): boolean =>
+    HEAVY_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
+
+  it('covers the unauthenticated Moralis proxy (the 2026-08-01 CU incident gap)', () => {
+    // These spend metered provider quota per request, and with A4b backfill on
+    // a first-time address view also enqueues up to 120-300 further calls.
+    // Every one of these was UNTHROTTLED for training crawlers until 2026-08-01.
+    for (const p of [
+      '/api/internal/address/0xabc/history',
+      '/api/internal/address/0xabc/transfers',
+      '/api/internal/address/0xabc/holdings',
+      '/api/internal/address/0xabc/nfts',
+      '/api/internal/token/0xabc/holders',
+    ]) {
+      expect(covered(p), p).toBe(true)
+    }
+  })
+
+  it('still covers the canonical pages that call those endpoints', () => {
+    // The page and the XHR it fires must be throttled together — covering only
+    // the page left the expensive half of the pair open.
+    for (const p of ['/address/0xabc', '/token/0xabc', '/tx/0xdead', '/blocks']) {
+      expect(covered(p), p).toBe(true)
+    }
+  })
+
+  it('does not over-reach into cheap or cacheable paths', () => {
+    for (const p of ['/', '/api/ping', '/api/health', '/about', '/api-docs']) {
+      expect(covered(p), p).toBe(false)
+    }
   })
 })

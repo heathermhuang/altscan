@@ -151,11 +151,25 @@ services:
       - key: NODE_OPTIONS
         value: "--max-old-space-size=768"  # GC before 1GB OOM kill
 
-  # ── Redis (shared API rate limiting) ─────────────────────────────────────
+  # ── Redis (shared API rate limiting + CU ledger) ─────────────────────────
   - type: redis
     name: bnbscan-redis
     plan: starter           # 25 MB — sufficient for rate-limit counters — $10/mo
     ipAllowList: []         # private networking only
+    # MUST be noeviction. This instance holds the monthly Moralis CU ledger
+    # (moralis:cu:v1:<YYYY-MM>), which is the only thing bounding a metered
+    # bill. Render defaults Blueprint-created instances to allkeys-lru, and the
+    # LIVE instance was found on allkeys-lru on 2026-08-03: under memory
+    # pressure Redis would evict an arbitrary key, the Lua admission script
+    # would read the missing ledger as 0, and the account would silently start a
+    # fresh monthly allowance — defeating the ceiling entirely and reproducing
+    # the 2026-08-01 incident with no warning.
+    #
+    # The trade-off is deliberate: with noeviction a full Redis fails WRITES
+    # rather than dropping the ledger. That is also what the rest of the code
+    # already assumes — the response cache is capped at a 2h TTL specifically
+    # so this 25 MB instance stays under its ceiling.
+    maxmemoryPolicy: noeviction
 
 databases:
 
