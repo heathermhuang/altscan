@@ -232,6 +232,51 @@ describe('health readout without Redis — the EthScan blind spot', () => {
     expect(after.limited).toBe(true)
   })
 
+  it('labels every reading as memory when there is no Redis', async () => {
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    const { getMoralisHealthState } = await freshModule()
+    const h = await getMoralisHealthState()
+    const buckets = h.buckets as Record<string, Record<string, unknown>>
+    for (const name of ['history', 'holders', 'assets']) {
+      expect(buckets[name].source, name).toBe('memory')
+    }
+    expect((h.monthlyCu as Record<string, unknown>).source).toBe('memory')
+    expect(h.source).toBe('memory')
+  })
+
+  it('never labels a reading redis when it came from memory (partial Redis failure)', async () => {
+    // Finding 6, precisely: bucket GETs succeed but the monthly GET throws. The
+    // old code fell back to memCu.used — usually 0 — while the response still
+    // said source:'redis'. A ledger sitting at its ceiling could therefore be
+    // reported as used:0, limited:false, source:'redis': the exact reading an
+    // operator would trust to conclude nothing was wrong.
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    vi.resetModules()
+    vi.doMock('@altscan/explorer-core', async (orig) => {
+      const actual = (await orig()) as Record<string, unknown>
+      return {
+        ...actual,
+        isRedisUnavailable: () => false,
+        getRedis: () => ({
+          get: async (k: string) => {
+            if (k.startsWith('moralis:cu:')) throw new Error('monthly read failed')
+            return '5'
+          },
+        }),
+      }
+    })
+    const { getMoralisHealthState } = await import('./moralis')
+    const h = await getMoralisHealthState()
+    const buckets = h.buckets as Record<string, Record<string, unknown>>
+
+    expect(buckets.history.source).toBe('redis')
+    expect(buckets.history.hourly).toBe(5)
+    // The reading that FAILED must say so, and the rollup must not claim redis.
+    expect((h.monthlyCu as Record<string, unknown>).source).toBe('memory')
+    expect(h.source).toBe('mixed')
+    vi.doUnmock('@altscan/explorer-core')
+  })
+
   it('exposes a monthly CU ledger so the number that maps to the invoice is visible', async () => {
     vi.stubEnv('MORALIS_API_KEY', 'k')
     vi.stubEnv('MORALIS_MONTHLY_CU_MAX', '1000')
