@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
 import { or, ilike } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
 
@@ -56,7 +56,7 @@ export default async function SearchPage({
               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded">{query}</span>
             </p>
             {showReferral && (
-              <BinanceReferralAd
+              <AdSlot
                 context="search_intent"
                 placement="search_results"
                 variant="compact"
@@ -113,7 +113,7 @@ export default async function SearchPage({
         <p className="text-gray-500 mb-6">Enter a block number, transaction hash, address, or token name in the search bar.</p>
       )}
       {showReferral && (
-        <BinanceReferralAd
+        <AdSlot
           context="search_intent"
           placement="search_no_results"
           variant="compact"

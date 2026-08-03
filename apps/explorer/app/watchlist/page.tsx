@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 
 const STORAGE_KEY = 'bnbscan_watchlist'
 
@@ -29,7 +29,7 @@ export default function WatchlistPage() {
         <div className="py-16 text-center text-gray-400">
           <p className="text-lg">Your watchlist is empty.</p>
           <p className="text-sm mt-2">Click the star on any address page to add it here.</p>
-          <BinanceReferralAd
+          <AdSlot
             context="watchlist_empty"
             placement="watchlist_empty"
             variant="compact"
@@ -67,7 +67,7 @@ export default function WatchlistPage() {
               </tbody>
             </table>
           </div>
-          <BinanceReferralAd
+          <AdSlot
             context="watchlist_active"
             placement="watchlist_active"
             variant="compact"

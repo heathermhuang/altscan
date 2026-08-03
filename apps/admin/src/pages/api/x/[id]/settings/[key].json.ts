@@ -5,6 +5,7 @@ import { canWrite } from '../../../../../lib/rbac'
 import { json } from '../../../../../lib/http'
 import { redactRpcValue } from '../../../../../lib/redact'
 import { explorerAdminFetch } from '../../../../../lib/upstream'
+import { ownsEveryCreativeKey, referencedCreativeKeys } from '../../../../../lib/creative-upload'
 
 export const prerender = false
 
@@ -26,6 +27,27 @@ export const PUT: APIRoute = async ({ params, locals, request }) => {
     body = parsed as typeof body
   } catch {
     return json({ error: 'invalid JSON body' }, 400)
+  }
+
+  // The upload route namespaces every key it mints, but this PUT takes an
+  // arbitrary JSON body from a browser — so re-bind the value to this caller's
+  // tenant and explorer here too. Hardening the writer alone would leave the
+  // store wide open (the Task-1 lesson).
+  if (params.key === 'ads') {
+    if (!ownsEveryCreativeKey(body.value, explorer.tenantId, explorer.id)) {
+      return json({ error: 'imageKey must reference an image uploaded to this explorer' }, 400)
+    }
+    // Prefix ownership proves the key is addressed to us; it does NOT prove the
+    // object exists. A hand-typed or fabricated same-prefix hash would save
+    // cleanly and then render a permanently broken image on the live site, with
+    // nothing in the pipeline to catch it. Confirm each referenced object is
+    // really in the bucket. Bounded by the schema's 12-creative cap.
+    const keys = referencedCreativeKeys(body.value)
+    const heads = await Promise.all(keys.map((k) => env.CREATIVES.head(k).catch(() => null)))
+    const missing = keys.filter((_, i) => !heads[i])
+    if (missing.length > 0) {
+      return json({ error: `no uploaded image for key(s): ${missing.join(', ')}` }, 400)
+    }
   }
 
   const upstream = await explorerAdminFetch(env, explorer, `/api/admin/settings/${params.key}`, {

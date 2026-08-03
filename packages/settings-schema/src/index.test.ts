@@ -3,6 +3,7 @@ import {
   AD_PLACEMENTS,
   SETTINGS_KEYS,
   isSettingsKey,
+  isValidCreativeKey,
   parseSetting,
 } from './index'
 
@@ -118,6 +119,34 @@ describe('settings-schema', () => {
     }
   })
 
+  it('rejects absolute https URLs with no usable host (codex round 3)', () => {
+    // A bare startsWith('https://') admitted every one of these. They save
+    // cleanly and then render a house-ad CTA that navigates nowhere. The same
+    // validator backs quickLinks.href AND creatives[].ctaUrl.
+    for (const href of ['https://', 'https://%', 'https://[', 'https:///', 'https://?q=1', 'https://#f']) {
+      expect(parseSetting('links', { quickLinks: [{ label: 'x', href }] }), href).toBeNull()
+    }
+  })
+
+  it('still accepts well-formed absolute https URLs', () => {
+    for (const href of [
+      'https://status.altscan.io',
+      'https://x.example/path?q=1#frag',
+      'https://sub.deep.example:8443/a/b',
+    ]) {
+      const v = parseSetting('links', { quickLinks: [{ label: 'x', href }] })
+      expect(v?.quickLinks[0]?.href, href).toBe(href)
+    }
+  })
+
+  it('applies the same host requirement to a creative ctaUrl', () => {
+    const mk = (ctaUrl: string) => ({
+      creatives: [{ id: 'promo', headline: 'h', ctaText: 'go', ctaUrl }],
+    })
+    expect(parseSetting('ads', mk('https://'))).toBeNull()
+    expect(parseSetting('ads', mk('https://ok.example'))).not.toBeNull()
+  })
+
   it('trims hrefs and still accepts normal paths', () => {
     const v = parseSetting('links', { quickLinks: [{ label: 'x', href: ' /blocks ' }] })
     expect(v?.quickLinks[0]?.href).toBe('/blocks')
@@ -147,5 +176,166 @@ describe('settings-schema', () => {
   it('returns null (never throws) on garbage', () => {
     expect(parseSetting('links', 42)).toBeNull()
     expect(parseSetting('ads', null)).toBeNull()
+  })
+
+  describe('ads namespace — house creatives and mixes', () => {
+    const HASH = 'b'.repeat(64)
+    const KEY = `altscan/bnb/${HASH}.png`
+    const CREATIVE = {
+      id: 'launch',
+      headline: 'Try the API',
+      ctaText: 'Read docs',
+      ctaUrl: '/api-docs',
+    }
+
+    it('still accepts a pre-Phase-B ads value unchanged (back-compat)', () => {
+      const legacy = { binanceRefCode: 'BNBSCAN', placements: { gas_top: { enabled: false } } }
+      expect(parseSetting('ads', legacy)).toEqual(legacy)
+      expect(parseSetting('ads', {})).toEqual({})
+    })
+
+    it('accepts creatives with a relative or https CTA and an image key', () => {
+      const value = {
+        creatives: [
+          CREATIVE,
+          {
+            ...CREATIVE,
+            id: 'promo',
+            ctaUrl: 'https://example.com/x',
+            body: 'Body copy',
+            imageKey: KEY,
+            imageAlt: 'Promo banner',
+          },
+        ],
+        placements: {
+          home_after_stats: {
+            mix: [
+              { provider: 'binance', weight: 1 },
+              { provider: 'house', creativeId: 'promo', weight: 3 },
+            ],
+          },
+        },
+      }
+      expect(parseSetting('ads', value)).toEqual(value)
+    })
+
+    it('requires imageAlt whenever imageKey is set', () => {
+      expect(parseSetting('ads', { creatives: [{ ...CREATIVE, imageKey: KEY }] })).toBeNull()
+      expect(
+        parseSetting('ads', { creatives: [{ ...CREATIVE, imageKey: KEY, imageAlt: 'alt' }] }),
+      ).not.toBeNull()
+    })
+
+    it('rejects an invalid image key through the creative schema', () => {
+      expect(
+        parseSetting('ads', {
+          creatives: [{ ...CREATIVE, imageKey: 'https://evil.example/x.png', imageAlt: 'a' }],
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects a javascript: or protocol-relative ctaUrl', () => {
+      for (const ctaUrl of ['javascript:alert(1)', '//evil.example', 'http://x.example']) {
+        expect(parseSetting('ads', { creatives: [{ ...CREATIVE, ctaUrl }] })).toBeNull()
+      }
+    })
+
+    it('rejects duplicate creative ids', () => {
+      expect(parseSetting('ads', { creatives: [CREATIVE, { ...CREATIVE }] })).toBeNull()
+    })
+
+    it('rejects a mix referencing an unknown creativeId', () => {
+      expect(
+        parseSetting('ads', {
+          creatives: [CREATIVE],
+          placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'nope', weight: 1 }] } },
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects a house slot with no creativeId and a binance slot carrying one', () => {
+      expect(
+        parseSetting('ads', {
+          placements: { gas_top: { mix: [{ provider: 'house', weight: 1 }] } },
+        }),
+      ).toBeNull()
+      expect(
+        parseSetting('ads', {
+          creatives: [CREATIVE],
+          placements: {
+            gas_top: { mix: [{ provider: 'binance', creativeId: 'launch', weight: 1 }] },
+          },
+        }),
+      ).toBeNull()
+    })
+
+    it('enforces weight, mix-length and creative-count bounds', () => {
+      const mix = (weight: number) => ({
+        placements: { gas_top: { mix: [{ provider: 'binance', weight }] } },
+      })
+      expect(parseSetting('ads', mix(0))).toBeNull()
+      expect(parseSetting('ads', mix(101))).toBeNull()
+      expect(parseSetting('ads', mix(1.5))).toBeNull()
+      expect(parseSetting('ads', { placements: { gas_top: { mix: [] } } })).toBeNull()
+      expect(
+        parseSetting('ads', {
+          placements: {
+            gas_top: { mix: Array.from({ length: 7 }, () => ({ provider: 'binance', weight: 1 })) },
+          },
+        }),
+      ).toBeNull()
+      expect(
+        parseSetting('ads', {
+          creatives: Array.from({ length: 13 }, (_, i) => ({ ...CREATIVE, id: `c${i}` })),
+        }),
+      ).toBeNull()
+    })
+
+    it('rejects unknown fields and unknown placements (strict)', () => {
+      expect(parseSetting('ads', { creatives: [{ ...CREATIVE, extra: 1 }] })).toBeNull()
+      expect(parseSetting('ads', { placements: { not_a_placement: { enabled: true } } })).toBeNull()
+    })
+
+    it('rejects a malformed creative id', () => {
+      for (const id of ['', 'Has Caps', 'has space', '-leading', 'x'.repeat(33)]) {
+        expect(parseSetting('ads', { creatives: [{ ...CREATIVE, id }] })).toBeNull()
+      }
+    })
+  })
+
+  describe('isValidCreativeKey', () => {
+    const HASH = 'a'.repeat(64)
+
+    it('accepts a well-formed tenant/explorer/hash.ext key', () => {
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.png`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.jpg`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.webp`)).toBe(true)
+      expect(isValidCreativeKey(`altscan/bnb/${HASH}.gif`)).toBe(true)
+      expect(isValidCreativeKey(`t-1_x/e-2_y/${HASH}.png`)).toBe(true)
+    })
+
+    it('rejects anything that could widen into an off-origin URL or escape the prefix', () => {
+      for (const k of [
+        `https://evil.example/${HASH}.png`, // absolute URL
+        `//evil.example/a/${HASH}.png`, // protocol-relative
+        `altscan/../other/${HASH}.png`, // traversal
+        `altscan//bnb/${HASH}.png`, // empty segment
+        `/altscan/bnb/${HASH}.png`, // leading slash
+        `altscan/bnb/${HASH}.png/x`, // extra segment
+        `altscan/${HASH}.png`, // too few segments
+        `altscan/bnb/${HASH}.svg`, // script-capable type
+        `altscan/bnb/${HASH}.PNG`, // uppercase ext
+        `altscan/bnb/${'a'.repeat(63)}.png`, // short hash
+        `altscan/bnb/${'a'.repeat(65)}.png`, // long hash
+        `altscan/bnb/${'g'.repeat(64)}.png`, // non-hex hash
+        `altscan/bnb/${HASH}`, // no extension
+        `altscan/bnb/${HASH}.png\n`, // control char
+        `altscan/bnb/${HASH}.png?x=1`, // query
+        `${'a'.repeat(190)}/bnb/${HASH}.png`, // over 200 chars
+        '',
+      ]) {
+        expect(isValidCreativeKey(k)).toBe(false)
+      }
+    })
   })
 })

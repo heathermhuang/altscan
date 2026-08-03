@@ -53,7 +53,17 @@ const httpsOrRelativeUrl = z
           return false
         }
       }
-      return v.startsWith('https://')
+      // The absolute branch used to be a bare startsWith('https://'), which
+      // admitted `https://`, `https://%` and `https://[` — all of which save
+      // cleanly and then render a house ad whose CTA goes nowhere. Parse it
+      // with the same URL parser the browser will use, and require a host:
+      // the prefix check proves the scheme, not that a destination exists.
+      try {
+        const u = new URL(v)
+        return u.protocol === 'https:' && u.hostname.length > 0
+      } catch {
+        return false
+      }
     },
     { message: 'href must be a relative path (/x) or an https:// URL' },
   )
@@ -75,6 +85,44 @@ export const footerSettingsSchema = z
   .strict()
 export type FooterSettings = z.infer<typeof footerSettingsSchema>
 
+const creativeId = z
+  .string()
+  .trim()
+  .regex(
+    /^[a-z0-9][a-z0-9_-]{0,31}$/,
+    'creative id: 1-32 chars of [a-z0-9_-], not starting with - or _',
+  )
+
+/** A house ad: structured text fields rendered by our own components. No raw
+ *  HTML anywhere — ctaUrl reuses the same refinement as the footer quick-links,
+ *  so javascript:, protocol-relative and control-character URLs are impossible. */
+export const houseCreativeSchema = z
+  .object({
+    id: creativeId,
+    headline: z.string().trim().min(1).max(80),
+    body: z.string().trim().min(1).max(160).optional(),
+    ctaText: z.string().trim().min(1).max(32),
+    ctaUrl: httpsOrRelativeUrl,
+    imageKey: z.string().trim().refine(isValidCreativeKey, {
+      message: 'imageKey must be <tenant>/<explorer>/<sha256>.<png|jpg|webp|gif>',
+    }).optional(),
+    imageAlt: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict()
+  .refine((c) => !c.imageKey || !!c.imageAlt, {
+    message: 'imageAlt is required when imageKey is set',
+  })
+export type HouseCreative = z.infer<typeof houseCreativeSchema>
+
+export const adSlotSchema = z
+  .object({
+    provider: z.enum(['binance', 'house']),
+    creativeId: creativeId.optional(),
+    weight: z.number().int().min(1).max(100),
+  })
+  .strict()
+export type AdSlotConfig = z.infer<typeof adSlotSchema>
+
 export const adsSettingsSchema = z
   .object({
     binanceRefCode: z
@@ -82,10 +130,52 @@ export const adsSettingsSchema = z
       .trim()
       .regex(/^[A-Za-z0-9_-]{2,32}$/, 'ref code: 2-32 chars of [A-Za-z0-9_-]')
       .optional(),
-    // deliberately partial: only overridden placements appear; absent = enabled
-    placements: z.record(z.enum(AD_PLACEMENTS), z.object({ enabled: z.boolean() }).strict()).optional(),
+    creatives: z.array(houseCreativeSchema).max(12).optional(),
+    // deliberately partial: only overridden placements appear; absent = enabled,
+    // and an absent `mix` = Binance-only, i.e. the pre-Phase-B behaviour.
+    placements: z
+      .record(
+        z.enum(AD_PLACEMENTS),
+        z
+          .object({
+            enabled: z.boolean().optional(),
+            mix: z.array(adSlotSchema).min(1).max(6).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
+  // Cross-field integrity belongs HERE rather than in the console, so a
+  // hand-crafted PUT, a restored audit version and the explorer's read-side
+  // re-validation are all bound by it. A dangling reference fails the whole
+  // namespace → getSetting returns null → defaults → Binance-only. Never a
+  // half-rendered ad.
+  .superRefine((v, ctx) => {
+    const ids = new Set<string>()
+    for (const c of v.creatives ?? []) {
+      if (ids.has(c.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate creative id: ${c.id}` })
+      }
+      ids.add(c.id)
+    }
+    for (const [placement, cfg] of Object.entries(v.placements ?? {})) {
+      for (const slot of cfg?.mix ?? []) {
+        if (slot.provider === 'house' && !ids.has(slot.creativeId ?? '')) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${placement}: mix references unknown creativeId ${slot.creativeId ?? '(missing)'}`,
+          })
+        }
+        if (slot.provider === 'binance' && slot.creativeId) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${placement}: a binance slot must not carry a creativeId`,
+          })
+        }
+      }
+    }
+  })
 export type AdsSettings = z.infer<typeof adsSettingsSchema>
 
 /**
@@ -118,6 +208,27 @@ export function isBlockedRpcHost(hostname: string): boolean {
   // directly (loopback, RFC1918, and 169.254.169.254 cloud metadata included).
   if (h.includes(':')) return true
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(h)
+}
+
+/**
+ * Object-key form for a house-creative image: <tenant>/<explorer>/<sha256>.<ext>.
+ *
+ * This lives in the SCHEMA, not in the upload route, so every path that handles
+ * the value inherits it: the upload, the settings PUT, the read-back GET, and
+ * the explorer's render path that prefixes it with the public bucket base.
+ * Hardening only the upload would leave the PUT — which accepts an arbitrary
+ * JSON body from a browser — free to store whatever it likes.
+ *
+ * The grammar is deliberately narrower than "a path": no scheme, no '//', no
+ * '..', no query, no control characters, exactly three segments. A key that
+ * cannot contain ':' or '//' cannot widen into an off-origin URL when the
+ * explorer concatenates it onto the bucket base.
+ */
+const CREATIVE_KEY_RE =
+  /^[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9_-]{1,64}\/[0-9a-f]{64}\.(png|jpg|webp|gif)$/
+
+export function isValidCreativeKey(k: unknown): boolean {
+  return typeof k === 'string' && k.length <= 200 && CREATIVE_KEY_RE.test(k)
 }
 
 /** https-only, control/space/backslash-free, bounded, and never pointed at a

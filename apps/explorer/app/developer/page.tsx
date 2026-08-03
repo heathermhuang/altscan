@@ -1,6 +1,6 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -40,7 +40,7 @@ export default function DeveloperPage() {
         </a>
       </div>
 
-      <BinanceReferralAd
+      <AdSlot
         context="developer"
         placement="developer_after_links"
         variant="compact"

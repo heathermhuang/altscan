@@ -2,7 +2,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 
 export const revalidate = 45
@@ -55,7 +55,7 @@ export default async function GasPage() {
         }
       </p>
 
-      <BinanceReferralAd
+      <AdSlot
         context="gas"
         placement="gas_top"
         className="mb-8"

@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 
 export function CopyButton({
@@ -34,7 +34,7 @@ export function CopyButton({
       </button>
       {showReferral && referralPlacement && (
         <div className="absolute left-0 top-full z-50 mt-2">
-          <BinanceReferralAd
+          <AdSlot
             context="address_copy"
             placement={referralPlacement}
             variant="popover"

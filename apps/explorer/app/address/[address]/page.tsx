@@ -21,7 +21,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
 import { AbiReader } from '@/components/contracts/AbiReader'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 
 export const revalidate = 300
 
@@ -233,7 +233,7 @@ export default async function AddressPage({
       </div>
 
       {gasReferralContext && (
-        <BinanceReferralAd
+        <AdSlot
           context={gasReferralContext}
           placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
           variant="compact"

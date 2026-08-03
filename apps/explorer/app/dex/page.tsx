@@ -6,7 +6,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -117,7 +117,7 @@ export default async function DexPage({
         </div>
       </div>
 
-      <BinanceReferralAd
+      <AdSlot
         context="dex"
         placement="dex_after_stats"
         variant="compact"

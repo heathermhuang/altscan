@@ -18,11 +18,94 @@ type AuditEntry = { id: number; version: number; value: unknown; updatedAt: stri
 type QuickLink = { label: string; href: string }
 type LinksValue = { quickLinks: QuickLink[] }
 type FooterValue = { tagline?: string; notAffiliatedWith?: string }
-type AdsValue = { binanceRefCode?: string; placements?: Record<string, { enabled: boolean }> }
+type HouseCreativeValue = {
+  id: string
+  headline: string
+  body?: string
+  ctaText: string
+  ctaUrl: string
+  imageKey?: string
+  imageAlt?: string
+}
+type AdSlotValue = { provider: 'binance' | 'house'; creativeId?: string; weight: number }
+type AdsValue = {
+  binanceRefCode?: string
+  creatives?: HouseCreativeValue[]
+  placements?: Record<string, { enabled?: boolean; mix?: AdSlotValue[] }>
+}
 type RpcValue = { webRpcUrl?: string; rpcTimeoutMs?: number }
 
 function currentValue<T>(p: SettingsPayload, key: string): T | null {
   return (p.settings[key]?.value as T | undefined) ?? null
+}
+
+/**
+ * Read stored settings values defensively.
+ *
+ * The explorer's settings GET and audit GET both return the stored value RAW —
+ * no schema re-validation — and `restore()` loads a historical value straight
+ * into the draft. A row that predates a schema change, or one written directly
+ * to the DB, can therefore carry anything at all. Calling .map() on it would
+ * blank the editor: the one tool you'd use to repair the bad row.
+ *
+ * Every field is NORMALISED, not merely shape-checked. An element-level
+ * `typeof === 'object'` filter still lets `{id: {bad: true}}` through, and React
+ * throws "Objects are not valid as a React child" the moment that id renders —
+ * blanking the editor just as surely as a non-array would.
+ */
+const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
+const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
+function creativeList(v: AdsValue | null | undefined): HouseCreativeValue[] {
+  // Start from `unknown`: the declared element type is a claim about data we
+  // have not validated, and the runtime predicates below must be well-typed.
+  const c: unknown = v?.creatives
+  if (!Array.isArray(c)) return []
+  return (c as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({
+      id: str(x.id),
+      headline: str(x.headline),
+      body: optStr(x.body),
+      ctaText: str(x.ctaText),
+      ctaUrl: str(x.ctaUrl, '/'),
+      imageKey: optStr(x.imageKey),
+      imageAlt: optStr(x.imageAlt),
+    }))
+}
+
+/** Same defence for a placement's mix. */
+function mixList(v: AdsValue | null | undefined, placement: string): AdSlotValue[] {
+  const m: unknown = v?.placements?.[placement]?.mix
+  if (!Array.isArray(m)) return []
+  return (m as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({
+      provider: x.provider === 'house' ? ('house' as const) : ('binance' as const),
+      creativeId: optStr(x.creativeId),
+      weight: typeof x.weight === 'number' && Number.isFinite(x.weight) ? x.weight : 1,
+    }))
+}
+
+/** The links namespace is read raw from the same unvalidated GET. Codex flagged
+ *  that `links.quickLinks.map(...)` can blank the whole editor for exactly the
+ *  same reason — guard it too rather than fix only the namespace I touched. */
+function quickLinkList(v: LinksValue | null | undefined): QuickLink[] {
+  const q: unknown = v?.quickLinks
+  if (!Array.isArray(q)) return []
+  return (q as unknown[])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+    .map((x) => ({ label: str(x.label), href: str(x.href, '/') }))
+}
+
+/** First free `creative-N`. Numbering from the array LENGTH would collide after
+ *  a middle row is deleted (add 3, delete #2, add → "creative-3" twice), and the
+ *  schema rejects duplicate ids on save. */
+function nextCreativeId(existing: HouseCreativeValue[]): string {
+  const taken = new Set(existing.map((c) => c?.id))
+  for (let n = existing.length + 1; ; n++) {
+    if (!taken.has(`creative-${n}`)) return `creative-${n}`
+  }
 }
 
 /** Module-level (NOT nested in SettingsPanel) so React keeps a stable
@@ -76,6 +159,10 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   // after a successful test invalidates the "already verified" save path.
   const [probe, setProbe] = useState<{ forUrl: string; result: RpcProbe } | null>(null)
   const [probing, setProbing] = useState(false)
+  // A SET, not a single id: with one slot, starting a second upload replaced the
+  // first and silently unlocked its row mid-flight (codex round 2, P2).
+  const [uploadingIds, setUploadingIds] = useState<ReadonlySet<string>>(new Set())
+  const isUploading = (id: string) => uploadingIds.has(id)
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [auditKey, setAuditKey] = useState<string | null>(null)
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
@@ -86,7 +173,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((p: SettingsPayload) => {
         setPayload(p)
-        setLinks(currentValue<LinksValue>(p, 'links') ?? { quickLinks: [] })
+        setLinks({ quickLinks: quickLinkList(currentValue<LinksValue>(p, 'links')) })
         setFooter(currentValue<FooterValue>(p, 'footer') ?? {})
         setAds(currentValue<AdsValue>(p, 'ads') ?? {})
         setRpc(currentValue<RpcValue>(p, 'rpc') ?? {})
@@ -121,6 +208,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
 
   async function save(key: string) {
     if (!payload) return
+    // Refuse to save while any upload is in flight. A successful save calls
+    // load(), which replaces every draft with the server's copy — so if the
+    // upload lands between the PUT and the reload, the reload restores the
+    // PRE-upload imageKey on top of it. The console still shows "image
+    // uploaded", the R2 object is permanent and now referenced by nothing, and
+    // there is no delete path to reclaim it. Guarded here rather than only on
+    // the button because saveRpc/restore and any future caller share this path.
+    if (uploadingIds.size > 0) {
+      setMessage({ kind: 'err', text: 'wait for the image upload to finish before saving' })
+      return
+    }
     setBusy(true)
     setMessage(null)
     const res = await fetch(`/api/x/${explorerId}/settings/${key}.json`, {
@@ -146,7 +244,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   }
 
   function restore(entry: AuditEntry) {
-    if (auditKey === 'links') setLinks(entry.value as LinksValue)
+    if (auditKey === 'links') setLinks({ quickLinks: quickLinkList(entry.value as LinksValue) })
     if (auditKey === 'footer') setFooter(entry.value as FooterValue)
     if (auditKey === 'ads') setAds(entry.value as AdsValue)
     if (auditKey === 'rpc') {
@@ -180,6 +278,103 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
     } finally {
       setProbing(false)
     }
+  }
+
+  /** Public bucket domain — display and preview only. The explorer builds its
+   *  own URL from the stored key, so nothing here is trusted downstream. */
+  const PUBLIC_CREATIVE_BASE = 'https://creatives.altscan.io'
+
+  function updateCreative(index: number, patch: Partial<HouseCreativeValue>) {
+    setAds((prev) => {
+      const creatives = [...creativeList(prev)]
+      creatives[index] = { ...creatives[index], ...patch }
+      return { ...prev, creatives }
+    })
+  }
+
+  /** Apply a patch by creative IDENTITY, not by array index.
+   *  An upload resolves asynchronously while the operator can still reorder rows;
+   *  re-using the captured index would attach the artwork to whichever creative
+   *  shifted into that slot. If the row is gone, the update no-ops.
+   *
+   *  Returns nothing on purpose. An earlier revision set a flag inside the
+   *  updater and read it right after setAds() to report success — React does not
+   *  promise the updater has run by then, so that report was a coin flip. */
+  function updateCreativeById(id: string, patch: Partial<HouseCreativeValue>): void {
+    setAds((prev) => {
+      const creatives = creativeList(prev)
+      // Re-check uniqueness HERE, against the state as it is at apply time.
+      // The check at upload start ran against a snapshot that a later rename
+      // could invalidate, and findIndex silently resolves ambiguity by picking
+      // the first match — i.e. by guessing. Locking the id inputs during any
+      // upload should make this unreachable; this is the fail-closed backstop
+      // for the paths that lock cannot cover (restore(), a future bulk edit).
+      // Dropping the patch orphans one R2 object; applying it to the wrong
+      // creative publishes the wrong artwork on the live site.
+      const matches = creatives.filter((c) => c.id === id)
+      if (matches.length !== 1) return prev
+      const i = creatives.findIndex((c) => c.id === id)
+      const next = [...creatives]
+      next[i] = { ...next[i], ...patch }
+      return { ...prev, creatives: next }
+    })
+  }
+
+  async function uploadCreativeImage(index: number, file: File) {
+    const creatives = creativeList(ads)
+    const creative = creatives[index]
+    if (!creative) return
+    const targetId = creative.id
+    // An id is the upload's only handle on its row. If two drafts share one,
+    // findIndex would attach the artwork to whichever comes first — refuse
+    // rather than silently pick. (The save would fail Zod on duplicates anyway.)
+    if (creatives.filter((c) => c.id === targetId).length > 1) {
+      setMessage({ kind: 'err', text: `duplicate creative id "${targetId}" — rename it before uploading` })
+      return
+    }
+    if (!targetId) {
+      setMessage({ kind: 'err', text: 'give the creative an id before uploading an image' })
+      return
+    }
+    setUploadingIds((prev) => new Set(prev).add(targetId))
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/x/${explorerId}/creatives.json`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      const body = (await res.json().catch(() => ({}))) as { key?: string; error?: string }
+      if (!res.ok) {
+        setMessage({ kind: 'err', text: `upload: ${body.error ?? `HTTP ${res.status}`}` })
+        return
+      }
+      updateCreativeById(targetId, { imageKey: body.key })
+      setMessage({ kind: 'ok', text: 'image uploaded — Save the ads namespace to apply it' })
+    } catch (e) {
+      setMessage({ kind: 'err', text: String(e) })
+    } finally {
+      setUploadingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(targetId)
+        return next
+      })
+    }
+  }
+
+  /** Writes a placement's mix while PRESERVING its `enabled` flag, and prunes
+   *  the placement entry entirely once neither field is set — so a pristine
+   *  panel stays non-dirty. */
+  function setMix(placement: string, mix: AdSlotValue[] | undefined) {
+    setAds((prev) => {
+      const placements = { ...(prev.placements ?? {}) }
+      const current = { ...(placements[placement] ?? {}) }
+      if (mix && mix.length > 0) current.mix = mix
+      else delete current.mix
+      if (current.enabled === undefined && current.mix === undefined) delete placements[placement]
+      else placements[placement] = current
+      return { ...prev, placements }
+    })
   }
 
   /**
@@ -278,7 +473,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={links}
           dirty={isDirty('links')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.links?.version}
           onSave={() => save('links')}
           onHistory={() => showAudit('links')}
@@ -315,7 +510,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={footer}
           dirty={isDirty('footer')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.footer?.version}
           onSave={() => save('footer')}
           onHistory={() => showAudit('footer')}
@@ -336,20 +531,223 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             />
           </dd>
         </dl>
-        <p>placements (unchecked = hidden):</p>
-        <div className="toggle-grid">
-          {payload.adPlacements.map((p) => (
-            <label className="toggle" key={p}>
+        <h4 style={{ marginBottom: 4 }}>House creatives</h4>
+        <p className="hint">
+          Uploaded images are stored on a <strong>public</strong> bucket and are readable by anyone
+          at {PUBLIC_CREATIVE_BASE}. Upload only artwork intended for the live site. Images are
+          never deleted, so reverting to an older version always works — but an abandoned draft
+          leaves the uploaded file behind.
+        </p>
+        {creativeList(ads).map((c, i) => (
+          <div className="card" key={i} style={{ marginTop: 8 }}>
+            <p className="row">
               <input
-                type="checkbox"
-                disabled={readOnly}
-                checked={placementEnabled(p)}
-                onChange={(e) =>
-                  setAds({ ...ads, placements: { ...(ads.placements ?? {}), [p]: { enabled: e.target.checked } } })
-                }
+                placeholder="id (a-z0-9-_)"
+                // Locked while ANY upload is in flight, not just this row's.
+                // The in-flight response re-finds its creative by id, so
+                // locking only the uploading row still let a DIFFERENT row be
+                // renamed INTO that id mid-upload — findIndex then returns the
+                // impostor and the artwork lands on the wrong creative. The
+                // duplicate check at upload start cannot see a rename that
+                // happens after it. isUploading() stays for the per-row cue.
+                disabled={readOnly || uploadingIds.size > 0}
+                value={c.id}
+                onChange={(e) => updateCreative(i, { id: e.target.value })}
               />
-              {p}
-            </label>
+              <input
+                placeholder="headline"
+                disabled={readOnly}
+                value={c.headline}
+                onChange={(e) => updateCreative(i, { headline: e.target.value })}
+              />
+            </p>
+            <p className="row">
+              <input
+                placeholder="body (optional)"
+                disabled={readOnly}
+                value={c.body ?? ''}
+                onChange={(e) => updateCreative(i, { body: e.target.value || undefined })}
+              />
+              <input
+                placeholder="CTA text"
+                disabled={readOnly}
+                value={c.ctaText}
+                onChange={(e) => updateCreative(i, { ctaText: e.target.value })}
+              />
+              <input
+                placeholder="CTA url (/path or https://)"
+                disabled={readOnly}
+                value={c.ctaUrl}
+                onChange={(e) => updateCreative(i, { ctaUrl: e.target.value })}
+              />
+            </p>
+            <p className="row">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                disabled={readOnly || isUploading(c.id)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void uploadCreativeImage(i, file)
+                }}
+              />
+              {isUploading(c.id) && <span>uploading…</span>}
+              {c.imageKey && (
+                <>
+                  <img
+                    src={`${PUBLIC_CREATIVE_BASE}/${c.imageKey}`}
+                    alt=""
+                    width={36}
+                    height={36}
+                    style={{ objectFit: 'cover', borderRadius: 6 }}
+                  />
+                  <input
+                    placeholder="image alt text (required)"
+                    disabled={readOnly}
+                    value={c.imageAlt ?? ''}
+                    onChange={(e) => updateCreative(i, { imageAlt: e.target.value || undefined })}
+                  />
+                  <button
+                    disabled={readOnly}
+                    onClick={() => updateCreative(i, { imageKey: undefined, imageAlt: undefined })}
+                  >
+                    remove image
+                  </button>
+                </>
+              )}
+            </p>
+            <p className="row">
+              <button
+                disabled={readOnly || isUploading(c.id)}
+                onClick={() =>
+                  setAds((prev) => ({
+                    ...prev,
+                    creatives: creativeList(prev).filter((_, j) => j !== i),
+                  }))
+                }
+              >
+                remove creative
+              </button>
+            </p>
+          </div>
+        ))}
+        <p className="row">
+          <button
+            disabled={readOnly || creativeList(ads).length >= 12}
+            onClick={() =>
+              setAds((prev) => ({
+                ...prev,
+                creatives: [
+                  ...creativeList(prev),
+                  {
+                    id: nextCreativeId(creativeList(prev)),
+                    headline: '',
+                    ctaText: '',
+                    ctaUrl: '/',
+                  },
+                ],
+              }))
+            }
+          >
+            + add creative
+          </button>
+          <span>max 12</span>
+        </p>
+
+        <p>placements (unchecked = hidden; no slots = Binance only):</p>
+        <div>
+          {payload.adPlacements.map((p) => (
+            <div className="row" key={p} style={{ alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <label className="toggle" style={{ minWidth: 210 }}>
+                <input
+                  type="checkbox"
+                  disabled={readOnly}
+                  checked={placementEnabled(p)}
+                  onChange={(e) =>
+                    // Spread the existing entry: replacing it wholesale would
+                    // silently drop this placement's mix.
+                    setAds({
+                      ...ads,
+                      placements: {
+                        ...(ads.placements ?? {}),
+                        [p]: { ...(ads.placements?.[p] ?? {}), enabled: e.target.checked },
+                      },
+                    })
+                  }
+                />
+                {p}
+              </label>
+              {mixList(ads, p).map((slot, si) => (
+                <span className="row" key={si} style={{ gap: 4 }}>
+                  <select
+                    disabled={readOnly}
+                    value={slot.provider}
+                    onChange={(e) => {
+                      const provider = e.target.value as 'binance' | 'house'
+                      const mix = [...mixList(ads, p)]
+                      mix[si] =
+                        provider === 'binance'
+                          ? { provider, weight: slot.weight }
+                          : { provider, creativeId: creativeList(ads)[0]?.id ?? '', weight: slot.weight }
+                      setMix(p, mix)
+                    }}
+                  >
+                    <option value="binance">Binance</option>
+                    <option value="house">House</option>
+                  </select>
+                  {slot.provider === 'house' && (
+                    <select
+                      disabled={readOnly}
+                      value={slot.creativeId ?? ''}
+                      onChange={(e) => {
+                        const mix = [...mixList(ads, p)]
+                        mix[si] = { ...slot, creativeId: e.target.value }
+                        setMix(p, mix)
+                      }}
+                    >
+                      <option value="">— pick a creative —</option>
+                      {creativeList(ads).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    disabled={readOnly}
+                    value={slot.weight}
+                    style={{ width: 64 }}
+                    onChange={(e) => {
+                      const mix = [...mixList(ads, p)]
+                      mix[si] = { ...slot, weight: Number(e.target.value) }
+                      setMix(p, mix)
+                    }}
+                  />
+                  <button
+                    disabled={readOnly}
+                    onClick={() =>
+                      setMix(
+                        p,
+                        mixList(ads, p).filter((_, j) => j !== si),
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <button
+                disabled={readOnly || mixList(ads, p).length >= 6}
+                onClick={() =>
+                  setMix(p, [...mixList(ads, p), { provider: 'binance', weight: 1 }])
+                }
+              >
+                {mixList(ads, p).length ? '+ slot' : 'customise (Binance only)'}
+              </button>
+            </div>
           ))}
         </div>
         <SaveRow
@@ -358,7 +756,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={ads}
           dirty={isDirty('ads')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.ads?.version}
           onSave={() => save('ads')}
           onHistory={() => showAudit('ads')}
@@ -425,7 +823,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={rpc}
           dirty={isDirty('rpc')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.rpc?.version}
           onSave={saveRpc}
           onHistory={() => showAudit('rpc')}

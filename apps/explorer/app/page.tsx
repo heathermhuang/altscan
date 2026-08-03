@@ -6,7 +6,7 @@ import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
@@ -327,7 +327,7 @@ export default async function HomePage() {
         </div>
       </div>
 
-      <BinanceReferralAd
+      <AdSlot
         context="home"
         placement="home_after_stats"
         className="mb-8"

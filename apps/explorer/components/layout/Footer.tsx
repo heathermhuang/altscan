@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import { getSetting } from '@/lib/settings'
 import { resolveFooterText, resolveLinks } from '@/lib/settings-defaults'
 
@@ -34,7 +34,7 @@ export async function Footer() {
 
   return (
     <footer className="bg-gray-900 text-gray-400 text-sm mt-auto">
-      <BinanceReferralAd
+      <AdSlot
         context="footer"
         placement="footer_strip"
         variant="footer"

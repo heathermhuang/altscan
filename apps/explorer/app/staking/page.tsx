@@ -2,7 +2,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
-import { BinanceReferralAd } from '@/components/ads/BinanceReferralAd'
+import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -90,7 +90,7 @@ export default async function StakingPage() {
         />
       </div>
 
-      <BinanceReferralAd
+      <AdSlot
         context="staking"
         placement="staking_after_stats"
         variant="compact"
