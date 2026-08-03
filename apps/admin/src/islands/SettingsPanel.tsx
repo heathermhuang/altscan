@@ -208,6 +208,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
 
   async function save(key: string) {
     if (!payload) return
+    // Refuse to save while any upload is in flight. A successful save calls
+    // load(), which replaces every draft with the server's copy — so if the
+    // upload lands between the PUT and the reload, the reload restores the
+    // PRE-upload imageKey on top of it. The console still shows "image
+    // uploaded", the R2 object is permanent and now referenced by nothing, and
+    // there is no delete path to reclaim it. Guarded here rather than only on
+    // the button because saveRpc/restore and any future caller share this path.
+    if (uploadingIds.size > 0) {
+      setMessage({ kind: 'err', text: 'wait for the image upload to finish before saving' })
+      return
+    }
     setBusy(true)
     setMessage(null)
     const res = await fetch(`/api/x/${explorerId}/settings/${key}.json`, {
@@ -292,8 +303,17 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   function updateCreativeById(id: string, patch: Partial<HouseCreativeValue>): void {
     setAds((prev) => {
       const creatives = creativeList(prev)
+      // Re-check uniqueness HERE, against the state as it is at apply time.
+      // The check at upload start ran against a snapshot that a later rename
+      // could invalidate, and findIndex silently resolves ambiguity by picking
+      // the first match — i.e. by guessing. Locking the id inputs during any
+      // upload should make this unreachable; this is the fail-closed backstop
+      // for the paths that lock cannot cover (restore(), a future bulk edit).
+      // Dropping the patch orphans one R2 object; applying it to the wrong
+      // creative publishes the wrong artwork on the live site.
+      const matches = creatives.filter((c) => c.id === id)
+      if (matches.length !== 1) return prev
       const i = creatives.findIndex((c) => c.id === id)
-      if (i === -1) return prev
       const next = [...creatives]
       next[i] = { ...next[i], ...patch }
       return { ...prev, creatives: next }
@@ -453,7 +473,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={links}
           dirty={isDirty('links')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.links?.version}
           onSave={() => save('links')}
           onHistory={() => showAudit('links')}
@@ -490,7 +510,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={footer}
           dirty={isDirty('footer')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.footer?.version}
           onSave={() => save('footer')}
           onHistory={() => showAudit('footer')}
@@ -523,9 +543,14 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
             <p className="row">
               <input
                 placeholder="id (a-z0-9-_)"
-                // Locked during upload: the in-flight response re-finds this
-                // creative BY ID, so renaming mid-upload would orphan the image.
-                disabled={readOnly || isUploading(c.id)}
+                // Locked while ANY upload is in flight, not just this row's.
+                // The in-flight response re-finds its creative by id, so
+                // locking only the uploading row still let a DIFFERENT row be
+                // renamed INTO that id mid-upload — findIndex then returns the
+                // impostor and the artwork lands on the wrong creative. The
+                // duplicate check at upload start cannot see a rename that
+                // happens after it. isUploading() stays for the per-row cue.
+                disabled={readOnly || uploadingIds.size > 0}
                 value={c.id}
                 onChange={(e) => updateCreative(i, { id: e.target.value })}
               />
@@ -731,7 +756,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={ads}
           dirty={isDirty('ads')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.ads?.version}
           onSave={() => save('ads')}
           onHistory={() => showAudit('ads')}
@@ -798,7 +823,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
           draft={rpc}
           dirty={isDirty('rpc')}
           readOnly={readOnly}
-          busy={busy}
+          busy={busy || uploadingIds.size > 0}
           version={payload.settings.rpc?.version}
           onSave={saveRpc}
           onHistory={() => showAudit('rpc')}

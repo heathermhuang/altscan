@@ -119,6 +119,34 @@ describe('settings-schema', () => {
     }
   })
 
+  it('rejects absolute https URLs with no usable host (codex round 3)', () => {
+    // A bare startsWith('https://') admitted every one of these. They save
+    // cleanly and then render a house-ad CTA that navigates nowhere. The same
+    // validator backs quickLinks.href AND creatives[].ctaUrl.
+    for (const href of ['https://', 'https://%', 'https://[', 'https:///', 'https://?q=1', 'https://#f']) {
+      expect(parseSetting('links', { quickLinks: [{ label: 'x', href }] }), href).toBeNull()
+    }
+  })
+
+  it('still accepts well-formed absolute https URLs', () => {
+    for (const href of [
+      'https://status.altscan.io',
+      'https://x.example/path?q=1#frag',
+      'https://sub.deep.example:8443/a/b',
+    ]) {
+      const v = parseSetting('links', { quickLinks: [{ label: 'x', href }] })
+      expect(v?.quickLinks[0]?.href, href).toBe(href)
+    }
+  })
+
+  it('applies the same host requirement to a creative ctaUrl', () => {
+    const mk = (ctaUrl: string) => ({
+      creatives: [{ id: 'promo', headline: 'h', ctaText: 'go', ctaUrl }],
+    })
+    expect(parseSetting('ads', mk('https://'))).toBeNull()
+    expect(parseSetting('ads', mk('https://ok.example'))).not.toBeNull()
+  })
+
   it('trims hrefs and still accepts normal paths', () => {
     const v = parseSetting('links', { quickLinks: [{ label: 'x', href: ' /blocks ' }] })
     expect(v?.quickLinks[0]?.href).toBe('/blocks')

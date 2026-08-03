@@ -53,7 +53,17 @@ const httpsOrRelativeUrl = z
           return false
         }
       }
-      return v.startsWith('https://')
+      // The absolute branch used to be a bare startsWith('https://'), which
+      // admitted `https://`, `https://%` and `https://[` — all of which save
+      // cleanly and then render a house ad whose CTA goes nowhere. Parse it
+      // with the same URL parser the browser will use, and require a host:
+      // the prefix check proves the scheme, not that a destination exists.
+      try {
+        const u = new URL(v)
+        return u.protocol === 'https:' && u.hostname.length > 0
+      } catch {
+        return false
+      }
     },
     { message: 'href must be a relative path (/x) or an https:// URL' },
   )

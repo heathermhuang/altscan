@@ -5,6 +5,9 @@ import {
   ownsEveryCreativeKey,
   sha256Hex,
   sniffImageType,
+  readImageDimensions,
+  rejectImageReason,
+  MAX_CREATIVE_DIMENSION,
 } from './creative-upload'
 
 const png = (extra = 0) =>
@@ -160,5 +163,85 @@ describe('referencedCreativeKeys', () => {
     for (const v of [null, undefined, 'str', 42, [], {}, { creatives: 'nope' }]) {
       expect(referencedCreativeKeys(v)).toEqual([])
     }
+  })
+})
+
+
+/* ── codex round 3: signature-only sniffing accepted corrupt files ────────── */
+
+const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]
+const le16 = (n: number) => [n & 255, (n >>> 8) & 255]
+const be16 = (n: number) => [(n >>> 8) & 255, n & 255]
+
+/** Signature + a real IHDR chunk, which is what a decoder actually needs. */
+const pngOf = (w: number, h: number) =>
+  new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ...be32(13), 0x49, 0x48, 0x44, 0x52,
+    ...be32(w), ...be32(h),
+    8, 6, 0, 0, 0,
+  ])
+const gifOf = (w: number, h: number) =>
+  new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, ...le16(w), ...le16(h)])
+/** FFD8 then SOF0: length, precision, height, width. */
+const jpegOf = (w: number, h: number) =>
+  new Uint8Array([0xff, 0xd8, 0xff, 0xc0, ...be16(17), 8, ...be16(h), ...be16(w), 3, 1, 0x22, 0])
+const webpVp8xOf = (w: number, h: number) =>
+  new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50,
+    0x56, 0x50, 0x38, 0x58, ...be32(10), 0, 0, 0, 0,
+    (w - 1) & 255, ((w - 1) >> 8) & 255, ((w - 1) >> 16) & 255,
+    (h - 1) & 255, ((h - 1) >> 8) & 255, ((h - 1) >> 16) & 255,
+  ])
+
+describe('readImageDimensions', () => {
+  it('reads dimensions from each accepted format', () => {
+    expect(readImageDimensions(pngOf(800, 200), 'image/png')).toEqual({ width: 800, height: 200 })
+    expect(readImageDimensions(gifOf(320, 50), 'image/gif')).toEqual({ width: 320, height: 50 })
+    expect(readImageDimensions(jpegOf(640, 480), 'image/jpeg')).toEqual({ width: 640, height: 480 })
+    expect(readImageDimensions(webpVp8xOf(300, 250), 'image/webp')).toEqual({
+      width: 300,
+      height: 250,
+    })
+  })
+
+  it('returns null rather than guessing when the header is absent or truncated', () => {
+    // The exact payload codex found: 8 bytes that are only the PNG signature.
+    // sniffImageType says "image/png" and always will — that is its job.
+    const bareSignature = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    expect(sniffImageType(bareSignature)).toBe('image/png')
+    expect(readImageDimensions(bareSignature, 'image/png')).toBeNull()
+
+    // Signature present, IHDR chunk missing → not a real PNG.
+    const noIhdr = new Uint8Array([...bareSignature, ...be32(13), 0x6a, 0x75, 0x6e, 0x6b, ...Array(8).fill(0)])
+    expect(readImageDimensions(noIhdr, 'image/png')).toBeNull()
+
+    expect(readImageDimensions(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), 'image/gif')).toBeNull()
+    expect(readImageDimensions(new Uint8Array([0xff, 0xd8, 0xff]), 'image/jpeg')).toBeNull()
+  })
+})
+
+describe('rejectImageReason', () => {
+  it('accepts a normal ad creative', () => {
+    expect(rejectImageReason(pngOf(728, 90), 'image/png')).toBeNull()
+    expect(rejectImageReason(jpegOf(300, 250), 'image/jpeg')).toBeNull()
+  })
+
+  it('rejects a decompression bomb that fits well under the byte cap', () => {
+    // 30000x30000 of uniform pixels compresses to a few KB and asks every
+    // visitor's browser for ~3.6 GB. MAX_CREATIVE_BYTES cannot see this.
+    const reason = rejectImageReason(pngOf(30000, 30000), 'image/png')
+    expect(reason).toMatch(/max .* per side/)
+  })
+
+  it('rejects an image that is within per-side limits but exceeds total pixels', () => {
+    const big = MAX_CREATIVE_DIMENSION
+    expect(rejectImageReason(pngOf(big, big), 'image/png')).toMatch(/pixels/)
+  })
+
+  it('rejects zero dimensions and unparseable headers', () => {
+    expect(rejectImageReason(pngOf(0, 100), 'image/png')).toMatch(/zero dimension/)
+    expect(rejectImageReason(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), 'image/png'))
+      .toMatch(/truncated|not a valid image/)
   })
 })

@@ -139,7 +139,19 @@ describe('buildAdConfig', () => {
   })
 
   it('omits imageUrl when the base is not a usable https origin', () => {
-    for (const creativesBaseUrl of ['http://insecure.example', 'not a url', '']) {
+    for (const creativesBaseUrl of [
+      'http://insecure.example',
+      'not a url',
+      '',
+      // codex round 3: safeImageUrl validated the PARSED url then concatenated
+      // the ORIGINAL string, so only the protocol was ever enforced. Each of
+      // these produced a URL where the object key is not in the path — one
+      // stray character in an env var breaks every creative image at once.
+      'https://creatives.altscan.io#staging', // key lands inside the fragment
+      'https://creatives.altscan.io?v=2', // key detached by the query string
+      'https://user:pw@creatives.altscan.io', // credentials published in <img src>
+      'https://creatives.altscan.io/sub', // non-root path, contract says origin
+    ]) {
       const out = buildAdConfig(
         {
           creatives: [CREATIVE],
@@ -149,6 +161,20 @@ describe('buildAdConfig', () => {
       )
       const candidate = out.placements.gas_top!.candidates[0] as { imageUrl?: string }
       expect(candidate.imageUrl).toBeUndefined()
+    }
+  })
+
+  it('builds the image URL from the parsed origin, tolerating trailing slashes', () => {
+    for (const base of ['https://creatives.altscan.io', 'https://creatives.altscan.io/']) {
+      const out = buildAdConfig(
+        {
+          creatives: [CREATIVE],
+          placements: { gas_top: { mix: [{ provider: 'house', creativeId: 'promo', weight: 1 }] } },
+        },
+        { binanceRestricted: false, creativesBaseUrl: base },
+      )
+      const candidate = out.placements.gas_top!.candidates[0] as { imageUrl?: string }
+      expect(candidate.imageUrl, base).toBe(`https://creatives.altscan.io/${CREATIVE.imageKey}`)
     }
   })
 

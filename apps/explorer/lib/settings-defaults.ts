@@ -88,13 +88,28 @@ export type AdConfigPayload = {
   placements: Partial<Record<AdPlacement, { candidates: ResolvedCandidate[] }>>
 }
 
-/** The bucket base must be a plain https origin. Anything else ⇒ render the
- *  creative text-only rather than emit a broken or plaintext <img>. */
+/** The bucket base must be a plain https ORIGIN — scheme + host, nothing else.
+ *  Anything else ⇒ render the creative text-only rather than emit a broken or
+ *  plaintext <img>.
+ *
+ *  This used to validate the parsed URL and then concatenate the ORIGINAL
+ *  string, so everything the parser was consulted about got discarded. Only the
+ *  protocol was actually enforced; the rest of the contract in this comment was
+ *  decorative. Concretely, `CREATIVES_BASE_URL=https://creatives.altscan.io#staging`
+ *  produced `https://creatives.altscan.io#staging/<key>` — the object key lands
+ *  inside the fragment, the browser requests `/`, and EVERY creative image on
+ *  the deployment breaks at once from one stray character in an env var. A
+ *  query string detaches the key the same way, and embedded credentials would
+ *  be published into every rendered <img src>. Build from base.origin so the
+ *  parse result is what actually ships. */
 function safeImageUrl(baseUrl: string, key: string): string | undefined {
   try {
     const base = new URL(baseUrl)
     if (base.protocol !== 'https:') return undefined
-    return `${baseUrl.replace(/\/+$/, '')}/${key}`
+    if (base.username || base.password) return undefined
+    if (base.search || base.hash) return undefined
+    if (base.pathname !== '/') return undefined
+    return `${base.origin}/${key}`
   } catch {
     return undefined
   }

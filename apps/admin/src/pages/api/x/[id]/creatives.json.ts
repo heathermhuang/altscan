@@ -7,6 +7,7 @@ import {
   MAX_CREATIVE_BYTES,
   MAX_CREATIVE_OBJECTS_PER_EXPLORER,
   buildCreativeKey,
+  rejectImageReason,
   sha256Hex,
   sniffImageType,
 } from '../../../../lib/creative-upload'
@@ -53,6 +54,13 @@ export const POST: APIRoute = async ({ params, locals, request }) => {
   if (!contentType) {
     return json({ error: 'unsupported image type — allowed: PNG, JPEG, WebP, GIF' }, 415)
   }
+
+  // The magic bytes prove the FORMAT, not that a decodable image follows them.
+  // Uploads are permanent and public, so a corrupt file accepted here is an
+  // orphan that outlives the mistake. Must run before sha256/put — once the
+  // object lands there is no delete path to undo it.
+  const reason = rejectImageReason(bytes, contentType)
+  if (reason) return json({ error: `rejected image: ${reason}` }, 422)
 
   const key = buildCreativeKey(
     locals.member.tenantId,
