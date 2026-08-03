@@ -12,7 +12,13 @@
  * GATED, like the PG suites: set MORALIS_TEST_REDIS_URL to run. Locally:
  *   redis-server --port 6399 --save '' --appendonly no --daemonize yes
  *   MORALIS_TEST_REDIS_URL=redis://127.0.0.1:6399 npx vitest run <this file>
- * Uses a dedicated DB index and flushes it, so point it at a THROWAWAY server.
+ *
+ * ⚠ This file deletes ONLY the keys it owns, by prefix. An earlier revision
+ * called FLUSHALL while its header claimed "a dedicated DB index" — FLUSHALL
+ * ignores database boundaries entirely, so even a URL ending in /15 would have
+ * wiped databases 0-14. A mis-set MORALIS_TEST_REDIS_URL pointing at a real
+ * instance would have destroyed the response cache, the rate ledgers and the
+ * queues. Never reintroduce a FLUSH of any kind here.
  */
 import Redis from 'ioredis'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -29,9 +35,18 @@ const fetchOk = () =>
 d('Moralis budget — real Redis', () => {
   let client: Redis
 
+  /** Namespaces this suite writes. Deleted by prefix — never flushed. */
+  const OWNED_PREFIXES = ['moralis:cu:v1:', 'moralis:rl:v7:', 'moralis:v2:']
+  const clearOwnedKeys = async (c: Redis) => {
+    for (const prefix of OWNED_PREFIXES) {
+      const keys = await c.keys(`${prefix}*`)
+      if (keys.length) await c.del(...keys)
+    }
+  }
+
   beforeEach(async () => {
     client = new Redis(URL_!)
-    await client.flushall()
+    await clearOwnedKeys(client)
     vi.resetModules()
     vi.stubEnv('REDIS_URL', URL_!)
     vi.stubEnv('MORALIS_API_KEY', 'k')
@@ -133,20 +148,52 @@ d('Moralis budget — real Redis', () => {
     expect(await client.get(cuK)).toBe('25') // not 50, and not refunded-back-to-25
   })
 
-  it('never leaves a counter negative when a key expires mid-flight', async () => {
-    // The pre-Lua sequence could DECR a key that had just expired, recreating it
-    // at -1 with no TTL — the next window then started 701 calls in credit.
+  it('self-heals a malformed counter instead of aborting mid-script', async () => {
+    // A key holding a non-integer used to be coerced to 0 by `tonumber() or 0`;
+    // the check passed and the NEXT INCRBY aborted the script — after earlier
+    // writes had already committed, because Redis does not roll back partial
+    // Lua writes. Result: a committed CU debit with no TTL, and every later
+    // EVAL throwing. Reproduced by codex; this pins the fix.
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '25')
+    const { createMoralisAdapter, monthKey } = await load()
+    vi.stubGlobal('fetch', fetchOk())
+    const cuK = `moralis:cu:v1:${monthKey()}`
+
+    await client.set('moralis:rl:v7:history:hourly', 'broken')
+
+    const r = await createMoralisAdapter(CFG).getAddressHistory('0xr-malformed')
+    expect(r.ok).toBe(true)
+
+    // The malformed key was reset and counted from zero...
+    expect(await client.get('moralis:rl:v7:history:hourly')).toBe('1')
+    // ...and the CU debit is correct rather than double-applied or stranded.
+    expect(await client.get(cuK)).toBe('25')
+    expect(await client.pttl(cuK)).toBeGreaterThan(0)
+    expect(await client.pttl('moralis:rl:v7:history:hourly')).toBeGreaterThan(0)
+  })
+
+  it('leaves every counter untouched when a call is denied', async () => {
+    // Replaces an earlier "never leaves a counter negative when a key expires
+    // mid-flight" test, which deleted the key BETWEEN two completed calls and
+    // so would have passed against the old broken INCR/DECR implementation too.
+    // The property that actually distinguishes the designs is that a denial
+    // writes nothing at all — no value change, no TTL re-arm.
     vi.stubEnv('MORALIS_HISTORY_HOURLY_MAX', '1')
-    const { createMoralisAdapter } = await load()
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '25')
+    const { createMoralisAdapter, monthKey } = await load()
     vi.stubGlobal('fetch', fetchOk())
     const a = createMoralisAdapter(CFG)
+    const cuK = `moralis:cu:v1:${monthKey()}`
+    const hK = 'moralis:rl:v7:history:hourly'
 
-    await a.getAddressHistory('0xr-e1')
-    await client.del('moralis:rl:v7:history:hourly') // simulate expiry
-    await a.getAddressHistory('0xr-e2')
+    await a.getAddressHistory('0xr-u1')
+    const before = { cu: await client.get(cuK), h: await client.get(hK), ttl: await client.pttl(hK) }
 
-    const v = Number(await client.get('moralis:rl:v7:history:hourly'))
-    expect(v).toBeGreaterThanOrEqual(0)
+    expect(await a.getAddressHistory('0xr-u2')).toEqual({ ok: false, reason: 'rate_limited' })
+
+    expect(await client.get(cuK)).toBe(before.cu)
+    expect(await client.get(hK)).toBe(before.h)
+    expect(await client.pttl(hK)).toBeLessThanOrEqual(before.ttl)
   })
 
   it('concurrent callers cannot collectively exceed the ceiling', async () => {
@@ -169,18 +216,36 @@ d('Moralis budget — real Redis', () => {
     expect(f).toHaveBeenCalledTimes(4)
   })
 
-  it('rolls to a fresh ledger at the month boundary without a scheduled reset', async () => {
+  it('charges a post-midnight request to the NEW month, not the old ledger', async () => {
+    // The earlier version of this test only asserted that an unused 2019 key
+    // was absent — it never advanced the clock or performed an admission after
+    // a boundary, so an implementation that captured the month key once at
+    // module load would have passed while billing new-month traffic to the
+    // previous ledger. Fake only Date so ioredis's own timers keep working.
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '25')
     const { createMoralisAdapter, monthKey } = await load()
     vi.stubGlobal('fetch', fetchOk())
-    await createMoralisAdapter(CFG).getAddressHistory('0xr-m1')
+    const a = createMoralisAdapter(CFG)
 
-    const thisMonth = `moralis:cu:v1:${monthKey()}`
-    expect(await client.get(thisMonth)).not.toBeNull()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-08-31T23:59:30Z'))
+      const augKey = `moralis:cu:v1:${monthKey()}`
+      expect(augKey).toBe('moralis:cu:v1:2026-08')
+      await a.getAddressHistory('0xr-aug')
+      expect(await client.get(augKey)).toBe('25')
 
-    // A different month is a different key: last month's spend cannot leak in.
-    const other = `moralis:cu:v1:${monthKey(new Date('2019-03-15T00:00:00Z'))}`
-    expect(other).not.toBe(thisMonth)
-    expect(await client.get(other)).toBeNull()
+      vi.setSystemTime(new Date('2026-09-01T00:00:30Z'))
+      const sepKey = `moralis:cu:v1:${monthKey()}`
+      expect(sepKey).toBe('moralis:cu:v1:2026-09')
+      await a.getAddressHistory('0xr-sep')
+
+      // The new month starts clean and the old ledger is not touched again.
+      expect(await client.get(sepKey)).toBe('25')
+      expect(await client.get(augKey)).toBe('25')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('health reports the Redis ledger and labels its source', async () => {

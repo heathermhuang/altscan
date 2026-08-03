@@ -207,6 +207,60 @@ describe('monthly CU ceiling — the control that did not exist', () => {
   })
 })
 
+describe('Redis failure must not reset the ceiling (codex round 2, P1)', () => {
+  const withBrokenRedis = async () => {
+    vi.resetModules()
+    vi.doMock('@altscan/explorer-core', async (orig) => {
+      const actual = (await orig()) as Record<string, unknown>
+      return {
+        ...actual,
+        isRedisUnavailable: () => false,
+        getRedis: () => ({
+          eval: async () => {
+            throw new Error('ETIMEDOUT')
+          },
+          get: async () => {
+            throw new Error('ETIMEDOUT')
+          },
+        }),
+      }
+    })
+    return await import('./moralis')
+  }
+
+  it('DENIES when Redis is configured but failing, instead of spending from an empty local ledger', async () => {
+    // The ledger of record holds (say) 2,000,000 CU. One timeout, and the old
+    // code fell through to isRateLimitedMemory() — a DIFFERENT, empty tally —
+    // so a fresh process saw used=0 and sent the exact request Redis would have
+    // refused. Nothing reconciles that spend when Redis returns, so every
+    // process could burn another full ceiling during one outage.
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    vi.stubEnv('REDIS_URL', 'redis://unreachable.invalid:6379')
+    const { createMoralisAdapter } = await withBrokenRedis()
+    const f = vi.fn().mockImplementation(async () => okJson({ result: [], cursor: null }))
+    vi.stubGlobal('fetch', f)
+
+    const r = await createMoralisAdapter(CFG).getAddressHistory('0xfailclosed-1')
+    expect(r).toEqual({ ok: false, reason: 'rate_limited' })
+    expect(f).not.toHaveBeenCalled() // no spend, not merely a bad reading
+    vi.doUnmock('@altscan/explorer-core')
+  })
+
+  it('still uses the in-memory ledger when Redis is genuinely not configured (EthScan)', async () => {
+    // The distinction that keeps EthScan working: no REDIS_URL means the memory
+    // tally IS the ledger of record, which is what scope:'per-ledger' documents.
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    vi.stubEnv('REDIS_URL', '')
+    const { createMoralisAdapter } = await freshModule()
+    const f = fetchReturning(emptyHistory)
+    vi.stubGlobal('fetch', f)
+
+    const r = await createMoralisAdapter(CFG).getAddressHistory('0xnoredis-1')
+    expect(r.ok).toBe(true)
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('health readout without Redis — the EthScan blind spot', () => {
   it('reports in-memory counters instead of null, so `limited` is actually reachable', async () => {
     vi.stubEnv('MORALIS_API_KEY', 'k')

@@ -408,9 +408,32 @@ local cuMax     = tonumber(ARGV[2])
 local hourlyMax = tonumber(ARGV[3])
 local dailyMax  = tonumber(ARGV[4])
 
-local cu     = tonumber(redis.call('GET', KEYS[1])) or 0
-local hourly = tonumber(redis.call('GET', KEYS[2])) or 0
-local daily  = tonumber(redis.call('GET', KEYS[3])) or 0
+-- Read a counter, and DELETE it if it holds anything INCRBY would refuse.
+--
+-- The first version of this script did 'tonumber(GET) or 0', which quietly
+-- turned a malformed value into 0. The comparison then passed, and the very
+-- next INCRBY aborted the script with a type error — AFTER earlier INCRBYs in
+-- the same script had already committed. Redis does NOT roll back partial Lua
+-- writes, so "EVAL is all-or-nothing" (as this file previously claimed) is
+-- false once a call can error mid-script. One corrupt key therefore produced a
+-- committed CU debit with no TTL, and every subsequent EVAL threw.
+--
+-- tonumber() alone is not enough: it accepts " 25", "25.0" and "0x19", none of
+-- which INCRBY will take. Round-tripping through %d is the exact test.
+local function readCounter(key)
+  local raw = redis.call('GET', key)
+  if raw == false then return 0 end
+  local n = tonumber(raw)
+  if n == nil or n ~= math.floor(n) or string.format('%d', n) ~= raw then
+    redis.call('DEL', key)
+    return 0
+  end
+  return n
+end
+
+local cu     = readCounter(KEYS[1])
+local hourly = readCounter(KEYS[2])
+local daily  = readCounter(KEYS[3])
 
 if cu + cuCost > cuMax then return 1 end
 if hourly + 1 > hourlyMax then return 2 end
@@ -456,10 +479,30 @@ async function isRateLimited(bucket: MoralisBucket, cuCost: number): Promise<boo
       )
       return Number(res) !== 0
     } catch {
-      // Redis genuinely unreachable. Safe to fall through now: EVAL is
-      // all-or-nothing, so there is no half-applied debit to reconcile.
+      // Fall through to the fail-closed check below — NOT to the memory ledger.
     }
   }
+
+  // Redis is CONFIGURED for this deployment but did not answer. Deny.
+  //
+  // Falling through to isRateLimitedMemory() here is what makes the ceiling
+  // bypassable: the in-memory tally is a DIFFERENT, EMPTY ledger. A Redis
+  // holding 2,000,000 CU plus one timeout means a fresh web or indexer process
+  // sees used=0 and sends the very request Redis would have refused — and
+  // nothing reconciles that outage spend when Redis comes back, so each process
+  // can burn another full ceiling. That is the same "degrade to the permissive
+  // path" shape as the original incident, just triggered by an outage instead
+  // of a config gap.
+  //
+  // Denying costs a degraded history tab (callers already fall back to the
+  // local index on 'rate_limited'); admitting costs unbounded metered spend
+  // with no way to detect it. Note isRedisUnavailable() is sticky until
+  // reconnect, so an outage denies for its duration by design.
+  //
+  // A deployment with NO Redis at all (EthScan) is a different case: its memory
+  // ledger IS the ledger of record, which is what scope:'per-ledger' documents.
+  if (process.env.REDIS_URL) return true
+
   return isRateLimitedMemory(bucket, cuCost)
 }
 
