@@ -4,7 +4,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "tsc",
@@ -15,6 +18,7 @@
     "@altscan/explorer-core": "workspace:*"
   },
   "devDependencies": {
+    "ioredis": "^5.3.0",
     "typescript": "^5.4.0"
   }
 }

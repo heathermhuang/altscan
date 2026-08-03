@@ -207,6 +207,45 @@ function envInt(name: string, fallback: number): number {
   return parseInt(process.env[name] ?? String(fallback), 10) || fallback
 }
 
+/**
+ * Strict positive-integer env read for values that BOUND SPEND.
+ *
+ * `envInt` above uses `parseInt`, which is wrong for anything a budget depends
+ * on, in two directions that both bite:
+ *   - `parseInt` takes a NUMERIC PREFIX, so "999999999999999999999garbage"
+ *     yields ~1e30 — a ceiling that can never be reached, i.e. no ceiling.
+ *   - `"1_000"` yields 1, because parsing stops at the underscore. A config
+ *     typo meant as "raise the limit" becomes an outage instead.
+ * `|| fallback` also silently accepts negatives, and a negative CU cost makes
+ * every call DECREMENT the meter, so usage runs backwards forever.
+ *
+ * Requiring the whole string to be digits rejects all of it: "1_000", "1e9",
+ * "0x10", "+5", "-1", "Infinity", "12garbage", "" and "  ". The upper bound
+ * closes the last gap — an absurd but well-formed number is still no ceiling.
+ *
+ * `envInt` is deliberately left alone for the hourly/daily CALL caps: those
+ * predate this incident, are not the billing unit, and changing their parsing
+ * is not this PR's job.
+ */
+export function strictPositiveInt(
+  raw: string | undefined,
+  fallback: number,
+  max: number,
+): number {
+  if (raw == null) return fallback
+  const t = raw.trim()
+  if (!/^[0-9]+$/.test(t)) return fallback
+  const n = Number(t)
+  if (!Number.isSafeInteger(n) || n <= 0 || n > max) return fallback
+  return n
+}
+
+/** No single endpoint plausibly costs more than this; a larger configured value
+ *  is a typo, and honouring it would let one call exhaust the month. */
+const MAX_CU_COST = 100_000
+const cuCostEnv = (name: string, fallback: number): number =>
+  strictPositiveInt(process.env[name], fallback, MAX_CU_COST)
+
 type BucketCaps = { hourlyMax: number; dailyMax: number }
 const BUCKET_CAPS: Record<MoralisBucket, BucketCaps> = {
   history: { hourlyMax: envInt('MORALIS_HISTORY_HOURLY_MAX', 700), dailyMax: envInt('MORALIS_HISTORY_DAILY_MAX', 5000) },
@@ -232,24 +271,34 @@ function bucketKeys(bucket: MoralisBucket): { hourly: string; daily: string } {
  *   2. whether these endpoints bill per REQUEST or per RESULT. If per result,
  *      `limit` does not reduce spend for a fixed volume of data, and the small
  *      page sizes below buy nothing — they just split the same bill into more
- *      requests. A4b backfill pulled 273,622 rows in 5 days; under per-result
- *      billing that row count, not the 15,306 request count, is the bill.
+ *      requests. A4b backfill pulled 290,067 rows in 6 days; under per-result
+ *      billing that row count, not the 16,077 request count, is the bill.
  *
  * Every entry is env-overridable so the real rates can be applied WITHOUT a
  * deploy, the same no-deploy property that let the backfill flag flip.
  */
 export const CU_COST = {
-  addressHistory:   envInt('MORALIS_CU_ADDRESS_HISTORY', 25),
-  addressBalances:  envInt('MORALIS_CU_ADDRESS_BALANCES', 25),
-  addressTransfers: envInt('MORALIS_CU_ADDRESS_TRANSFERS', 25),
-  addressNfts:      envInt('MORALIS_CU_ADDRESS_NFTS', 25),
-  tokenHolders:     envInt('MORALIS_CU_TOKEN_HOLDERS', 50),
-  tokenHolderCount: envInt('MORALIS_CU_TOKEN_HOLDER_COUNT', 50),
+  addressHistory:   cuCostEnv('MORALIS_CU_ADDRESS_HISTORY', 25),
+  addressBalances:  cuCostEnv('MORALIS_CU_ADDRESS_BALANCES', 25),
+  addressTransfers: cuCostEnv('MORALIS_CU_ADDRESS_TRANSFERS', 25),
+  addressNfts:      cuCostEnv('MORALIS_CU_ADDRESS_NFTS', 25),
+  tokenHolders:     cuCostEnv('MORALIS_CU_TOKEN_HOLDERS', 50),
+  tokenHolderCount: cuCostEnv('MORALIS_CU_TOKEN_HOLDER_COUNT', 50),
 } as const
 
 /**
- * Account-wide monthly CU ceiling. This is the control that did not exist
- * before 2026-08-01, and its absence is why the account hit 100% of plan.
+ * Monthly CU ceiling — PER LEDGER, not per Moralis account. Read the scope
+ * note below before sizing it; an earlier revision of this comment called it
+ * "account-wide", which it is not and cannot be with the current infrastructure.
+ *
+ * ⚠ SCOPE. There is one ledger per Redis, plus one per process that has no
+ * Redis. BNB web + indexer share a Redis ⇒ one ledger. ETH has no Redis ⇒ each
+ * ETH process counts alone. So this value is enforced up to ~4 times over
+ * against ONE Moralis account. Provisioning Redis for ETH (Track C1) is the
+ * only thing that makes a single ceiling mean what its name suggests.
+ *
+ * This is the control that did not exist before 2026-08-01, and its absence is
+ * why the account hit 100% of plan.
  *
  * Hourly and daily CALL caps cannot bound a MONTHLY CU bill. Backfill never
  * once exceeded its 300-pages/hour reserve; it simply ran at that reserve for
@@ -273,11 +322,14 @@ const MONTHLY_TTL = 35 * 86400_000  // key is month-stamped; TTL only reaps old 
  * close. If you want more headroom, raise the number; you cannot switch the
  * meter off.
  */
+/** Upper bound on a configurable ceiling. A well-formed but absurd number is
+ *  still "no ceiling" in practice; at $11.25 per million CU this cap keeps the
+ *  worst configurable monthly overage around four figures rather than
+ *  unbounded. Anything larger is a typo, not an intent. */
+const MAX_MONTHLY_CU = 100_000_000
+
 export function monthlyCuMax(env: Record<string, string | undefined> = process.env): number {
-  const raw = env.MORALIS_MONTHLY_CU_MAX
-  if (raw == null) return DEFAULT_MONTHLY_CU_MAX
-  const n = parseInt(raw.trim(), 10)
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MONTHLY_CU_MAX
+  return strictPositiveInt(env.MORALIS_MONTHLY_CU_MAX, DEFAULT_MONTHLY_CU_MAX, MAX_MONTHLY_CU)
 }
 
 /** Calendar-month key, UTC. Month-stamped so rollover needs no scheduled reset
@@ -329,36 +381,83 @@ function isRateLimitedMemory(bucket: MoralisBucket, cuCost: number): boolean {
  * inflating the counter (the old code's INCR-before-check let a blocked feature climb to 3× its cap
  * and made the health readout lie). Always guarantees a TTL: set on first INCR, re-arm if PTTL<0.
  */
+/**
+ * Admission control as ONE atomic Redis operation.
+ *
+ * The previous shape was INCR-then-DECR-on-denial, and it could not be made
+ * correct by adding more refunds. Every early return and every thrown
+ * connection error left the ledger holding spend for a call that was never
+ * sent, and the JS `catch` then fell through to a SEPARATE in-memory ledger
+ * with no idea which Redis commands had committed. Result: leaked budget in one
+ * direction, under-counting in the other, and no way to tell which had happened.
+ *
+ * Inside EVAL the whole decision is one step: read all three counters, decide,
+ * and only then commit. There is no intermediate state, so there is nothing to
+ * refund and no interleaving with the other processes sharing this Redis.
+ *
+ * It also removes a race the sequential version could not avoid: an hourly key
+ * that expired between INCR and PTTL got recreated by the compensating DECR as
+ * `-1` with NO TTL, so the next window silently started 701 calls in credit.
+ * Nothing here ever decrements.
+ *
+ * Returns 0 admitted, 1 monthly-denied, 2 hourly-denied, 3 daily-denied.
+ */
+const ADMIT_LUA = `
+local cuCost    = tonumber(ARGV[1])
+local cuMax     = tonumber(ARGV[2])
+local hourlyMax = tonumber(ARGV[3])
+local dailyMax  = tonumber(ARGV[4])
+
+local cu     = tonumber(redis.call('GET', KEYS[1])) or 0
+local hourly = tonumber(redis.call('GET', KEYS[2])) or 0
+local daily  = tonumber(redis.call('GET', KEYS[3])) or 0
+
+if cu + cuCost > cuMax then return 1 end
+if hourly + 1 > hourlyMax then return 2 end
+if daily + 1 > dailyMax then return 3 end
+
+redis.call('INCRBY', KEYS[1], cuCost)
+redis.call('INCR', KEYS[2])
+redis.call('INCR', KEYS[3])
+
+-- PTTL < 0 covers both "exists, no TTL" (-1) and "missing" (-2). The INCRs
+-- above guarantee existence, so a negative here means the TTL needs arming.
+if redis.call('PTTL', KEYS[1]) < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[5]) end
+if redis.call('PTTL', KEYS[2]) < 0 then redis.call('PEXPIRE', KEYS[2], ARGV[6]) end
+if redis.call('PTTL', KEYS[3]) < 0 then redis.call('PEXPIRE', KEYS[3], ARGV[7]) end
+
+return 0
+`
+
 async function isRateLimited(bucket: MoralisBucket, cuCost: number): Promise<boolean> {
   const r = getRedis()
   if (r && !isRedisUnavailable()) {
     try {
-      // Monthly CU ceiling FIRST — it is the one that bounds the bill, so it
-      // must deny before any per-window counter is touched. Every later denial
-      // refunds it, otherwise a bucket-throttled call would permanently consume
-      // monthly budget it never actually spent at the provider.
-      const cKey = cuKey()
-      const cuMax = monthlyCuMax()
-      const cuUsed = await r.incrby(cKey, cuCost)
-      if (cuUsed === cuCost) await r.pexpire(cKey, MONTHLY_TTL)
-      else if ((await r.pttl(cKey)) < 0) await r.pexpire(cKey, MONTHLY_TTL)
-      if (cuUsed > cuMax) { await r.decrby(cKey, cuCost); return true }
-
       const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
       const { hourlyMax, dailyMax } = BUCKET_CAPS[bucket]
-      const hourly = await r.incr(hKey)
-      if (hourly === 1) await r.pexpire(hKey, HOURLY_WINDOW)
-      else if ((await r.pttl(hKey)) < 0) await r.pexpire(hKey, HOURLY_WINDOW)
-      if (hourly > hourlyMax) { await r.decr(hKey); await r.decrby(cKey, cuCost); return true }
-      const daily = await r.incr(dKey)
-      if (daily === 1) await r.pexpire(dKey, DAILY_WINDOW)
-      else if ((await r.pttl(dKey)) < 0) await r.pexpire(dKey, DAILY_WINDOW)
-      if (daily > dailyMax) {
-        await r.decr(dKey); await r.decr(hKey); await r.decrby(cKey, cuCost); return true
-      }
-      return false
+      // cuKey() is evaluated HERE, immediately before the call, not at function
+      // entry — so a request that arrives after UTC midnight debits the new
+      // month. Requests ADMITTED just before the boundary and SENT just after
+      // are still charged to the old month; that overshoot is bounded by
+      // in-flight concurrency and is inherent to charging at admission.
+      const res = await r.eval(
+        ADMIT_LUA,
+        3,
+        cuKey(),
+        hKey,
+        dKey,
+        String(cuCost),
+        String(monthlyCuMax()),
+        String(hourlyMax),
+        String(dailyMax),
+        String(MONTHLY_TTL),
+        String(HOURLY_WINDOW),
+        String(DAILY_WINDOW),
+      )
+      return Number(res) !== 0
     } catch {
-      // Redis blip — fall through to in-memory
+      // Redis genuinely unreachable. Safe to fall through now: EVAL is
+      // all-or-nothing, so there is no half-applied debit to reconcile.
     }
   }
   return isRateLimitedMemory(bucket, cuCost)
@@ -388,17 +487,25 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
   let anyLimited = false
   const r = getRedis()
   const redisLive = !!r && !isRedisUnavailable()
-  let source: 'redis' | 'memory' = redisLive ? 'redis' : 'memory'
 
   for (const bucket of ['history', 'holders', 'assets'] as MoralisBucket[]) {
     let hourly: number | null = null
     let daily: number | null = null
+    // Source is tracked PER READING, not once for the whole response. A single
+    // global flag lied in both directions: one failed bucket read relabelled
+    // every other bucket 'memory' even though they came from Redis, and — worse
+    // — a failed monthly GET fell back to memCu.used (usually 0) while the label
+    // still said 'redis', so a Redis ledger sitting at its ceiling could be
+    // reported as used:0, limited:false, source:'redis'. Exactly the reading an
+    // operator would trust to conclude nothing was wrong.
+    let bucketSource: 'redis' | 'memory' = 'memory'
     if (redisLive) {
       try {
         const { hourly: hKey, daily: dKey } = bucketKeys(bucket)
         const [h, d] = await Promise.all([r!.get(hKey), r!.get(dKey)])
         hourly = h ? Number(h) : 0
         daily = d ? Number(d) : 0
+        bucketSource = 'redis'
       } catch { /* Redis blip — fall through to the in-memory tally below */ }
     }
     // No Redis (EthScan) or a blip: report THIS PROCESS's in-memory counters
@@ -413,23 +520,23 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
       const c = rollMemWindows(bucket)
       hourly = c.hourly
       daily = c.daily
-      source = 'memory'
+      bucketSource = 'memory'
     }
     const state = buildBucketState(hourly, daily, BUCKET_CAPS[bucket])
     if (state.limited) anyLimited = true
-    buckets[bucket] = state
+    buckets[bucket] = { ...state, source: bucketSource }
   }
 
   // Monthly CU ledger — the number that actually maps to the invoice.
   const cuMax = monthlyCuMax()
-  let cuUsed = 0
+  let cuUsed = memCu.used
+  let cuSource: 'redis' | 'memory' = 'memory'
   if (redisLive) {
     try {
       const v = await r!.get(cuKey())
       cuUsed = v ? Number(v) : 0
-    } catch { cuUsed = memCu.used }
-  } else {
-    cuUsed = memCu.used
+      cuSource = 'redis'
+    } catch { /* keep the in-memory figure AND the honest 'memory' label */ }
   }
   const cuLimited = cuUsed >= cuMax
   if (cuLimited) anyLimited = true
@@ -438,15 +545,42 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
     disabled: process.env.MORALIS_DISABLED === 'true',
     keyPresent: !!process.env.MORALIS_API_KEY,
     buckets,
-    /** 'memory' means per-process and NOT fleet-wide — with no Redis these
-     *  ceilings are enforced N times over for N processes. */
-    source,
+    /**
+     * Rolled up from the per-reading sources, and it distinguishes three
+     * states rather than two. 'mixed' is the one that matters: it means some
+     * readings are fleet-wide and some are this process only, so the numbers
+     * in this response cannot be compared with each other. Collapsing that
+     * into 'memory' would understate it, and into 'redis' would be a lie of
+     * exactly the kind this field exists to prevent.
+     */
+    source: ((): 'redis' | 'memory' | 'mixed' => {
+      const all = [cuSource, ...Object.values(buckets).map((b) => (b as { source: string }).source)]
+      if (all.every((s) => s === 'redis')) return 'redis'
+      if (all.every((s) => s === 'memory')) return 'memory'
+      return 'mixed'
+    })(),
     monthlyCu: {
       month: monthKey(),
       used: cuUsed,
       max: cuMax,
       pctUsed: cuMax > 0 ? Math.round((cuUsed / cuMax) * 1000) / 10 : null,
       limited: cuLimited,
+      source: cuSource,
+      /**
+       * ⚠ SCOPE: this ceiling is PER LEDGER, not per Moralis account.
+       *
+       * BNB's web + indexer share one Redis and therefore one ledger. ETH has
+       * no Redis at all, so each ETH process counts in its own memory. Four
+       * processes across two chains ⇒ a 2,000,000 ceiling permits up to ~6M CU
+       * against a single Moralis account, because nothing joins the ledgers.
+       *
+       * This is a real limit of the fix, not an oversight: a true account-wide
+       * ceiling needs shared state that ETH does not have. Provisioning Redis
+       * for ETH (Track C1) is what closes it, and would also fix the same blind
+       * spot in the rate limiter and the KV cache. Until then, size the ceiling
+       * with the multiplier in mind.
+       */
+      scope: 'per-ledger',
       /** Costs are estimates until confirmed in the Moralis console. */
       estimated: true,
     },

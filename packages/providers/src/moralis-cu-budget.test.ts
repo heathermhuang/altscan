@@ -58,6 +58,46 @@ describe('monthlyCuMax — fail-closed config', () => {
     expect(monthlyCuMax({ MORALIS_MONTHLY_CU_MAX: '25000000' })).toBe(25_000_000)
     expect(monthlyCuMax({ MORALIS_MONTHLY_CU_MAX: ' 900 ' })).toBe(900)
   })
+
+  it('rejects the parseInt-prefix class that the first version of this fix let through', async () => {
+    const { monthlyCuMax } = await freshModule()
+    const fallback = monthlyCuMax({})
+    // Codex round 1 on this PR: parseInt() takes a NUMERIC PREFIX and has no
+    // upper bound, so the original "fail-closed" implementation still had
+    // inputs that disabled the ceiling entirely, and one that caused an outage.
+    const disablesTheCeiling = '999999999999999999999999999999garbage' // → ~1e30
+    const causesAnOutage = '1_000' // → 1
+    for (const bad of [
+      disablesTheCeiling,
+      causesAnOutage,
+      '1e9',
+      '0x10',
+      '+5',
+      '12garbage',
+      '9007199254740993', // beyond Number.MAX_SAFE_INTEGER
+      '1.5',
+      '١٢٣', // non-ASCII digits
+    ]) {
+      expect(monthlyCuMax({ MORALIS_MONTHLY_CU_MAX: bad }), `input: ${bad}`).toBe(fallback)
+    }
+  })
+})
+
+describe('strictPositiveInt', () => {
+  it('accepts only a complete, safe, positive decimal integer', async () => {
+    const { strictPositiveInt } = await freshModule()
+    expect(strictPositiveInt('42', 7, 1000)).toBe(42)
+    expect(strictPositiveInt(' 42 ', 7, 1000)).toBe(42)
+    for (const bad of ['', '  ', '0', '-1', '1.5', '1e3', '0x2a', '+42', '42x', 'x42', undefined]) {
+      expect(strictPositiveInt(bad, 7, 1000), `input: ${bad}`).toBe(7)
+    }
+  })
+
+  it('falls back rather than honouring a value above the cap', async () => {
+    const { strictPositiveInt } = await freshModule()
+    expect(strictPositiveInt('1001', 7, 1000)).toBe(7)
+    expect(strictPositiveInt('1000', 7, 1000)).toBe(1000)
+  })
 })
 
 describe('monthKey — calendar-month stamping', () => {
@@ -79,6 +119,35 @@ describe('CU cost table', () => {
       expect(Number.isInteger(cost), name).toBe(true)
       expect(cost, name).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('CU cost overrides are validated, not merely parsed', () => {
+  it('ignores a negative cost, which would otherwise run the meter BACKWARDS', async () => {
+    // envInt's `parseInt(...) || fallback` accepted -25, and the debit is an
+    // INCRBY: every history call would then DECREMENT monthly usage, so the
+    // ceiling could never be reached no matter how much was spent. The old
+    // test only asserted the DEFAULTS were positive, never the overrides —
+    // it would have passed with this bug present.
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '-25')
+    const { CU_COST } = await freshModule()
+    expect(CU_COST.addressHistory).toBe(25)
+  })
+
+  it('ignores zero, non-numeric, and absurdly large costs', async () => {
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '0')
+    vi.stubEnv('MORALIS_CU_TOKEN_HOLDERS', 'free')
+    vi.stubEnv('MORALIS_CU_ADDRESS_NFTS', '99999999')
+    const { CU_COST } = await freshModule()
+    expect(CU_COST.addressHistory).toBe(25)
+    expect(CU_COST.tokenHolders).toBe(50)
+    expect(CU_COST.addressNfts).toBe(25)
+  })
+
+  it('honours a plausible override', async () => {
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '40')
+    const { CU_COST } = await freshModule()
+    expect(CU_COST.addressHistory).toBe(40)
   })
 })
 

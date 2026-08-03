@@ -478,7 +478,15 @@ const ENTITY_TYPES: ReadonlyArray<ClaimedEntity['entity_type']> = [
  *  Practical effect on ETH: backfill now yields at budgetHeadroom × hourlyMax
  *  (0.4 × 700 = 280 history calls/hr) instead of running to the 300-pages/hr
  *  reserve. Slightly slower, and bounded by an actual signal. A genuine absence
- *  of any counter still returns false. */
+ *  of any counter still returns false.
+ *
+ *  ⚠ But on ETH this is SELF-throttling, not politeness. With no Redis the
+ *  worker reads its OWN process counters, so it cannot see the web process at
+ *  all: if web serves 600 history calls and the worker has spent 279, the
+ *  worker sees 279 < 280 and keeps going while the real total is 879 against a
+ *  700 cap. The phrase "yield while busy serving humans" is only true on BNB,
+ *  where a shared Redis makes the counter fleet-wide. Same root cause as the
+ *  per-ledger CU ceiling, same fix: give ETH a Redis (Track C1). */
 export async function sharedBucketOverHeadroom(
   bucket: ProviderBucket,
   healthFn?: () => Promise<Record<string, unknown>>,
