@@ -99,7 +99,22 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
+    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
+    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
+    # or the module is simply absent on the box. Omitting them is why the backfill
+    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
+    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
+    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
+    # providers: providers value-imports it.
+    # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
+    # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
+    # The trailing check is the point: apps/indexer's build was `tsc || true`
+    # and tsconfig has noEmitOnError:false, so a build could report SUCCESS while
+    # emitting nothing (or invalid JS) and Render would happily ship it. `|| true`
+    # is now gone, and this asserts the artifact exists, parses, and that every
+    # workspace package the runtime require()s actually resolves — which is the
+    # exact failure this commit fixes, verified at build time instead of at boot.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -131,7 +146,22 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo (upgraded from starter after OOM crashes, exit 134)
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
+    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
+    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
+    # or the module is simply absent on the box. Omitting them is why the backfill
+    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
+    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
+    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
+    # providers: providers value-imports it.
+    # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
+    # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
+    # The trailing check is the point: apps/indexer's build was `tsc || true`
+    # and tsconfig has noEmitOnError:false, so a build could report SUCCESS while
+    # emitting nothing (or invalid JS) and Render would happily ship it. `|| true`
+    # is now gone, and this asserts the artifact exists, parses, and that every
+    # workspace package the runtime require()s actually resolves — which is the
+    # exact failure this commit fixes, verified at build time instead of at boot.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
