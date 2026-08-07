@@ -99,7 +99,16 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
+    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
+    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
+    # or the module is simply absent on the box. Omitting them is why the backfill
+    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
+    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
+    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
+    # providers: providers value-imports it.
+    # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
+    # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -131,7 +140,16 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo (upgraded from starter after OOM crashes, exit 134)
     region: oregon
     rootDir: apps/indexer
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
+    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
+    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
+    # or the module is simply absent on the box. Omitting them is why the backfill
+    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
+    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
+    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
+    # providers: providers value-imports it.
+    # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
+    # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
