@@ -65,11 +65,36 @@ services:
     env: node
     plan: starter
     rootDir: apps/indexer
+    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
+    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
+    # or the module is simply absent on the box. explorer-core MUST precede
+    # providers: providers value-imports it (packages/providers/src/moralis.ts).
+    # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
+    # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
+    #
+    # Why the trailing checks, when tsc already fails on the missing packages:
+    # tsconfig sets noEmitOnError:false, so tsc EMITS a dist/index.js even as it
+    # errors. The moment anything restores a `|| true` on the indexer's build (it
+    # was exactly that until 2026-08-07), the type errors go quiet, a broken
+    # artifact ships, and the failure resurfaces at BOOT instead — "Cannot find
+    # module @altscan/providers/dist/index.js", the packaging class behind the
+    # 10.5h outage on 2026-07-19 documented in apps/indexer/src/backfill-worker.ts.
+    # These checks assert the artifact exists, parses, and that every workspace
+    # package the runtime require()s actually resolves, so that regression fails
+    # the build instead of the boot.
     buildCommand: >-
       cd ../.. && pnpm install --no-frozen-lockfile &&
       pnpm --filter @altscan/chain-config build &&
+      pnpm --filter @altscan/explorer-core build &&
+      pnpm --filter @altscan/providers build &&
       pnpm --filter @altscan/db build &&
-      pnpm --filter @altscan/indexer build
+      pnpm --filter @altscan/indexer build &&
+      test -s apps/indexer/dist/index.js &&
+      node --check apps/indexer/dist/index.js &&
+      test -s packages/providers/dist/index.js &&
+      test -s packages/explorer-core/dist/index.js &&
+      cd apps/indexer &&
+      node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     autoDeploy: true
     envVars:
