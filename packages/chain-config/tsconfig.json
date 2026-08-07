@@ -1,12 +1,37 @@
 {
+  // Production BUILD config. Emits CommonJS + .d.ts to ./dist so the compiled
+  // CJS indexer can require() this package. Previously `build` was
+  // `tsc --noEmit` and main/exports pointed at ./src/index.ts, so
+  // apps/indexer/dist/index.js shipped a literal
+  // `require("@altscan/chain-config")` that resolved to a .ts FILE. That only
+  // ever worked because current Node strips types on require; under
+  // `--no-experimental-strip-types` (or a Node downgrade) it dies immediately
+  // on line 1, `export type ChainTheme`, with
+  // "SyntaxError: Unexpected token 'export'". Nothing pinned the Node version
+  // — no `engines`, no .nvmrc/.node-version, NODE_VERSION unset on both Render
+  // indexers — so a Render-side default change would have crash-looped BNB and
+  // ETH simultaneously. Same packaging class as #78/#79 and as the 10.5h
+  // outage on 2026-07-19 (apps/indexer/src/backfill-worker.ts:23).
+  //
+  // module/moduleResolution moved off ESNext/bundler for the same reason: the
+  // emitted entrypoint has to be require()-able by plain node, not just by a
+  // bundler. Safe here — index.ts has no imports at all, relative or bare.
+  //
+  // Tests stay EXCLUDED from the emitted build (PR #73): a *.test.ts in src
+  // pulls `import 'vitest'` → vite/types/importGlob.d.ts → `Worker` → TS2304
+  // under a pure ES2020 lib, failing the indexer deploy build only.
+  // tsconfig.typecheck.json re-includes them with DOM.
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "strict": true,
     "declaration": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
   "include": ["src"],
   "exclude": ["**/*.test.ts", "**/*.spec.ts"]

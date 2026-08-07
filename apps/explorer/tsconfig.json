@@ -27,7 +27,15 @@
       // the webs compile these from source and never need dist at all.
       "@altscan/explorer-core": ["../../packages/explorer-core/src/index.ts"],
       "@altscan/explorer-core/format": ["../../packages/explorer-core/src/format.ts"],
-      "@altscan/providers": ["../../packages/providers/src/index.ts"]
+      "@altscan/providers": ["../../packages/providers/src/index.ts"],
+      // chain-config joined the built packages on 2026-08-07 (it shipped TS
+      // source that the compiled CJS indexer require()d, which only ran under
+      // Node's type-stripping). Without this entry the webs' build reaches
+      // "Checking validity of types" and dies on "Cannot find module
+      // '@altscan/chain-config' or its corresponding type declarations"
+      // (lib/backfill-trigger.ts) — verified, not theorized. Only ESLint is
+      // skipped during the build; type-checking is not.
+      "@altscan/chain-config": ["../../packages/chain-config/src/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

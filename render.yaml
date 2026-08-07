@@ -9,6 +9,14 @@ services:
                             # (bumped from 1 after May 2026 botnet OOM-crashed the sole instance)
     region: oregon
     rootDir: apps/explorer
+    # Deliberately builds NO workspace package. Every built package the explorer
+    # touches (@altscan/db, chain-config, explorer-core, providers) is mapped to
+    # source by apps/explorer/tsconfig.json `paths`, which Next applies to webpack
+    # AND tsc, so the webs compile them from source and never need dist. The one
+    # loader `paths` cannot reach is jiti (postcss -> tailwind.config.ts); that file
+    # therefore imports chain-config by source path. Keep it that way — the same
+    # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
+    # stay build-step-free.
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
@@ -60,6 +68,14 @@ services:
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
+    # Deliberately builds NO workspace package. Every built package the explorer
+    # touches (@altscan/db, chain-config, explorer-core, providers) is mapped to
+    # source by apps/explorer/tsconfig.json `paths`, which Next applies to webpack
+    # AND tsc, so the webs compile them from source and never need dist. The one
+    # loader `paths` cannot reach is jiti (postcss -> tailwind.config.ts); that file
+    # therefore imports chain-config by source path. Keep it that way — the same
+    # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
+    # stay build-step-free.
     buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
@@ -99,13 +115,22 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo
     region: oregon
     rootDir: apps/indexer
-    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
-    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
-    # or the module is simply absent on the box. Omitting them is why the backfill
-    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
-    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
-    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
-    # providers: providers value-imports it.
+    # @altscan/chain-config, @altscan/explorer-core and @altscan/providers ALL ship
+    # compiled CommonJS (main: ./dist/index.js) and dist/ is gitignored, so they
+    # must be BUILT here or the module is simply absent on the box. Omitting them
+    # is why the backfill worker died at boot with "Cannot find module
+    # @altscan/providers/dist/index.js" (2026-08-07) — the same packaging class as
+    # the 10.5h outage on 2026-07-19 documented in apps/indexer/src/backfill-worker.ts.
+    # explorer-core MUST precede providers: providers value-imports it.
+    #
+    # chain-config joined that list on 2026-08-07: its build was `tsc --noEmit`
+    # and main pointed at ./src/index.ts, so the compiled indexer shipped a
+    # `require("@altscan/chain-config")` that resolved to a .ts FILE and only ran
+    # because current Node strips types on require. Nothing pinned that behavior
+    # (no engines/.nvmrc/.node-version, NODE_VERSION unset on both indexers), so a
+    # Render Node default change would have crash-looped BNB and ETH at once. The
+    # require.resolve assertion below fails the build if the entry is ever a
+    # non-.js file again — the regression guard, not just the fix.
     # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
     # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
     # The trailing check is the point: apps/indexer's build was `tsc || true`
@@ -114,7 +139,7 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -146,13 +171,22 @@ services:
     plan: standard          # 1 GB RAM / 1 CPU — $25/mo (upgraded from starter after OOM crashes, exit 134)
     region: oregon
     rootDir: apps/indexer
-    # @altscan/explorer-core and @altscan/providers BOTH ship compiled CommonJS
-    # (main: ./dist/index.js) and dist/ is gitignored, so they must be BUILT here
-    # or the module is simply absent on the box. Omitting them is why the backfill
-    # worker died at boot with "Cannot find module @altscan/providers/dist/index.js"
-    # (2026-08-07) — the same packaging class as the 10.5h outage on 2026-07-19
-    # documented in apps/indexer/src/backfill-worker.ts. explorer-core MUST precede
-    # providers: providers value-imports it.
+    # @altscan/chain-config, @altscan/explorer-core and @altscan/providers ALL ship
+    # compiled CommonJS (main: ./dist/index.js) and dist/ is gitignored, so they
+    # must be BUILT here or the module is simply absent on the box. Omitting them
+    # is why the backfill worker died at boot with "Cannot find module
+    # @altscan/providers/dist/index.js" (2026-08-07) — the same packaging class as
+    # the 10.5h outage on 2026-07-19 documented in apps/indexer/src/backfill-worker.ts.
+    # explorer-core MUST precede providers: providers value-imports it.
+    #
+    # chain-config joined that list on 2026-08-07: its build was `tsc --noEmit`
+    # and main pointed at ./src/index.ts, so the compiled indexer shipped a
+    # `require("@altscan/chain-config")` that resolved to a .ts FILE and only ran
+    # because current Node strips types on require. Nothing pinned that behavior
+    # (no engines/.nvmrc/.node-version, NODE_VERSION unset on both indexers), so a
+    # Render Node default change would have crash-looped BNB and ETH at once. The
+    # require.resolve assertion below fails the build if the entry is ever a
+    # non-.js file again — the regression guard, not just the fix.
     # NOT `--filter @altscan/indexer... build` (deps): @altscan/types has no build
     # script, which risks ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT killing the deploy.
     # The trailing check is the point: apps/indexer's build was `tsc || true`
@@ -161,7 +195,7 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN

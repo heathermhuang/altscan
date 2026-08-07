@@ -20,11 +20,29 @@ RUN apk add --no-cache python3 make g++ libc6-compat
 COPY . .
 RUN pnpm install --frozen-lockfile
 
-# @altscan/db and @altscan/chain-config emit dist/ that the indexer imports.
-# Order matters: chain-config and db must build before the indexer.
+# Every workspace package the indexer require()s at runtime emits dist/, and dist/
+# is gitignored, so each must be built here or the module is absent in the image.
+# explorer-core and providers load lazily (only when BACKFILL_ENABLED=true), so
+# omitting them fails at BOOT the first time backfill is enabled, not at build —
+# exactly how the production indexers died on 2026-08-07 with "Cannot find module
+# .../@altscan/providers/dist/index.js".
+# Order matters: chain-config first (providers type-imports it), then explorer-core
+# (providers value-imports it), then providers, then db, then the indexer.
 RUN pnpm --filter @altscan/chain-config build \
+ && pnpm --filter @altscan/explorer-core build \
+ && pnpm --filter @altscan/providers build \
  && pnpm --filter @altscan/db build \
  && pnpm --filter @altscan/indexer build
+
+# Assert the artifact and that every runtime require() actually resolves — the
+# 2026-08-07 failure verified at build time instead of at boot.
+RUN test -s apps/indexer/dist/index.js \
+ && node --check apps/indexer/dist/index.js \
+ && test -s packages/chain-config/dist/index.js \
+ && test -s packages/explorer-core/dist/index.js \
+ && test -s packages/providers/dist/index.js \
+ && cd apps/indexer \
+ && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
