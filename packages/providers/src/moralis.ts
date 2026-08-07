@@ -692,7 +692,9 @@ export function createMoralisAdapter(
    * Without it, keys were bare (`history:0xabc:`) while `kvGet`/`kvSet` pass the
    * key straight to Redis. Two hosts sharing one Redis would then collide: from
    * A4b-2 the indexer resolves its own adapter against the SAME `REDIS_URL` as
-   * the web (`apps/indexer/src/queue.ts`), and it passes no `currency` ctx —
+   * the web (`apps/indexer/src/backfill-worker.ts`, which dynamically imports
+   * this package; the indexer's REDIS_URL is wired in render.yaml), and it
+   * passes no `currency` ctx —
    * so whichever host wrote first would decide the other's rendered summary
    * (`"1.5 BNB transfer"` vs `"1.5 transfer"`, see summarize* below).
    *
