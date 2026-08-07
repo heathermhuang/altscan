@@ -114,7 +114,16 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
+    # @altscan/chain-config is in that require() list for a non-obvious reason: it
+    # is a SOURCE package (main: ./src/index.ts, build: tsc --noEmit, emits no
+    # dist), so the compiled indexer's require("@altscan/chain-config") only
+    # resolves because Node strips types by default (>=22.18). On a runtime where
+    # that is off, boot dies with "SyntaxError: Unexpected token 'export'". Loading
+    # it here binds the build to the same resolution the boot needs, so that fails
+    # the BUILD instead. Do NOT "fix" this by pointing chain-config's main at a
+    # dist: that was tried on 2026-08-07 and broke four consumers, including
+    # jiti/postcss (resolves via package.json exports, cannot see tsconfig paths).
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/chain-config');require('@altscan/providers');console.log('[build-check] @altscan/chain-config + @altscan/providers load (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -161,7 +170,16 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
+    # @altscan/chain-config is in that require() list for a non-obvious reason: it
+    # is a SOURCE package (main: ./src/index.ts, build: tsc --noEmit, emits no
+    # dist), so the compiled indexer's require("@altscan/chain-config") only
+    # resolves because Node strips types by default (>=22.18). On a runtime where
+    # that is off, boot dies with "SyntaxError: Unexpected token 'export'". Loading
+    # it here binds the build to the same resolution the boot needs, so that fails
+    # the BUILD instead. Do NOT "fix" this by pointing chain-config's main at a
+    # dist: that was tried on 2026-08-07 and broke four consumers, including
+    # jiti/postcss (resolves via package.json exports, cannot see tsconfig paths).
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "require('@altscan/chain-config');require('@altscan/providers');console.log('[build-check] @altscan/chain-config + @altscan/providers load (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
