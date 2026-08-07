@@ -9,15 +9,15 @@ services:
                             # (bumped from 1 after May 2026 botnet OOM-crashed the sole instance)
     region: oregon
     rootDir: apps/explorer
-    # chain-config MUST be built here even though apps/explorer/tsconfig.json
-    # aliases it to source. That alias covers webpack and tsc, but NOT jiti:
-    # postcss loads apps/explorer/tailwind.config.ts through jiti, which resolves
-    # by package.json `exports` and cannot see tsconfig paths. Drop this step and
-    # the build dies compiling app/globals.css with "Cannot find module
-    # .../@altscan/chain-config/dist/index.js" (verified 2026-08-07, not theorized).
-    # Nothing else is needed: webpack inlines chain-config from source, so the
-    # standalone runtime never loads the package at all.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    # Deliberately builds NO workspace package. Every built package the explorer
+    # touches (@altscan/db, chain-config, explorer-core, providers) is mapped to
+    # source by apps/explorer/tsconfig.json `paths`, which Next applies to webpack
+    # AND tsc, so the webs compile them from source and never need dist. The one
+    # loader `paths` cannot reach is jiti (postcss -> tailwind.config.ts); that file
+    # therefore imports chain-config by source path. Keep it that way — the same
+    # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
+    # stay build-step-free.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
@@ -68,15 +68,15 @@ services:
     plan: pro               # 2 GB RAM / 1 CPU — $50/mo (upgraded from standard after OOM crashes)
     region: oregon
     rootDir: apps/explorer
-    # chain-config MUST be built here even though apps/explorer/tsconfig.json
-    # aliases it to source. That alias covers webpack and tsc, but NOT jiti:
-    # postcss loads apps/explorer/tailwind.config.ts through jiti, which resolves
-    # by package.json `exports` and cannot see tsconfig paths. Drop this step and
-    # the build dies compiling app/globals.css with "Cannot find module
-    # .../@altscan/chain-config/dist/index.js" (verified 2026-08-07, not theorized).
-    # Nothing else is needed: webpack inlines chain-config from source, so the
-    # standalone runtime never loads the package at all.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    # Deliberately builds NO workspace package. Every built package the explorer
+    # touches (@altscan/db, chain-config, explorer-core, providers) is mapped to
+    # source by apps/explorer/tsconfig.json `paths`, which Next applies to webpack
+    # AND tsc, so the webs compile them from source and never need dist. The one
+    # loader `paths` cannot reach is jiti (postcss -> tailwind.config.ts); that file
+    # therefore imports chain-config by source path. Keep it that way — the same
+    # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
+    # stay build-step-free.
+    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true

@@ -3,7 +3,15 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      // Mirrors the vite alias in astro.config.mjs. That alias only fixes the
+      // BUNDLER; TypeScript resolves @altscan/chain-config independently and
+      // would report a missing ./dist/index.d.ts on any checkout that has not
+      // built the package (dist/ is gitignored) — breaking `astro check` and
+      // editor diagnostics while `astro build` succeeds. Keep the two in sync.
+      "@altscan/chain-config": ["../../packages/chain-config/src/index.ts"]
+    }
   },
   "include": ["src"]
 }
