@@ -38,12 +38,27 @@ RUN pnpm --filter @altscan/chain-config build \
 # ships silently, failing only when the backfill worker require()s providers.
 # This asserts the artifact exists, parses, and that every workspace package the
 # runtime require()s actually resolves from the indexer's own directory.
+#
+# @altscan/chain-config is in that require() list for a non-obvious reason: it is
+# a SOURCE package (main: ./src/index.ts, build: tsc --noEmit, emits no dist), so
+# the compiled indexer's require("@altscan/chain-config") only resolves because
+# Node strips types by default (>=22.18). Bump the base image to a runtime where
+# that is off and boot dies with "SyntaxError: Unexpected token 'export'". Build
+# and runtime stages share one FROM, so this catches that bump at BUILD time.
+# It does NOT cover flag-level divergence: the shared FROM pins the same Node
+# BINARY, not the same process flags, so running the image with
+# NODE_OPTIONS=--no-experimental-strip-types still dies at boot after a green
+# build. Do not set that flag for this service. apps/indexer declares
+# engines.node >=22.18 so the required floor is at least explicit.
+# Do NOT "fix" this by pointing chain-config's main at a dist: that was tried on
+# 2026-08-07 and broke four consumers, including jiti/postcss (resolves via
+# package.json exports, cannot see tsconfig paths).
 RUN test -s apps/indexer/dist/index.js \
  && node --check apps/indexer/dist/index.js \
  && test -s packages/providers/dist/index.js \
  && test -s packages/explorer-core/dist/index.js \
  && cd apps/indexer \
- && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
+ && node -e "require('@altscan/chain-config');require('@altscan/providers');console.log('[build-check] @altscan/chain-config + @altscan/providers load (transitively proves explorer-core)')"
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime

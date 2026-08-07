@@ -2,6 +2,10 @@
   "name": "@altscan/indexer",
   "version": "0.0.1",
   "main": "dist/index.js",
+  "//engines": "dist/index.js require()s @altscan/chain-config, a source package (main: ./src/index.ts). That resolves only on a Node that strips TypeScript types by default, which landed in 22.18 — Render's default varies by service creation date and has shipped 22.16. Floor only: a future major that drops stripping is caught by the build assertion in render.yaml / blueprint.yaml / Dockerfile.indexer.",
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
