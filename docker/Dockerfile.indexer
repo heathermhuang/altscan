@@ -20,11 +20,30 @@ RUN apk add --no-cache python3 make g++ libc6-compat
 COPY . .
 RUN pnpm install --frozen-lockfile
 
-# @altscan/db and @altscan/chain-config emit dist/ that the indexer imports.
-# Order matters: chain-config and db must build before the indexer.
+# Every workspace package the indexer imports emits dist/ that is gitignored, so
+# each one must be built here or the module is simply absent in the image.
+# @altscan/explorer-core and @altscan/providers are the easy ones to miss — the
+# backfill worker only require()s providers at runtime.
+# Order matters: chain-config and db before the indexer, and explorer-core BEFORE
+# providers — providers value-imports it (packages/providers/src/moralis.ts).
 RUN pnpm --filter @altscan/chain-config build \
+ && pnpm --filter @altscan/explorer-core build \
+ && pnpm --filter @altscan/providers build \
  && pnpm --filter @altscan/db build \
  && pnpm --filter @altscan/indexer build
+
+# Assert the packaging at BUILD time instead of discovering it at boot. tsc runs
+# with noEmitOnError:false, so it EMITS a dist/index.js even when it errors on a
+# missing package — restore a `|| true` on the indexer's build and a broken image
+# ships silently, failing only when the backfill worker require()s providers.
+# This asserts the artifact exists, parses, and that every workspace package the
+# runtime require()s actually resolves from the indexer's own directory.
+RUN test -s apps/indexer/dist/index.js \
+ && node --check apps/indexer/dist/index.js \
+ && test -s packages/providers/dist/index.js \
+ && test -s packages/explorer-core/dist/index.js \
+ && cd apps/indexer \
+ && node -e "require('@altscan/providers');console.log('[build-check] @altscan/providers loads (transitively proves explorer-core)')"
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
