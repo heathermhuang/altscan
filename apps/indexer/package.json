@@ -16,11 +16,9 @@
     "@altscan/providers": "workspace:*",
     "@altscan/types": "workspace:*",
     "axios": "^1.18.1",
-    "bullmq": "^5.4.0",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.31.0",
-    "ethers": "^6.11.0",
-    "ioredis": "^5.3.0"
+    "ethers": "^6.11.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

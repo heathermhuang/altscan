@@ -76,7 +76,7 @@ altscan/
 │   ├── explorer/       Unified Next.js 14 frontend + API routes
 │   │                   CHAIN=bnb → bnbscan.com
 │   │                   CHAIN=eth → ethscan.io
-│   ├── indexer/        Unified BullMQ block indexer
+│   ├── indexer/        Unified block indexer (direct polling loop)
 │   │                   CHAIN=bnb → indexes BNB Chain
 │   │                   CHAIN=eth → indexes Ethereum
 │   └── status/         Independent Hono status page
@@ -97,8 +97,8 @@ altscan/
 | Frontend | Next.js 14 (App Router), React 18, Tailwind CSS |
 | Backend | Next.js API routes, Hono (status page) |
 | Database | PostgreSQL (via Drizzle ORM) |
-| Indexer | BullMQ, ethers.js, JSON-RPC |
-| Cache | Redis (rate limiting, job queues) |
+| Indexer | ethers.js, JSON-RPC (direct polling loop, no job queue) |
+| Cache | Redis (rate limiting, Moralis CU ledger) |
 | Monorepo | pnpm + Turborepo |
 | Hosting | Render.com (web services + workers + Postgres + Redis) |
 

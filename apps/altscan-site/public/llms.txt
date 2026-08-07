@@ -15,7 +15,7 @@
 ## Source
 
 - [GitHub](https://github.com/heathermhuang/altscan): the full platform —
-  Next.js explorer frontend, BullMQ indexer, Postgres schema, Astro site.
+  Next.js explorer frontend, block indexer, Postgres schema, Astro site.
   TypeScript throughout. License: AGPL-3.0 — read, fork, self-host.
 
 ## Data
