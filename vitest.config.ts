@@ -23,6 +23,14 @@ export default defineConfig({
       '@altscan/explorer-core/format': fileURLToPath(new URL('./packages/explorer-core/src/format.ts', import.meta.url)),
       '@altscan/explorer-core': fileURLToPath(new URL('./packages/explorer-core/src/index.ts', import.meta.url)),
       '@altscan/providers': fileURLToPath(new URL('./packages/providers/src/index.ts', import.meta.url)),
+      // Same reason again: chain-config moved from `main: ./src/index.ts` to a
+      // real compiled ./dist entry, so the compiled CJS indexer stops
+      // require()ing a .ts file through Node's type-stripping. dist/ is
+      // gitignored and CI runs vitest with NO build step, so without this alias
+      // the suite dies on "Failed to resolve entry for package
+      // @altscan/chain-config" (apps/explorer/lib/settings-defaults.test.ts and
+      // the indexer suites both reach it).
+      '@altscan/chain-config': fileURLToPath(new URL('./packages/chain-config/src/index.ts', import.meta.url)),
       // Mirror apps/explorer's tsconfig `@/* -> ./*` path alias so tests can
       // import route handlers and libs the same way the app does. The alias is
       // explorer-only (no other workspace uses `@/`), so a global mapping is
