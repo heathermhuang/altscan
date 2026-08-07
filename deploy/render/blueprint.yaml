@@ -65,9 +65,20 @@ services:
     env: node
     plan: starter
     rootDir: apps/indexer
+    # Every workspace package the indexer require()s at runtime ships compiled
+    # CommonJS (main: ./dist/*.js) and dist/ is gitignored, so each one must be
+    # BUILT here or the module is simply absent on the box. explorer-core and
+    # providers load lazily (only when BACKFILL_ENABLED=true), so omitting them
+    # fails at BOOT the first time backfill is enabled, not at deploy — that is
+    # exactly how the production indexers died on 2026-08-07 with "Cannot find
+    # module .../@altscan/providers/dist/index.js".
+    # ORDER MATTERS: chain-config first (providers type-imports it), then
+    # explorer-core (providers value-imports it), then providers.
     buildCommand: >-
       cd ../.. && pnpm install --no-frozen-lockfile &&
       pnpm --filter @altscan/chain-config build &&
+      pnpm --filter @altscan/explorer-core build &&
+      pnpm --filter @altscan/providers build &&
       pnpm --filter @altscan/db build &&
       pnpm --filter @altscan/indexer build
     startCommand: node dist/index.js
