@@ -43,9 +43,13 @@ RUN pnpm --filter @altscan/chain-config build \
 # a SOURCE package (main: ./src/index.ts, build: tsc --noEmit, emits no dist), so
 # the compiled indexer's require("@altscan/chain-config") only resolves because
 # Node strips types by default (>=22.18). Bump the base image to a runtime where
-# that is off and boot dies with "SyntaxError: Unexpected token 'export'" — the
-# build and runtime stages share one FROM, so loading it here binds the build to
-# the same resolution the boot needs and that bump fails the BUILD instead.
+# that is off and boot dies with "SyntaxError: Unexpected token 'export'". Build
+# and runtime stages share one FROM, so this catches that bump at BUILD time.
+# It does NOT cover flag-level divergence: the shared FROM pins the same Node
+# BINARY, not the same process flags, so running the image with
+# NODE_OPTIONS=--no-experimental-strip-types still dies at boot after a green
+# build. Do not set that flag for this service. apps/indexer declares
+# engines.node >=22.18 so the required floor is at least explicit.
 # Do NOT "fix" this by pointing chain-config's main at a dist: that was tried on
 # 2026-08-07 and broke four consumers, including jiti/postcss (resolves via
 # package.json exports, cannot see tsconfig paths).
