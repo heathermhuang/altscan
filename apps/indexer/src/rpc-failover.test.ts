@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { processWithFailover, readWithFailover, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
+import { processWithFailover, readWithFailover, withTimeout, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
 
 /**
  * Regression cover for the 2026-08-11 BNB indexing collapse.
@@ -389,5 +389,37 @@ describe('formatRedactedError', () => {
 
   it('handles null without throwing', () => {
     expect(formatRedactedError(null, urls)).toBe('null')
+  })
+})
+
+/**
+ * Bounds RPC acquisition. bsc.publicnode.com took ~85-90s to reject an archive
+ * request; because a FAILED processBlock attempt never reaches recordTimings,
+ * that wait was invisible to the profiler — 30 normal block timings, ~85s of
+ * "unaccounted" wall. 7 such failures matched 7 >60s stall windows exactly.
+ */
+describe('withTimeout', () => {
+  it('passes through a value that settles in time', async () => {
+    await expect(withTimeout(Promise.resolve('ok'), 500, 'x')).resolves.toBe('ok')
+  })
+
+  it('rejects once the deadline passes', async () => {
+    await expect(withTimeout(new Promise(() => {}), 20, 'acquisition')).rejects.toThrow(/acquisition timed out after 20ms/)
+  })
+
+  it('returns promptly instead of waiting out the stuck promise', async () => {
+    const stuck = new Promise(resolve => setTimeout(() => resolve('late'), 5000))
+    const started = process.hrtime.bigint()
+    await expect(withTimeout(stuck, 20, 'x')).rejects.toThrow(/timed out/)
+    expect(Number(process.hrtime.bigint() - started) / 1e6).toBeLessThan(1000)
+  })
+
+  it('propagates the original rejection rather than masking it as a timeout', async () => {
+    await expect(withTimeout(Promise.reject(new Error('archive 403')), 500, 'x')).rejects.toThrow('archive 403')
+  })
+
+  it('does not hold the event loop open after resolving', async () => {
+    // A leaked timer would keep the process alive for the full timeout.
+    await expect(withTimeout(Promise.resolve(1), 60_000, 'x')).resolves.toBe(1)
   })
 })

@@ -83,6 +83,34 @@ export async function processWithFailover<P>(
 }
 
 /**
+ * Reject if `promise` has not settled within `timeoutMs`.
+ *
+ * Used to bound RPC acquisition. A throttled or archive-refusing endpoint does
+ * not fail fast: bsc.publicnode.com took ~85-90s to finally reject an archive
+ * request (ethers retries and backs off internally), and because a FAILED
+ * processBlock attempt never reaches recordTimings, that wait was invisible to
+ * the profiler — it showed as "unaccounted" wall time with all 30 block timings
+ * looking normal.
+ *
+ * The abandoned promise is not cancelled (ethers exposes no abort handle); it
+ * settles later and is ignored. Callers must therefore only apply this where
+ * abandoning the work is SAFE — i.e. strictly before any durable write.
+ */
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`[rpc-failover] ${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
  * Failover for a READ that returns a value, with a hard timeout.
  *
  * Companion to processWithFailover, for the per-batch `getBlockNumber()` and

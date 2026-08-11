@@ -1,6 +1,7 @@
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
 import { getDb, schema } from './db'
+import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider } from './provider'
 import { sanitizeTokenMetadata } from './postgres-text'
@@ -36,6 +37,17 @@ const ASYNC_TT_WRITER = (() => {
 // Enable with PROFILE_BLOCKS=N (e.g. 30) — logs a phase breakdown every
 // N blocks to find the dominant cost center. Zero overhead when disabled.
 const PROFILE_BLOCKS = parseInt(process.env.PROFILE_BLOCKS ?? '0', 10)
+
+// Ceiling on pure RPC acquisition per block.
+//
+// Measured rpcBlockWait in production averages 275-428ms, so 8s is ~20x the mean
+// and a comfortable ceiling for a dense block under load. Sized deliberately
+// tight: bsc.publicnode.com rejects EVERY archive request, so with 4 endpoints
+// roughly a quarter of attempts start there and pay this timeout before failing
+// over. At 90s that cost the batch ~90s; at 8s it costs ~8s. A false timeout on
+// a merely-slow endpoint is harmless — this bounds a PURE READ, so failover just
+// re-fetches elsewhere.
+const RPC_FETCH_TIMEOUT_MS = parseInt(process.env.RPC_FETCH_TIMEOUT_MS ?? '8000', 10)
 const PROFILE_ENABLED = PROFILE_BLOCKS > 0
 
 type PhaseTimings = {
@@ -213,7 +225,20 @@ export async function processBlock(
     ? fetchBlockReceipts(provider, blockNumber)
     : Promise.resolve([] as Array<{ txHash: string; receipt: NormalizedReceipt }>)
 
-  const [block, receipts] = await Promise.all([blockPromise, receiptsPromise])
+  // Bound the acquisition. An archive-refusing or throttled endpoint does NOT
+  // fail fast — bsc.publicnode.com took ~85-90s to reject an archive request,
+  // and since a failed attempt never reaches recordTimings, that wait was
+  // invisible to the profiler while stalling the batch. 7 such failures lined up
+  // 1:1 with 7 >60s stall windows.
+  //
+  // Placed HERE, strictly above the first write (onWritesBegan below), so a
+  // timeout can only ever abandon pure reads — rpc-failover then retries the
+  // block on another endpoint with no risk of a half-written replay.
+  const [block, receipts] = await withTimeout(
+    Promise.all([blockPromise, receiptsPromise]),
+    RPC_FETCH_TIMEOUT_MS,
+    `block ${blockNumber} acquisition`,
+  )
   if (t) {
     t.rpcBlockWait = performance.now() - rpcStart
     t.rpcReceiptsWait = 0
