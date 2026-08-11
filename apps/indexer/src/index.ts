@@ -27,7 +27,7 @@ import {
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
-import { detectReorg, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
+import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
@@ -172,11 +172,15 @@ async function main() {
   }
   const readTip = () =>
     readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover)
-  const readHeader = (n: number) =>
-    readWithFailover(providers, readCursor++, async p => {
-      const b = await p.getBlock(n, false)   // header only
-      return b ? { hash: b.hash ?? '', parentHash: b.parentHash } : null
-    }, RPC_READ_TIMEOUT_MS, reportReadFailover)
+  // Deps bound to ONE provider. detectReorgPinned fails the whole check over;
+  // per-read failover here would mix chain views mid-walk. (codex P1.)
+  const reorgDepsFor = (p: JsonRpcProvider) => makeReorgDepsFrom(async n => {
+    const b = await p.getBlock(n, false)   // header only
+    return b ? { hash: b.hash ?? '', parentHash: b.parentHash } : null
+  })
+  // A full check can issue up to 2K+2 header reads, so it needs a far longer
+  // budget than the single-read tip timeout.
+  const REORG_CHECK_TIMEOUT_MS = parseInt(process.env.RPC_REORG_TIMEOUT_MS ?? '45000', 10)
   const db = getDb()
 
   // Retry getBlockNumber on startup
@@ -217,7 +221,6 @@ async function main() {
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
   const REORG_CHECK = process.env.REORG_CHECK !== '0'
   const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
-  const reorgDeps = makeReorgDepsFrom(readHeader)
   // Throttle the idle (tip-mode) check — it costs 2 header calls; every poll would
   // double idle RPC load for a condition the next boundary check surfaces anyway.
   const IDLE_REORG_CHECK_MS = parseInt(process.env.IDLE_REORG_CHECK_MS ?? '30000', 10)
@@ -246,7 +249,7 @@ async function main() {
         // until the next block arrives.
         if (REORG_CHECK && Date.now() - lastIdleReorgCheck >= IDLE_REORG_CHECK_MS) {
           lastIdleReorgCheck = Date.now()
-          const check = await detectReorg(reorgDeps, lastIndexed, REORG_DEPTH)
+          const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
           if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
         }
         await sleep(POLL_MS)
@@ -270,7 +273,7 @@ async function main() {
       // A3: validate the batch boundary before processing — detects any reorg at or
       // below lastIndexed (1 header call; the K-bounded walk only runs on mismatch).
       if (REORG_CHECK) {
-        const check = await detectReorg(reorgDeps, lastIndexed, REORG_DEPTH)
+        const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
         if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
       }
 
