@@ -25,7 +25,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, redactRpcUrl } from './rpc-failover'
+import { processWithFailover, redactRpcUrl, redactRpcSecrets } from './rpc-failover'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -113,24 +113,31 @@ async function main() {
   )
   // Endpoint identity for failover logging. Zipped by index — `providers` is
   // built 1:1 from RPC_URLS directly above, so the indices cannot drift.
-  const urlOf = new Map(providers.map((p, i) => [p, redactRpcUrl(RPC_URLS[i])]))
+  const urlLabelOf = new Map(providers.map((p, i) => [p, redactRpcUrl(RPC_URLS[i])]))
   // Throttled: a permanently-sick endpoint fails on a large share of blocks, and
   // one log line each would bury the progress output. First hit reports
   // immediately (so a new failure is never silent), then at most once a minute
   // per endpoint carrying the count accumulated since the last report.
-  const failoverCount = new Map<string, number>()
-  const failoverLoggedAt = new Map<string, number>()
+  // Keyed by provider IDENTITY, not by the redacted label: two differently-keyed
+  // endpoints on the same origin both render as `https://host/***`, so a
+  // label-keyed map would let one endpoint's counter and one-minute suppression
+  // window swallow the other's first warning. (codex P2.)
+  const failoverCount = new Map<JsonRpcProvider, number>()
+  const failoverLoggedAt = new Map<JsonRpcProvider, number>()
   const FAILOVER_LOG_MS = 60_000
   const reportFailover = (block: number, provider: JsonRpcProvider, err: unknown) => {
-    const url = urlOf.get(provider) ?? '<unknown>'
-    const n = (failoverCount.get(url) ?? 0) + 1
-    failoverCount.set(url, n)
-    const last = failoverLoggedAt.get(url)
+    const label = urlLabelOf.get(provider) ?? '<unknown>'
+    const n = (failoverCount.get(provider) ?? 0) + 1
+    failoverCount.set(provider, n)
+    const last = failoverLoggedAt.get(provider)
     const now = Date.now()
     if (last !== undefined && now - last < FAILOVER_LOG_MS) return
-    failoverLoggedAt.set(url, now)
-    const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`${TAG} ⚠ RPC failover: ${url} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
+    failoverLoggedAt.set(provider, now)
+    // Scrub the message too, not just the label: ethers embeds the full
+    // requestUrl (userinfo/path/query) in HTTP failure text. Redact BEFORE
+    // slicing so a truncation can never expose a half-masked credential.
+    const msg = redactRpcSecrets(err instanceof Error ? err.message : String(err), RPC_URLS)
+    console.warn(`${TAG} ⚠ RPC failover: ${label} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
   }
   // Tip queries always use providers[0]; keeps the "tip" cursor consistent
   // and doesn't matter for rate-limits (1 req per poll cycle).
@@ -340,7 +347,10 @@ async function main() {
       )
 
       if (failure) {
-        console.error(`${TAG} Block ${failure.block} failed:`, failure.err instanceof Error ? failure.err.message : failure.err)
+        // Same leak as the failover logger: ethers puts the full requestUrl in
+        // the message, and this line is how raw endpoints reached production
+        // logs before redaction existed. Scrub it here too.
+        console.error(`${TAG} Block ${failure.block} failed:`, redactRpcSecrets(failure.err instanceof Error ? failure.err.message : String(failure.err), RPC_URLS))
         await sleep(1000)
       }
 

@@ -91,11 +91,6 @@ export async function processWithFailover<P>(
  * stay fully readable so the logs remain useful.
  */
 export function redactRpcUrl(url: string): string {
-  // Mask userinfo by rewrite rather than by re-serializing a parsed URL, so the
-  // rest of the endpoint keeps the operator's exact spelling (trailing slash and
-  // all) and stays greppable against the configured value.
-  if (/\/\/[^/@]+@/.test(url)) return url.replace(/\/\/[^/@]+@/, '//***@')
-
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -103,9 +98,45 @@ export function redactRpcUrl(url: string): string {
     return '<unparseable-rpc-url>'
   }
 
-  // A non-trivial path or any query string is assumed to carry the key.
+  // Every rule is evaluated in ONE pass. An earlier version returned as soon as
+  // it had masked userinfo, so a URL carrying both basic-auth and a path or
+  // query token leaked the latter. (codex P1 round 2.)
+  const hasUserInfo = parsed.username !== '' || parsed.password !== ''
   const pathCarriesSecret = parsed.pathname !== '' && parsed.pathname !== '/'
-  if (pathCarriesSecret || parsed.search !== '') return `${parsed.origin}/***`
+  const hasQuery = parsed.search !== ''
 
-  return url
+  // Nothing credential-shaped: keep the operator's exact spelling (trailing
+  // slash and all) so logs stay greppable against the configured value.
+  if (!hasUserInfo && !pathCarriesSecret && !hasQuery) return url
+
+  const userPart = hasUserInfo ? '***@' : ''
+  // A non-empty path or any query is assumed to carry the key — the two are
+  // indistinguishable from a routing path without vendor-specific knowledge.
+  const tail = pathCarriesSecret || hasQuery ? '/***' : ''
+  // `parsed.host` keeps any non-default port.
+  return `${parsed.protocol}//${userPart}${parsed.host}${tail}`
+}
+
+/**
+ * Scrub credentials out of arbitrary error text before logging it.
+ *
+ * Redacting the endpoint label is not sufficient: ethers 6.16 embeds the
+ * complete `requestUrl` — userinfo, path and query included — in the message of
+ * HTTP failure errors, which is how the raw endpoint reached production logs in
+ * the first place. Configured endpoints are replaced with their redacted form;
+ * anything else that merely looks credential-bearing gets its userinfo masked.
+ */
+export function redactRpcSecrets(message: string, rawUrls: readonly string[]): string {
+  let out = message
+  for (const raw of rawUrls) {
+    if (!raw) continue
+    const safe = redactRpcUrl(raw)
+    // A public endpoint redacts to itself — leave it readable.
+    if (safe === raw) continue
+    // split/join is a literal replace-all: no regex escaping, so a `+`, `?` or
+    // `.` inside the configured URL cannot corrupt the match.
+    out = out.split(raw).join(safe)
+  }
+  // Catch-all for endpoints that were never configured (redirects, proxies).
+  return out.replace(/\/\/[^/\s@"']+@/g, '//***@')
 }

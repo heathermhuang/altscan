@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { processWithFailover, redactRpcUrl } from './rpc-failover'
+import { processWithFailover, redactRpcUrl, redactRpcSecrets } from './rpc-failover'
 
 /**
  * Regression cover for the 2026-08-11 BNB indexing collapse.
@@ -155,7 +155,19 @@ describe('processWithFailover', () => {
  */
 describe('redactRpcUrl', () => {
   it('masks basic-auth credentials', () => {
-    expect(redactRpcUrl('https://user:s3cret@rpc.example.com/path')).toBe('https://***@rpc.example.com/path')
+    expect(redactRpcUrl('https://user:s3cret@rpc.example.com/path')).toBe('https://***@rpc.example.com/***')
+  })
+
+  // codex P1 round 2: the first implementation returned immediately after
+  // masking userinfo, so a URL carrying BOTH basic-auth and a path/query token
+  // leaked the latter. Every rule must apply in one pass.
+  it('applies every rule at once — userinfo AND path AND query', () => {
+    expect(redactRpcUrl('https://user:pass@rpc.example.com/v1/path-token?apikey=query-token'))
+      .toBe('https://***@rpc.example.com/***')
+  })
+
+  it('preserves a non-default port', () => {
+    expect(redactRpcUrl('https://rpc.example.com:8545/')).toBe('https://rpc.example.com:8545/')
   })
 
   it('masks a token embedded as userinfo', () => {
@@ -176,5 +188,57 @@ describe('redactRpcUrl', () => {
 
   it('does not throw on an unparseable URL', () => {
     expect(redactRpcUrl('not a url')).toBe('<unparseable-rpc-url>')
+  })
+})
+
+/**
+ * codex P1 round 2. Redacting the endpoint LABEL is not enough: ethers 6.16
+ * embeds the complete `requestUrl` — userinfo, path and query included — in the
+ * text of HTTP failure errors. Production logs show exactly this shape:
+ *   `server response 500 ... info={ "requestUrl": "https://..." }`
+ * So the error message itself has to be scrubbed before it is logged.
+ */
+describe('redactRpcSecrets', () => {
+  const urls = [
+    'https://user:pass@rpc.example.com/v1/token',
+    'https://bsc-dataseed1.binance.org/',
+  ]
+
+  it('replaces a configured credential-bearing URL inside an error message', () => {
+    const msg = 'server response 500 (requestUrl="https://user:pass@rpc.example.com/v1/token", code=SERVER_ERROR)'
+    const out = redactRpcSecrets(msg, urls)
+    expect(out).not.toContain('user:pass')
+    expect(out).not.toContain('/v1/token')
+    expect(out).toContain('https://***@rpc.example.com/***')
+  })
+
+  it('leaves a message with no configured URL untouched', () => {
+    expect(redactRpcSecrets('Block 123 not found', urls)).toBe('Block 123 not found')
+  })
+
+  it('keeps credential-free public endpoints readable', () => {
+    const msg = 'timeout on https://bsc-dataseed1.binance.org/'
+    expect(redactRpcSecrets(msg, urls)).toBe(msg)
+  })
+
+  it('masks userinfo of an URL that was never configured', () => {
+    const out = redactRpcSecrets('failed https://leaked:key@other.example.com/x', urls)
+    expect(out).not.toContain('leaked:key')
+  })
+
+  it('replaces every occurrence, not just the first', () => {
+    const msg = 'a https://user:pass@rpc.example.com/v1/token b https://user:pass@rpc.example.com/v1/token'
+    const out = redactRpcSecrets(msg, urls)
+    expect(out).not.toContain('user:pass')
+  })
+
+  it('is safe when the url list is empty', () => {
+    expect(redactRpcSecrets('plain message', [])).toBe('plain message')
+  })
+
+  it('does not let a regex-special character in a URL break replacement', () => {
+    const tricky = ['https://rpc.example.com/a+b?x=1']
+    const out = redactRpcSecrets('hit https://rpc.example.com/a+b?x=1 now', tricky)
+    expect(out).toContain('https://rpc.example.com/***')
   })
 })
