@@ -184,7 +184,20 @@ const pairCache = new Map<string, [string, string]>()
 const PAIR_CACHE_MAX = 10_000
 
 // ── Main entry ──────────────────────────────────────────────────────
-export async function processBlock(blockNumber: number, provider: JsonRpcProvider, skipLogs = false) {
+/**
+ * `onWritesBegan` is invoked exactly once, immediately before the first durable
+ * write. Everything above that call is pure RPC acquisition and is safe to retry
+ * on another endpoint; everything below it persists incrementally and is NOT
+ * (dex_trades has no unique constraint, so a replay duplicates rows). RPC
+ * failover uses this boundary — see rpc-failover.ts. Optional: callers that
+ * never retry (backfill.ts) can ignore it.
+ */
+export async function processBlock(
+  blockNumber: number,
+  provider: JsonRpcProvider,
+  skipLogs = false,
+  onWritesBegan?: () => void,
+) {
   const t: PhaseTimings | null = PROFILE_ENABLED ? newTimings() : null
   const blockStart = PROFILE_ENABLED ? performance.now() : 0
   const db = getDb()
@@ -216,6 +229,9 @@ export async function processBlock(blockNumber: number, provider: JsonRpcProvide
   for (const r of receipts) receiptByTx.set(r.txHash, r.receipt)
 
   // ── 1. Insert block ────────────────────────────────────────────
+  // Point of no return: past here the block is partially persisted, so this
+  // attempt can no longer be replayed on a different endpoint.
+  onWritesBegan?.()
   const s1 = PROFILE_ENABLED ? performance.now() : 0
   await db.insert(schema.blocks).values({
     number: block.number,

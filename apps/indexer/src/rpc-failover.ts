@@ -22,8 +22,28 @@
 export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
 /**
+ * The unit of work. `onSideEffect` MUST be called the instant before the first
+ * durable write, so failover knows the attempt can no longer be safely replayed.
+ */
+export type FailoverWork<P> = (
+  block: number,
+  provider: P,
+  onSideEffect: () => void,
+) => Promise<void>
+
+/**
  * Run `work(block, provider)` against `providers`, starting at `startIdx` and
  * wrapping around, until one succeeds.
+ *
+ * Failover is only attempted while the work is known to have produced NO side
+ * effects. `processBlock` is not a pure fetch: it commits blocks, transactions
+ * and dex_trades incrementally and only enqueues transfers at the end, and
+ * `dex_trades` carries `id serial PRIMARY KEY` with no unique constraint — so
+ * `onConflictDoNothing()` cannot deduplicate a replayed insert. Retrying a block
+ * that already wrote would duplicate rows and could splice provider A's block
+ * with provider B's transactions. Once `onSideEffect` fires we therefore rethrow
+ * immediately and let the batch-level path handle it, exactly as before this
+ * module existed. (codex P1 on PR #91.)
  *
  * Every provider is tried at most once. If all of them fail, the LAST error is
  * thrown — callers treat a throw exactly as before, so the batch-level failure
@@ -33,7 +53,7 @@ export async function processWithFailover<P>(
   block: number,
   providers: readonly P[],
   startIdx: number,
-  work: (block: number, provider: P) => Promise<void>,
+  work: FailoverWork<P>,
   onFailover?: FailoverReporter<P>,
 ): Promise<void> {
   if (providers.length === 0) {
@@ -47,13 +67,45 @@ export async function processWithFailover<P>(
   let lastErr: unknown
   for (let attempt = 0; attempt < providers.length; attempt++) {
     const provider = providers[(start + attempt) % providers.length]
+    let wrote = false
     try {
-      await work(block, provider)
+      await work(block, provider, () => { wrote = true })
       return
     } catch (err) {
       lastErr = err
+      // Partially persisted — replaying elsewhere would corrupt, not heal.
+      // Not counted as a failover: the endpoint served us fine, the write did not.
+      if (wrote) throw err
       onFailover?.(block, provider, err)
     }
   }
   throw lastErr
+}
+
+/**
+ * Mask anything credential-shaped in an RPC URL before it reaches a log.
+ *
+ * Endpoints are frequently keyed — render.yaml records the BNB endpoint having
+ * been a Chainstack URL — and providers carry the secret as basic-auth userinfo,
+ * a path segment, or a query parameter depending on vendor. Public endpoints
+ * stay fully readable so the logs remain useful.
+ */
+export function redactRpcUrl(url: string): string {
+  // Mask userinfo by rewrite rather than by re-serializing a parsed URL, so the
+  // rest of the endpoint keeps the operator's exact spelling (trailing slash and
+  // all) and stays greppable against the configured value.
+  if (/\/\/[^/@]+@/.test(url)) return url.replace(/\/\/[^/@]+@/, '//***@')
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return '<unparseable-rpc-url>'
+  }
+
+  // A non-trivial path or any query string is assumed to carry the key.
+  const pathCarriesSecret = parsed.pathname !== '' && parsed.pathname !== '/'
+  if (pathCarriesSecret || parsed.search !== '') return `${parsed.origin}/***`
+
+  return url
 }

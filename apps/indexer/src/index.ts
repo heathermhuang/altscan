@@ -25,7 +25,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover } from './rpc-failover'
+import { processWithFailover, redactRpcUrl } from './rpc-failover'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -67,7 +67,9 @@ process.on('uncaughtException', (err) => {
 
 async function main() {
   console.log(`${TAG} Starting ${chain.name} indexer...`)
-  const redactedRpcs = RPC_URLS.map(u => u.replace(/\/\/.*@/, '//***@'))
+  // Shared with the failover logger so both paths mask identically — and so a
+  // key carried in the path or query (not just basic-auth userinfo) is caught.
+  const redactedRpcs = RPC_URLS.map(redactRpcUrl)
   console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPCs (${RPC_URLS.length}): ${redactedRpcs.join(', ')}`)
 
   // Retry ensureSchema on DB connection errors (e.g. max_connections exceeded).
@@ -111,7 +113,7 @@ async function main() {
   )
   // Endpoint identity for failover logging. Zipped by index — `providers` is
   // built 1:1 from RPC_URLS directly above, so the indices cannot drift.
-  const urlOf = new Map(providers.map((p, i) => [p, RPC_URLS[i]]))
+  const urlOf = new Map(providers.map((p, i) => [p, redactRpcUrl(RPC_URLS[i])]))
   // Throttled: a permanently-sick endpoint fails on a large share of blocks, and
   // one log line each would bury the progress output. First hit reports
   // immediately (so a new failure is never silent), then at most once a minute
@@ -319,7 +321,13 @@ async function main() {
             // 403, which only ever hits us once we're already behind — aborts
             // the whole batch and turns a small lag into a permanent skip.
             try {
-              await processWithFailover(blockNum, providers, workerId, processBlock, reportFailover)
+              await processWithFailover(
+                blockNum,
+                providers,
+                workerId,
+                (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+                reportFailover,
+              )
               blockStatus[idx] = 2
               advanceLastIndexed()
             } catch (err) {
