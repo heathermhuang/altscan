@@ -25,9 +25,9 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, redactRpcUrl } from './rpc-failover'
+import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
-import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
+import { detectReorg, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
@@ -148,15 +148,41 @@ async function main() {
     const msg = safeErr(err)
     console.warn(`${TAG} ⚠ RPC failover: ${label} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
   }
-  // Tip queries always use providers[0]; keeps the "tip" cursor consistent
-  // and doesn't matter for rate-limits (1 req per poll cycle).
-  const tipProvider = providers[0]
+  // Tip and reorg reads were pinned to providers[0] with neither failover nor a
+  // timeout. A throttled endpoint does not error — it HANGS, and because these
+  // two calls gate EVERY batch, one slow endpoint stalled the whole indexer.
+  // Measured on BNB after PR #91: ~85s of each stalled window went here while
+  // in-block time stayed normal and the transfer queue sat empty. They now
+  // rotate across the pool and time out. Reads are pure, so retrying is safe.
+  const RPC_READ_TIMEOUT_MS = parseInt(process.env.RPC_READ_TIMEOUT_MS ?? '10000', 10)
+  // Rotates the starting endpoint per call so a throttled one isn't re-tried
+  // first every batch (which would pay the timeout before failing over).
+  let readCursor = 0
+  const readFailCount = new Map<JsonRpcProvider, number>()
+  const readLoggedAt = new Map<JsonRpcProvider, number>()
+  const reportReadFailover = (provider: JsonRpcProvider, err: unknown) => {
+    const label = urlLabelOf.get(provider) ?? '<unknown>'
+    const n = (readFailCount.get(provider) ?? 0) + 1
+    readFailCount.set(provider, n)
+    const last = readLoggedAt.get(provider)
+    const now = Date.now()
+    if (last !== undefined && now - last < FAILOVER_LOG_MS) return
+    readLoggedAt.set(provider, now)
+    console.warn(`${TAG} ⚠ RPC read failover: ${label} (${n} so far) — ${safeErr(err).slice(0, 160)}`)
+  }
+  const readTip = () =>
+    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover)
+  const readHeader = (n: number) =>
+    readWithFailover(providers, readCursor++, async p => {
+      const b = await p.getBlock(n, false)   // header only
+      return b ? { hash: b.hash ?? '', parentHash: b.parentHash } : null
+    }, RPC_READ_TIMEOUT_MS, reportReadFailover)
   const db = getDb()
 
   // Retry getBlockNumber on startup
   let tip = 0
   for (let attempt = 1; attempt <= 5; attempt++) {
-    try { tip = await tipProvider.getBlockNumber(); break }
+    try { tip = await readTip(); break }
     catch (err) {
       console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, safeErr(err))
       if (attempt < 5) await sleep(5000 * attempt)
@@ -191,7 +217,7 @@ async function main() {
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
   const REORG_CHECK = process.env.REORG_CHECK !== '0'
   const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
-  const reorgDeps = makeReorgDeps(tipProvider)
+  const reorgDeps = makeReorgDepsFrom(readHeader)
   // Throttle the idle (tip-mode) check — it costs 2 header calls; every poll would
   // double idle RPC load for a condition the next boundary check surfaces anyway.
   const IDLE_REORG_CHECK_MS = parseInt(process.env.IDLE_REORG_CHECK_MS ?? '30000', 10)
@@ -212,7 +238,7 @@ async function main() {
 
   while (running) {
     try {
-      const latest = await tipProvider.getBlockNumber()
+      const latest = await readTip()
 
       if (latest <= lastIndexed) {
         // Caught up. Periodically verify the tip we stored is still canonical —

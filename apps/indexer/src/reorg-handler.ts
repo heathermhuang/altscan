@@ -24,7 +24,6 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
-import type { JsonRpcProvider } from 'ethers'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
 export type ReorgDeps = {
@@ -85,10 +84,19 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
 }
 
 /**
- * Production ReorgDeps backed by the chain-aware indexer DB + an ethers provider.
+ * Production ReorgDeps: the chain-aware indexer DB, plus an injected chain view.
  * (getDb from './db' — NOT '@altscan/db' — so ETH resolves ETH_DATABASE_URL.)
+ *
+ * This deliberately takes a FETCHER, not a JsonRpcProvider. The previous
+ * `makeReorgDeps(provider)` bound the reorg check to ONE endpoint with no
+ * failover and no timeout, which is how a throttled bsc-dataseed1 stalled the
+ * whole poll loop for ~85s per batch — the reorg check gates every batch, so a
+ * hang there halts indexing outright. It was removed rather than kept alongside,
+ * so the single-provider shape cannot be reintroduced by accident. index.ts
+ * passes a failover-and-timeout-wrapped fetcher. Header reads are pure, so
+ * retrying one across endpoints is always safe.
  */
-export function makeReorgDeps(provider: JsonRpcProvider): ReorgDeps {
+export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
   return {
     async storedHash(n) {
       const db = getDb()
@@ -96,10 +104,7 @@ export function makeReorgDeps(provider: JsonRpcProvider): ReorgDeps {
         .where(eq(schema.blocks.number, n)).limit(1)
       return row?.hash ?? null
     },
-    async rpcBlock(n) {
-      const b = await provider.getBlock(n, false)   // header only
-      return b ? { hash: b.hash ?? '', parentHash: b.parentHash } : null
-    },
+    rpcBlock,
   }
 }
 

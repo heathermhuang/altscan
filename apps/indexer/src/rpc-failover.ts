@@ -83,6 +83,63 @@ export async function processWithFailover<P>(
 }
 
 /**
+ * Failover for a READ that returns a value, with a hard timeout.
+ *
+ * Companion to processWithFailover, for the per-batch `getBlockNumber()` and
+ * reorg header calls. Those were pinned to providers[0] with neither failover
+ * nor a timeout, and a throttled endpoint does not error — it HANGS. Measured on
+ * BNB after PR #91: ~85s of every stalled window was spent here while in-block
+ * time stayed normal and the transfer queue sat empty.
+ *
+ * The timeout is the load-bearing part. Failover alone cannot rescue a call that
+ * never settles.
+ *
+ * Unlike processWithFailover there is NO side-effect boundary: these reads write
+ * nothing, so retrying them is unconditionally safe.
+ *
+ * Note: a timed-out request is abandoned, not cancelled — ethers gives us no
+ * abort handle here. It settles later and is ignored. Harmless, but it does mean
+ * a throttled endpoint keeps receiving the request that timed out.
+ */
+export async function readWithFailover<T, P>(
+  providers: readonly P[],
+  startIdx: number,
+  work: (provider: P) => Promise<T>,
+  timeoutMs: number,
+  onFailover?: (provider: P, err: unknown) => void,
+): Promise<T> {
+  if (providers.length === 0) {
+    throw new Error('[rpc-failover] no RPC providers configured — cannot read')
+  }
+  const start = ((startIdx % providers.length) + providers.length) % providers.length
+
+  let lastErr: unknown
+  for (let attempt = 0; attempt < providers.length; attempt++) {
+    const provider = providers[(start + attempt) % providers.length]
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        work(provider),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`[rpc-failover] read timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          )
+        }),
+      ])
+    } catch (err) {
+      lastErr = err
+      onFailover?.(provider, err)
+    } finally {
+      // Always clear: on the success path this stops a pending timer from
+      // holding the event loop open for the full timeout.
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+  throw lastErr
+}
+
+/**
  * Mask anything credential-shaped in an RPC URL before it reaches a log.
  *
  * Endpoints are frequently keyed — render.yaml records the BNB endpoint having
