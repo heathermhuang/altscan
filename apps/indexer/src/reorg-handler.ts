@@ -24,6 +24,7 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
+import { readWithFailover } from './rpc-failover'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
 export type ReorgDeps = {
@@ -106,6 +107,41 @@ export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
     },
     rpcBlock,
   }
+}
+
+/**
+ * Run a COMPLETE reorg check against one endpoint, failing over as a unit.
+ *
+ * The pinning is a correctness requirement, not an optimization. Per-read
+ * failover mixes chain views: a current endpoint can flag a mismatch at L+1,
+ * then a STALE endpoint can return the orphaned stored hash at L, so
+ * findForkPoint() "agrees" at L and the unwind becomes a no-op. A later stale
+ * boundary read then passes, and because processBlock() does not validate parent
+ * continuity against the stored chain, workers can persist blocks from two
+ * different forks. (codex P1.)
+ *
+ * So: every read in one check — boundary, tip and the whole K-bounded walk —
+ * comes from a single provider. If any of them fails or the check exceeds
+ * `timeoutMs`, the entire check is abandoned and restarted on the next provider
+ * rather than resumed, because a half-walked result is exactly the mixed view we
+ * are avoiding.
+ */
+export async function detectReorgPinned<P>(
+  providers: readonly P[],
+  startIdx: number,
+  depsFor: (provider: P) => ReorgDeps,
+  lastIndexed: number,
+  maxDepth: number,
+  timeoutMs: number,
+  onFailover?: (provider: P, err: unknown) => void,
+): Promise<ReorgCheck> {
+  return readWithFailover(
+    providers,
+    startIdx,
+    provider => detectReorg(depsFor(provider), lastIndexed, maxDepth),
+    timeoutMs,
+    onFailover,
+  )
 }
 
 /**
