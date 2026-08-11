@@ -25,7 +25,8 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, redactRpcUrl, formatRedactedError } from './rpc-failover'
+import { processWithFailover, redactRpcUrl } from './rpc-failover'
+import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -41,10 +42,9 @@ const TAG = `[${chain.brandName}-indexer]`
 // When multiple URLs are given, block fetches are round-robined across them,
 // which distributes per-IP rate-limit pressure across several public endpoints.
 // This is the real fix for "indexer falls behind because one public RPC throttles us".
-const RPC_URLS = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)
+// Parsed once in provider.ts and imported here, so every module that logs an
+// RPC-derived error redacts against the exact same endpoint list.
+const RPC_URLS = SHARED_RPC_URLS
 const POLL_MS     = chain.pollMs
 const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 // BNB produces a block every 3s — needs higher concurrency to keep up.
@@ -61,7 +61,7 @@ const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '2
  * raw Error to console.error publishes the key. Defined at module scope so the
  * global handlers below can use it too. (codex P1 rounds 2 and 3.)
  */
-const safeErr = (err: unknown): string => formatRedactedError(err, RPC_URLS)
+const safeErr = safeRpcError
 
 let running = true
 process.on('SIGINT',  () => { running = false })
