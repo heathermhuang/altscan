@@ -25,7 +25,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, redactRpcUrl, redactRpcSecrets } from './rpc-failover'
+import { processWithFailover, redactRpcUrl, formatRedactedError } from './rpc-failover'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -54,14 +54,23 @@ const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CON
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
 
+/**
+ * EVERY error that could have come from an RPC call goes through here before it
+ * reaches a log. ethers embeds the full endpoint — userinfo, path and query — in
+ * both the message text and the `info` property of HTTP failures, so passing the
+ * raw Error to console.error publishes the key. Defined at module scope so the
+ * global handlers below can use it too. (codex P1 rounds 2 and 3.)
+ */
+const safeErr = (err: unknown): string => formatRedactedError(err, RPC_URLS)
+
 let running = true
 process.on('SIGINT',  () => { running = false })
 process.on('SIGTERM', () => { running = false })
 process.on('unhandledRejection', (err) => {
-  console.error(`${TAG} Unhandled rejection:`, err)
+  console.error(`${TAG} Unhandled rejection:`, safeErr(err))
 })
 process.on('uncaughtException', (err) => {
-  console.error(`${TAG} Uncaught exception:`, err)
+  console.error(`${TAG} Uncaught exception:`, safeErr(err))
   process.exit(1)
 })
 
@@ -92,11 +101,11 @@ async function main() {
     }
   }
 
-  startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
+  startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, safeErr(err)))
 
   // Track A4b lazy backfill — gated on chain-config `provider.backfill.enabled`
   // (false on both chains until A4b-2 rollout) + the BACKFILL_ENABLED=0 kill switch.
-  startBackfillWorker().catch(err => console.error('[backfill] fatal:', err))
+  startBackfillWorker().catch(err => console.error('[backfill] fatal:', safeErr(err)))
 
   // One provider per RPC URL. We round-robin `processBlock` across this pool
   // so 8 concurrent block fetches get distributed across N endpoints instead
@@ -136,7 +145,7 @@ async function main() {
     // Scrub the message too, not just the label: ethers embeds the full
     // requestUrl (userinfo/path/query) in HTTP failure text. Redact BEFORE
     // slicing so a truncation can never expose a half-masked credential.
-    const msg = redactRpcSecrets(err instanceof Error ? err.message : String(err), RPC_URLS)
+    const msg = safeErr(err)
     console.warn(`${TAG} ⚠ RPC failover: ${label} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
   }
   // Tip queries always use providers[0]; keeps the "tip" cursor consistent
@@ -149,7 +158,7 @@ async function main() {
   for (let attempt = 1; attempt <= 5; attempt++) {
     try { tip = await tipProvider.getBlockNumber(); break }
     catch (err) {
-      console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, err instanceof Error ? err.message : err)
+      console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, safeErr(err))
       if (attempt < 5) await sleep(5000 * attempt)
       else throw err
     }
@@ -173,8 +182,8 @@ async function main() {
 
   // Sync validators only for chains that have them (BNB)
   if (chain.features.hasValidators) {
-    syncValidators().catch(err => console.error('[validator-syncer] initial error:', err))
-    setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 60 * 60 * 1000)
+    syncValidators().catch(err => console.error('[validator-syncer] initial error:', safeErr(err)))
+    setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', safeErr(err))), 60 * 60 * 1000)
   }
 
   const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
@@ -350,13 +359,13 @@ async function main() {
         // Same leak as the failover logger: ethers puts the full requestUrl in
         // the message, and this line is how raw endpoints reached production
         // logs before redaction existed. Scrub it here too.
-        console.error(`${TAG} Block ${failure.block} failed:`, redactRpcSecrets(failure.err instanceof Error ? failure.err.message : String(failure.err), RPC_URLS))
+        console.error(`${TAG} Block ${failure.block} failed:`, safeErr(failure.err))
         await sleep(1000)
       }
 
       if (lastIndexed >= latest) await sleep(POLL_MS)
     } catch (err) {
-      console.error(`${TAG} Error:`, err instanceof Error ? err.message : err)
+      console.error(`${TAG} Error:`, safeErr(err))
       await sleep(5000)
     }
   }
@@ -453,6 +462,6 @@ async function getOrInitDurableBlock(
 }
 
 main().catch(err => {
-  console.error(`${TAG} Fatal:`, err)
+  console.error(`${TAG} Fatal:`, safeErr(err))
   process.exit(1)
 })

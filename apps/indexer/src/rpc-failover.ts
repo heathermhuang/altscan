@@ -128,8 +128,13 @@ export function redactRpcUrl(url: string): string {
  */
 export function redactRpcSecrets(message: string, rawUrls: readonly string[]): string {
   let out = message
-  for (const raw of rawUrls) {
-    if (!raw) continue
+  // LONGEST-FIRST is load-bearing. In configuration order, a shorter
+  // credential-bearing URL that prefixes a longer one destroys the longer exact
+  // match and leaves its suffix exposed — e.g. replacing
+  // `https://host/v1/token` inside `https://host/v1/token?apikey=SECOND` yields
+  // `https://host/***?apikey=SECOND`. (codex P1 round 3.)
+  const ordered = [...rawUrls].filter(Boolean).sort((a, b) => b.length - a.length)
+  for (const raw of ordered) {
     const safe = redactRpcUrl(raw)
     // A public endpoint redacts to itself — leave it readable.
     if (safe === raw) continue
@@ -139,4 +144,18 @@ export function redactRpcSecrets(message: string, rawUrls: readonly string[]): s
   }
   // Catch-all for endpoints that were never configured (redirects, proxies).
   return out.replace(/\/\/[^/\s@"']+@/g, '//***@')
+}
+
+/**
+ * Format ANY thrown value for logging with RPC credentials stripped.
+ *
+ * Handing `console.error` a raw ethers Error also prints its `info` property,
+ * which is where ethers parks `requestUrl` — so every RPC-reachable sink must
+ * format through here rather than passing the object. The stack is preserved for
+ * debuggability; `info` is deliberately dropped, since its only unique content
+ * is the endpoint we must not log.
+ */
+export function formatRedactedError(err: unknown, rawUrls: readonly string[]): string {
+  const raw = err instanceof Error ? err.stack ?? err.message : String(err)
+  return redactRpcSecrets(raw, rawUrls)
 }

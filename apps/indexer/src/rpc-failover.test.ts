@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { processWithFailover, redactRpcUrl, redactRpcSecrets } from './rpc-failover'
+import { processWithFailover, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
 
 /**
  * Regression cover for the 2026-08-11 BNB indexing collapse.
@@ -240,5 +240,69 @@ describe('redactRpcSecrets', () => {
     const tricky = ['https://rpc.example.com/a+b?x=1']
     const out = redactRpcSecrets('hit https://rpc.example.com/a+b?x=1 now', tricky)
     expect(out).toContain('https://rpc.example.com/***')
+  })
+
+  // codex P1 round 3: replacing in configuration order lets a SHORTER
+  // credential-bearing URL that prefixes a longer one destroy the longer exact
+  // match, leaving its suffix exposed.
+  it('redacts fully when one configured URL prefixes another', () => {
+    const overlapping = [
+      'https://rpc.example.com/v1/token',
+      'https://rpc.example.com/v1/token?apikey=SECOND',
+    ]
+    const out = redactRpcSecrets('failed https://rpc.example.com/v1/token?apikey=SECOND', overlapping)
+    expect(out).not.toContain('SECOND')
+    expect(out).not.toContain('apikey')
+  })
+
+  it('redacts fully regardless of which order the overlapping URLs are configured', () => {
+    const overlapping = [
+      'https://rpc.example.com/v1/token?apikey=SECOND',
+      'https://rpc.example.com/v1/token',
+    ]
+    const out = redactRpcSecrets('failed https://rpc.example.com/v1/token?apikey=SECOND', overlapping)
+    expect(out).not.toContain('SECOND')
+  })
+})
+
+/**
+ * codex P1 round 3. Redacting two log sites was not enough — ethers-derived
+ * errors also reach the startup getBlockNumber retry, the poll-loop catch, the
+ * fatal handler and the global unhandledRejection/uncaughtException handlers.
+ * Handing console.error the raw Error prints its `info` property too, which is
+ * where ethers parks requestUrl. Every sink formats through this instead.
+ */
+describe('formatRedactedError', () => {
+  const urls = ['https://user:pass@rpc.example.com/v1/token']
+
+  it('redacts credentials out of an Error message', () => {
+    const err = new Error('server response 500 requestUrl="https://user:pass@rpc.example.com/v1/token"')
+    const out = formatRedactedError(err, urls)
+    expect(out).not.toContain('user:pass')
+    expect(out).not.toContain('/v1/token')
+  })
+
+  it('preserves the stack trace for debuggability', () => {
+    const err = new Error('boom')
+    const out = formatRedactedError(err, urls)
+    expect(out).toContain('boom')
+    // A real stack, not just the message — at least one "  at <frame>" line.
+    expect(out).toMatch(/\n\s+at /)
+  })
+
+  it('does not leak the credential carried in an ethers-style info property', () => {
+    const err = Object.assign(new Error('server response 500'), {
+      info: { requestUrl: 'https://user:pass@rpc.example.com/v1/token' },
+    })
+    const out = formatRedactedError(err, urls)
+    expect(out).not.toContain('user:pass')
+  })
+
+  it('handles a non-Error throw', () => {
+    expect(formatRedactedError('plain string failure', urls)).toBe('plain string failure')
+  })
+
+  it('handles null without throwing', () => {
+    expect(formatRedactedError(null, urls)).toBe('null')
   })
 })
