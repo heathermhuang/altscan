@@ -25,6 +25,8 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
+import { processWithFailover, redactRpcUrl } from './rpc-failover'
+import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -40,10 +42,9 @@ const TAG = `[${chain.brandName}-indexer]`
 // When multiple URLs are given, block fetches are round-robined across them,
 // which distributes per-IP rate-limit pressure across several public endpoints.
 // This is the real fix for "indexer falls behind because one public RPC throttles us".
-const RPC_URLS = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)
+// Parsed once in provider.ts and imported here, so every module that logs an
+// RPC-derived error redacts against the exact same endpoint list.
+const RPC_URLS = SHARED_RPC_URLS
 const POLL_MS     = chain.pollMs
 const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 // BNB produces a block every 3s — needs higher concurrency to keep up.
@@ -53,20 +54,31 @@ const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CON
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
 
+/**
+ * EVERY error that could have come from an RPC call goes through here before it
+ * reaches a log. ethers embeds the full endpoint — userinfo, path and query — in
+ * both the message text and the `info` property of HTTP failures, so passing the
+ * raw Error to console.error publishes the key. Defined at module scope so the
+ * global handlers below can use it too. (codex P1 rounds 2 and 3.)
+ */
+const safeErr = safeRpcError
+
 let running = true
 process.on('SIGINT',  () => { running = false })
 process.on('SIGTERM', () => { running = false })
 process.on('unhandledRejection', (err) => {
-  console.error(`${TAG} Unhandled rejection:`, err)
+  console.error(`${TAG} Unhandled rejection:`, safeErr(err))
 })
 process.on('uncaughtException', (err) => {
-  console.error(`${TAG} Uncaught exception:`, err)
+  console.error(`${TAG} Uncaught exception:`, safeErr(err))
   process.exit(1)
 })
 
 async function main() {
   console.log(`${TAG} Starting ${chain.name} indexer...`)
-  const redactedRpcs = RPC_URLS.map(u => u.replace(/\/\/.*@/, '//***@'))
+  // Shared with the failover logger so both paths mask identically — and so a
+  // key carried in the path or query (not just basic-auth userinfo) is caught.
+  const redactedRpcs = RPC_URLS.map(redactRpcUrl)
   console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPCs (${RPC_URLS.length}): ${redactedRpcs.join(', ')}`)
 
   // Retry ensureSchema on DB connection errors (e.g. max_connections exceeded).
@@ -89,11 +101,11 @@ async function main() {
     }
   }
 
-  startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, err))
+  startRetentionCleanup().catch(err => console.error(`${TAG} retention startup error:`, safeErr(err)))
 
   // Track A4b lazy backfill — gated on chain-config `provider.backfill.enabled`
   // (false on both chains until A4b-2 rollout) + the BACKFILL_ENABLED=0 kill switch.
-  startBackfillWorker().catch(err => console.error('[backfill] fatal:', err))
+  startBackfillWorker().catch(err => console.error('[backfill] fatal:', safeErr(err)))
 
   // One provider per RPC URL. We round-robin `processBlock` across this pool
   // so 8 concurrent block fetches get distributed across N endpoints instead
@@ -108,6 +120,34 @@ async function main() {
   const providers = RPC_URLS.map(url =>
     new JsonRpcProvider(url, network, { staticNetwork: network })
   )
+  // Endpoint identity for failover logging. Zipped by index — `providers` is
+  // built 1:1 from RPC_URLS directly above, so the indices cannot drift.
+  const urlLabelOf = new Map(providers.map((p, i) => [p, redactRpcUrl(RPC_URLS[i])]))
+  // Throttled: a permanently-sick endpoint fails on a large share of blocks, and
+  // one log line each would bury the progress output. First hit reports
+  // immediately (so a new failure is never silent), then at most once a minute
+  // per endpoint carrying the count accumulated since the last report.
+  // Keyed by provider IDENTITY, not by the redacted label: two differently-keyed
+  // endpoints on the same origin both render as `https://host/***`, so a
+  // label-keyed map would let one endpoint's counter and one-minute suppression
+  // window swallow the other's first warning. (codex P2.)
+  const failoverCount = new Map<JsonRpcProvider, number>()
+  const failoverLoggedAt = new Map<JsonRpcProvider, number>()
+  const FAILOVER_LOG_MS = 60_000
+  const reportFailover = (block: number, provider: JsonRpcProvider, err: unknown) => {
+    const label = urlLabelOf.get(provider) ?? '<unknown>'
+    const n = (failoverCount.get(provider) ?? 0) + 1
+    failoverCount.set(provider, n)
+    const last = failoverLoggedAt.get(provider)
+    const now = Date.now()
+    if (last !== undefined && now - last < FAILOVER_LOG_MS) return
+    failoverLoggedAt.set(provider, now)
+    // Scrub the message too, not just the label: ethers embeds the full
+    // requestUrl (userinfo/path/query) in HTTP failure text. Redact BEFORE
+    // slicing so a truncation can never expose a half-masked credential.
+    const msg = safeErr(err)
+    console.warn(`${TAG} ⚠ RPC failover: ${label} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
+  }
   // Tip queries always use providers[0]; keeps the "tip" cursor consistent
   // and doesn't matter for rate-limits (1 req per poll cycle).
   const tipProvider = providers[0]
@@ -118,7 +158,7 @@ async function main() {
   for (let attempt = 1; attempt <= 5; attempt++) {
     try { tip = await tipProvider.getBlockNumber(); break }
     catch (err) {
-      console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, err instanceof Error ? err.message : err)
+      console.error(`${TAG} getBlockNumber attempt ${attempt}/5:`, safeErr(err))
       if (attempt < 5) await sleep(5000 * attempt)
       else throw err
     }
@@ -142,8 +182,8 @@ async function main() {
 
   // Sync validators only for chains that have them (BNB)
   if (chain.features.hasValidators) {
-    syncValidators().catch(err => console.error('[validator-syncer] initial error:', err))
-    setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', err)), 60 * 60 * 1000)
+    syncValidators().catch(err => console.error('[validator-syncer] initial error:', safeErr(err)))
+    setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', safeErr(err))), 60 * 60 * 1000)
   }
 
   const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
@@ -291,9 +331,19 @@ async function main() {
             const idx = claimNext()
             if (idx < 0) return
             const blockNum = from + idx
-            const provider = providers[workerId % providers.length]
+            // Start on this worker's endpoint (preserves the old round-robin
+            // spread), but fail over to the others before giving up. Without
+            // this, ONE endpoint that rejects a request class — e.g. an archive
+            // 403, which only ever hits us once we're already behind — aborts
+            // the whole batch and turns a small lag into a permanent skip.
             try {
-              await processBlock(blockNum, provider)
+              await processWithFailover(
+                blockNum,
+                providers,
+                workerId,
+                (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+                reportFailover,
+              )
               blockStatus[idx] = 2
               advanceLastIndexed()
             } catch (err) {
@@ -306,13 +356,16 @@ async function main() {
       )
 
       if (failure) {
-        console.error(`${TAG} Block ${failure.block} failed:`, failure.err instanceof Error ? failure.err.message : failure.err)
+        // Same leak as the failover logger: ethers puts the full requestUrl in
+        // the message, and this line is how raw endpoints reached production
+        // logs before redaction existed. Scrub it here too.
+        console.error(`${TAG} Block ${failure.block} failed:`, safeErr(failure.err))
         await sleep(1000)
       }
 
       if (lastIndexed >= latest) await sleep(POLL_MS)
     } catch (err) {
-      console.error(`${TAG} Error:`, err instanceof Error ? err.message : err)
+      console.error(`${TAG} Error:`, safeErr(err))
       await sleep(5000)
     }
   }
@@ -409,6 +462,6 @@ async function getOrInitDurableBlock(
 }
 
 main().catch(err => {
-  console.error(`${TAG} Fatal:`, err)
+  console.error(`${TAG} Fatal:`, safeErr(err))
   process.exit(1)
 })

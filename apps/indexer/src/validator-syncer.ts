@@ -1,6 +1,6 @@
 import { Contract, formatEther } from 'ethers'
 import { getDb, schema } from './db'
-import { getProvider } from './provider'
+import { getProvider, safeRpcError } from './provider'
 import { STAKE_HUB_ABI, STAKE_HUB_ADDRESS, toCommissionFraction } from './validator-stakehub'
 
 const provider = getProvider()
@@ -58,7 +58,7 @@ export async function syncValidators(): Promise<void> {
     }
     console.warn('[validator-syncer] StakeHub returned 0 validators, falling back to ValidatorSet')
   } catch (err) {
-    console.warn('[validator-syncer] StakeHub failed, falling back to ValidatorSet:', err instanceof Error ? err.message : err)
+    console.warn('[validator-syncer] StakeHub failed, falling back to ValidatorSet:', safeRpcError(err))
   }
 
   // Attempt 2: ValidatorSet contract (simpler, always works)
@@ -76,7 +76,7 @@ export async function syncValidators(): Promise<void> {
     const equalPower = Array(validators.length).fill(0n) as bigint[]
     await upsertValidators(db, null, validators, equalPower, new Map())
   } catch (err) {
-    console.error('[validator-syncer] Both methods failed:', err instanceof Error ? err.message : err)
+    console.error('[validator-syncer] Both methods failed:', safeRpcError(err))
   }
 }
 
@@ -121,7 +121,7 @@ async function resolveOperatorAddresses(
 
   console.log(`[validator-syncer] Resolved ${resolved}/${consensusAddrs.length} operator addresses (${failed} failed)`)
   if (firstFailure) {
-    console.warn(`[validator-syncer] first operator-resolution failure — ${firstFailure}`)
+    console.warn(`[validator-syncer] first operator-resolution failure — ${safeRpcError(firstFailure)}`)
   }
   return map
 }
@@ -185,7 +185,7 @@ async function upsertValidators(
       })
       upserted++
     } catch (err) {
-      console.warn('[validator-syncer] Failed to upsert validator:', addr, err instanceof Error ? err.message : err)
+      console.warn('[validator-syncer] Failed to upsert validator:', addr, safeRpcError(err))
     }
   }
 

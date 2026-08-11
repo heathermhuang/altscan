@@ -1,5 +1,6 @@
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
+import { formatRedactedError } from './rpc-failover'
 
 /**
  * Shared RPC provider singleton for one-off callers (validator-syncer etc.).
@@ -15,13 +16,33 @@ import { getChainConfig } from '@altscan/chain-config'
  * auto-detection before every request. See index.ts for the full rationale.
  */
 const chain = getChainConfig()
-const rpcUrl = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
+
+/**
+ * The canonical parsed endpoint list. Exported so every module that logs an
+ * RPC-derived error scrubs against the SAME set — index.ts used to parse its own
+ * copy, which meant a sink could redact against a different list than the client
+ * that produced the error. (codex P1 round 4.)
+ */
+export const RPC_URLS = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
   .split(',')
   .map(s => s.trim())
-  .filter(Boolean)[0] ?? chain.defaultRpcUrl
+  .filter(Boolean)
+
+const rpcUrl = RPC_URLS[0] ?? chain.defaultRpcUrl
 const network = Network.from(chain.chainId)
 const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
 
 export function getProvider(): JsonRpcProvider {
   return provider
+}
+
+/**
+ * Format any RPC-derived error for logging with endpoint credentials stripped.
+ *
+ * Single definition, shared by every module with its own catch-and-log. Modules
+ * that swallow their RPC errors internally (validator-syncer) are NOT covered by
+ * the caller's wrappers, so they must call this themselves.
+ */
+export function safeRpcError(err: unknown): string {
+  return formatRedactedError(err, RPC_URLS)
 }
