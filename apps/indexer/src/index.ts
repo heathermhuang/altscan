@@ -25,6 +25,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
+import { processWithFailover } from './rpc-failover'
 import { detectReorg, makeReorgDeps, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -108,6 +109,27 @@ async function main() {
   const providers = RPC_URLS.map(url =>
     new JsonRpcProvider(url, network, { staticNetwork: network })
   )
+  // Endpoint identity for failover logging. Zipped by index — `providers` is
+  // built 1:1 from RPC_URLS directly above, so the indices cannot drift.
+  const urlOf = new Map(providers.map((p, i) => [p, RPC_URLS[i]]))
+  // Throttled: a permanently-sick endpoint fails on a large share of blocks, and
+  // one log line each would bury the progress output. First hit reports
+  // immediately (so a new failure is never silent), then at most once a minute
+  // per endpoint carrying the count accumulated since the last report.
+  const failoverCount = new Map<string, number>()
+  const failoverLoggedAt = new Map<string, number>()
+  const FAILOVER_LOG_MS = 60_000
+  const reportFailover = (block: number, provider: JsonRpcProvider, err: unknown) => {
+    const url = urlOf.get(provider) ?? '<unknown>'
+    const n = (failoverCount.get(url) ?? 0) + 1
+    failoverCount.set(url, n)
+    const last = failoverLoggedAt.get(url)
+    const now = Date.now()
+    if (last !== undefined && now - last < FAILOVER_LOG_MS) return
+    failoverLoggedAt.set(url, now)
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`${TAG} ⚠ RPC failover: ${url} failed block ${block} (${n} failure(s) so far) — ${msg.slice(0, 160)}`)
+  }
   // Tip queries always use providers[0]; keeps the "tip" cursor consistent
   // and doesn't matter for rate-limits (1 req per poll cycle).
   const tipProvider = providers[0]
@@ -291,9 +313,13 @@ async function main() {
             const idx = claimNext()
             if (idx < 0) return
             const blockNum = from + idx
-            const provider = providers[workerId % providers.length]
+            // Start on this worker's endpoint (preserves the old round-robin
+            // spread), but fail over to the others before giving up. Without
+            // this, ONE endpoint that rejects a request class — e.g. an archive
+            // 403, which only ever hits us once we're already behind — aborts
+            // the whole batch and turns a small lag into a permanent skip.
             try {
-              await processBlock(blockNum, provider)
+              await processWithFailover(blockNum, providers, workerId, processBlock, reportFailover)
               blockStatus[idx] = 2
               advanceLastIndexed()
             } catch (err) {
