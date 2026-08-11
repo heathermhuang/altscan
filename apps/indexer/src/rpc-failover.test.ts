@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { processWithFailover, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
+import { processWithFailover, readWithFailover, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
 
 /**
  * Regression cover for the 2026-08-11 BNB indexing collapse.
@@ -188,6 +188,91 @@ describe('redactRpcUrl', () => {
 
   it('does not throw on an unparseable URL', () => {
     expect(redactRpcUrl('not a url')).toBe('<unparseable-rpc-url>')
+  })
+})
+
+/**
+ * Second bottleneck, found after PR #91 shipped. Removing the batch aborts got
+ * BNB to 1.07 blk/s against a 2.31 blk/s chain — still losing ground. Profiler
+ * arithmetic located it: in stalled windows `avg in-block` stayed NORMAL
+ * (~1300-1950ms) while wall time hit 88-96s, leaving ~85s per window spent
+ * OUTSIDE block processing, with the transfer queue empty.
+ *
+ * By elimination the only awaits left in the poll loop are the per-batch
+ * `getBlockNumber()` and `detectReorg()` — both pinned to providers[0] with no
+ * failover and no timeout. When that one endpoint throttles it does not error,
+ * it HANGS, so the whole indexer blocks. Failover alone cannot fix a hang; the
+ * timeout is what makes it recoverable.
+ *
+ * These reads are pure (no writes), so unlike processWithFailover there is no
+ * side-effect boundary to respect — retrying is unconditionally safe.
+ */
+describe('readWithFailover', () => {
+  it('returns the first provider’s value without touching the others', async () => {
+    const work = vi.fn().mockResolvedValue(42)
+    await expect(readWithFailover(['a', 'b'], 0, work, 1000)).resolves.toBe(42)
+    expect(work).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails over to the next provider on an error', async () => {
+    const work = vi.fn().mockRejectedValueOnce(new Error('503')).mockResolvedValueOnce(7)
+    await expect(readWithFailover(['a', 'b'], 0, work, 1000)).resolves.toBe(7)
+    expect(work).toHaveBeenCalledTimes(2)
+  })
+
+  // THE case that matters: a throttled endpoint hangs rather than throwing.
+  it('fails over when a provider HANGS past the timeout', async () => {
+    const work = vi.fn()
+      .mockImplementationOnce(() => new Promise(() => {}))  // never settles
+      .mockImplementationOnce(async () => 'recovered')
+    await expect(readWithFailover(['stuck', 'good'], 0, work, 30)).resolves.toBe('recovered')
+    expect(work).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not wait on the abandoned request — returns promptly after timeout', async () => {
+    const work = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve('late'), 5000)))
+      .mockImplementationOnce(async () => 'fast')
+    const started = process.hrtime.bigint()
+    await expect(readWithFailover(['slow', 'good'], 0, work, 30)).resolves.toBe('fast')
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6
+    expect(elapsedMs).toBeLessThan(1000)
+  })
+
+  it('throws when every provider times out', async () => {
+    const work = vi.fn().mockImplementation(() => new Promise(() => {}))
+    await expect(readWithFailover(['a', 'b'], 0, work, 20)).rejects.toThrow(/timed out/i)
+    expect(work).toHaveBeenCalledTimes(2)
+  })
+
+  it('tries every provider exactly once, starting at the given index', async () => {
+    const work = vi.fn().mockRejectedValue(new Error('down'))
+    await expect(readWithFailover(['a', 'b', 'c'], 1, work, 500)).rejects.toThrow('down')
+    expect(work.mock.calls.map(c => c[0])).toEqual(['b', 'c', 'a'])
+  })
+
+  it('normalizes an out-of-range start index', async () => {
+    const work = vi.fn().mockResolvedValue('ok')
+    await readWithFailover(['a', 'b'], 5, work, 500)
+    expect(work).toHaveBeenCalledWith('b')
+  })
+
+  it('throws a clear error when the provider list is empty', async () => {
+    await expect(readWithFailover([], 0, vi.fn(), 500)).rejects.toThrow(/no RPC providers/i)
+  })
+
+  it('reports each failed attempt so a throttling endpoint is visible', async () => {
+    const onFailover = vi.fn()
+    const work = vi.fn().mockRejectedValueOnce(new Error('nope')).mockResolvedValueOnce(1)
+    await readWithFailover(['bad', 'good'], 0, work, 500, onFailover)
+    expect(onFailover).toHaveBeenCalledTimes(1)
+    expect(onFailover).toHaveBeenCalledWith('bad', expect.any(Error))
+  })
+
+  it('propagates a falsy result without treating it as failure', async () => {
+    const work = vi.fn().mockResolvedValue(null)
+    await expect(readWithFailover(['a', 'b'], 0, work, 500)).resolves.toBeNull()
+    expect(work).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -24,7 +24,7 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
-import type { JsonRpcProvider } from 'ethers'
+import { readWithFailover } from './rpc-failover'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
 export type ReorgDeps = {
@@ -85,10 +85,19 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
 }
 
 /**
- * Production ReorgDeps backed by the chain-aware indexer DB + an ethers provider.
+ * Production ReorgDeps: the chain-aware indexer DB, plus an injected chain view.
  * (getDb from './db' — NOT '@altscan/db' — so ETH resolves ETH_DATABASE_URL.)
+ *
+ * This deliberately takes a FETCHER, not a JsonRpcProvider. The previous
+ * `makeReorgDeps(provider)` bound the reorg check to ONE endpoint with no
+ * failover and no timeout, which is how a throttled bsc-dataseed1 stalled the
+ * whole poll loop for ~85s per batch — the reorg check gates every batch, so a
+ * hang there halts indexing outright. It was removed rather than kept alongside,
+ * so the single-provider shape cannot be reintroduced by accident. index.ts
+ * passes a failover-and-timeout-wrapped fetcher. Header reads are pure, so
+ * retrying one across endpoints is always safe.
  */
-export function makeReorgDeps(provider: JsonRpcProvider): ReorgDeps {
+export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
   return {
     async storedHash(n) {
       const db = getDb()
@@ -96,11 +105,43 @@ export function makeReorgDeps(provider: JsonRpcProvider): ReorgDeps {
         .where(eq(schema.blocks.number, n)).limit(1)
       return row?.hash ?? null
     },
-    async rpcBlock(n) {
-      const b = await provider.getBlock(n, false)   // header only
-      return b ? { hash: b.hash ?? '', parentHash: b.parentHash } : null
-    },
+    rpcBlock,
   }
+}
+
+/**
+ * Run a COMPLETE reorg check against one endpoint, failing over as a unit.
+ *
+ * The pinning is a correctness requirement, not an optimization. Per-read
+ * failover mixes chain views: a current endpoint can flag a mismatch at L+1,
+ * then a STALE endpoint can return the orphaned stored hash at L, so
+ * findForkPoint() "agrees" at L and the unwind becomes a no-op. A later stale
+ * boundary read then passes, and because processBlock() does not validate parent
+ * continuity against the stored chain, workers can persist blocks from two
+ * different forks. (codex P1.)
+ *
+ * So: every read in one check — boundary, tip and the whole K-bounded walk —
+ * comes from a single provider. If any of them fails or the check exceeds
+ * `timeoutMs`, the entire check is abandoned and restarted on the next provider
+ * rather than resumed, because a half-walked result is exactly the mixed view we
+ * are avoiding.
+ */
+export async function detectReorgPinned<P>(
+  providers: readonly P[],
+  startIdx: number,
+  depsFor: (provider: P) => ReorgDeps,
+  lastIndexed: number,
+  maxDepth: number,
+  timeoutMs: number,
+  onFailover?: (provider: P, err: unknown) => void,
+): Promise<ReorgCheck> {
+  return readWithFailover(
+    providers,
+    startIdx,
+    provider => detectReorg(depsFor(provider), lastIndexed, maxDepth),
+    timeoutMs,
+    onFailover,
+  )
 }
 
 /**
