@@ -4,7 +4,16 @@ export interface ChainState { block: number | null; online: boolean; }
 export function parseHealth(body: unknown): ChainState {
   const b = body as HealthBody | null | undefined;
   const block = typeof b?.latestBlock === 'number' ? b.latestBlock : null;
-  return { block, online: b?.status === 'ok' && block !== null };
+  // `online` means the explorer ANSWERED with a usable block — not that
+  // everything downstream is perfect. `degraded` is a live, serving explorer
+  // reporting a problem with itself (memory pressure, or an index-completeness
+  // gap), so rendering it as offline on the marketing site would be wrong.
+  //
+  // This mattered the moment /api/health started degrading on recorded block
+  // gaps: without it, one abandoned range would flip bnbscan.com to "offline"
+  // here while the site was up and serving normally.
+  const status = b?.status;
+  return { block, online: (status === 'ok' || status === 'degraded') && block !== null };
 }
 
 export function buildChainsPayload(

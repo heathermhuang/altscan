@@ -211,6 +211,33 @@ export async function ensureSchema(): Promise<void> {
   `))
   await db.execute(sql.raw(`INSERT INTO indexer_cursor (id, transfers_durable_block) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`))
 
+  // Deliberately-abandoned block ranges (the MAX_LAG_BLOCKS skip).
+  //
+  // The skip has always existed; until now it recorded NOTHING, so falling
+  // behind cost correctness rather than freshness and did so invisibly —
+  // ~92,000 blocks between 2026-08-04 and 08-11 with /api/health reporting "ok"
+  // throughout. Recording the range makes the loss both alertable and, later,
+  // backfillable.
+  //
+  // from_block is the PK: a range is identified by where it starts, so a retry
+  // of the same skip is idempotent instead of inserting a duplicate. No serial
+  // here — an int4 sequence overflow already took token_transfers down once.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS index_gaps (
+      from_block BIGINT PRIMARY KEY,
+      to_block   BIGINT NOT NULL,
+      reason     TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      healed_at  TIMESTAMPTZ,
+      CONSTRAINT index_gaps_range CHECK (to_block >= from_block)
+    )
+  `))
+  // Partial index: every read is "what is still missing?", and the healed rows
+  // are the ones that accumulate.
+  await db.execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS index_gaps_unhealed_idx ON index_gaps (from_block) WHERE healed_at IS NULL
+  `))
+
   // Runtime-editable explorer settings (admin console) — one JSONB doc per
   // namespace, written via the web app's /api/admin/settings, read at render time.
   await db.execute(sql.raw(`
@@ -330,6 +357,28 @@ export async function ensureSchema(): Promise<void> {
   // place so the tx page knows to refetch it. Lock-safe: addColumnIfMissing skips
   // the ALTER entirely once the column exists (see the CRITICAL note above).
   await addColumnIfMissing('transactions', 'body_pruned', 'BOOLEAN NOT NULL DEFAULT false')
+  // Where gap RECORDING began — the bound on /api/health's `ok`. Left NULL here
+  // ON PURPOSE, which reports `unverified` until an operator sets it.
+  //
+  // It is deliberately NOT stamped automatically at boot. Render's rolling
+  // deploy overlaps generations (see the AccessExclusiveLock note above — the
+  // outgoing instance is still writing while this runs), and the OUTGOING binary
+  // skips WITHOUT recording. A baseline stamped during that window would cover
+  // blocks the old generation then abandoned unrecorded, so health would report
+  // a permanent, confident `ok` over real holes — a worse failure than the
+  // silence being fixed, because it looks verified. There is no cooperative fix:
+  // the old binary cannot be taught to record retroactively. (codex P1.)
+  //
+  // Set it once, deliberately, after confirming the new generation is the sole
+  // writer (one instance in the Render dashboard, old deploy fully stopped):
+  //
+  //   UPDATE indexer_cursor
+  //      SET gap_tracking_from_block = (SELECT MAX(number) FROM blocks)
+  //    WHERE id = 1;
+  //
+  // Until then `unverified` is the honest answer, and `degraded` still fires on
+  // every recorded gap — the alert works regardless of the baseline.
+  await addColumnIfMissing('indexer_cursor', 'gap_tracking_from_block', 'BIGINT')
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
