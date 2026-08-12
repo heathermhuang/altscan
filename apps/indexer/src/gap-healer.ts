@@ -214,13 +214,26 @@ export async function healNextGap(
        OR EXISTS (
             SELECT 1 FROM blocks b
             WHERE b.number = n
-              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
+              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
           )
     ORDER BY n
   `
-  const missing = rowsOf(await db.execute(incompleteIn(healFrom, windowEnd)))
-    .map(r => toNum(r.n))
-    .filter((n): n is number => n !== null)
+  // REPLAY EVERY BLOCK ABOVE THE CURSOR — not just the ones that look incomplete.
+  //
+  // This is the correction that actually closes the crash hole. If the process
+  // dies after reindexBlock returns but before the flush, the block and its
+  // transactions are on disk while the in-memory transfer queue is gone. Such a
+  // block satisfies every content test there is, so a content-driven work set
+  // skips it, the empty queue flushes cleanly, and the cursor sails past a block
+  // whose transfers no longer exist anywhere. (codex P1, round 4.)
+  //
+  // heal_cursor is the ONLY durable statement about transfer durability, so
+  // anything above it is unconfirmed by definition and gets replayed regardless
+  // of appearance. processBlock is idempotent — transfers are DELETE+INSERT per
+  // block, everything else upserts — so the redundant work costs time, not
+  // correctness, and it is bounded by one window per crash.
+  const missing: number[] = []
+  for (let n = healFrom; n <= windowEnd; n++) missing.push(n)
 
   let repaired = 0
   for (let i = 0; i < missing.length; i++) {
@@ -306,7 +319,7 @@ export async function healNextGap(
             OR EXISTS (
                  SELECT 1 FROM blocks b
                  WHERE b.number = n
-                   AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
+                   AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
                )
        )
      RETURNING from_block

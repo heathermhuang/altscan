@@ -36,7 +36,15 @@ export async function recordIndexGap(
       SET to_block  = GREATEST(index_gaps.to_block, EXCLUDED.to_block),
           reason    = EXCLUDED.reason,
           -- Re-abandoning a previously healed range means it is missing again.
-          healed_at = NULL
+          healed_at = NULL,
+          -- Reopening a HEALED row must also drop its heal progress. The cursor
+          -- would otherwise still sit at the old to_block, so heal_from lands past
+          -- the end, every tick works an empty window, the final proof fails, and
+          -- the range can never heal again. Progress on a row that was ALREADY
+          -- unhealed is real and is kept — this only resets the healed->unhealed
+          -- transition. (codex P2, round 4.)
+          heal_cursor = CASE WHEN index_gaps.healed_at IS NOT NULL
+                             THEN NULL ELSE index_gaps.heal_cursor END
   `)
   return true
 }

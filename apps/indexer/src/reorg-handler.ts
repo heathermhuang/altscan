@@ -24,7 +24,14 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
-import { readWithFailover, markNotEndpointFault } from './rpc-failover'
+import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
+
+/**
+ * Bound on the reorg check's DB reads. Must stay comfortably BELOW the outer
+ * RPC read timeout (default 45s for a full check) so a hung database rejects —
+ * and is tagged — before the outer timer can fire and misattribute it.
+ */
+const STORED_HASH_TIMEOUT_MS = parseInt(process.env.STORED_HASH_TIMEOUT_MS ?? '10000', 10)
 import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
@@ -101,14 +108,27 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
 export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
   return {
     async storedHash(n) {
-      // Tagged so a Postgres outage is not recorded against the RPC endpoint
-      // this check happens to be pinned to. The check still fails over — only
-      // the health attribution is suppressed. (codex P2.)
+      // Tagged so a Postgres outage is not recorded against the RPC endpoint this
+      // check happens to be pinned to. The check still fails over — only the
+      // health attribution is suppressed. (codex P2.)
+      //
+      // The inner timeout is what makes the tag reliable. Tagging can only ever
+      // decorate a REJECTION, so a DB that HANGS rather than errors would sail
+      // past this and be killed by the outer read timer instead — producing a
+      // fresh, untagged timeout that is then charged to the endpoint. A DB outage
+      // expressed as hung queries could therefore demote the entire read pool.
+      // Failing here first keeps the attribution correct. (codex P2, round 4.)
       try {
         const db = getDb()
-        const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
-          .where(eq(schema.blocks.number, n)).limit(1)
-        return row?.hash ?? null
+        return await withTimeout(
+          (async () => {
+            const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
+              .where(eq(schema.blocks.number, n)).limit(1)
+            return row?.hash ?? null
+          })(),
+          STORED_HASH_TIMEOUT_MS,
+          `storedHash(${n})`,
+        )
       } catch (err) {
         throw markNotEndpointFault(err)
       }

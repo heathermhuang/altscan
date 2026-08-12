@@ -111,12 +111,17 @@ export async function processWithFailover<P>(
       return
     } catch (err) {
       lastErr = err
-      // Partially persisted — replaying elsewhere would corrupt, not heal.
-      // Not counted as a failover: the endpoint served us fine, the write did
-      // not. Record that as a SUCCESS for the RPC phase rather than leaving a
-      // stale failure streak standing against an endpoint that just worked.
-      // (codex P2.)
-      if (wrote) { health?.recordSuccess(provider, 'block'); throw err }
+      // Partially persisted — replaying elsewhere would corrupt, not heal, so we
+      // rethrow instead of failing over.
+      //
+      // Health is left UNTOUCHED here, neither success nor failure. processBlock
+      // keeps calling the endpoint after writes begin (ensureTokensBatch, DEX pair
+      // lookups), so a post-write error may well be the endpoint's fault — scoring
+      // it a success would clear a genuine streak. Equally it may be the database,
+      // so scoring it a failure would blame the endpoint for Postgres. The side
+      // effect boundary governs retry SAFETY; it is not evidence about the
+      // endpoint either way. (codex P2, round 4.)
+      if (wrote) throw err
       if (isEndpointFault(err)) health?.recordFailure(provider, 'block')
       onFailover?.(block, provider, err)
     }

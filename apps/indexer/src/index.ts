@@ -340,7 +340,13 @@ async function main() {
       const latest = await readTip()
       // Feeds the gap healer's lag guard. Without this it would read a boot-time
       // tip forever and think it was caught up while falling behind.
-      lastKnownTip = latest
+      //
+      // MONOTONIC: a bare assignment lets a lagging endpoint erase a higher tip we
+      // already observed, and the healer would then be green-lit by the lower
+      // number while genuinely behind. Keeping the high-water mark makes the lag
+      // estimate conservative, which is the correct direction for a guard whose
+      // job is to refuse work. (codex P2, round 4.)
+      lastKnownTip = Math.max(lastKnownTip, latest)
 
       if (latest <= lastIndexed) {
         // Caught up. Periodically verify the tip we stored is still canonical —
