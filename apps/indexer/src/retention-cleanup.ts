@@ -561,6 +561,25 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     }
     if (compactCutoffBlock !== null && compactCutoffBlock > 0) {
       console.warn(`[retention] ⚠ COMPACT override active (${compactDays}d) — pruning compact tables below block ${compactCutoffBlock}`)
+      // Publish the floor for the completeness reader and the gap healer.
+      //
+      // They must NOT infer it from MIN(blocks.number). If the oldest retained
+      // region is itself an abandoned range — real cutoff 150, gap 100..200,
+      // first surviving row 201 — the inferred floor lands ABOVE the gap, the
+      // gap is written off as aged-out, and health reports `ok` over damage
+      // that is squarely inside the retention window. Deriving a floor from
+      // the very data whose holes are being measured is circular. (codex P1.)
+      //
+      // This is the number retention actually deletes below, so it is the only
+      // truthful floor. NULL (never run / compact pruning disabled) means "no
+      // floor known", which counts everything — fail closed, not open.
+      try {
+        await getMaintenanceDb().execute(sql`
+          UPDATE indexer_cursor SET compact_cutoff_block = ${compactCutoffBlock} WHERE id = 1
+        `)
+      } catch (err) {
+        console.error('[retention] could not publish compact cutoff:', err instanceof Error ? err.message : err)
+      }
       // Body sweep to the SAME cutoff first: when the compact cutoff is NEWER than
       // the body cutoff (emergency re-run tightens only compactDays; or a
       // COMPACT_RETENTION_DAYS < RETENTION_DAYS config), the transactions deleted

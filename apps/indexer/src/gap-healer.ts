@@ -60,6 +60,27 @@ export const DEFAULT_HEAL_BATCH = 25
 /** Max lag (blocks) that still counts as "at the tip". */
 export const DEFAULT_HEAL_MAX_LAG = 50
 
+/**
+ * Positive-integer env parse that falls back instead of trusting the value.
+ *
+ * Every knob here fails OPEN if a bad value survives, which is the worst
+ * direction for this module (codex P1):
+ *   - batch 0/NaN  → `LIMIT 0` returns no missing rows, and "no rows missing" is
+ *     the healed branch — a config typo would stamp healed_at over untouched
+ *     damage, instantly and silently.
+ *   - maxLag NaN   → `lag > NaN` is false, so the never-run-while-behind guard
+ *     stops firing and the healer competes with an indexer that is losing blocks.
+ *   - interval NaN → setInterval treats it as 0 and spins every tick.
+ * Same shape as the config fail-open that shipped a security hole before: a bad
+ * value must never mean "skip the check".
+ */
+export function positiveIntEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === null || raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return fallback
+  return n
+}
+
 function toNum(v: unknown): number | null {
   if (v === null || v === undefined) return null
   if (typeof v === 'bigint') return Number(v)
@@ -88,15 +109,14 @@ function rowsOf(result: unknown): Array<Record<string, unknown>> {
  * blocks retention deletes faster than we can write them.
  */
 export const NEXT_HEALABLE_GAP_SQL = `
-  WITH f AS (SELECT MIN(number) AS floor FROM blocks)
+  WITH f AS (SELECT compact_cutoff_block AS floor FROM indexer_cursor WHERE id = 1)
   SELECT g.from_block,
          g.to_block,
          GREATEST(g.from_block, f.floor) AS heal_from,
          f.floor                          AS retention_floor
   FROM index_gaps g, f
   WHERE g.healed_at IS NULL
-    AND f.floor IS NOT NULL
-    AND g.to_block >= f.floor
+    AND (f.floor IS NULL OR g.to_block >= f.floor)
   ORDER BY g.from_block
   LIMIT 1
 `
@@ -117,9 +137,15 @@ export async function healNextGap(
   const now = deps.now ?? (() => new Date())
   const log = deps.log ?? (() => {})
 
+  // Re-clamp at the entry point too, not just at the env boundary. A batch of 0
+  // turns the "nothing missing" branch into an instant false heal, so the value
+  // must be sane no matter which caller supplied it.
+  const batch = Number.isInteger(batchSize) && batchSize >= 1 ? batchSize : DEFAULT_HEAL_BATCH
+  const lagCeiling = Number.isFinite(maxLag) && maxLag >= 0 ? maxLag : DEFAULT_HEAL_MAX_LAG
+
   const lag = lagBlocks()
   // Guard FIRST: never spend RPC/DB budget on history while the tip is slipping.
-  if (!Number.isFinite(lag) || lag > maxLag) return { status: 'skipped', lag }
+  if (!Number.isFinite(lag) || lag > lagCeiling) return { status: 'skipped', lag }
 
   const gapRow = rowsOf(await db.execute(sql.raw(NEXT_HEALABLE_GAP_SQL)))[0]
   if (!gapRow) return { status: 'idle' }
@@ -136,17 +162,25 @@ export async function healNextGap(
     SELECT n FROM generate_series(${healFrom}::bigint, ${toBlock}::bigint) AS n
     WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
     ORDER BY n
-    LIMIT ${batchSize}
+    LIMIT ${batch}
   `))
     .map(r => toNum(r.n))
     .filter((n): n is number => n !== null)
 
   if (missing.length === 0) {
-    // Verified dense across the retained window — NOT assumed. healed_at is only
-    // ever stamped off a fresh read proving there is nothing left to fetch.
+    // Density is re-proved INSIDE the update, never assumed and never carried
+    // across statements. A no-op result means the range changed under us, which
+    // simply leaves it unhealed for the next tick.
     await db.execute(sql`
-      UPDATE index_gaps SET healed_at = ${now().toISOString()}::timestamptz
-      WHERE from_block = ${fromBlock} AND healed_at IS NULL
+      UPDATE index_gaps
+         SET healed_at = ${now().toISOString()}::timestamptz
+       WHERE from_block = ${fromBlock}
+         AND to_block   = ${toBlock}
+         AND healed_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM generate_series(${healFrom}::bigint, ${toBlock}::bigint) AS n
+           WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+         )
     `)
     log(`[gap-healer] healed ${fromBlock}..${toBlock} (retained window complete)`)
     return { status: 'healed', fromBlock, toBlock, repaired: 0 }
@@ -154,11 +188,36 @@ export async function healNextGap(
 
   let repaired = 0
   for (const blockNumber of missing) {
+    // Re-check lag between blocks. The tip moves while a tick runs, so a single
+    // check at the start can leave the healer competing with a loop that has
+    // since fallen behind. (codex P1.)
+    const midLag = lagBlocks()
+    if (!Number.isFinite(midLag) || midLag > lagCeiling) {
+      log(`[gap-healer] yielding mid-tick — lag ${midLag} exceeds ${lagCeiling}`)
+      return { status: 'progressed', fromBlock, toBlock, repaired }
+    }
     try {
       await reindexBlock(blockNumber)
       repaired++
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
+      // Roll back the partial write. processBlock inserts the `blocks` row FIRST
+      // and its transactions after ("Point of no return: past here the block is
+      // partially persisted"), so a mid-block failure leaves a bare block row.
+      // That row would read as proof the block is indexed, and the next tick
+      // would skip it and stamp healed_at over an incomplete block. (codex P1.)
+      //
+      // Safe to delete: this tick's own query proved the block ABSENT moments
+      // ago, so removing it restores the state we found rather than destroying
+      // anything that predates us.
+      try {
+        await db.execute(sql`DELETE FROM blocks WHERE number = ${blockNumber}`)
+      } catch (cleanupErr) {
+        // Leave the range unhealed and say so — a bare row that survives here is
+        // exactly the silent-completeness bug, so it must not pass unremarked.
+        log(`[gap-healer] ⚠ could NOT roll back partial block ${blockNumber}: ${
+          cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`)
+      }
       log(`[gap-healer] ⚠ block ${blockNumber} in ${fromBlock}..${toBlock} failed: ${error}`)
       // Stop this tick rather than grinding the whole batch against a bad
       // endpoint; the range stays unhealed and the next tick retries it.

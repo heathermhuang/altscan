@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { healNextGap, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
+import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 
 /**
  * #94 recorded abandoned ranges but nothing ever healed them, so a repaired
@@ -89,8 +89,9 @@ describe('healNextGap', () => {
     expect(out).toMatchObject({ fromBlock: 100, toBlock: 200, repaired: 1 })
     // Bailed at 151 — did not grind the rest of the batch against a bad endpoint.
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([150, 151])
+    // gap lookup + missing lookup + the partial-write rollback DELETE.
     // Critically: no UPDATE. A partially-repaired range must stay degraded.
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
   })
 
   it('heals from the CLAMPED start, not the recorded start', async () => {
@@ -116,5 +117,68 @@ describe('healNextGap', () => {
     await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
     expect(reindexBlock).toHaveBeenCalledWith(150)
     expect(typeof reindexBlock.mock.calls[0][0]).toBe('number')
+  })
+})
+
+/**
+ * Regressions for the five P1s codex found on the first cut. Each one was a way
+ * the healer could report success over damage it had not actually repaired.
+ */
+describe('healNextGap — fail-closed properties', () => {
+  it('does not treat batch 0 as "nothing missing" and stamp a false heal', async () => {
+    // LIMIT 0 returns no rows, and "no rows missing" is the healed branch — so an
+    // unvalidated GAP_HEAL_BATCH=0 would instantly stamp healed_at over untouched
+    // damage. The batch must be re-clamped no matter which caller supplied it.
+    const { db, calls } = stubDb([GAP, [{ n: '150' }]])
+    const reindexBlock = vi.fn(async (_n: number) => {})
+    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 }, 0)
+    expect(out.status).not.toBe('healed')
+    expect(reindexBlock).toHaveBeenCalledWith(150)
+    expect(calls).toHaveLength(2) // no UPDATE
+  })
+
+  it('does not let a NaN lag ceiling disable the never-run-while-behind guard', async () => {
+    // `lag > NaN` is false, so an unvalidated ceiling would silently stop the
+    // guard firing and let healing compete with an indexer that is losing blocks.
+    const { db } = stubDb([GAP, []])
+    const out = await healNextGap({ db, reindexBlock: vi.fn(), lagBlocks: () => 10_000 }, 25, NaN)
+    expect(out.status).toBe('skipped')
+  })
+
+  it('rolls back the partial block row when a re-index fails', async () => {
+    // processBlock writes the `blocks` row BEFORE its transactions, so a mid-block
+    // failure leaves a bare row. Left in place it reads as proof the block is
+    // indexed, and the next tick would skip it and stamp healed over an
+    // incomplete block.
+    const { db, calls } = stubDb([GAP, [{ n: '150' }]])
+    const reindexBlock = vi.fn(async (_n: number) => { throw new Error('archive 403') })
+    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    expect(out.status).toBe('failed')
+    expect(calls).toHaveLength(3) // gap lookup + missing lookup + rollback DELETE
+  })
+
+  it('yields mid-tick when the indexer falls behind during the batch', async () => {
+    // The tip moves while a tick runs; a single check at the start is not enough.
+    const lags = [0, 0, 9999]
+    let i = 0
+    const { db } = stubDb([GAP, [{ n: '150' }, { n: '151' }, { n: '152' }]])
+    const reindexBlock = vi.fn(async (_n: number) => {})
+    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => lags[Math.min(i++, lags.length - 1)] })
+    expect(out.status).toBe('progressed')
+    // Started two blocks, then bailed when lag spiked rather than finishing all 3.
+    expect(reindexBlock.mock.calls.length).toBeLessThan(3)
+  })
+})
+
+describe('positiveIntEnv', () => {
+  it('falls back on the values that would fail open', () => {
+    for (const bad of ['0', '-1', 'nonsense', '', '  ', '1.5', 'NaN', undefined]) {
+      expect(positiveIntEnv(bad as string | undefined, 25)).toBe(25)
+    }
+  })
+
+  it('accepts a genuine positive integer', () => {
+    expect(positiveIntEnv('7', 25)).toBe(7)
+    expect(positiveIntEnv('1', 25)).toBe(1)
   })
 })

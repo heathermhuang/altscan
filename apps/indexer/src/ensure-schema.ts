@@ -380,6 +380,20 @@ export async function ensureSchema(): Promise<void> {
   // every recorded gap — the alert works regardless of the baseline.
   await addColumnIfMissing('indexer_cursor', 'gap_tracking_from_block', 'BIGINT')
 
+  // The block retention actually prunes below, published by the retention job.
+  //
+  // The completeness reader and the gap healer both need a retention floor, and
+  // both MUST take it from here rather than MIN(blocks.number). When the oldest
+  // retained region is itself an abandoned range, the inferred floor sits ABOVE
+  // the gap: the gap reads as aged-out, health reports `ok`, and the healer goes
+  // idle over damage that is inside the retention window. A floor inferred from
+  // the same sparse data whose holes are being measured is circular. (codex P1.)
+  //
+  // NULL means no floor is known — compact pruning disabled, or retention has
+  // not run since this column appeared. That counts everything and heals
+  // everything: wasteful at worst, never a false all-clear.
+  await addColumnIfMissing('indexer_cursor', 'compact_cutoff_block', 'BIGINT')
+
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
   try {

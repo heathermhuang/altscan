@@ -27,7 +27,7 @@ import {
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
 import { recordIndexGap } from './index-gaps'
-import { healNextGap, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
+import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
@@ -239,12 +239,18 @@ async function main() {
   // refuses to run while behind (DEFAULT_HEAL_MAX_LAG), because spending RPC on
   // history while lagging drives the loop toward the MAX_LAG skip — which
   // abandons blocks and would manufacture the very gaps this is closing.
+  // parseInt would let `GAP_HEAL_BATCH=0` through as a real 0, and `LIMIT 0`
+  // returns no missing rows — which IS the healed branch. A single bad env value
+  // would stamp healed_at over untouched damage. Every knob here fails open, so
+  // all of them are validated rather than trusted. (codex P1.)
   const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED !== '0'
-  const HEAL_INTERVAL_MS = parseInt(process.env.GAP_HEAL_INTERVAL_MS ?? '30000', 10)
-  const HEAL_BATCH = parseInt(process.env.GAP_HEAL_BATCH ?? String(DEFAULT_HEAL_BATCH), 10)
-  const HEAL_MAX_LAG = parseInt(process.env.GAP_HEAL_MAX_LAG ?? String(DEFAULT_HEAL_MAX_LAG), 10)
-  // Tracks the most recent tip so the healer can judge lag without its own RPC
-  // call. Seeded from the boot tip; the poll loop refreshes it every iteration.
+  const HEAL_INTERVAL_MS = positiveIntEnv(process.env.GAP_HEAL_INTERVAL_MS, 30000)
+  const HEAL_BATCH = positiveIntEnv(process.env.GAP_HEAL_BATCH, DEFAULT_HEAL_BATCH)
+  const HEAL_MAX_LAG = positiveIntEnv(process.env.GAP_HEAL_MAX_LAG, DEFAULT_HEAL_MAX_LAG)
+  // Refreshed every poll iteration AND re-read from the chain at each tick start.
+  // The loop-updated value alone goes stale during a long batch or reorg walk, so
+  // the healer could start historical work believing a tip that has since moved
+  // on — burning the RPC budget precisely when the loop is losing ground.
   let lastKnownTip = tip
   let healInflight = false
   console.log(
@@ -256,23 +262,32 @@ async function main() {
       // it and double the background RPC draw.
       if (healInflight || !running) return
       healInflight = true
-      healNextGap(
-        {
-          db,
-          reindexBlock: (blockNumber: number) =>
-            processWithFailover(
-              blockNumber,
-              providers,
-              readCursor++,
-              (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
-              reportFailover,
-            ),
-          lagBlocks: () => lastKnownTip - lastIndexed,
-          log: msg => console.log(`${TAG} ${msg}`),
-        },
-        HEAL_BATCH,
-        HEAL_MAX_LAG,
-      )
+      // Refresh the tip before judging lag. One extra getBlockNumber per tick is
+      // negligible next to the per-block fetches it gates, and it stops the
+      // healer acting on a reading that went stale during a long batch.
+      // A failed read leaves lastKnownTip untouched; the lag guard then sees the
+      // last good value, and a genuinely unreachable RPC means no healing work
+      // succeeds anyway.
+      readTip()
+        .then(t => { lastKnownTip = Math.max(lastKnownTip, t) })
+        .catch(() => {})
+        .then(() => healNextGap(
+          {
+            db,
+            reindexBlock: (blockNumber: number) =>
+              processWithFailover(
+                blockNumber,
+                providers,
+                readCursor++,
+                (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+                reportFailover,
+              ),
+            lagBlocks: () => lastKnownTip - lastIndexed,
+            log: msg => console.log(`${TAG} ${msg}`),
+          },
+          HEAL_BATCH,
+          HEAL_MAX_LAG,
+        ))
         .catch(err => console.error(`${TAG} gap healer error:`, safeErr(err)))
         .finally(() => { healInflight = false })
     }, HEAL_INTERVAL_MS)

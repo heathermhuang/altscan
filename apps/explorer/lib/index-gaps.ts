@@ -120,14 +120,16 @@ export function completenessStatus(summary: GapSummary): 'ok' | 'degraded' | 'un
  *    `tracked_from` is NULL and the status is `unverified` — never `ok`.
  */
 export const GAP_SUMMARY_SQL = `
-  WITH f AS (SELECT MIN(number) AS floor FROM blocks),
-       t AS (SELECT gap_tracking_from_block AS tracked FROM indexer_cursor WHERE id = 1),
+  WITH t AS (
+         SELECT gap_tracking_from_block AS tracked, compact_cutoff_block AS floor
+         FROM indexer_cursor WHERE id = 1
+       ),
+       f AS (SELECT floor FROM t),
        clamped AS (
          SELECT GREATEST(g.from_block, f.floor) AS from_block, g.to_block
          FROM index_gaps g, f
          WHERE g.healed_at IS NULL
-           AND f.floor IS NOT NULL
-           AND g.to_block >= f.floor
+           AND (f.floor IS NULL OR g.to_block >= f.floor)
        ),
        ordered AS (
          SELECT from_block, to_block,
@@ -150,8 +152,11 @@ export const GAP_SUMMARY_SQL = `
   SELECT (SELECT COUNT(*) FROM merged)                                          AS gap_count,
          (SELECT COALESCE(SUM(to_block - from_block + 1), 0) FROM merged)        AS missing_blocks,
          (SELECT MIN(from_block) FROM merged)                                    AS oldest_from,
-         (SELECT floor FROM f)                                                   AS retention_floor,
-         (SELECT CASE WHEN t.tracked IS NULL OR f.floor IS NULL THEN NULL
-                      ELSE GREATEST(t.tracked, f.floor) END
-            FROM t, f)                                                           AS tracked_from
+         (SELECT floor FROM t)                                                   AS retention_floor,
+         -- GREATEST ignores NULL, so an unknown floor leaves the recording
+         -- baseline as the sole bound. A NULL baseline still yields NULL, which
+         -- reports unverified -- the claim can be narrowed, never invented.
+         (SELECT CASE WHEN t.tracked IS NULL THEN NULL
+                      ELSE GREATEST(t.tracked, t.floor) END
+            FROM t)                                                              AS tracked_from
 `
