@@ -16,6 +16,27 @@ t('parseHealth: null latestBlock → offline', () => {
   assert.deepEqual(r, { block: null, online: false });
 });
 
+// A live-but-degraded explorer is still ONLINE. /api/health degrades on index
+// completeness gaps (and on memory pressure), and treating that as offline would
+// have flipped bnbscan.com to "offline" on the marketing site the first time a
+// block range was abandoned — while the explorer was up and serving normally.
+t('parseHealth: degraded body → still online', () => {
+  const r = parseHealth({ status: 'degraded', latestBlock: 456, lagSeconds: 3 });
+  assert.deepEqual(r, { block: 456, online: true });
+});
+
+// Degraded still requires a usable block — degraded + no block is offline.
+t('parseHealth: degraded with null block → offline', () => {
+  const r = parseHealth({ status: 'degraded', latestBlock: null, lagSeconds: null });
+  assert.deepEqual(r, { block: null, online: false });
+});
+
+// Anything that is not a recognised serving state stays offline.
+t('parseHealth: error status → offline', () => {
+  const r = parseHealth({ status: 'error', latestBlock: 789, lagSeconds: 1 });
+  assert.deepEqual(r, { block: 789, online: false });
+});
+
 // parseHealth: undefined/garbage → offline, no throw
 t('parseHealth: garbage → offline', () => {
   const r = parseHealth(undefined);
