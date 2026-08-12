@@ -211,6 +211,33 @@ export async function ensureSchema(): Promise<void> {
   `))
   await db.execute(sql.raw(`INSERT INTO indexer_cursor (id, transfers_durable_block) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`))
 
+  // Deliberately-abandoned block ranges (the MAX_LAG_BLOCKS skip).
+  //
+  // The skip has always existed; until now it recorded NOTHING, so falling
+  // behind cost correctness rather than freshness and did so invisibly —
+  // ~92,000 blocks between 2026-08-04 and 08-11 with /api/health reporting "ok"
+  // throughout. Recording the range makes the loss both alertable and, later,
+  // backfillable.
+  //
+  // from_block is the PK: a range is identified by where it starts, so a retry
+  // of the same skip is idempotent instead of inserting a duplicate. No serial
+  // here — an int4 sequence overflow already took token_transfers down once.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS index_gaps (
+      from_block BIGINT PRIMARY KEY,
+      to_block   BIGINT NOT NULL,
+      reason     TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      healed_at  TIMESTAMPTZ,
+      CONSTRAINT index_gaps_range CHECK (to_block >= from_block)
+    )
+  `))
+  // Partial index: every read is "what is still missing?", and the healed rows
+  // are the ones that accumulate.
+  await db.execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS index_gaps_unhealed_idx ON index_gaps (from_block) WHERE healed_at IS NULL
+  `))
+
   // Runtime-editable explorer settings (admin console) — one JSONB doc per
   // namespace, written via the web app's /api/admin/settings, read at render time.
   await db.execute(sql.raw(`

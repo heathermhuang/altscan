@@ -4,6 +4,7 @@ import { desc, sql } from 'drizzle-orm'
 import { getCacheSizes, getTotalCacheEntries } from '@/lib/cache-registry'
 import { getDataProviderHealth } from '@/lib/providers'
 import { getRateLimitMapSize } from '@altscan/explorer-core'
+import { GAP_SUMMARY_SQL, summarizeGapRow, completenessStatus } from '@/lib/index-gaps'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,12 +79,51 @@ export async function GET(request: NextRequest) {
       // DB slow or down — still report basic health
     }
 
+    // Index completeness — separate from liveness, because they fail
+    // independently. The 2026-08-04→08-11 incident was a LIVE, responsive
+    // indexer silently abandoning ~92,000 blocks; every existing signal here
+    // stayed green. `null` means "cannot tell" (e.g. the explorer deployed ahead
+    // of the indexer that creates `index_gaps`) and is deliberately NOT reported
+    // as healthy.
+    let completeness: Record<string, unknown>
+    try {
+      const gapResult = await Promise.race([
+        db.execute(sql.raw(GAP_SUMMARY_SQL)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ])
+      const summary = summarizeGapRow(
+        Array.from(gapResult as Iterable<Record<string, unknown>>)[0],
+      )
+      completeness = {
+        status: completenessStatus(summary),
+        gapCount: summary.count,
+        missingBlocks: summary.missingBlocks,
+        oldestGapFrom: summary.oldestFromBlock,
+      }
+    } catch (err) {
+      // NEVER swallow this into a null that reads as "fine". A typo in the query
+      // or a missing table would otherwise disable the completeness signal
+      // permanently and invisibly — reproducing the exact blind spot this whole
+      // block exists to close. `unknown` is explicitly not `ok`, and carries the
+      // reason, so `completeness.status != "ok"` is a usable alert rule.
+      completeness = {
+        status: 'unknown',
+        reason: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+      }
+    }
+
     // Public response: status + block info only
     const response: Record<string, unknown> = {
       status: 'ok',
       latestBlock: latestBlockNumber,
       lagSeconds,
+      completeness,
     }
+
+    // Abandoned blocks degrade the PUBLIC status. This is the signal that was
+    // missing: status.altscan.io polls unauthenticated, so gating it behind the
+    // admin secret would reproduce exactly the blind spot being fixed.
+    if (completeness?.status === 'degraded') response.status = 'degraded'
 
     // Memory pressure drives the top-level status for ALL callers — the public
     // status page (status.altscan.io) polls unauthenticated and must still see

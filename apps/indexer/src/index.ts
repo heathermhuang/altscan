@@ -26,6 +26,7 @@ import {
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
+import { recordIndexGap } from './index-gaps'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
@@ -262,7 +263,17 @@ async function main() {
       }
 
       if (resumeGapBackfillUntil === null && latest - lastIndexed > MAX_LAG) {
-        console.log(`${TAG} ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — skipping to block ${latest - 200}`)
+        const abandonedFrom = lastIndexed + 1
+        const abandonedTo = latest - 200
+        console.warn(`${TAG} ⚠ ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — ABANDONING blocks ${abandonedFrom}..${abandonedTo} and skipping to ${abandonedTo}`)
+        // Record the range before moving the cursor. This skip has always existed
+        // and always recorded nothing, so falling behind cost CORRECTNESS, not just
+        // freshness — and silently: ~92,000 blocks between 2026-08-04 and 08-11
+        // while /api/health reported "ok". Recording makes it alertable now and
+        // backfillable later. Failure to record must not stop the skip (the skip is
+        // what stops the death spiral), so it is logged and swallowed.
+        await recordIndexGap(db, abandonedFrom, abandonedTo, `max_lag_skip(${MAX_LAG})`)
+          .catch(err => console.error(`${TAG} failed to record index gap ${abandonedFrom}..${abandonedTo}:`, safeErr(err)))
         lastIndexed = latest - 200
         // Jump the transfer watermark with the skip — these blocks are deliberately
         // abandoned (same gap the pre-existing skip already creates in `blocks`), so
