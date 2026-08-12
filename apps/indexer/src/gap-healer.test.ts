@@ -27,7 +27,16 @@ function stubDb(results: unknown[]) {
   }
 }
 
-const GAP = [{ from_block: '100', to_block: '200', heal_from: '100', retention_floor: '50' }]
+const GAP = [{ from_block: '100', to_block: '200', heal_from: '100', verify_from: '100', retention_floor: '50' }]
+
+/** Small enough to finish inside one batch, so a tick can reach the stamp. */
+const SMALL_GAP = [{ from_block: '100', to_block: '110', heal_from: '100', verify_from: '100', retention_floor: '50' }]
+
+/**
+ * Call order per tick: gap lookup, incomplete-in-window, [re-index], flush,
+ * re-verify, advance heal_cursor, and — only when the window reaches to_block —
+ * the conditional stamp.
+ */
 
 
 describe('healNextGap', () => {
@@ -58,25 +67,37 @@ describe('healNextGap', () => {
     expect(reindexBlock).not.toHaveBeenCalled()
   })
 
-  it('re-indexes missing blocks and does NOT stamp healed_at while holes remain', async () => {
+  it('re-indexes missing blocks and does NOT stamp healed_at while the range is unfinished', async () => {
     const missing = [{ n: '150' }, { n: '151' }]
-    const { db, calls } = stubDb([GAP, missing])
+    // gap, incomplete, re-verify(clean), advance-cursor
+    const { db, calls } = stubDb([GAP, missing, [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
     const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
+    // The batch covers 100..124, well short of to_block 200, so the cursor
+    // advances but the range stays unhealed and nothing is stamped.
     expect(out).toEqual({ status: 'progressed', fromBlock: 100, toBlock: 200, repaired: 2 })
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([150, 151])
-    // gap lookup + missing lookup only — no UPDATE.
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(4)
   })
 
-  it('stamps healed_at only once the retained window reads back dense', async () => {
-    // The UPDATE is conditional, so its RETURNING row is the proof it applied.
-    const { db, calls } = stubDb([GAP, [], [{ from_block: '100' }]])
+  it('holds the cursor when the window is still incomplete after the flush', async () => {
+    // The cursor must never advance past blocks that did not verify — that is
+    // the whole reason it exists.
+    const { db } = stubDb([GAP, [{ n: '150' }], [{ n: '150' }]])
+    const reindexBlock = vi.fn(async (_n: number) => {})
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
+    expect(out.status).toBe('progressed')
+  })
+
+  it('stamps healed_at only once the whole range is confirmed', async () => {
+    // gap, incomplete(none), re-verify(clean), advance-cursor, stamp(RETURNING).
+    // The conditional UPDATE's RETURNING row is the proof it actually applied.
+    const { db, calls } = stubDb([SMALL_GAP, [], [], [], [{ from_block: '100' }]])
     const reindexBlock = vi.fn()
     const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
-    expect(out).toEqual({ status: 'healed', fromBlock: 100, toBlock: 200, repaired: 0 })
+    expect(out).toEqual({ status: 'healed', fromBlock: 100, toBlock: 110, repaired: 0 })
     expect(reindexBlock).not.toHaveBeenCalled()
-    expect(calls).toHaveLength(3) // gap lookup + missing lookup + UPDATE
+    expect(calls).toHaveLength(5)
   })
 
   it('stops the tick on a failed block and leaves the range unhealed', async () => {
@@ -100,7 +121,7 @@ describe('healNextGap', () => {
     // heal_from is 150. Healing from 100 would chase blocks Postgres deletes
     // faster than we can write them, and the range would never close.
     // (The clamp itself is SQL — verified against real Postgres separately.)
-    const clamped = [{ from_block: '100', to_block: '200', heal_from: '150', retention_floor: '150' }]
+    const clamped = [{ from_block: '100', to_block: '200', heal_from: '150', verify_from: '150', retention_floor: '150' }]
     const { db } = stubDb([clamped, [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
@@ -113,7 +134,7 @@ describe('healNextGap', () => {
   it('coerces BIGINT-as-string rows rather than trusting them', async () => {
     // node-postgres hands back BIGINT as a string; untreated, block arithmetic
     // becomes string concatenation.
-    const { db } = stubDb([[{ from_block: '100', to_block: '200', heal_from: '100' }], [{ n: '150' }]])
+    const { db } = stubDb([[{ from_block: '100', to_block: '200', heal_from: '100', verify_from: '100' }], [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(reindexBlock).toHaveBeenCalledWith(150)
@@ -130,12 +151,11 @@ describe('healNextGap — fail-closed properties', () => {
     // LIMIT 0 returns no rows, and "no rows missing" is the healed branch — so an
     // unvalidated GAP_HEAL_BATCH=0 would instantly stamp healed_at over untouched
     // damage. The batch must be re-clamped no matter which caller supplied it.
-    const { db, calls } = stubDb([GAP, [{ n: '150' }]])
+    const { db } = stubDb([GAP, [{ n: '150' }], [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
     const out = await healNextGap({ db, reindexBlock, readLag: async () => 0}, 0)
     expect(out.status).not.toBe('healed')
     expect(reindexBlock).toHaveBeenCalledWith(150)
-    expect(calls).toHaveLength(2) // no UPDATE
   })
 
   it('does not let a NaN lag ceiling disable the never-run-while-behind guard', async () => {
@@ -163,7 +183,7 @@ describe('healNextGap — fail-closed properties', () => {
   it('does not stamp healed when the conditional UPDATE matches nothing', async () => {
     // The range changed under us (grew, or lost rows to a reorg). Zero rows
     // updated is NOT a heal.
-    const { db } = stubDb([GAP, [], []])
+    const { db } = stubDb([SMALL_GAP, [], [], [], []])
     const out = await healNextGap({ db, reindexBlock: vi.fn(), readLag: async () => 0 })
     expect(out.status).toBe('progressed')
   })
@@ -172,12 +192,14 @@ describe('healNextGap — fail-closed properties', () => {
     // processBlock only ENQUEUES transfers, and the skip already moved the
     // durable watermark past this range, so an undrained queue means the healed
     // range's transfers may never be replayed.
-    const { db } = stubDb([GAP, [], [{ from_block: '100' }]])
+    const { db, calls } = stubDb([SMALL_GAP, [], [], [], [{ from_block: '100' }]])
     const out = await healNextGap({
       db, reindexBlock: vi.fn(), readLag: async () => 0,
       flushTransfers: async () => { throw new Error('writer stuck') },
     })
     expect(out.status).toBe('progressed')
+    // Bailed at the flush: no re-verify, no cursor advance, no stamp.
+    expect(calls).toHaveLength(2)
   })
 
   it('treats an unreadable tip as behind, not as caught up', async () => {

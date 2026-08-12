@@ -232,6 +232,15 @@ export async function ensureSchema(): Promise<void> {
       CONSTRAINT index_gaps_range CHECK (to_block >= from_block)
     )
   `))
+  // Durable heal progress. Blocks at or below heal_cursor have been re-indexed,
+  // had the transfer queue DRAINED, and been re-verified — so healing survives a
+  // crash. Without it, a crash after re-indexing but before the drain loses the
+  // in-memory transfer queue while the block itself survives with a full
+  // tx_count, and every content-based test would call it complete. Nothing
+  // replays it, because the MAX_LAG skip already jumped the durable watermark
+  // past this range. (codex P1, round 3.)
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_cursor BIGINT`))
+
   // Partial index: every read is "what is still missing?", and the healed rows
   // are the ones that accumulate.
   await db.execute(sql.raw(`

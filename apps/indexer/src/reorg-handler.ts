@@ -24,7 +24,7 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
-import { readWithFailover } from './rpc-failover'
+import { readWithFailover, markNotEndpointFault } from './rpc-failover'
 import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
@@ -101,10 +101,17 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
 export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
   return {
     async storedHash(n) {
-      const db = getDb()
-      const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
-        .where(eq(schema.blocks.number, n)).limit(1)
-      return row?.hash ?? null
+      // Tagged so a Postgres outage is not recorded against the RPC endpoint
+      // this check happens to be pinned to. The check still fails over — only
+      // the health attribution is suppressed. (codex P2.)
+      try {
+        const db = getDb()
+        const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
+          .where(eq(schema.blocks.number, n)).limit(1)
+        return row?.hash ?? null
+      } catch (err) {
+        throw markNotEndpointFault(err)
+      }
     },
     rpcBlock,
   }

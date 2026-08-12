@@ -20,6 +20,33 @@
 
 import type { EndpointHealth } from './endpoint-health'
 
+/**
+ * Marks an error as NOT the endpoint's fault.
+ *
+ * Endpoint health must reflect the RPC phase, not the whole work unit. Both
+ * failover helpers run a callback that can touch the database — detectReorgPinned
+ * interleaves `storedHash()` (Postgres) with header reads inside a single pinned
+ * check — so a DB outage would otherwise record a failure against every endpoint
+ * tried and demote the entire pool for something no endpoint did. (codex P2.)
+ *
+ * Failover behaviour is deliberately unchanged: the work still failed, so we
+ * still move on. Only the health attribution is suppressed.
+ */
+const NOT_ENDPOINT_FAULT = Symbol.for('altscan.notEndpointFault')
+
+/** Tag an error as caused by something other than the RPC endpoint. */
+export function markNotEndpointFault<E>(err: E): E {
+  if (err && typeof err === 'object') {
+    try { (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] = true } catch { /* frozen */ }
+  }
+  return err
+}
+
+/** True when the error was explicitly attributed to something else. */
+export function isEndpointFault(err: unknown): boolean {
+  return !(err && typeof err === 'object' && (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] === true)
+}
+
 /** Notified on each failed attempt, so a sick endpoint is visible in logs. */
 export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
@@ -86,9 +113,11 @@ export async function processWithFailover<P>(
       lastErr = err
       // Partially persisted — replaying elsewhere would corrupt, not heal.
       // Not counted as a failover: the endpoint served us fine, the write did
-      // not, so it must NOT count against the endpoint's health either.
-      if (wrote) throw err
-      health?.recordFailure(provider, 'block')
+      // not. Record that as a SUCCESS for the RPC phase rather than leaving a
+      // stale failure streak standing against an endpoint that just worked.
+      // (codex P2.)
+      if (wrote) { health?.recordSuccess(provider, 'block'); throw err }
+      if (isEndpointFault(err)) health?.recordFailure(provider, 'block')
       onFailover?.(block, provider, err)
     }
   }
@@ -177,7 +206,7 @@ export async function readWithFailover<T, P>(
       return value
     } catch (err) {
       lastErr = err
-      health?.recordFailure(provider, 'read')
+      if (isEndpointFault(err)) health?.recordFailure(provider, 'read')
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from

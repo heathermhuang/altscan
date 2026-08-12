@@ -126,7 +126,13 @@ export const NEXT_HEALABLE_GAP_SQL = `
   WITH f AS (SELECT compact_cutoff_block AS floor FROM indexer_cursor WHERE id = 1)
   SELECT g.from_block,
          g.to_block,
-         GREATEST(g.from_block, f.floor) AS heal_from,
+         GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
+         -- The retention-clamped START of the range. The final proof must span
+         -- this, NOT heal_from: once the cursor reaches to_block, heal_from is
+         -- to_block + 1 and a density check over that empty series is trivially
+         -- true, so it would stamp healed having verified nothing.
+         GREATEST(g.from_block, f.floor)  AS verify_from,
+         g.heal_cursor                    AS heal_cursor,
          f.floor                          AS retention_floor
   FROM index_gaps g, f
   WHERE g.healed_at IS NULL
@@ -174,32 +180,36 @@ export async function healNextGap(
   const fromBlock = toNum(gapRow.from_block)
   const toBlock = toNum(gapRow.to_block)
   const healFrom = toNum(gapRow.heal_from)
-  if (fromBlock === null || toBlock === null || healFrom === null) return { status: 'idle' }
+  const verifyFrom = toNum(gapRow.verify_from)
+  if (fromBlock === null || toBlock === null || healFrom === null || verifyFrom === null) {
+    return { status: 'idle' }
+  }
 
-  // What still needs work inside the retained portion of the range, oldest first.
+  // Work one WINDOW at a time, bounded by a DURABLE cursor.
   //
-  // "Row absent" is NOT the whole test. processBlock commits the `blocks` row
-  // BEFORE its transactions ("Point of no return: past here the block is
-  // partially persisted"), so a mid-block failure leaves a bare row that would
-  // otherwise read as proof the block is indexed — and the range would be stamped
-  // healed over it. (codex P1, round 2.)
+  // The cursor is what makes healing crash-safe. processBlock only ENQUEUES
+  // transfers before returning, and the async writer's queue lives in memory, so
+  // a crash after re-indexing but before the drain loses those transfers — and
+  // no restart replays them, because the MAX_LAG skip already jumped the durable
+  // watermark past this range. The block itself survives with a full tx_count,
+  // so every content-based test would call it complete. (codex P1, round 3.)
   //
-  // The test is `retained transactions < blocks.tx_count`. tx_count is written in
-  // the SAME insert as the block row, from block.transactions.length, so it is an
-  // exact expected count rather than a proxy. An earlier cut used
-  // `gas_used > 0 AND no transactions`, which only ever proved that ONE
-  // transaction existed — a block that should hold 100 and holds 1 passed it.
-  // (codex P1, round 3.) tx_count also handles legitimately EMPTY blocks with no
-  // special case: tx_count = 0 is satisfied by zero rows.
+  // heal_cursor only ever advances past blocks that have been re-indexed, had the
+  // transfer queue DRAINED, and then re-verified. A crash anywhere earlier leaves
+  // the cursor behind, so the whole window is redone; processBlock is idempotent,
+  // so redoing it is free of consequence.
+  const windowEnd = Math.min(toBlock, healFrom + batch - 1)
+
+  // Content test for the window. `retained transactions < blocks.tx_count` uses
+  // the exact count written in the SAME insert as the block row, so a block that
+  // should hold 100 transactions and holds 1 is caught — the earlier
+  // `gas_used > 0 AND no transactions` proxy only ever proved that ONE existed.
+  // tx_count = 0 covers legitimately empty blocks with no special case.
   //
   // Safe at the retention boundary: retention deletes strictly BELOW the cutoff
-  // and heal_from starts AT it, so pruned transactions are never mistaken for
-  // damage.
-  //
-  // LIMIT lets Postgres stop once it has a batch, so the common case costs
-  // O(distance to the batch-th hole) rather than O(range).
-  const INCOMPLETE_IN_RANGE = sql`
-    SELECT n FROM generate_series(${healFrom}::bigint, ${toBlock}::bigint) AS n
+  // and heal_from starts AT it, so pruned transactions are never read as damage.
+  const incompleteIn = (lo: number, hi: number) => sql`
+    SELECT n FROM generate_series(${lo}::bigint, ${hi}::bigint) AS n
     WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
        OR EXISTS (
             SELECT 1 FROM blocks b
@@ -207,56 +217,10 @@ export async function healNextGap(
               AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
           )
     ORDER BY n
-    LIMIT ${batch}
   `
-  const missing = rowsOf(await db.execute(INCOMPLETE_IN_RANGE))
+  const missing = rowsOf(await db.execute(incompleteIn(healFrom, windowEnd)))
     .map(r => toNum(r.n))
     .filter((n): n is number => n !== null)
-
-  if (missing.length === 0) {
-    // Drain the async transfer writer FIRST. processBlock returns once transfers
-    // are merely ENQUEUED, and the MAX_LAG skip already jumped the durable
-    // watermark past this range, so the watermark cannot attest to these blocks.
-    // Without a flush, a crash between the block commit and the queue drain
-    // leaves transfers that no restart will replay, under a gap marked healed.
-    // (codex P1, round 2.)
-    try {
-      await flushTransfers?.()
-    } catch (err) {
-      log(`[gap-healer] ⚠ transfer flush failed, NOT stamping ${fromBlock}..${toBlock}: ${
-        err instanceof Error ? err.message : String(err)}`)
-      return { status: 'progressed', fromBlock, toBlock, repaired: 0 }
-    }
-
-    // Density is re-proved INSIDE the update, never carried across statements,
-    // and `to_block` is matched so a range that grew under us is not stamped with
-    // a proof that predates the growth.
-    const res = await db.execute(sql`
-      UPDATE index_gaps
-         SET healed_at = ${now().toISOString()}::timestamptz
-       WHERE from_block = ${fromBlock}
-         AND to_block   = ${toBlock}
-         AND healed_at IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM generate_series(${healFrom}::bigint, ${toBlock}::bigint) AS n
-           WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
-              OR EXISTS (
-                   SELECT 1 FROM blocks b
-                   WHERE b.number = n
-                     AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
-                 )
-         )
-       RETURNING from_block
-    `)
-    // A conditional UPDATE that matches nothing is NOT a heal. Reporting one
-    // would be the same false all-clear by a quieter route. (codex P2.)
-    if (rowsOf(res).length === 0) {
-      log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
-      return { status: 'progressed', fromBlock, toBlock, repaired: 0 }
-    }
-    log(`[gap-healer] healed ${fromBlock}..${toBlock} (retained window complete)`)
-    return { status: 'healed', fromBlock, toBlock, repaired: 0 }
-  }
 
   let repaired = 0
   for (let i = 0; i < missing.length; i++) {
@@ -299,6 +263,59 @@ export async function healNextGap(
     }
   }
 
-  log(`[gap-healer] repaired ${repaired} block(s) in ${fromBlock}..${toBlock}`)
-  return { status: 'progressed', fromBlock, toBlock, repaired }
+  // Drain BEFORE confirming anything. Until the queue is on disk, these blocks
+  // are not durable no matter how complete they look.
+  try {
+    await flushTransfers?.()
+  } catch (err) {
+    log(`[gap-healer] ⚠ transfer flush failed, NOT advancing ${fromBlock}..${toBlock}: ${
+      err instanceof Error ? err.message : String(err)}`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
+
+  // Re-verify the window now that everything is durable. Only then is the cursor
+  // allowed past it.
+  const stillIncomplete = rowsOf(await db.execute(incompleteIn(healFrom, windowEnd))).length
+  if (stillIncomplete > 0) {
+    log(`[gap-healer] ${stillIncomplete} block(s) still incomplete in ${healFrom}..${windowEnd} — cursor held`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
+
+  await db.execute(sql`
+    UPDATE index_gaps
+       SET heal_cursor = GREATEST(COALESCE(heal_cursor, ${healFrom} - 1), ${windowEnd})
+     WHERE from_block = ${fromBlock} AND healed_at IS NULL
+  `)
+
+  if (windowEnd < toBlock) {
+    log(`[gap-healer] repaired ${repaired} block(s); confirmed through ${windowEnd} of ${fromBlock}..${toBlock}`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
+
+  // Whole range confirmed. Stamp in ONE statement that re-proves density, so a
+  // reorg or a range that grew under us cannot receive a stale proof.
+  const res = await db.execute(sql`
+    UPDATE index_gaps
+       SET healed_at = ${now().toISOString()}::timestamptz
+     WHERE from_block = ${fromBlock}
+       AND to_block   = ${toBlock}
+       AND healed_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM generate_series(${verifyFrom}::bigint, ${toBlock}::bigint) AS n
+         WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+            OR EXISTS (
+                 SELECT 1 FROM blocks b
+                 WHERE b.number = n
+                   AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
+               )
+       )
+     RETURNING from_block
+  `)
+  // A conditional UPDATE that matches nothing is NOT a heal. (codex P2.)
+  if (rowsOf(res).length === 0) {
+    log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
+  log(`[gap-healer] healed ${fromBlock}..${toBlock} (retained window complete)`)
+  return { status: 'healed', fromBlock, toBlock, repaired }
 }
