@@ -184,11 +184,17 @@ export async function healNextGap(
   // otherwise read as proof the block is indexed — and the range would be stamped
   // healed over it. (codex P1, round 2.)
   //
-  // A block that burned gas MUST have at least one transaction, so
-  // `gas_used > 0 AND no transactions` is a structurally incomplete block. That
-  // uses data already written, needing no new completion protocol and no
-  // destructive cleanup. Blocks below the compact cutoff are excluded upstream by
-  // heal_from, so retention deleting transactions cannot be mistaken for damage.
+  // The test is `retained transactions < blocks.tx_count`. tx_count is written in
+  // the SAME insert as the block row, from block.transactions.length, so it is an
+  // exact expected count rather than a proxy. An earlier cut used
+  // `gas_used > 0 AND no transactions`, which only ever proved that ONE
+  // transaction existed — a block that should hold 100 and holds 1 passed it.
+  // (codex P1, round 3.) tx_count also handles legitimately EMPTY blocks with no
+  // special case: tx_count = 0 is satisfied by zero rows.
+  //
+  // Safe at the retention boundary: retention deletes strictly BELOW the cutoff
+  // and heal_from starts AT it, so pruned transactions are never mistaken for
+  // damage.
   //
   // LIMIT lets Postgres stop once it has a batch, so the common case costs
   // O(distance to the batch-th hole) rather than O(range).
@@ -198,8 +204,7 @@ export async function healNextGap(
        OR EXISTS (
             SELECT 1 FROM blocks b
             WHERE b.number = n
-              AND b.gas_used > 0
-              AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.block_number = n)
+              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
           )
     ORDER BY n
     LIMIT ${batch}
@@ -238,8 +243,7 @@ export async function healNextGap(
               OR EXISTS (
                    SELECT 1 FROM blocks b
                    WHERE b.number = n
-                     AND b.gas_used > 0
-                     AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.block_number = n)
+                     AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
                  )
          )
        RETURNING from_block

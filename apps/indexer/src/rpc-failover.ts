@@ -72,7 +72,7 @@ export async function processWithFailover<P>(
   // off the front. `% length` alone still yields a negative for negative input.
   const start = ((startIdx % providers.length) + providers.length) % providers.length
   const ordered = health
-    ? health.order(providers, start)
+    ? health.order(providers, start, 'block')
     : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
@@ -80,7 +80,7 @@ export async function processWithFailover<P>(
     let wrote = false
     try {
       await work(block, provider, () => { wrote = true })
-      health?.recordSuccess(provider)
+      health?.recordSuccess(provider, 'block')
       return
     } catch (err) {
       lastErr = err
@@ -88,7 +88,7 @@ export async function processWithFailover<P>(
       // Not counted as a failover: the endpoint served us fine, the write did
       // not, so it must NOT count against the endpoint's health either.
       if (wrote) throw err
-      health?.recordFailure(provider)
+      health?.recordFailure(provider, 'block')
       onFailover?.(block, provider, err)
     }
   }
@@ -157,7 +157,7 @@ export async function readWithFailover<T, P>(
   // These are the tip and reorg reads that gate EVERY batch, so they are the
   // calls that most need to stop starting on a known-bad endpoint.
   const ordered = health
-    ? health.order(providers, start)
+    ? health.order(providers, start, 'read')
     : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
@@ -173,11 +173,11 @@ export async function readWithFailover<T, P>(
           )
         }),
       ])
-      health?.recordSuccess(provider)
+      health?.recordSuccess(provider, 'read')
       return value
     } catch (err) {
       lastErr = err
-      health?.recordFailure(provider)
+      health?.recordFailure(provider, 'read')
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from

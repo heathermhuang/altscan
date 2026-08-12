@@ -25,7 +25,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
+import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap } from './index-gaps'
 import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
@@ -253,6 +253,7 @@ async function main() {
   const HEAL_INTERVAL_MS = positiveIntEnv(process.env.GAP_HEAL_INTERVAL_MS, 30000)
   const HEAL_BATCH = positiveIntEnv(process.env.GAP_HEAL_BATCH, DEFAULT_HEAL_BATCH)
   const HEAL_MAX_LAG = positiveIntEnv(process.env.GAP_HEAL_MAX_LAG, DEFAULT_HEAL_MAX_LAG)
+  const HEAL_FLUSH_TIMEOUT_MS = positiveIntEnv(process.env.GAP_HEAL_FLUSH_TIMEOUT_MS, 60000)
   // Refreshed every poll iteration AND re-read from the chain at each tick start.
   // The loop-updated value alone goes stale during a long batch or reorg walk, so
   // the healer could start historical work believing a tip that has since moved
@@ -288,13 +289,28 @@ async function main() {
           // count as "behind" rather than "caught up". (codex P1.)
           readLag: async () => {
             const t = await readTip()
+            // Compare against the HIGHEST tip seen, not this one reading. A
+            // responsive-but-lagging endpoint can answer with a lower tip than we
+            // already know about, and returning `t - lastIndexed` would let that
+            // optimistic number green-light healing after a truer reading had
+            // already said we were behind. Monotonic is the honest floor.
+            // (codex P2, round 3.)
             lastKnownTip = Math.max(lastKnownTip, t)
-            return t - lastIndexed
+            return lastKnownTip - lastIndexed
           },
           // Transfers are only ENQUEUED when processBlock returns, and the skip
           // already advanced the durable watermark past this range, so a flush is
           // the only thing that can attest the healed range's transfers landed.
-          flushTransfers: ASYNC_TT_WRITER ? flushTransferWriter : undefined,
+          //
+          // BOUNDED, because flushTransferWriter never rejects: the writer catches,
+          // requeues and retries forever, so a permanently stuck writer would leave
+          // this promise pending, `healInflight` stuck true, and healing silently
+          // dead with no error anywhere. A timeout converts that into a refusal to
+          // stamp — which is the safe direction, since an undrained queue means the
+          // range's transfers may never be replayed. (codex round 3.)
+          flushTransfers: ASYNC_TT_WRITER
+            ? () => withTimeout(flushTransferWriter(), HEAL_FLUSH_TIMEOUT_MS, 'gap-healer transfer flush')
+            : undefined,
           log: msg => console.log(`${TAG} ${msg}`),
         },
         HEAL_BATCH,
