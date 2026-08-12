@@ -357,6 +357,16 @@ export async function ensureSchema(): Promise<void> {
   // place so the tx page knows to refetch it. Lock-safe: addColumnIfMissing skips
   // the ALTER entirely once the column exists (see the CRITICAL note above).
   await addColumnIfMissing('transactions', 'body_pruned', 'BOOLEAN NOT NULL DEFAULT false')
+  // Where gap RECORDING began. Without it an empty index_gaps reads as a blanket
+  // "complete", which is false — the BNB index carries ~92,000 holes from before
+  // the recording existed. Stamped ONCE (WHERE ... IS NULL), so it pins the real
+  // start of coverage rather than drifting forward on every boot. (codex P1.)
+  await addColumnIfMissing('indexer_cursor', 'gap_tracking_from_block', 'BIGINT')
+  await db.execute(sql.raw(`
+    UPDATE indexer_cursor
+       SET gap_tracking_from_block = COALESCE((SELECT MAX(number) FROM blocks), 0)
+     WHERE id = 1 AND gap_tracking_from_block IS NULL
+  `))
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.

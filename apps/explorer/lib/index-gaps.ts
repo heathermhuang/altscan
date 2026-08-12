@@ -20,6 +20,14 @@ export type GapSummary = {
   missingBlocks: number
   /** Lowest abandoned block still unhealed, for locating the oldest damage. */
   oldestFromBlock: number | null
+  /**
+   * Block height at which gap RECORDING began. Coverage before this point was
+   * never tracked, so "no gaps" says nothing about it — the BNB index still
+   * carries ~92,000 holes from before this mechanism existed. Without this
+   * bound, an empty table would report a blanket `ok` that is simply false.
+   * (codex P1.)
+   */
+  trackedFromBlock: number | null
 }
 
 /**
@@ -43,11 +51,12 @@ function toBlock(v: unknown): number | null {
 }
 
 export function summarizeGapRow(row: Record<string, unknown> | undefined | null): GapSummary {
-  if (!row) return { count: 0, missingBlocks: 0, oldestFromBlock: null }
+  if (!row) return { count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: null }
   return {
     count: toCount(row.gap_count),
     missingBlocks: toCount(row.missing_blocks),
     oldestFromBlock: toBlock(row.oldest_from),
+    trackedFromBlock: toBlock(row.tracked_from),
   }
 }
 
@@ -55,16 +64,24 @@ export function summarizeGapRow(row: Record<string, unknown> | undefined | null)
  * ONE unhealed gap degrades. Deliberately not thresholded on block count: the
  * failure mode being guarded against produced ~5,100 missing blocks an hour, and
  * any threshold above zero would have stayed green for the first hour of it.
+ *
+ * `unverified` is NOT `ok`. An empty table means "nothing recorded", which is
+ * indistinguishable from "never tracked" unless we know where tracking started —
+ * and the BNB index really does carry ~92,000 pre-existing holes, so a blanket
+ * `ok` would be a false all-clear. `ok` therefore means the bounded claim "no
+ * recorded gaps at or after trackedFromBlock". (codex P1.)
  */
-export function completenessStatus(summary: GapSummary): 'ok' | 'degraded' {
-  return summary.count > 0 ? 'degraded' : 'ok'
+export function completenessStatus(summary: GapSummary): 'ok' | 'degraded' | 'unverified' {
+  if (summary.count > 0) return 'degraded'
+  return summary.trackedFromBlock === null ? 'unverified' : 'ok'
 }
 
 /** The single SQL read behind the summary. Kept here so both halves stay in step. */
 export const GAP_SUMMARY_SQL = `
-  SELECT COUNT(*)                                  AS gap_count,
-         SUM(to_block - from_block + 1)            AS missing_blocks,
-         MIN(from_block)                           AS oldest_from
+  SELECT COUNT(*)                       AS gap_count,
+         SUM(to_block - from_block + 1) AS missing_blocks,
+         MIN(from_block)                AS oldest_from,
+         (SELECT gap_tracking_from_block FROM indexer_cursor WHERE id = 1) AS tracked_from
   FROM index_gaps
   WHERE healed_at IS NULL
 `

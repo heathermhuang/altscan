@@ -272,8 +272,27 @@ async function main() {
         // while /api/health reported "ok". Recording makes it alertable now and
         // backfillable later. Failure to record must not stop the skip (the skip is
         // what stops the death spiral), so it is logged and swallowed.
-        await recordIndexGap(db, abandonedFrom, abandonedTo, `max_lag_skip(${MAX_LAG})`)
-          .catch(err => console.error(`${TAG} failed to record index gap ${abandonedFrom}..${abandonedTo}:`, safeErr(err)))
+        // The cursor must NOT advance past blocks we failed to record. Logging
+        // and skipping anyway would abandon them AND leave them untracked —
+        // precisely the silent loss this whole mechanism exists to prevent, so
+        // one transient DB blip would reproduce the original bug. (codex P1.)
+        //
+        // Not skipping is cheap: if the DB is unreachable the indexer cannot
+        // write blocks either, so it makes no progress regardless. Leaving the
+        // cursor put simply retries the skip on the next iteration, and the
+        // >MAX_LAG condition is still true. A no-op return (empty range) is not
+        // a failure and does not block.
+        let gapRecorded = true
+        try {
+          await recordIndexGap(db, abandonedFrom, abandonedTo, `max_lag_skip(${MAX_LAG})`)
+        } catch (err) {
+          gapRecorded = false
+          console.error(`${TAG} ⚠ could NOT record index gap ${abandonedFrom}..${abandonedTo} — NOT skipping, will retry:`, safeErr(err))
+        }
+        if (!gapRecorded) {
+          await sleep(1000)
+          continue
+        }
         lastIndexed = latest - 200
         // Jump the transfer watermark with the skip — these blocks are deliberately
         // abandoned (same gap the pre-existing skip already creates in `blocks`), so

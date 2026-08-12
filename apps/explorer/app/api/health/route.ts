@@ -99,6 +99,8 @@ export async function GET(request: NextRequest) {
         gapCount: summary.count,
         missingBlocks: summary.missingBlocks,
         oldestGapFrom: summary.oldestFromBlock,
+        // Bounds the claim: `ok` means no gaps AT OR AFTER this block.
+        trackedFromBlock: summary.trackedFromBlock,
       }
     } catch (err) {
       // NEVER swallow this into a null that reads as "fine". A typo in the query
