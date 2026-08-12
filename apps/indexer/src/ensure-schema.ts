@@ -357,16 +357,28 @@ export async function ensureSchema(): Promise<void> {
   // place so the tx page knows to refetch it. Lock-safe: addColumnIfMissing skips
   // the ALTER entirely once the column exists (see the CRITICAL note above).
   await addColumnIfMissing('transactions', 'body_pruned', 'BOOLEAN NOT NULL DEFAULT false')
-  // Where gap RECORDING began. Without it an empty index_gaps reads as a blanket
-  // "complete", which is false — the BNB index carries ~92,000 holes from before
-  // the recording existed. Stamped ONCE (WHERE ... IS NULL), so it pins the real
-  // start of coverage rather than drifting forward on every boot. (codex P1.)
+  // Where gap RECORDING began — the bound on /api/health's `ok`. Left NULL here
+  // ON PURPOSE, which reports `unverified` until an operator sets it.
+  //
+  // It is deliberately NOT stamped automatically at boot. Render's rolling
+  // deploy overlaps generations (see the AccessExclusiveLock note above — the
+  // outgoing instance is still writing while this runs), and the OUTGOING binary
+  // skips WITHOUT recording. A baseline stamped during that window would cover
+  // blocks the old generation then abandoned unrecorded, so health would report
+  // a permanent, confident `ok` over real holes — a worse failure than the
+  // silence being fixed, because it looks verified. There is no cooperative fix:
+  // the old binary cannot be taught to record retroactively. (codex P1.)
+  //
+  // Set it once, deliberately, after confirming the new generation is the sole
+  // writer (one instance in the Render dashboard, old deploy fully stopped):
+  //
+  //   UPDATE indexer_cursor
+  //      SET gap_tracking_from_block = (SELECT MAX(number) FROM blocks)
+  //    WHERE id = 1;
+  //
+  // Until then `unverified` is the honest answer, and `degraded` still fires on
+  // every recorded gap — the alert works regardless of the baseline.
   await addColumnIfMissing('indexer_cursor', 'gap_tracking_from_block', 'BIGINT')
-  await db.execute(sql.raw(`
-    UPDATE indexer_cursor
-       SET gap_tracking_from_block = COALESCE((SELECT MAX(number) FROM blocks), 0)
-     WHERE id = 1 AND gap_tracking_from_block IS NULL
-  `))
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
