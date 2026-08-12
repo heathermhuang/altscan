@@ -25,6 +25,7 @@
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
 import { readWithFailover } from './rpc-failover'
+import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
 export type ReorgDeps = {
@@ -134,6 +135,7 @@ export async function detectReorgPinned<P>(
   maxDepth: number,
   timeoutMs: number,
   onFailover?: (provider: P, err: unknown) => void,
+  health?: EndpointHealth<P>,
 ): Promise<ReorgCheck> {
   return readWithFailover(
     providers,
@@ -141,6 +143,10 @@ export async function detectReorgPinned<P>(
     provider => detectReorg(depsFor(provider), lastIndexed, maxDepth),
     timeoutMs,
     onFailover,
+    // Reorg checks gate every batch, so they must respect the same demotion the
+    // block fetches do — otherwise a sick endpoint keeps taxing the one call
+    // that runs before any block work can start.
+    health,
   )
 }
 

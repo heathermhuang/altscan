@@ -26,6 +26,7 @@ import {
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
+import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap } from './index-gaps'
 import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
@@ -172,8 +173,13 @@ async function main() {
     readLoggedAt.set(provider, now)
     console.warn(`${TAG} ⚠ RPC read failover: ${label} (${n} so far) — ${safeErr(err).slice(0, 160)}`)
   }
+  // Shared across reads AND block fetches so one endpoint's failures inform both.
+  // bsc.publicnode.com serves recent blocks but 403s ARCHIVE requests, which only
+  // happen once we are already behind — so without this the sick endpoint taxes
+  // ~1/N of blocks an 8s timeout exactly when throughput matters most.
+  const endpointHealth = createEndpointHealth<JsonRpcProvider>()
   const readTip = () =>
-    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover)
+    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover, endpointHealth)
   // Deps bound to ONE provider. detectReorgPinned fails the whole check over;
   // per-read failover here would mix chain views mid-walk. (codex P1.)
   const reorgDepsFor = (p: JsonRpcProvider) => makeReorgDepsFrom(async n => {
@@ -272,6 +278,7 @@ async function main() {
               readCursor++,
               (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
               reportFailover,
+              endpointHealth,
             ),
           // Reads the tip from the CHAIN, not from a closure the poll loop
           // refreshes. A cached tip goes stale exactly when it matters — while
@@ -325,7 +332,7 @@ async function main() {
         // until the next block arrives.
         if (REORG_CHECK && Date.now() - lastIdleReorgCheck >= IDLE_REORG_CHECK_MS) {
           lastIdleReorgCheck = Date.now()
-          const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
+          const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover, endpointHealth)
           if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
         }
         await sleep(POLL_MS)
@@ -378,7 +385,7 @@ async function main() {
       // A3: validate the batch boundary before processing — detects any reorg at or
       // below lastIndexed (1 header call; the K-bounded walk only runs on mismatch).
       if (REORG_CHECK) {
-        const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
+        const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover, endpointHealth)
         if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
       }
 
@@ -477,6 +484,7 @@ async function main() {
                 workerId,
                 (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
                 reportFailover,
+                endpointHealth,
               )
               blockStatus[idx] = 2
               advanceLastIndexed()

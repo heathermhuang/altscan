@@ -18,6 +18,8 @@
  * broken endpoint costs a single wasted round trip, not the batch.
  */
 
+import type { EndpointHealth } from './endpoint-health'
+
 /** Notified on each failed attempt, so a sick endpoint is visible in logs. */
 export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
@@ -55,27 +57,38 @@ export async function processWithFailover<P>(
   startIdx: number,
   work: FailoverWork<P>,
   onFailover?: FailoverReporter<P>,
+  health?: EndpointHealth<P>,
 ): Promise<void> {
   if (providers.length === 0) {
     throw new Error(`[rpc-failover] no RPC providers configured — cannot process block ${block}`)
   }
 
+  // Health-aware order when a tracker is supplied: an endpoint that keeps
+  // failing goes LAST, so the common path stops paying its timeout on ~1/N of
+  // blocks. The order is always a full permutation — a demoted endpoint is a
+  // last resort, never dropped.
+  //
   // Normalize: workerId can exceed the list length, and a negative would index
   // off the front. `% length` alone still yields a negative for negative input.
   const start = ((startIdx % providers.length) + providers.length) % providers.length
+  const ordered = health
+    ? health.order(providers, start)
+    : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
-  for (let attempt = 0; attempt < providers.length; attempt++) {
-    const provider = providers[(start + attempt) % providers.length]
+  for (const provider of ordered) {
     let wrote = false
     try {
       await work(block, provider, () => { wrote = true })
+      health?.recordSuccess(provider)
       return
     } catch (err) {
       lastErr = err
       // Partially persisted — replaying elsewhere would corrupt, not heal.
-      // Not counted as a failover: the endpoint served us fine, the write did not.
+      // Not counted as a failover: the endpoint served us fine, the write did
+      // not, so it must NOT count against the endpoint's health either.
       if (wrote) throw err
+      health?.recordFailure(provider)
       onFailover?.(block, provider, err)
     }
   }
@@ -135,18 +148,23 @@ export async function readWithFailover<T, P>(
   work: (provider: P) => Promise<T>,
   timeoutMs: number,
   onFailover?: (provider: P, err: unknown) => void,
+  health?: EndpointHealth<P>,
 ): Promise<T> {
   if (providers.length === 0) {
     throw new Error('[rpc-failover] no RPC providers configured — cannot read')
   }
   const start = ((startIdx % providers.length) + providers.length) % providers.length
+  // These are the tip and reorg reads that gate EVERY batch, so they are the
+  // calls that most need to stop starting on a known-bad endpoint.
+  const ordered = health
+    ? health.order(providers, start)
+    : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
-  for (let attempt = 0; attempt < providers.length; attempt++) {
-    const provider = providers[(start + attempt) % providers.length]
+  for (const provider of ordered) {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      return await Promise.race([
+      const value = await Promise.race([
         work(provider),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
@@ -155,8 +173,11 @@ export async function readWithFailover<T, P>(
           )
         }),
       ])
+      health?.recordSuccess(provider)
+      return value
     } catch (err) {
       lastErr = err
+      health?.recordFailure(provider)
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from
