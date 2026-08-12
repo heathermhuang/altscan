@@ -27,6 +27,7 @@ import {
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
 import { recordIndexGap } from './index-gaps'
+import { healNextGap, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
@@ -228,6 +229,57 @@ async function main() {
   let lastIdleReorgCheck = 0
   console.log(`${TAG} reorg tail-check ${REORG_CHECK ? `ON (K=${REORG_DEPTH})` : 'OFF'}`)
 
+  // ── Gap healing ───────────────────────────────────────────────────────────
+  // #94 recorded abandoned ranges but nothing ever cleared them, so a range that
+  // had been repaired still read `degraded` forever. A signal that can only go
+  // red is one people stop reading, which would have cost #94 its entire point.
+  //
+  // Runs on an interval rather than in the poll loop: the loop's job is the tip,
+  // and healing must never sit between it and a new block. healNextGap itself
+  // refuses to run while behind (DEFAULT_HEAL_MAX_LAG), because spending RPC on
+  // history while lagging drives the loop toward the MAX_LAG skip — which
+  // abandons blocks and would manufacture the very gaps this is closing.
+  const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED !== '0'
+  const HEAL_INTERVAL_MS = parseInt(process.env.GAP_HEAL_INTERVAL_MS ?? '30000', 10)
+  const HEAL_BATCH = parseInt(process.env.GAP_HEAL_BATCH ?? String(DEFAULT_HEAL_BATCH), 10)
+  const HEAL_MAX_LAG = parseInt(process.env.GAP_HEAL_MAX_LAG ?? String(DEFAULT_HEAL_MAX_LAG), 10)
+  // Tracks the most recent tip so the healer can judge lag without its own RPC
+  // call. Seeded from the boot tip; the poll loop refreshes it every iteration.
+  let lastKnownTip = tip
+  let healInflight = false
+  console.log(
+    `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG})` : 'OFF'}`,
+  )
+  if (HEAL_ENABLED) {
+    const healTimer = setInterval(() => {
+      // Non-overlapping: a tick that runs long must not stack another on top of
+      // it and double the background RPC draw.
+      if (healInflight || !running) return
+      healInflight = true
+      healNextGap(
+        {
+          db,
+          reindexBlock: (blockNumber: number) =>
+            processWithFailover(
+              blockNumber,
+              providers,
+              readCursor++,
+              (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+              reportFailover,
+            ),
+          lagBlocks: () => lastKnownTip - lastIndexed,
+          log: msg => console.log(`${TAG} ${msg}`),
+        },
+        HEAL_BATCH,
+        HEAL_MAX_LAG,
+      )
+        .catch(err => console.error(`${TAG} gap healer error:`, safeErr(err)))
+        .finally(() => { healInflight = false })
+    }, HEAL_INTERVAL_MS)
+    // Don't hold the process open on shutdown.
+    healTimer.unref?.()
+  }
+
   // Roll back the transfer writer FIRST (quiesce in-flight drain, purge stale
   // queue, rewind + persist W to the fork) so the writer can't re-insert orphaned
   // rows after the delete and a crash mid-reprocess can't resume past the fork;
@@ -243,6 +295,9 @@ async function main() {
   while (running) {
     try {
       const latest = await readTip()
+      // Feeds the gap healer's lag guard. Without this it would read a boot-time
+      // tip forever and think it was caught up while falling behind.
+      lastKnownTip = latest
 
       if (latest <= lastIndexed) {
         // Caught up. Periodically verify the tip we stored is still canonical —

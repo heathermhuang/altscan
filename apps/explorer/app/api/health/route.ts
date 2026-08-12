@@ -99,8 +99,13 @@ export async function GET(request: NextRequest) {
         gapCount: summary.count,
         missingBlocks: summary.missingBlocks,
         oldestGapFrom: summary.oldestFromBlock,
-        // Bounds the claim: `ok` means no gaps AT OR AFTER this block.
+        // Bounds the claim: `ok` means no gaps AT OR AFTER this block. It is the
+        // LATER of where gap recording began and where retention currently
+        // starts — blocks below the retention floor are intentionally absent, so
+        // counting them would pin this red forever with nothing to fix.
         trackedFromBlock: summary.trackedFromBlock,
+        // Exposed so the bound above is auditable rather than asserted.
+        retentionFloorBlock: summary.retentionFloorBlock,
       }
     } catch (err) {
       // NEVER swallow this into a null that reads as "fine". A typo in the query
