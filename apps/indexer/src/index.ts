@@ -262,32 +262,37 @@ async function main() {
       // it and double the background RPC draw.
       if (healInflight || !running) return
       healInflight = true
-      // Refresh the tip before judging lag. One extra getBlockNumber per tick is
-      // negligible next to the per-block fetches it gates, and it stops the
-      // healer acting on a reading that went stale during a long batch.
-      // A failed read leaves lastKnownTip untouched; the lag guard then sees the
-      // last good value, and a genuinely unreachable RPC means no healing work
-      // succeeds anyway.
-      readTip()
-        .then(t => { lastKnownTip = Math.max(lastKnownTip, t) })
-        .catch(() => {})
-        .then(() => healNextGap(
-          {
-            db,
-            reindexBlock: (blockNumber: number) =>
-              processWithFailover(
-                blockNumber,
-                providers,
-                readCursor++,
-                (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
-                reportFailover,
-              ),
-            lagBlocks: () => lastKnownTip - lastIndexed,
-            log: msg => console.log(`${TAG} ${msg}`),
+      healNextGap(
+        {
+          db,
+          reindexBlock: (blockNumber: number) =>
+            processWithFailover(
+              blockNumber,
+              providers,
+              readCursor++,
+              (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+              reportFailover,
+            ),
+          // Reads the tip from the CHAIN, not from a closure the poll loop
+          // refreshes. A cached tip goes stale exactly when it matters — while
+          // the live loop is stuck in a slow batch and the chain moves on — so
+          // every lag check the healer makes would keep returning the same
+          // reassuring number. Rejecting on RPC failure makes an unknown lag
+          // count as "behind" rather than "caught up". (codex P1.)
+          readLag: async () => {
+            const t = await readTip()
+            lastKnownTip = Math.max(lastKnownTip, t)
+            return t - lastIndexed
           },
-          HEAL_BATCH,
-          HEAL_MAX_LAG,
-        ))
+          // Transfers are only ENQUEUED when processBlock returns, and the skip
+          // already advanced the durable watermark past this range, so a flush is
+          // the only thing that can attest the healed range's transfers landed.
+          flushTransfers: ASYNC_TT_WRITER ? flushTransferWriter : undefined,
+          log: msg => console.log(`${TAG} ${msg}`),
+        },
+        HEAL_BATCH,
+        HEAL_MAX_LAG,
+      )
         .catch(err => console.error(`${TAG} gap healer error:`, safeErr(err)))
         .finally(() => { healInflight = false })
     }, HEAL_INTERVAL_MS)

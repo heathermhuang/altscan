@@ -573,9 +573,18 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
       // This is the number retention actually deletes below, so it is the only
       // truthful floor. NULL (never run / compact pruning disabled) means "no
       // floor known", which counts everything — fail closed, not open.
+      // GREATEST, never a bare assignment: the floor must not move BACKWARDS.
+      // An emergency run tightens retention (say 2d → 1d) and deletes that
+      // history; a later normal 2d run would then compute a LOWER cutoff. A bare
+      // write would republish it, widening the verified claim back across data
+      // the emergency run already destroyed and letting health report `ok` over
+      // blocks that no longer exist. Deleted history does not come back because
+      // the policy relaxed. (codex P1.)
       try {
         await getMaintenanceDb().execute(sql`
-          UPDATE indexer_cursor SET compact_cutoff_block = ${compactCutoffBlock} WHERE id = 1
+          UPDATE indexer_cursor
+             SET compact_cutoff_block = GREATEST(COALESCE(compact_cutoff_block, 0), ${compactCutoffBlock})
+           WHERE id = 1
         `)
       } catch (err) {
         console.error('[retention] could not publish compact cutoff:', err instanceof Error ? err.message : err)

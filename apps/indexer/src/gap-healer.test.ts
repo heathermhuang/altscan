@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
+import { healNextGap, positiveIntEnv, LAG_RECHECK_EVERY, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 
 /**
  * #94 recorded abandoned ranges but nothing ever healed them, so a repaired
@@ -35,7 +35,7 @@ describe('healNextGap', () => {
     const { db, calls } = stubDb([GAP])
     const reindexBlock = vi.fn()
     const out = await healNextGap({
-      db, reindexBlock, lagBlocks: () => DEFAULT_HEAL_MAX_LAG + 1,
+      db, reindexBlock, readLag: async () => DEFAULT_HEAL_MAX_LAG + 1,
     })
     expect(out).toEqual({ status: 'skipped', lag: DEFAULT_HEAL_MAX_LAG + 1 })
     // The guard must come BEFORE any query — healing must cost nothing at all
@@ -46,14 +46,14 @@ describe('healNextGap', () => {
 
   it('treats a non-finite lag as behind (fails closed)', async () => {
     const { db } = stubDb([GAP])
-    const out = await healNextGap({ db, reindexBlock: vi.fn(), lagBlocks: () => NaN })
+    const out = await healNextGap({ db, reindexBlock: vi.fn(), readLag: async () => NaN})
     expect(out.status).toBe('skipped')
   })
 
   it('is idle when nothing unhealed intersects the retained window', async () => {
     const { db } = stubDb([[]])
     const reindexBlock = vi.fn()
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(out).toEqual({ status: 'idle' })
     expect(reindexBlock).not.toHaveBeenCalled()
   })
@@ -62,7 +62,7 @@ describe('healNextGap', () => {
     const missing = [{ n: '150' }, { n: '151' }]
     const { db, calls } = stubDb([GAP, missing])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(out).toEqual({ status: 'progressed', fromBlock: 100, toBlock: 200, repaired: 2 })
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([150, 151])
     // gap lookup + missing lookup only — no UPDATE.
@@ -70,9 +70,10 @@ describe('healNextGap', () => {
   })
 
   it('stamps healed_at only once the retained window reads back dense', async () => {
-    const { db, calls } = stubDb([GAP, []])
+    // The UPDATE is conditional, so its RETURNING row is the proof it applied.
+    const { db, calls } = stubDb([GAP, [], [{ from_block: '100' }]])
     const reindexBlock = vi.fn()
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(out).toEqual({ status: 'healed', fromBlock: 100, toBlock: 200, repaired: 0 })
     expect(reindexBlock).not.toHaveBeenCalled()
     expect(calls).toHaveLength(3) // gap lookup + missing lookup + UPDATE
@@ -84,14 +85,14 @@ describe('healNextGap', () => {
     const reindexBlock = vi.fn(async (n: number) => {
       if (n === 151) throw new Error('archive 403')
     })
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(out.status).toBe('failed')
     expect(out).toMatchObject({ fromBlock: 100, toBlock: 200, repaired: 1 })
     // Bailed at 151 — did not grind the rest of the batch against a bad endpoint.
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([150, 151])
-    // gap lookup + missing lookup + the partial-write rollback DELETE.
-    // Critically: no UPDATE. A partially-repaired range must stay degraded.
-    expect(calls).toHaveLength(3)
+    // gap lookup + missing lookup only. No UPDATE (the range must stay
+    // degraded) and no destructive cleanup DELETE.
+    expect(calls).toHaveLength(2)
   })
 
   it('heals from the CLAMPED start, not the recorded start', async () => {
@@ -102,7 +103,7 @@ describe('healNextGap', () => {
     const clamped = [{ from_block: '100', to_block: '200', heal_from: '150', retention_floor: '150' }]
     const { db } = stubDb([clamped, [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(reindexBlock).toHaveBeenCalledWith(150)
     // healed_at is still keyed on the RECORDED start — that is the primary key.
     expect(out).toMatchObject({ fromBlock: 100, toBlock: 200 })
@@ -114,7 +115,7 @@ describe('healNextGap', () => {
     // becomes string concatenation.
     const { db } = stubDb([[{ from_block: '100', to_block: '200', heal_from: '100' }], [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(reindexBlock).toHaveBeenCalledWith(150)
     expect(typeof reindexBlock.mock.calls[0][0]).toBe('number')
   })
@@ -131,7 +132,7 @@ describe('healNextGap — fail-closed properties', () => {
     // damage. The batch must be re-clamped no matter which caller supplied it.
     const { db, calls } = stubDb([GAP, [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 }, 0)
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0}, 0)
     expect(out.status).not.toBe('healed')
     expect(reindexBlock).toHaveBeenCalledWith(150)
     expect(calls).toHaveLength(2) // no UPDATE
@@ -141,32 +142,71 @@ describe('healNextGap — fail-closed properties', () => {
     // `lag > NaN` is false, so an unvalidated ceiling would silently stop the
     // guard firing and let healing compete with an indexer that is losing blocks.
     const { db } = stubDb([GAP, []])
-    const out = await healNextGap({ db, reindexBlock: vi.fn(), lagBlocks: () => 10_000 }, 25, NaN)
+    const out = await healNextGap({ db, reindexBlock: vi.fn(), readLag: async () => 10_000}, 25, NaN)
     expect(out.status).toBe('skipped')
   })
 
-  it('rolls back the partial block row when a re-index fails', async () => {
-    // processBlock writes the `blocks` row BEFORE its transactions, so a mid-block
-    // failure leaves a bare row. Left in place it reads as proof the block is
-    // indexed, and the next tick would skip it and stamp healed over an
-    // incomplete block.
+  it('never issues a destructive cleanup on a failed re-index', async () => {
+    // An earlier cut deleted the partial `blocks` row to "roll back". That was
+    // unreliable AND unsafe: once transactions exist the non-cascading FK rejects
+    // the delete, and between the absence check and the delete another writer can
+    // legitimately insert the same block, so it could destroy data it never
+    // owned. The partial row is caught by the structural completeness test
+    // instead, which owns nothing and is idempotent.
     const { db, calls } = stubDb([GAP, [{ n: '150' }]])
     const reindexBlock = vi.fn(async (_n: number) => { throw new Error('archive 403') })
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => 0 })
+    const out = await healNextGap({ db, reindexBlock, readLag: async () => 0})
     expect(out.status).toBe('failed')
-    expect(calls).toHaveLength(3) // gap lookup + missing lookup + rollback DELETE
+    expect(calls).toHaveLength(2) // gap lookup + missing lookup; no UPDATE, no DELETE
+  })
+
+  it('does not stamp healed when the conditional UPDATE matches nothing', async () => {
+    // The range changed under us (grew, or lost rows to a reorg). Zero rows
+    // updated is NOT a heal.
+    const { db } = stubDb([GAP, [], []])
+    const out = await healNextGap({ db, reindexBlock: vi.fn(), readLag: async () => 0 })
+    expect(out.status).toBe('progressed')
+  })
+
+  it('does not stamp healed if the transfer flush fails', async () => {
+    // processBlock only ENQUEUES transfers, and the skip already moved the
+    // durable watermark past this range, so an undrained queue means the healed
+    // range's transfers may never be replayed.
+    const { db } = stubDb([GAP, [], [{ from_block: '100' }]])
+    const out = await healNextGap({
+      db, reindexBlock: vi.fn(), readLag: async () => 0,
+      flushTransfers: async () => { throw new Error('writer stuck') },
+    })
+    expect(out.status).toBe('progressed')
+  })
+
+  it('treats an unreadable tip as behind, not as caught up', async () => {
+    const { db, calls } = stubDb([GAP])
+    const out = await healNextGap({
+      db, reindexBlock: vi.fn(), readLag: async () => { throw new Error('rpc down') },
+    })
+    expect(out.status).toBe('skipped')
+    expect(calls).toHaveLength(0)
   })
 
   it('yields mid-tick when the indexer falls behind during the batch', async () => {
-    // The tip moves while a tick runs; a single check at the start is not enough.
-    const lags = [0, 0, 9999]
-    let i = 0
-    const { db } = stubDb([GAP, [{ n: '150' }, { n: '151' }, { n: '152' }]])
+    // The tip moves while a tick runs, so one check at the start is not enough.
+    // Rechecks land every LAG_RECHECK_EVERY blocks, which bounds the extra tip
+    // reads while still catching a loop that slips mid-tick.
+    const blocks = Array.from({ length: 3 * LAG_RECHECK_EVERY }, (_, k) => ({ n: String(150 + k) }))
+    let call = 0
+    const { db } = stubDb([GAP, blocks])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ db, reindexBlock, lagBlocks: () => lags[Math.min(i++, lags.length - 1)] })
+    const out = await healNextGap({
+      db, reindexBlock,
+      // Caught up for the first two checks, then the loop falls behind.
+      // Reads: entry guard, then a recheck every LAG_RECHECK_EVERY blocks.
+      readLag: async () => (++call <= 3 ? 0 : 9999),
+    })
     expect(out.status).toBe('progressed')
-    // Started two blocks, then bailed when lag spiked rather than finishing all 3.
-    expect(reindexBlock.mock.calls.length).toBeLessThan(3)
+    // Stopped at a recheck boundary instead of draining the whole batch.
+    expect(reindexBlock.mock.calls.length).toBeLessThan(blocks.length)
+    expect(reindexBlock.mock.calls.length).toBe(2 * LAG_RECHECK_EVERY)
   })
 })
 
