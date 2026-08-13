@@ -24,7 +24,30 @@
 
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
-import { readWithFailover } from './rpc-failover'
+import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
+import { positiveIntEnv } from './gap-healer'
+
+/**
+ * Bound on the reorg check's DB reads. Must stay comfortably BELOW the outer RPC
+ * read timeout (default 45s for a full check) so a hung database rejects — and is
+ * tagged — before the outer timer can fire and misattribute it to the endpoint.
+ *
+ * Validated rather than parsed: `parseInt` yields NaN for a typo and 0 for "0",
+ * and either would make the timer fire immediately or never — defeating the whole
+ * point. Capped too, because a value above the outer timeout is silently useless.
+ * (codex P2, round 5.)
+ */
+const STORED_HASH_TIMEOUT_MS = (() => {
+  const requested = Math.min(positiveIntEnv(process.env.STORED_HASH_TIMEOUT_MS, 10_000), 30_000)
+  // RPC_REORG_TIMEOUT_MS is set independently, so it can legitimately be tuned
+  // BELOW this one — at which point the outer timer fires first with an untagged
+  // error and the whole point (tagging a DB hang so it is not blamed on, and
+  // retried against, every endpoint) is silently lost. Stay strictly under it.
+  // (codex P2, round 6.)
+  const outer = positiveIntEnv(process.env.RPC_REORG_TIMEOUT_MS, 45_000)
+  return Math.max(1_000, Math.min(requested, Math.floor(outer / 2)))
+})()
+import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */
 export type ReorgDeps = {
@@ -100,10 +123,30 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
 export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
   return {
     async storedHash(n) {
-      const db = getDb()
-      const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
-        .where(eq(schema.blocks.number, n)).limit(1)
-      return row?.hash ?? null
+      // Tagged so a Postgres outage is not recorded against the RPC endpoint this
+      // check happens to be pinned to. The check still fails over — only the
+      // health attribution is suppressed. (codex P2.)
+      //
+      // The inner timeout is what makes the tag reliable. Tagging can only ever
+      // decorate a REJECTION, so a DB that HANGS rather than errors would sail
+      // past this and be killed by the outer read timer instead — producing a
+      // fresh, untagged timeout that is then charged to the endpoint. A DB outage
+      // expressed as hung queries could therefore demote the entire read pool.
+      // Failing here first keeps the attribution correct. (codex P2, round 4.)
+      try {
+        const db = getDb()
+        return await withTimeout(
+          (async () => {
+            const [row] = await db.select({ hash: schema.blocks.hash }).from(schema.blocks)
+              .where(eq(schema.blocks.number, n)).limit(1)
+            return row?.hash ?? null
+          })(),
+          STORED_HASH_TIMEOUT_MS,
+          `storedHash(${n})`,
+        )
+      } catch (err) {
+        throw markNotEndpointFault(err)
+      }
     },
     rpcBlock,
   }
@@ -134,6 +177,7 @@ export async function detectReorgPinned<P>(
   maxDepth: number,
   timeoutMs: number,
   onFailover?: (provider: P, err: unknown) => void,
+  health?: EndpointHealth<P>,
 ): Promise<ReorgCheck> {
   return readWithFailover(
     providers,
@@ -141,6 +185,10 @@ export async function detectReorgPinned<P>(
     provider => detectReorg(depsFor(provider), lastIndexed, maxDepth),
     timeoutMs,
     onFailover,
+    // Reorg checks gate every batch, so they must respect the same demotion the
+    // block fetches do — otherwise a sick endpoint keeps taxing the one call
+    // that runs before any block work can start.
+    health,
   )
 }
 

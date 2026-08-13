@@ -1162,6 +1162,22 @@ const ERC20_ABI = [
   'function totalSupply() view returns (uint256)',
 ]
 
+/**
+ * Deterministic ascending lock order for a multi-row upsert.
+ *
+ * Exported so the deadlock guard is testable against the SHIPPED sort rather than
+ * a re-implementation in the test — a fix that is only defined, never wired, stays
+ * green forever (that is exactly how #92 shipped inert).
+ *
+ * Byte order, not locale: `localeCompare` is locale-sensitive and can order two
+ * hex strings differently than Postgres does. Only mutual consistency between
+ * concurrent inserters matters, so the comparison must not depend on ambient
+ * locale. Returns a NEW array — the caller's array is reused for cache warming.
+ */
+export function orderByAddress<T extends { address: string }>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+}
+
 async function ensureTokensBatch(
   tokensToEnsure: Map<string, 'BEP20' | 'BEP721' | 'BEP1155'>,
   provider: JsonRpcProvider,
@@ -1223,7 +1239,46 @@ async function ensureTokensBatch(
 
   const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
   if (valid.length > 0) {
-    await db.insert(schema.tokens).values(valid).onConflictDoNothing()
+    // Sort by address → consistent lock order, same discipline as flushAddresses.
+    //
+    // Without this, `valid` inherits per-block token DISCOVERY order (Promise.all
+    // preserves input order, and `toFetch` is filtered from block-scan order). Two
+    // workers indexing different blocks that touch an overlapping token set then
+    // insert those rows in DIFFERENT orders, and each waits on the index tuple the
+    // other already holds — a textbook circular wait. Postgres confirmed exactly
+    // that shape on 2026-08-12 06:23Z: both processes in `insert into "tokens" …
+    // on conflict do nothing`, each blocked on the other's transaction, CONTEXT
+    // "while inserting index tuple … in relation \"tokens\"".
+    //
+    // It is NOT a resource problem — a deadlock is a lock-ORDER property, so no
+    // amount of RAM or disk removes it. Ascending address order on every inserter
+    // makes a cycle impossible.
+    //
+    // It recurred 6 times in the 7 days to 2026-08-12 (Aug 5 ×3, 8, 10, 12). Each
+    // one aborts a whole block, and the resulting catch-up lag is what pushes the
+    // loop toward the MAX_LAG skip — which abandons blocks for real. Cheap fix,
+    // prevents the expensive failure downstream.
+    const ordered = orderByAddress(valid)
+    for (let i = 0; i < ordered.length; i += SQL_BATCH_CHUNK) {
+      const chunk = ordered.slice(i, i + SQL_BATCH_CHUNK)
+      // Retry the residual: ordering removes same-statement cycles, but a
+      // concurrent writer on another path can still collide. Safe to retry because
+      // this insert is its own implicit transaction (no enclosing db.transaction)
+      // and ON CONFLICT DO NOTHING makes it idempotent.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await db.insert(schema.tokens).values(chunk).onConflictDoNothing()
+          break
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          if (msg.includes('deadlock') && attempt < 3) {
+            await new Promise(r => setTimeout(r, 50 * attempt))
+            continue
+          }
+          throw err
+        }
+      }
+    }
     for (const v of valid) {
       tokenCache.add(v.address)
       if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()

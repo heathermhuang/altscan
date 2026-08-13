@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 import {
   fetchBlockReceipts, enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth,
+  orderByAddress,
 } from './block-processor'
 
 // Simulate the real failure mode observed on 2026-04-16: three consecutive
@@ -133,5 +134,48 @@ describe('purgeTransferQueueAbove', () => {
     expect(after.rows).toBe(1)
     purgeTransferQueueAbove(0)   // cleanup so queue state can't leak into other tests
     expect(getTransferQueueDepth().rows).toBe(0)
+  })
+})
+
+// ── tokens deadlock guard ───────────────────────────────────────────
+//
+// PostgresError "deadlock detected" aborted a block 6 times in the 7 days to
+// 2026-08-12 (Aug 5 x3, 8, 10, 12). Postgres named the shape precisely: two
+// processes both in `insert into "tokens" ... on conflict do nothing`, each
+// waiting on the other's transaction, CONTEXT "while inserting index tuple ...
+// in relation \"tokens\"". Token rows inherited per-block DISCOVERY order, so two
+// workers touching an overlapping token set inserted them in different orders and
+// deadlocked. `addresses` had sorted for this reason since it was written; the
+// tokens path never did.
+describe('orderByAddress (tokens insert lock ordering)', () => {
+  it('puts rows in ascending address order', () => {
+    const rows = [{ address: '0xff' }, { address: '0x01' }, { address: '0x7a' }]
+    expect(orderByAddress(rows).map(r => r.address)).toEqual(['0x01', '0x7a', '0xff'])
+  })
+
+  it('gives two workers the SAME order from different discovery orders', () => {
+    // The actual invariant: a cycle is impossible only if every inserter agrees
+    // on the order. Same set, different starting permutations, one result.
+    const a = [{ address: '0xaa' }, { address: '0xbb' }, { address: '0xcc' }]
+    const b = [{ address: '0xcc' }, { address: '0xaa' }, { address: '0xbb' }]
+    expect(orderByAddress(a).map(r => r.address)).toEqual(orderByAddress(b).map(r => r.address))
+  })
+
+  it('does not mutate the caller array (reused for cache warming)', () => {
+    const rows = [{ address: '0xff' }, { address: '0x01' }]
+    orderByAddress(rows)
+    expect(rows.map(r => r.address)).toEqual(['0xff', '0x01'])
+  })
+
+  it('orders by byte value, not locale', () => {
+    // localeCompare would sort these differently under some locales; Postgres
+    // index order does not care about locale, and neither may we.
+    const rows = [{ address: '0xB0' }, { address: '0xa0' }]
+    expect(orderByAddress(rows).map(r => r.address)).toEqual(['0xB0', '0xa0'])
+  })
+
+  it('is stable on an empty set and a single row', () => {
+    expect(orderByAddress([])).toEqual([])
+    expect(orderByAddress([{ address: '0x01' }]).map(r => r.address)).toEqual(['0x01'])
   })
 })

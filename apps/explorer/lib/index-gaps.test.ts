@@ -16,28 +16,28 @@ describe('summarizeGapRow', () => {
   // Reading them raw yields string concatenation and truthy "0".
   it('coerces postgres bigint strings to numbers', () => {
     expect(summarizeGapRow({ gap_count: '3', missing_blocks: '15300', oldest_from: '115299700', tracked_from: '115000000' }))
-      .toEqual({ count: 3, missingBlocks: 15300, oldestFromBlock: 115299700, trackedFromBlock: 115000000 })
+      .toEqual({ count: 3, missingBlocks: 15300, oldestFromBlock: 115299700, trackedFromBlock: 115000000, retentionFloorBlock: null })
   })
 
   it('treats an empty table as zero, not null', () => {
     expect(summarizeGapRow({ gap_count: '0', missing_blocks: null, oldest_from: null, tracked_from: '42' }))
-      .toEqual({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: 42 })
+      .toEqual({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: 42, retentionFloorBlock: null })
   })
 
   it('handles a missing row without throwing', () => {
-    const empty = { count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: null }
+    const empty = { count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: null, retentionFloorBlock: null }
     expect(summarizeGapRow(undefined)).toEqual(empty)
     expect(summarizeGapRow(null)).toEqual(empty)
   })
 
   it('accepts native numbers and bigints too', () => {
     expect(summarizeGapRow({ gap_count: 2, missing_blocks: 10n, oldest_from: 5n, tracked_from: 1n }))
-      .toEqual({ count: 2, missingBlocks: 10, oldestFromBlock: 5, trackedFromBlock: 1 })
+      .toEqual({ count: 2, missingBlocks: 10, oldestFromBlock: 5, trackedFromBlock: 1, retentionFloorBlock: null })
   })
 
   it('never reports a negative or NaN count', () => {
     expect(summarizeGapRow({ gap_count: 'nonsense', missing_blocks: undefined, oldest_from: 'x', tracked_from: 'y' }))
-      .toEqual({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: null })
+      .toEqual({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: null, retentionFloorBlock: null })
   })
 
   // Block 0 is a legitimate baseline (fresh DB) and must survive coercion —
@@ -51,7 +51,7 @@ describe('summarizeGapRow', () => {
 describe('completenessStatus', () => {
   // Default carries a KNOWN baseline; the unverified case is asserted explicitly.
   const s = (o: Partial<GapSummary>): GapSummary =>
-    ({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: 1000, ...o })
+    ({ count: 0, missingBlocks: 0, oldestFromBlock: null, trackedFromBlock: 1000, retentionFloorBlock: null, ...o })
 
   it('is ok with no recorded gaps and a known baseline', () => {
     expect(completenessStatus(s({}))).toBe('ok')
@@ -86,5 +86,26 @@ describe('completenessStatus', () => {
 
   it('does not degrade on a count of zero with a stale block total', () => {
     expect(completenessStatus(s({ count: 0, missingBlocks: 0 }))).toBe('ok')
+  })
+})
+
+/**
+ * The retention floor is the second bound on the claim. `blocks` rows are
+ * hard-deleted below the compact cutoff (BNB keeps ~2 days — measured 2026-08-12:
+ * the whole table spanned 2d 07:50), so a gap below the floor describes blocks
+ * that are intentionally absent. It can never be healed, because a backfill
+ * would just be pruned again — counting it would pin `degraded` on forever, and
+ * a signal that can only go red is one people stop reading.
+ */
+describe('retention floor bound', () => {
+  it('surfaces the floor so the bound is auditable', () => {
+    expect(summarizeGapRow({ gap_count: '0', tracked_from: '500', retention_floor: '400' }).retentionFloorBlock)
+      .toBe(400)
+  })
+
+  it('reports no floor as null rather than 0', () => {
+    // 0 is a legitimate floor on a fresh chain; absent must not masquerade as it.
+    expect(summarizeGapRow({ gap_count: '0', tracked_from: '5' }).retentionFloorBlock).toBeNull()
+    expect(summarizeGapRow({ gap_count: '0', retention_floor: '0' }).retentionFloorBlock).toBe(0)
   })
 })

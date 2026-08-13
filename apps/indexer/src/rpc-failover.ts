@@ -18,6 +18,35 @@
  * broken endpoint costs a single wasted round trip, not the batch.
  */
 
+import type { EndpointHealth } from './endpoint-health'
+
+/**
+ * Marks an error as NOT the endpoint's fault.
+ *
+ * Endpoint health must reflect the RPC phase, not the whole work unit. Both
+ * failover helpers run a callback that can touch the database — detectReorgPinned
+ * interleaves `storedHash()` (Postgres) with header reads inside a single pinned
+ * check — so a DB outage would otherwise record a failure against every endpoint
+ * tried and demote the entire pool for something no endpoint did. (codex P2.)
+ *
+ * Failover behaviour is deliberately unchanged: the work still failed, so we
+ * still move on. Only the health attribution is suppressed.
+ */
+const NOT_ENDPOINT_FAULT = Symbol.for('altscan.notEndpointFault')
+
+/** Tag an error as caused by something other than the RPC endpoint. */
+export function markNotEndpointFault<E>(err: E): E {
+  if (err && typeof err === 'object') {
+    try { (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] = true } catch { /* frozen */ }
+  }
+  return err
+}
+
+/** True when the error was explicitly attributed to something else. */
+export function isEndpointFault(err: unknown): boolean {
+  return !(err && typeof err === 'object' && (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] === true)
+}
+
 /** Notified on each failed attempt, so a sick endpoint is visible in logs. */
 export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
@@ -55,27 +84,45 @@ export async function processWithFailover<P>(
   startIdx: number,
   work: FailoverWork<P>,
   onFailover?: FailoverReporter<P>,
+  health?: EndpointHealth<P>,
 ): Promise<void> {
   if (providers.length === 0) {
     throw new Error(`[rpc-failover] no RPC providers configured — cannot process block ${block}`)
   }
 
+  // Health-aware order when a tracker is supplied: an endpoint that keeps
+  // failing goes LAST, so the common path stops paying its timeout on ~1/N of
+  // blocks. The order is always a full permutation — a demoted endpoint is a
+  // last resort, never dropped.
+  //
   // Normalize: workerId can exceed the list length, and a negative would index
   // off the front. `% length` alone still yields a negative for negative input.
   const start = ((startIdx % providers.length) + providers.length) % providers.length
+  const ordered = health
+    ? health.order(providers, start, 'block')
+    : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
-  for (let attempt = 0; attempt < providers.length; attempt++) {
-    const provider = providers[(start + attempt) % providers.length]
+  for (const provider of ordered) {
     let wrote = false
     try {
       await work(block, provider, () => { wrote = true })
+      health?.recordSuccess(provider, 'block')
       return
     } catch (err) {
       lastErr = err
-      // Partially persisted — replaying elsewhere would corrupt, not heal.
-      // Not counted as a failover: the endpoint served us fine, the write did not.
+      // Partially persisted — replaying elsewhere would corrupt, not heal, so we
+      // rethrow instead of failing over.
+      //
+      // Health is left UNTOUCHED here, neither success nor failure. processBlock
+      // keeps calling the endpoint after writes begin (ensureTokensBatch, DEX pair
+      // lookups), so a post-write error may well be the endpoint's fault — scoring
+      // it a success would clear a genuine streak. Equally it may be the database,
+      // so scoring it a failure would blame the endpoint for Postgres. The side
+      // effect boundary governs retry SAFETY; it is not evidence about the
+      // endpoint either way. (codex P2, round 4.)
       if (wrote) throw err
+      if (isEndpointFault(err)) health?.recordFailure(provider, 'block')
       onFailover?.(block, provider, err)
     }
   }
@@ -135,18 +182,23 @@ export async function readWithFailover<T, P>(
   work: (provider: P) => Promise<T>,
   timeoutMs: number,
   onFailover?: (provider: P, err: unknown) => void,
+  health?: EndpointHealth<P>,
 ): Promise<T> {
   if (providers.length === 0) {
     throw new Error('[rpc-failover] no RPC providers configured — cannot read')
   }
   const start = ((startIdx % providers.length) + providers.length) % providers.length
+  // These are the tip and reorg reads that gate EVERY batch, so they are the
+  // calls that most need to stop starting on a known-bad endpoint.
+  const ordered = health
+    ? health.order(providers, start, 'read')
+    : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
-  for (let attempt = 0; attempt < providers.length; attempt++) {
-    const provider = providers[(start + attempt) % providers.length]
+  for (const provider of ordered) {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      return await Promise.race([
+      const value = await Promise.race([
         work(provider),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
@@ -155,8 +207,18 @@ export async function readWithFailover<T, P>(
           )
         }),
       ])
+      health?.recordSuccess(provider, 'read')
+      return value
     } catch (err) {
       lastErr = err
+      // A non-endpoint fault (a database error inside the work callback) will
+      // fail identically on every other provider, so trying them is pure waste —
+      // and worse than waste when the DB is HUNG, because withTimeout abandons
+      // rather than cancels, leaving one unresolved query per provider per check
+      // and draining the connection pool. Stop immediately instead.
+      // (codex P2, round 5.)
+      if (!isEndpointFault(err)) throw err
+      health?.recordFailure(provider, 'read')
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from

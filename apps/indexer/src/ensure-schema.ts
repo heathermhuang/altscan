@@ -232,6 +232,31 @@ export async function ensureSchema(): Promise<void> {
       CONSTRAINT index_gaps_range CHECK (to_block >= from_block)
     )
   `))
+  // Durable heal progress. Blocks at or below heal_cursor have been re-indexed,
+  // had the transfer queue DRAINED, and been re-verified — so healing survives a
+  // crash. Without it, a crash after re-indexing but before the drain loses the
+  // in-memory transfer queue while the block itself survives with a full
+  // tx_count, and every content-based test would call it complete. Nothing
+  // replays it, because the MAX_LAG skip already jumped the durable watermark
+  // past this range. (codex P1, round 3.)
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_cursor BIGINT`))
+
+  // Lease columns for the gap healer's atomic claim.
+  //
+  // healInflight is process-LOCAL, and Render rolling deploys overlap generations
+  // for ~60-80s (measured, background workers included). Two healers would
+  // otherwise select the same absent block before either inserted it and both run
+  // processBlock — duplicating dex_trades (serial PK, no unique constraint),
+  // double-delivering webhooks, and racing the transfer writer's delete-then-
+  // reinsert. That is corruption strictly worse than having no healer.
+  // (codex P1, round 7.)
+  //
+  // The owner column doubles as a fencing token: every heal write requires the
+  // lease still be held BY THIS OWNER, so a process whose lease expired cannot
+  // land a late write over the new owner's work.
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_lease_owner TEXT`))
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_lease_until TIMESTAMPTZ`))
+
   // Partial index: every read is "what is still missing?", and the healed rows
   // are the ones that accumulate.
   await db.execute(sql.raw(`
@@ -379,6 +404,20 @@ export async function ensureSchema(): Promise<void> {
   // Until then `unverified` is the honest answer, and `degraded` still fires on
   // every recorded gap — the alert works regardless of the baseline.
   await addColumnIfMissing('indexer_cursor', 'gap_tracking_from_block', 'BIGINT')
+
+  // The block retention actually prunes below, published by the retention job.
+  //
+  // The completeness reader and the gap healer both need a retention floor, and
+  // both MUST take it from here rather than MIN(blocks.number). When the oldest
+  // retained region is itself an abandoned range, the inferred floor sits ABOVE
+  // the gap: the gap reads as aged-out, health reports `ok`, and the healer goes
+  // idle over damage that is inside the retention window. A floor inferred from
+  // the same sparse data whose holes are being measured is circular. (codex P1.)
+  //
+  // NULL means no floor is known — compact pruning disabled, or retention has
+  // not run since this column appeared. That counts everything and heals
+  // everything: wasteful at worst, never a false all-clear.
+  await addColumnIfMissing('indexer_cursor', 'compact_cutoff_block', 'BIGINT')
 
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.

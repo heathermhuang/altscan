@@ -25,8 +25,10 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, readWithFailover, redactRpcUrl } from './rpc-failover'
+import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout } from './rpc-failover'
+import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap } from './index-gaps'
+import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
@@ -171,8 +173,13 @@ async function main() {
     readLoggedAt.set(provider, now)
     console.warn(`${TAG} ⚠ RPC read failover: ${label} (${n} so far) — ${safeErr(err).slice(0, 160)}`)
   }
+  // Shared across reads AND block fetches so one endpoint's failures inform both.
+  // bsc.publicnode.com serves recent blocks but 403s ARCHIVE requests, which only
+  // happen once we are already behind — so without this the sick endpoint taxes
+  // ~1/N of blocks an 8s timeout exactly when throughput matters most.
+  const endpointHealth = createEndpointHealth<JsonRpcProvider>()
   const readTip = () =>
-    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover)
+    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover, endpointHealth)
   // Deps bound to ONE provider. detectReorgPinned fails the whole check over;
   // per-read failover here would mix chain views mid-walk. (codex P1.)
   const reorgDepsFor = (p: JsonRpcProvider) => makeReorgDepsFrom(async n => {
@@ -228,6 +235,122 @@ async function main() {
   let lastIdleReorgCheck = 0
   console.log(`${TAG} reorg tail-check ${REORG_CHECK ? `ON (K=${REORG_DEPTH})` : 'OFF'}`)
 
+  // ── Gap healing ───────────────────────────────────────────────────────────
+  // #94 recorded abandoned ranges but nothing ever cleared them, so a range that
+  // had been repaired still read `degraded` forever. A signal that can only go
+  // red is one people stop reading, which would have cost #94 its entire point.
+  //
+  // Runs on an interval rather than in the poll loop: the loop's job is the tip,
+  // and healing must never sit between it and a new block. healNextGap itself
+  // refuses to run while behind (DEFAULT_HEAL_MAX_LAG), because spending RPC on
+  // history while lagging drives the loop toward the MAX_LAG skip — which
+  // abandons blocks and would manufacture the very gaps this is closing.
+  // parseInt would let `GAP_HEAL_BATCH=0` through as a real 0, and `LIMIT 0`
+  // returns no missing rows — which IS the healed branch. A single bad env value
+  // would stamp healed_at over untouched damage. Every knob here fails open, so
+  // all of them are validated rather than trusted. (codex P1.)
+  // OFF BY DEFAULT — opt in with GAP_HEAL_ENABLED=1.
+  //
+  // The healing MACHINERY is complete and verified (atomic fenced claim,
+  // retention-bounded, absent-blocks-only, territorially disjoint from the resume
+  // scan), but one hole remains and its consequence is disqualifying rather than
+  // merely unfortunate. processBlock persists the block and all transactions
+  // BEFORE its receipt-derived writes, so if a token/DEX write fails — or the
+  // process dies after transfers are enqueued but before the queue drains — the
+  // block survives with the expected transaction count. The work set only selects
+  // ABSENT blocks, so it will never retry that one, and verification only checks
+  // presence and transaction count, so the range can be stamped healed with its
+  // transfers, DEX trades and webhooks missing.
+  //
+  // That turns a VISIBLE gap into invisible partial data reported as
+  // `completeness: ok` — a confident false all-clear, which is the exact failure
+  // #94 exists to prevent and is strictly worse than having no healer. A missing
+  // block you can see beats a wrong block you cannot.
+  //
+  // Enable once healing has a durable per-block completion marker covering the
+  // receipt-derived writes and the transfer drain, or once replay is fully
+  // idempotent/transactional. Everything else on this branch is independent of
+  // this flag.
+  const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED === '1'
+  const HEAL_INTERVAL_MS = positiveIntEnv(process.env.GAP_HEAL_INTERVAL_MS, 30000)
+  const HEAL_BATCH = positiveIntEnv(process.env.GAP_HEAL_BATCH, DEFAULT_HEAL_BATCH)
+  const HEAL_MAX_LAG = positiveIntEnv(process.env.GAP_HEAL_MAX_LAG, DEFAULT_HEAL_MAX_LAG)
+  const HEAL_FLUSH_TIMEOUT_MS = positiveIntEnv(process.env.GAP_HEAL_FLUSH_TIMEOUT_MS, 60000)
+  // Refreshed every poll iteration AND re-read from the chain at each tick start.
+  // The loop-updated value alone goes stale during a long batch or reorg walk, so
+  // the healer could start historical work believing a tip that has since moved
+  // on — burning the RPC budget precisely when the loop is losing ground.
+  let lastKnownTip = tip
+  let healInflight = false
+  // Fencing identity for the healer's gap lease. healInflight is process-local,
+  // and Render rolling deploys overlap generations for ~60-80s, so the claim has
+  // to be distinguishable per PROCESS, not per service. (codex P1, round 7.)
+  const healOwner = `${process.env.RENDER_INSTANCE_ID ?? 'local'}:${process.pid}:${Date.now().toString(36)}`
+  console.log(
+    `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG}, owner ${healOwner})` : 'OFF'}`,
+  )
+  if (HEAL_ENABLED) {
+    const healTimer = setInterval(() => {
+      // Non-overlapping: a tick that runs long must not stack another on top of
+      // it and double the background RPC draw.
+      if (healInflight || !running) return
+      healInflight = true
+      healNextGap(
+        {
+          db,
+          reindexBlock: (blockNumber: number) =>
+            processWithFailover(
+              blockNumber,
+              providers,
+              readCursor++,
+              (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
+              reportFailover,
+              endpointHealth,
+            ),
+          // Reads the tip from the CHAIN, not from a closure the poll loop
+          // refreshes. A cached tip goes stale exactly when it matters — while
+          // the live loop is stuck in a slow batch and the chain moves on — so
+          // every lag check the healer makes would keep returning the same
+          // reassuring number. Rejecting on RPC failure makes an unknown lag
+          // count as "behind" rather than "caught up". (codex P1.)
+          readLag: async () => {
+            const t = await readTip()
+            // Compare against the HIGHEST tip seen, not this one reading. A
+            // responsive-but-lagging endpoint can answer with a lower tip than we
+            // already know about, and returning `t - lastIndexed` would let that
+            // optimistic number green-light healing after a truer reading had
+            // already said we were behind. Monotonic is the honest floor.
+            // (codex P2, round 3.)
+            lastKnownTip = Math.max(lastKnownTip, t)
+            return lastKnownTip - lastIndexed
+          },
+          // Transfers are only ENQUEUED when processBlock returns, and the skip
+          // already advanced the durable watermark past this range, so a flush is
+          // the only thing that can attest the healed range's transfers landed.
+          //
+          // BOUNDED, because flushTransferWriter never rejects: the writer catches,
+          // requeues and retries forever, so a permanently stuck writer would leave
+          // this promise pending, `healInflight` stuck true, and healing silently
+          // dead with no error anywhere. A timeout converts that into a refusal to
+          // stamp — which is the safe direction, since an undrained queue means the
+          // range's transfers may never be replayed. (codex round 3.)
+          flushTransfers: ASYNC_TT_WRITER
+            ? () => withTimeout(flushTransferWriter(), HEAL_FLUSH_TIMEOUT_MS, 'gap-healer transfer flush')
+            : undefined,
+          owner: healOwner,
+          resumeWindow: RESUME_GAP_SCAN_BLOCKS,
+          log: msg => console.log(`${TAG} ${msg}`),
+        },
+        HEAL_BATCH,
+        HEAL_MAX_LAG,
+      )
+        .catch(err => console.error(`${TAG} gap healer error:`, safeErr(err)))
+        .finally(() => { healInflight = false })
+    }, HEAL_INTERVAL_MS)
+    // Don't hold the process open on shutdown.
+    healTimer.unref?.()
+  }
+
   // Roll back the transfer writer FIRST (quiesce in-flight drain, purge stale
   // queue, rewind + persist W to the fork) so the writer can't re-insert orphaned
   // rows after the delete and a crash mid-reprocess can't resume past the fork;
@@ -243,6 +366,15 @@ async function main() {
   while (running) {
     try {
       const latest = await readTip()
+      // Feeds the gap healer's lag guard. Without this it would read a boot-time
+      // tip forever and think it was caught up while falling behind.
+      //
+      // MONOTONIC: a bare assignment lets a lagging endpoint erase a higher tip we
+      // already observed, and the healer would then be green-lit by the lower
+      // number while genuinely behind. Keeping the high-water mark makes the lag
+      // estimate conservative, which is the correct direction for a guard whose
+      // job is to refuse work. (codex P2, round 4.)
+      lastKnownTip = Math.max(lastKnownTip, latest)
 
       if (latest <= lastIndexed) {
         // Caught up. Periodically verify the tip we stored is still canonical —
@@ -250,7 +382,7 @@ async function main() {
         // until the next block arrives.
         if (REORG_CHECK && Date.now() - lastIdleReorgCheck >= IDLE_REORG_CHECK_MS) {
           lastIdleReorgCheck = Date.now()
-          const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
+          const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover, endpointHealth)
           if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
         }
         await sleep(POLL_MS)
@@ -303,7 +435,7 @@ async function main() {
       // A3: validate the batch boundary before processing — detects any reorg at or
       // below lastIndexed (1 header call; the K-bounded walk only runs on mismatch).
       if (REORG_CHECK) {
-        const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover)
+        const check = await detectReorgPinned(providers, readCursor++, reorgDepsFor, lastIndexed, REORG_DEPTH, REORG_CHECK_TIMEOUT_MS, reportReadFailover, endpointHealth)
         if (check.isReorg) { await recoverFromReorg(check.forkPoint); continue }
       }
 
@@ -402,6 +534,7 @@ async function main() {
                 workerId,
                 (b, p, onSideEffect) => processBlock(b, p, false, onSideEffect),
                 reportFailover,
+                endpointHealth,
               )
               blockStatus[idx] = 2
               advanceLastIndexed()
