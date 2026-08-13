@@ -195,6 +195,17 @@ export async function healNextGap(
            heal_lease_until = now() + (${leaseMs} || ' milliseconds')::interval
       FROM f
      WHERE g.from_block = (SELECT from_block FROM candidate)
+       -- Eligibility is REPEATED here, not just inside the candidate CTE, and
+       -- that is what makes the claim atomic. Under READ COMMITTED two claimers
+       -- can both pick row 100; the second blocks on the row lock and, once the
+       -- first commits, Postgres RE-EVALUATES this predicate against the new row
+       -- version. With only from_block = 100 it still passes, so the loser would
+       -- overwrite the winner's lease and also be handed the gap — both then enter
+       -- processBlock, and no amount of later fencing can un-duplicate a dex_trade
+       -- or un-send a webhook. Re-checking the lease here makes the loser update
+       -- zero rows and idle. (codex P1, round 8.)
+       AND g.healed_at IS NULL
+       AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
     RETURNING g.from_block,
               g.to_block,
               GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
