@@ -249,7 +249,29 @@ async function main() {
   // returns no missing rows — which IS the healed branch. A single bad env value
   // would stamp healed_at over untouched damage. Every knob here fails open, so
   // all of them are validated rather than trusted. (codex P1.)
-  const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED !== '0'
+  // OFF BY DEFAULT — opt in with GAP_HEAL_ENABLED=1.
+  //
+  // The healing MACHINERY is complete and verified (atomic fenced claim,
+  // retention-bounded, absent-blocks-only, territorially disjoint from the resume
+  // scan), but one hole remains and its consequence is disqualifying rather than
+  // merely unfortunate. processBlock persists the block and all transactions
+  // BEFORE its receipt-derived writes, so if a token/DEX write fails — or the
+  // process dies after transfers are enqueued but before the queue drains — the
+  // block survives with the expected transaction count. The work set only selects
+  // ABSENT blocks, so it will never retry that one, and verification only checks
+  // presence and transaction count, so the range can be stamped healed with its
+  // transfers, DEX trades and webhooks missing.
+  //
+  // That turns a VISIBLE gap into invisible partial data reported as
+  // `completeness: ok` — a confident false all-clear, which is the exact failure
+  // #94 exists to prevent and is strictly worse than having no healer. A missing
+  // block you can see beats a wrong block you cannot.
+  //
+  // Enable once healing has a durable per-block completion marker covering the
+  // receipt-derived writes and the transfer drain, or once replay is fully
+  // idempotent/transactional. Everything else on this branch is independent of
+  // this flag.
+  const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED === '1'
   const HEAL_INTERVAL_MS = positiveIntEnv(process.env.GAP_HEAL_INTERVAL_MS, 30000)
   const HEAL_BATCH = positiveIntEnv(process.env.GAP_HEAL_BATCH, DEFAULT_HEAL_BATCH)
   const HEAL_MAX_LAG = positiveIntEnv(process.env.GAP_HEAL_MAX_LAG, DEFAULT_HEAL_MAX_LAG)
