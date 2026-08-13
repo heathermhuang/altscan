@@ -182,11 +182,23 @@ export async function healNextGap(
   const gapRow = rowsOf(await db.execute(sql`
     WITH f AS (SELECT compact_cutoff_block AS floor FROM indexer_cursor WHERE id = 1),
          candidate AS (
+           -- Deliberately does NOT skip leased rows. Skipping would let a second
+           -- process move on to the NEXT row — and gap ranges can OVERLAP, because
+           -- a reorg rollback moves lastIndexed backwards so a later skip can
+           -- record a range overlapping a stored one. A would hold [100,200] while
+           -- B claimed [110,250], and both would see 110..124 as absent and call
+           -- processBlock on them. The per-row lease cannot see that; the rows
+           -- differ. (codex P1, round 9.)
+           --
+           -- Nominating the oldest row unconditionally means every process
+           -- competes for the SAME row, so the repeated target predicate below
+           -- leaves exactly one winner and idles the rest. Only one gap is in
+           -- flight at a time, which is fine for a background trickle and is the
+           -- only way to make overlap impossible rather than merely unlikely.
            SELECT g.from_block
            FROM index_gaps g, f
            WHERE g.healed_at IS NULL
              AND (f.floor IS NULL OR g.to_block >= f.floor)
-             AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
            ORDER BY g.from_block
            LIMIT 1
          )
