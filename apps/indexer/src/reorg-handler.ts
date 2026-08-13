@@ -37,10 +37,16 @@ import { positiveIntEnv } from './gap-healer'
  * point. Capped too, because a value above the outer timeout is silently useless.
  * (codex P2, round 5.)
  */
-const STORED_HASH_TIMEOUT_MS = Math.min(
-  positiveIntEnv(process.env.STORED_HASH_TIMEOUT_MS, 10_000),
-  30_000,
-)
+const STORED_HASH_TIMEOUT_MS = (() => {
+  const requested = Math.min(positiveIntEnv(process.env.STORED_HASH_TIMEOUT_MS, 10_000), 30_000)
+  // RPC_REORG_TIMEOUT_MS is set independently, so it can legitimately be tuned
+  // BELOW this one — at which point the outer timer fires first with an untagged
+  // error and the whole point (tagging a DB hang so it is not blamed on, and
+  // retried against, every endpoint) is silently lost. Stay strictly under it.
+  // (codex P2, round 6.)
+  const outer = positiveIntEnv(process.env.RPC_REORG_TIMEOUT_MS, 45_000)
+  return Math.max(1_000, Math.min(requested, Math.floor(outer / 2)))
+})()
 import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */

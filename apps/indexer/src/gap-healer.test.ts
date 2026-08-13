@@ -82,17 +82,24 @@ describe('healNextGap', () => {
   })
 
   /**
-   * processBlock is NOT idempotent: dex_trades has only a serial primary key, so
-   * onConflictDoNothing() cannot dedupe a replay, and writeTransferBlocks DELETEs
-   * a block's transfers before re-inserting. Replaying an already-complete block
-   * therefore duplicates swaps and can destroy good transfers. Only damage a
-   * replay can actually repair may be selected. (codex P1, round 5.)
+   * processBlock has no partial mode — it decodes every receipt and re-runs every
+   * side effect — and it is not idempotent: dex_trades has only a serial primary
+   * key so onConflictDoNothing() cannot dedupe, webhooks re-fire for every
+   * transaction, and writeTransferBlocks DELETEs a block's transfers before
+   * re-inserting (destroying them outright if the receipt fetch returns empty).
+   * So ONLY absent blocks may be processed — for those it is a first write, not a
+   * replay. That is exactly the damage a MAX_LAG skip produces.
+   * (codex P1, rounds 5 and 6.)
    */
-  it('only re-indexes REPAIRABLE damage, never already-complete blocks', async () => {
-    const { db } = stubDb([SMALL, [{ n: '104' }, { n: '105' }], [], []])
+  it('processes ONLY absent blocks — whatever the work query returns', async () => {
+    const { db, calls } = stubDb([SMALL, [{ n: '104' }, { n: '105' }], [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({ db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([104, 105])
+    // The work query must not admit present-but-wrong blocks at all.
+    const workSql = JSON.stringify(calls[1])
+    expect(workSql).toContain('NOT EXISTS')
+    expect(workSql).not.toContain('tx_count')
   })
 
   it('advances the cursor but does NOT stamp while the range is unfinished', async () => {

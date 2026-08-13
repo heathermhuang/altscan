@@ -218,42 +218,36 @@ export async function healNextGap(
           )
     ORDER BY n
   `
-  // Work set = REPLAYABLE damage only: blocks that are absent, or that hold
-  // FEWER transactions than tx_count says they should.
+  // Work set = ABSENT blocks ONLY. Nothing else is safe to process.
   //
-  // An earlier cut replayed every block above the cursor, reasoning that the
-  // cursor is the only durable claim about transfer durability. That was a
-  // corruption regression, not a fix: processBlock is explicitly NOT idempotent.
-  // `dex_trades` carries `id serial PRIMARY KEY` with no unique constraint, so
-  // its onConflictDoNothing() cannot dedupe a replay — rpc-failover.ts documents
-  // this and refuses to fail over past a side effect for exactly this reason.
-  // Replaying an already-complete block therefore DUPLICATES its swaps on every
-  // crash, held cursor or failed flush. Worse, writeTransferBlocks DELETEs a
-  // block's transfers before re-inserting, so a replay that gets an empty receipt
-  // response destroys good transfers while the transaction count still verifies.
-  // (codex P1, round 5.)
+  // processBlock is not a repair tool, it is a first-time indexer, and it has no
+  // partial mode: it decodes EVERY receipt in the block and re-runs every side
+  // effect. So re-processing a block that already exists —
+  //   - inserts all its dex_trades AGAIN (`id serial PRIMARY KEY`, no unique
+  //     constraint, so onConflictDoNothing() cannot dedupe; rpc-failover.ts:70
+  //     documents this and refuses to fail over past a side effect for it),
+  //   - re-delivers webhooks for every transaction, not just new ones, and
+  //   - DELETEs and re-inserts the block's transfers, which destroys good rows
+  //     outright if the receipt fetch comes back empty (null is read as []).
+  // An earlier cut selected blocks with `transactions < tx_count`, reasoning that
+  // "underfull" damage is repairable. It is not: the missing transaction may be
+  // unreinsertable (a mixed-fork hash collision), in which case the predicate
+  // stays true and those side effects repeat EVERY tick — unbounded duplication.
+  // (codex P1, rounds 5 and 6.)
   //
-  // Only damage that a replay can actually REPAIR is selected. Overfull blocks
-  // (count > tx_count, the mixed-fork shape) are deliberately NOT selected:
-  // ON CONFLICT DO NOTHING cannot remove the extra rows, so replaying one would
-  // never fix it and would spin the same window forever, amplifying RPC and DB
-  // load. Verification below still uses exact equality, so such a block holds the
-  // range unhealed and visible rather than being silently stamped.
+  // An ABSENT block has no transactions, no dex_trades, no transfers and no
+  // delivered webhooks, so indexing it is a first write rather than a replay.
+  // That is also exactly the damage a MAX_LAG skip produces: whole abandoned
+  // blocks. The healer therefore covers its actual use case completely.
   //
-  // Residual, documented, NOT claimed as closed: a crash between reindexBlock
-  // returning and the flush leaves a block whose rows are on disk while the
-  // in-memory transfer queue is lost. It satisfies the content test, so it is not
-  // re-selected. Closing that needs a durable per-block completion marker written
-  // after transfer persistence; replaying blindly is strictly worse than the hole
-  // it was trying to plug.
+  // Present-but-wrong blocks (underfull OR overfull) are deliberately left alone.
+  // Verification below uses exact equality, so such a block holds its range
+  // unhealed and loudly logged — visibly degraded, which is honest, rather than
+  // silently stamped or endlessly reprocessed. Repairing them needs a
+  // transactional block rebuild, which is a separate piece of work.
   const missing = rowsOf(await db.execute(sql`
     SELECT n FROM generate_series(${healFrom}::bigint, ${windowEnd}::bigint) AS n
     WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
-       OR EXISTS (
-            SELECT 1 FROM blocks b
-            WHERE b.number = n
-              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
-          )
     ORDER BY n
   `))
     .map(r => toNum(r.n))
