@@ -241,6 +241,22 @@ export async function ensureSchema(): Promise<void> {
   // past this range. (codex P1, round 3.)
   await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_cursor BIGINT`))
 
+  // Lease columns for the gap healer's atomic claim.
+  //
+  // healInflight is process-LOCAL, and Render rolling deploys overlap generations
+  // for ~60-80s (measured, background workers included). Two healers would
+  // otherwise select the same absent block before either inserted it and both run
+  // processBlock — duplicating dex_trades (serial PK, no unique constraint),
+  // double-delivering webhooks, and racing the transfer writer's delete-then-
+  // reinsert. That is corruption strictly worse than having no healer.
+  // (codex P1, round 7.)
+  //
+  // The owner column doubles as a fencing token: every heal write requires the
+  // lease still be held BY THIS OWNER, so a process whose lease expired cannot
+  // land a late write over the new owner's work.
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_lease_owner TEXT`))
+  await db.execute(sql.raw(`ALTER TABLE index_gaps ADD COLUMN IF NOT EXISTS heal_lease_until TIMESTAMPTZ`))
+
   // Partial index: every read is "what is still missing?", and the healed rows
   // are the ones that accumulate.
   await db.execute(sql.raw(`

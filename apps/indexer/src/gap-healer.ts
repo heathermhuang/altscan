@@ -43,6 +43,12 @@ export type HealDeps = {
    */
   readLag: () => Promise<number>
   /**
+   * Identity of THIS process, used as the lease's fencing token. Must be unique
+   * per process — two generations sharing an owner string would defeat the lease
+   * entirely during a rolling deploy, which is the exact window it guards.
+   */
+  owner: string
+  /**
    * Drain the async transfer writer. Required before stamping healed_at:
    * processBlock returns once transfers are only ENQUEUED, and the MAX_LAG skip
    * already advanced the durable watermark past these blocks, so nothing else
@@ -55,6 +61,17 @@ export type HealDeps = {
 
 /** Re-read the tip every N blocks within a tick. */
 export const LAG_RECHECK_EVERY = 10
+
+/**
+ * How long a claimed gap stays leased. Must comfortably exceed one tick's work
+ * (a batch of blocks plus the transfer flush) so the holder finishes long before
+ * the lease lapses, while staying short enough that a crashed holder does not
+ * park a gap for long.
+ */
+export const DEFAULT_HEAL_LEASE_MS = 600_000
+
+/** Stop this many ms before the lease lapses, so work never outlives the claim. */
+export const LEASE_SAFETY_MS = 30_000
 
 export type HealOutcome =
   /** Nothing unhealed intersects the retained window. */
@@ -122,25 +139,6 @@ function rowsOf(result: unknown): Array<Record<string, unknown>> {
  * queue entirely — without it the healer would spin forever on a range whose
  * blocks retention deletes faster than we can write them.
  */
-export const NEXT_HEALABLE_GAP_SQL = `
-  WITH f AS (SELECT compact_cutoff_block AS floor FROM indexer_cursor WHERE id = 1)
-  SELECT g.from_block,
-         g.to_block,
-         GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
-         -- The retention-clamped START of the range. The final proof must span
-         -- this, NOT heal_from: once the cursor reaches to_block, heal_from is
-         -- to_block + 1 and a density check over that empty series is trivially
-         -- true, so it would stamp healed having verified nothing.
-         GREATEST(g.from_block, f.floor)  AS verify_from,
-         g.heal_cursor                    AS heal_cursor,
-         f.floor                          AS retention_floor
-  FROM index_gaps g, f
-  WHERE g.healed_at IS NULL
-    AND (f.floor IS NULL OR g.to_block >= f.floor)
-  ORDER BY g.from_block
-  LIMIT 1
-`
-
 /**
  * Run one bounded healing tick. Returns what it did so the caller can log it.
  *
@@ -152,8 +150,9 @@ export async function healNextGap(
   deps: HealDeps,
   batchSize: number = DEFAULT_HEAL_BATCH,
   maxLag: number = DEFAULT_HEAL_MAX_LAG,
+  leaseMsIn: number = DEFAULT_HEAL_LEASE_MS,
 ): Promise<HealOutcome> {
-  const { db, reindexBlock, readLag, flushTransfers } = deps
+  const { db, reindexBlock, readLag, flushTransfers, owner } = deps
   const now = deps.now ?? (() => new Date())
   const log = deps.log ?? (() => {})
 
@@ -162,6 +161,10 @@ export async function healNextGap(
   // must be sane no matter which caller supplied it.
   const batch = Number.isInteger(batchSize) && batchSize >= 1 ? batchSize : DEFAULT_HEAL_BATCH
   const lagCeiling = Number.isFinite(maxLag) && maxLag >= 0 ? maxLag : DEFAULT_HEAL_MAX_LAG
+  // The lease must outlast a tick by a wide margin, or the safety margin below
+  // would abort every tick immediately.
+  const leaseMs = Number.isInteger(leaseMsIn) && leaseMsIn > LEASE_SAFETY_MS * 2
+    ? leaseMsIn : DEFAULT_HEAL_LEASE_MS
 
   // Guard FIRST: never spend RPC/DB budget on history while the tip is slipping.
   // A tip we cannot read is treated as behind — an unreachable RPC must not
@@ -174,8 +177,35 @@ export async function healNextGap(
   }
   if (!Number.isFinite(lag) || lag > lagCeiling) return { status: 'skipped', lag }
 
-  const gapRow = rowsOf(await db.execute(sql.raw(NEXT_HEALABLE_GAP_SQL)))[0]
+  // Claim atomically. No row means another process (or another generation mid
+  // rolling deploy) holds the lease — idle rather than racing it.
+  const gapRow = rowsOf(await db.execute(sql`
+    WITH f AS (SELECT compact_cutoff_block AS floor FROM indexer_cursor WHERE id = 1),
+         candidate AS (
+           SELECT g.from_block
+           FROM index_gaps g, f
+           WHERE g.healed_at IS NULL
+             AND (f.floor IS NULL OR g.to_block >= f.floor)
+             AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
+           ORDER BY g.from_block
+           LIMIT 1
+         )
+    UPDATE index_gaps g
+       SET heal_lease_owner = ${owner},
+           heal_lease_until = now() + (${leaseMs} || ' milliseconds')::interval
+      FROM f
+     WHERE g.from_block = (SELECT from_block FROM candidate)
+    RETURNING g.from_block,
+              g.to_block,
+              GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
+              GREATEST(g.from_block, f.floor) AS verify_from,
+              g.heal_cursor AS heal_cursor,
+              f.floor       AS retention_floor
+  `))[0]
   if (!gapRow) return { status: 'idle' }
+  // Local deadline: stop before the lease lapses so a slow tick cannot still be
+  // calling processBlock while another owner has taken over.
+  const leaseDeadline = Date.now() + leaseMs
 
   const fromBlock = toNum(gapRow.from_block)
   const toBlock = toNum(gapRow.to_block)
@@ -260,6 +290,13 @@ export async function healNextGap(
     // loop refreshes is useless exactly when it matters — if the live loop is
     // stuck in a slow batch while the chain advances, every check returns the
     // same stale value and the healer keeps competing. (codex P1, round 2.)
+    // Bail before the lease lapses. Past that point another generation may hold
+    // the gap, and two processBlock runs on one block is the corruption this
+    // lease exists to prevent.
+    if (Date.now() > leaseDeadline - LEASE_SAFETY_MS) {
+      log(`[gap-healer] lease expiring — stopping after ${repaired} block(s) in ${fromBlock}..${toBlock}`)
+      return { status: 'progressed', fromBlock, toBlock, repaired }
+    }
     if (i % LAG_RECHECK_EVERY === 0) {
       let midLag: number
       try {
@@ -320,6 +357,8 @@ export async function healNextGap(
     UPDATE index_gaps
        SET heal_cursor = GREATEST(COALESCE(heal_cursor, ${healFrom} - 1), ${windowEnd})
      WHERE from_block = ${fromBlock} AND healed_at IS NULL
+       -- Fenced: a lapsed owner must not land a late write over the new owner.
+       AND heal_lease_owner = ${owner} AND heal_lease_until > now()
   `)
 
   if (windowEnd < toBlock) {
@@ -335,6 +374,7 @@ export async function healNextGap(
      WHERE from_block = ${fromBlock}
        AND to_block   = ${toBlock}
        AND healed_at IS NULL
+       AND heal_lease_owner = ${owner} AND heal_lease_until > now()
        AND NOT EXISTS (
          SELECT 1 FROM generate_series(${verifyFrom}::bigint, ${toBlock}::bigint) AS n
          WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)

@@ -260,8 +260,12 @@ async function main() {
   // on — burning the RPC budget precisely when the loop is losing ground.
   let lastKnownTip = tip
   let healInflight = false
+  // Fencing identity for the healer's gap lease. healInflight is process-local,
+  // and Render rolling deploys overlap generations for ~60-80s, so the claim has
+  // to be distinguishable per PROCESS, not per service. (codex P1, round 7.)
+  const healOwner = `${process.env.RENDER_INSTANCE_ID ?? 'local'}:${process.pid}:${Date.now().toString(36)}`
   console.log(
-    `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG})` : 'OFF'}`,
+    `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG}, owner ${healOwner})` : 'OFF'}`,
   )
   if (HEAL_ENABLED) {
     const healTimer = setInterval(() => {
@@ -311,6 +315,7 @@ async function main() {
           flushTransfers: ASYNC_TT_WRITER
             ? () => withTimeout(flushTransferWriter(), HEAL_FLUSH_TIMEOUT_MS, 'gap-healer transfer flush')
             : undefined,
+          owner: healOwner,
           log: msg => console.log(`${TAG} ${msg}`),
         },
         HEAL_BATCH,
