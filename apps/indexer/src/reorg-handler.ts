@@ -25,13 +25,22 @@
 import { getDb, schema } from './db'
 import { eq, gte } from 'drizzle-orm'
 import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
+import { positiveIntEnv } from './gap-healer'
 
 /**
- * Bound on the reorg check's DB reads. Must stay comfortably BELOW the outer
- * RPC read timeout (default 45s for a full check) so a hung database rejects —
- * and is tagged — before the outer timer can fire and misattribute it.
+ * Bound on the reorg check's DB reads. Must stay comfortably BELOW the outer RPC
+ * read timeout (default 45s for a full check) so a hung database rejects — and is
+ * tagged — before the outer timer can fire and misattribute it to the endpoint.
+ *
+ * Validated rather than parsed: `parseInt` yields NaN for a typo and 0 for "0",
+ * and either would make the timer fire immediately or never — defeating the whole
+ * point. Capped too, because a value above the outer timeout is silently useless.
+ * (codex P2, round 5.)
  */
-const STORED_HASH_TIMEOUT_MS = parseInt(process.env.STORED_HASH_TIMEOUT_MS ?? '10000', 10)
+const STORED_HASH_TIMEOUT_MS = Math.min(
+  positiveIntEnv(process.env.STORED_HASH_TIMEOUT_MS, 10_000),
+  30_000,
+)
 import type { EndpointHealth } from './endpoint-health'
 
 /** Injectable chain views so detection logic is unit-testable without DB/RPC. */

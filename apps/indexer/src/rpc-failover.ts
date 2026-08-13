@@ -211,7 +211,14 @@ export async function readWithFailover<T, P>(
       return value
     } catch (err) {
       lastErr = err
-      if (isEndpointFault(err)) health?.recordFailure(provider, 'read')
+      // A non-endpoint fault (a database error inside the work callback) will
+      // fail identically on every other provider, so trying them is pure waste —
+      // and worse than waste when the DB is HUNG, because withTimeout abandons
+      // rather than cancels, leaving one unresolved query per provider per check
+      // and draining the connection pool. Stop immediately instead.
+      // (codex P2, round 5.)
+      if (!isEndpointFault(err)) throw err
+      health?.recordFailure(provider, 'read')
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from

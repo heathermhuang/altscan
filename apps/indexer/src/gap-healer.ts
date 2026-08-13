@@ -218,22 +218,46 @@ export async function healNextGap(
           )
     ORDER BY n
   `
-  // REPLAY EVERY BLOCK ABOVE THE CURSOR — not just the ones that look incomplete.
+  // Work set = REPLAYABLE damage only: blocks that are absent, or that hold
+  // FEWER transactions than tx_count says they should.
   //
-  // This is the correction that actually closes the crash hole. If the process
-  // dies after reindexBlock returns but before the flush, the block and its
-  // transactions are on disk while the in-memory transfer queue is gone. Such a
-  // block satisfies every content test there is, so a content-driven work set
-  // skips it, the empty queue flushes cleanly, and the cursor sails past a block
-  // whose transfers no longer exist anywhere. (codex P1, round 4.)
+  // An earlier cut replayed every block above the cursor, reasoning that the
+  // cursor is the only durable claim about transfer durability. That was a
+  // corruption regression, not a fix: processBlock is explicitly NOT idempotent.
+  // `dex_trades` carries `id serial PRIMARY KEY` with no unique constraint, so
+  // its onConflictDoNothing() cannot dedupe a replay — rpc-failover.ts documents
+  // this and refuses to fail over past a side effect for exactly this reason.
+  // Replaying an already-complete block therefore DUPLICATES its swaps on every
+  // crash, held cursor or failed flush. Worse, writeTransferBlocks DELETEs a
+  // block's transfers before re-inserting, so a replay that gets an empty receipt
+  // response destroys good transfers while the transaction count still verifies.
+  // (codex P1, round 5.)
   //
-  // heal_cursor is the ONLY durable statement about transfer durability, so
-  // anything above it is unconfirmed by definition and gets replayed regardless
-  // of appearance. processBlock is idempotent — transfers are DELETE+INSERT per
-  // block, everything else upserts — so the redundant work costs time, not
-  // correctness, and it is bounded by one window per crash.
-  const missing: number[] = []
-  for (let n = healFrom; n <= windowEnd; n++) missing.push(n)
+  // Only damage that a replay can actually REPAIR is selected. Overfull blocks
+  // (count > tx_count, the mixed-fork shape) are deliberately NOT selected:
+  // ON CONFLICT DO NOTHING cannot remove the extra rows, so replaying one would
+  // never fix it and would spin the same window forever, amplifying RPC and DB
+  // load. Verification below still uses exact equality, so such a block holds the
+  // range unhealed and visible rather than being silently stamped.
+  //
+  // Residual, documented, NOT claimed as closed: a crash between reindexBlock
+  // returning and the flush leaves a block whose rows are on disk while the
+  // in-memory transfer queue is lost. It satisfies the content test, so it is not
+  // re-selected. Closing that needs a durable per-block completion marker written
+  // after transfer persistence; replaying blindly is strictly worse than the hole
+  // it was trying to plug.
+  const missing = rowsOf(await db.execute(sql`
+    SELECT n FROM generate_series(${healFrom}::bigint, ${windowEnd}::bigint) AS n
+    WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+       OR EXISTS (
+            SELECT 1 FROM blocks b
+            WHERE b.number = n
+              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) < b.tx_count
+          )
+    ORDER BY n
+  `))
+    .map(r => toNum(r.n))
+    .filter((n): n is number => n !== null)
 
   let repaired = 0
   for (let i = 0; i < missing.length; i++) {
@@ -288,9 +312,13 @@ export async function healNextGap(
 
   // Re-verify the window now that everything is durable. Only then is the cursor
   // allowed past it.
-  const stillIncomplete = rowsOf(await db.execute(incompleteIn(healFrom, windowEnd))).length
-  if (stillIncomplete > 0) {
-    log(`[gap-healer] ${stillIncomplete} block(s) still incomplete in ${healFrom}..${windowEnd} — cursor held`)
+  const bad = rowsOf(await db.execute(incompleteIn(healFrom, windowEnd)))
+  if (bad.length > 0) {
+    // Exact-equality verification, so this also catches OVERFULL blocks that the
+    // work set deliberately skipped. Those cannot be repaired by replay, so say so
+    // loudly: the range stays unhealed and visible rather than quietly retried
+    // forever or silently stamped.
+    log(`[gap-healer] ${bad.length} block(s) failed verification in ${healFrom}..${windowEnd} — cursor held, range left degraded`)
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
 
