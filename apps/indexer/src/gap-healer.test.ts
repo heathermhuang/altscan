@@ -48,7 +48,7 @@ describe('healNextGap', () => {
   it('refuses to run while the indexer is behind', async () => {
     const { db, calls } = stubDb([GAP])
     const reindexBlock = vi.fn()
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock, readLag: async () => DEFAULT_HEAL_MAX_LAG + 1,
     })
     expect(out).toEqual({ status: 'skipped', lag: DEFAULT_HEAL_MAX_LAG + 1 })
@@ -60,13 +60,13 @@ describe('healNextGap', () => {
 
   it('treats a non-finite lag as behind (fails closed)', async () => {
     const { db } = stubDb([GAP])
-    const out = await healNextGap({ owner: 'test', db, reindexBlock: vi.fn(), readLag: async () => NaN })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock: vi.fn(), readLag: async () => NaN })
     expect(out.status).toBe('skipped')
   })
 
   it('treats an unreadable tip as behind, not as caught up', async () => {
     const { db, calls } = stubDb([GAP])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(), readLag: async () => { throw new Error('rpc down') },
     })
     expect(out.status).toBe('skipped')
@@ -76,7 +76,7 @@ describe('healNextGap', () => {
   it('is idle when nothing unhealed intersects the retained window', async () => {
     const { db } = stubDb([[]])
     const reindexBlock = vi.fn()
-    const out = await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0 })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0 })
     expect(out).toEqual({ status: 'idle' })
     expect(reindexBlock).not.toHaveBeenCalled()
   })
@@ -94,7 +94,7 @@ describe('healNextGap', () => {
   it('processes ONLY absent blocks — whatever the work query returns', async () => {
     const { db, calls } = stubDb([SMALL, [{ n: '104' }, { n: '105' }], [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock.mock.calls.map(c => c[0])).toEqual([104, 105])
     // The work query must not admit present-but-wrong blocks at all.
     const workSql = JSON.stringify(calls[1])
@@ -107,7 +107,7 @@ describe('healNextGap', () => {
     // range, so there is no stamp.
     const { db, calls } = stubDb([GAP, [{ n: '110' }], [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(out).toMatchObject({ status: 'progressed', fromBlock: 100, toBlock: 200 })
     expect(reindexBlock).toHaveBeenCalledTimes(1)
     // gap, work-set, verify, advance — no stamp, the window ends at 124 of 200.
@@ -117,7 +117,7 @@ describe('healNextGap', () => {
   it('stamps healed_at only once the whole range is confirmed', async () => {
     // gap, re-verify(clean), advance-cursor, stamp(RETURNING a row = it applied).
     const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
     })
     expect(out).toMatchObject({ status: 'healed', fromBlock: 100, toBlock: 110 })
@@ -128,7 +128,7 @@ describe('healNextGap', () => {
     // The range changed under us (grew, or lost rows to a reorg). Zero rows
     // updated is NOT a heal — that would be the same false all-clear, quietly.
     const { db } = stubDb([SMALL, [], [], [], []])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
     })
     expect(out.status).toBe('progressed')
@@ -140,7 +140,7 @@ describe('healNextGap', () => {
     // Verification uses EXACT equality, so it also catches overfull blocks the
     // work set deliberately skipped — those cannot be repaired by replay.
     const { db, calls } = stubDb([SMALL, [], [{ n: '105' }]])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
     })
     expect(out.status).toBe('progressed')
@@ -153,7 +153,7 @@ describe('healNextGap', () => {
     // watermark past this range, so an undrained queue means these transfers may
     // never be replayed.
     const { db, calls } = stubDb([SMALL, [], [], [{ from_block: '100' }]])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0,
       flushTransfers: async () => { throw new Error('writer stuck') },
     })
@@ -166,7 +166,7 @@ describe('healNextGap', () => {
     const reindexBlock = vi.fn(async (n: number) => {
       if (n === 102) throw new Error('archive 403')
     })
-    const out = await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(out.status).toBe('failed')
     expect(out).toMatchObject({ fromBlock: 100, toBlock: 110, repaired: 2 })
     // Bailed at 102 — did not grind the rest against a bad endpoint.
@@ -182,7 +182,7 @@ describe('healNextGap', () => {
     // absence check and the delete, so it could destroy data it never owned.
     const { db, calls } = stubDb([SMALL, [{ n: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => { throw new Error('archive 403') })
-    const out = await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(out.status).toBe('failed')
     expect(calls).toHaveLength(2)
   })
@@ -193,7 +193,7 @@ describe('healNextGap', () => {
     const clamped = [{ from_block: '100', to_block: '155', heal_from: '150', verify_from: '150' }]
     const { db } = stubDb([clamped, [{ n: '150' }], [], [], [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock.mock.calls[0][0]).toBe(150)
     // healed_at is still keyed on the RECORDED start — that is the primary key.
     expect(out).toMatchObject({ fromBlock: 100, toBlock: 155 })
@@ -204,7 +204,7 @@ describe('healNextGap', () => {
     // becomes string concatenation.
     const { db } = stubDb([[{ from_block: '100', to_block: '101', heal_from: '100', verify_from: '100' }], [{ n: '100' }], [], [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
+    await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock).toHaveBeenCalledWith(100)
     expect(typeof reindexBlock.mock.calls[0][0]).toBe('number')
   })
@@ -216,7 +216,7 @@ describe('healNextGap — fail-closed properties', () => {
     // stamp. The batch is re-clamped no matter which caller supplied it.
     const { db } = stubDb([SMALL, [{ n: '100' }], [], [], [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    await healNextGap({ owner: 'test', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush }, 0)
+    await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush }, 0)
     expect(reindexBlock).toHaveBeenCalled()
   })
 
@@ -224,7 +224,7 @@ describe('healNextGap — fail-closed properties', () => {
     // `lag > NaN` is false, so an unvalidated ceiling would silently stop the
     // guard firing and let healing compete with an indexer that is losing blocks.
     const { db } = stubDb([GAP, []])
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(), readLag: async () => 10_000,
     }, 25, NaN)
     expect(out.status).toBe('skipped')
@@ -236,7 +236,7 @@ describe('healNextGap — fail-closed properties', () => {
     const work = Array.from({ length: 3 * LAG_RECHECK_EVERY }, (_, k) => ({ n: String(100 + k) }))
     const { db } = stubDb([GAP, work, [], []])
     const reindexBlock = vi.fn(async (_n: number) => {})
-    const out = await healNextGap({ owner: 'test',
+    const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock,
       // Reads: entry guard, then a recheck every LAG_RECHECK_EVERY blocks.
       readLag: async () => (++call <= 3 ? 0 : 9999),
@@ -273,7 +273,7 @@ describe('gap lease', () => {
     // The claim is an UPDATE ... RETURNING: the loser simply sees zero rows.
     const { db, calls } = stubDb([[]])
     const reindexBlock = vi.fn()
-    const out = await healNextGap({ owner: 'b', db, reindexBlock, readLag: async () => 0 })
+    const out = await healNextGap({ owner: 'b', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0 })
     expect(out).toEqual({ status: 'idle' })
     expect(reindexBlock).not.toHaveBeenCalled()
     expect(calls).toHaveLength(1)
@@ -282,7 +282,7 @@ describe('gap lease', () => {
   it('claims with THIS owner and fences both writes on it', async () => {
     const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
     await healNextGap({
-      owner: 'owner-abc', db, reindexBlock: vi.fn(async (_n: number) => {}),
+      owner: 'owner-abc', resumeWindow: 20000, db, reindexBlock: vi.fn(async (_n: number) => {}),
       readLag: async () => 0, flushTransfers: okFlush,
     })
     const claim = JSON.stringify(calls[0])
@@ -303,7 +303,7 @@ describe('gap lease', () => {
     const { db } = stubDb([SMALL, [{ n: '100' }], [], [], [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({
-      owner: 't', db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush,
+      owner: 't', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush,
     }, 25, 50, 1000)
     expect(reindexBlock).toHaveBeenCalled()
   })

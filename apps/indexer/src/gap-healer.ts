@@ -43,6 +43,12 @@ export type HealDeps = {
    */
   readLag: () => Promise<number>
   /**
+   * RESUME_GAP_SCAN_BLOCKS. Gaps nearer the tip than this are the resume scan's
+   * responsibility and must be left alone, or two writers can process the same
+   * block during a deploy overlap.
+   */
+  resumeWindow: number
+  /**
    * Identity of THIS process, used as the lease's fencing token. Must be unique
    * per process — two generations sharing an owner string would defeat the lease
    * entirely during a rolling deploy, which is the exact window it guards.
@@ -152,7 +158,7 @@ export async function healNextGap(
   maxLag: number = DEFAULT_HEAL_MAX_LAG,
   leaseMsIn: number = DEFAULT_HEAL_LEASE_MS,
 ): Promise<HealOutcome> {
-  const { db, reindexBlock, readLag, flushTransfers, owner } = deps
+  const { db, reindexBlock, readLag, flushTransfers, owner, resumeWindow } = deps
   const now = deps.now ?? (() => new Date())
   const log = deps.log ?? (() => {})
 
@@ -199,6 +205,19 @@ export async function healNextGap(
            FROM index_gaps g, f
            WHERE g.healed_at IS NULL
              AND (f.floor IS NULL OR g.to_block >= f.floor)
+             -- Stay clear of the resume scan's territory. getResumeCursor rewinds
+             -- lastIndexed to backfill any hole within RESUME_GAP_SCAN_BLOCKS of
+             -- the tip, and that path knows nothing about this lease — so during a
+             -- rolling deploy the old generation's healer and the new generation's
+             -- resume backfill could both processBlock the same block, duplicating
+             -- dex_trades and webhooks. Rather than couple the two writers, their
+             -- territories are made disjoint: the resume scan owns recent holes,
+             -- the healer owns everything older. (codex P1, round 10.)
+             --
+             -- Costs only latency, never coverage: a fresh gap simply waits until
+             -- it falls out of the resume window, which is hours, against a
+             -- retention floor measured in days.
+             AND g.to_block < (SELECT MAX(number) FROM blocks) - ${resumeWindow}
            ORDER BY g.from_block
            LIMIT 1
          )

@@ -316,6 +316,7 @@ async function main() {
             ? () => withTimeout(flushTransferWriter(), HEAL_FLUSH_TIMEOUT_MS, 'gap-healer transfer flush')
             : undefined,
           owner: healOwner,
+          resumeWindow: RESUME_GAP_SCAN_BLOCKS,
           log: msg => console.log(`${TAG} ${msg}`),
         },
         HEAL_BATCH,
