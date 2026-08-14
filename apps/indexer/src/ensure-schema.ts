@@ -185,6 +185,33 @@ export async function ensureSchema(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_hash_key
       ON webhook_deliveries (webhook_id, block_hash) WHERE block_hash IS NOT NULL
   `))
+  // Adding the hash key is not enough on its own: a table created in the earlier
+  // shape still carries PRIMARY KEY (webhook_id, block_number), and that key is
+  // exactly what breaks reorgs. The replacement block at height N has a new hash
+  // but the SAME number, so its claim satisfies the hash key and then violates
+  // the legacy one — an error the hash-specific ON CONFLICT does not catch, which
+  // drops into the fail-closed path and silently suppresses the canonical block's
+  // notification. Drop it so the constraint set matches the intended key.
+  try {
+    const legacy = await db.execute(sql.raw(`
+      SELECT c.conname
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE t.relname = 'webhook_deliveries'
+        AND c.contype IN ('p', 'u')
+        AND (SELECT array_agg(a.attname::text ORDER BY a.attname)
+               FROM unnest(c.conkey) k
+               JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k)
+            = ARRAY['block_number','webhook_id']
+    `))
+    for (const row of Array.from(legacy)) {
+      const name = (row as Record<string, unknown>).conname as string
+      console.log(`[indexer] dropping legacy webhook_deliveries key ${name} (blocks reorg re-delivery)`)
+      await db.execute(sql.raw(`ALTER TABLE webhook_deliveries DROP CONSTRAINT IF EXISTS "${name}"`))
+    }
+  } catch (err) {
+    console.error('[indexer] legacy webhook_deliveries key check skipped:', err)
+  }
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS validators (
