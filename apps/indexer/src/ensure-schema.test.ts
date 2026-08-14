@@ -17,9 +17,8 @@ describe('buildConcurrentIndexList', () => {
     }
   })
 
-  // A unique index is the one statement here that can FAIL on real data (a
-  // pre-existing duplicate), so it must be paired with the dedupe that runs
-  // before it. Pin its presence and shape so neither half can drift away alone.
+  // The unique index is the one statement here that could FAIL on real data, so
+  // its PARTIAL predicate is what keeps the boot path safe on a populated table.
   it('builds dex_tx_log_unique on the natural key, in both partition modes', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned)
@@ -27,6 +26,9 @@ describe('buildConcurrentIndexList', () => {
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       expect(stmts[0]).toMatch(/^CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS /)
       expect(stmts[0]).toContain('ON dex_trades(tx_hash, log_index)')
+      // PARTIAL is load-bearing: it excludes rows predating the column, so the
+      // build cannot fail on legacy data and no migration has to precede it.
+      expect(stmts[0]).toContain('WHERE log_index IS NOT NULL')
     }
   })
 

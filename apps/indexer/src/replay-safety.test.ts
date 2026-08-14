@@ -21,8 +21,12 @@ import {
  *      partial answer produced a block with a full tx_count and missing
  *      derived rows: the exact shape every completeness check calls healthy.
  *
- * These tests pin (2) and (3). (1) is enforced by dex_tx_log_unique, whose
- * buildability is covered in ensure-schema.test.ts.
+ * These tests pin (2) and (3). (1) is enforced by the PARTIAL unique index
+ * dex_tx_log_unique ... WHERE log_index IS NOT NULL, whose shape is pinned in
+ * ensure-schema.test.ts. log_index is nullable with NO default on purpose: a
+ * sentinel default would collide across a deploy overlap (the outgoing binary
+ * does not write the column) and the constraint would then silently DROP a real
+ * second swap, making the fix worse than the bug.
  */
 
 function providerReturning(value: unknown): JsonRpcProvider {
@@ -49,33 +53,60 @@ describe('fetchBlockReceipts — null is not empty', () => {
 })
 
 describe('assertReceiptCoverage', () => {
+  const h = (n: number) => '0x' + n.toString(16).padStart(64, '0')
+  const many = (n: number) => Array.from({ length: n }, (_, i) => h(i))
+
   it('accepts a fully covered block', () => {
-    expect(() => assertReceiptCoverage(1, 120, 120, true)).not.toThrow()
+    expect(() => assertReceiptCoverage(1, many(120), many(120), true)).not.toThrow()
   })
 
   it('rejects an under-covered block', () => {
-    expect(() => assertReceiptCoverage(115471977, 120, 119, true))
-      .toThrow(/coverage incomplete: 119 receipt\(s\) for 120 transaction\(s\)/)
+    expect(() => assertReceiptCoverage(115471977, many(120), many(119), true))
+      .toThrow(/coverage incomplete/)
   })
 
   it('rejects the catastrophic case — transactions present, zero receipts', () => {
     // This is the one that silently wipes transfers on replay.
-    expect(() => assertReceiptCoverage(115471977, 120, 0, true)).toThrow(/coverage incomplete/)
+    expect(() => assertReceiptCoverage(115471977, many(120), [], true)).toThrow(/coverage incomplete/)
   })
 
   it('rejects an OVER-covered block', () => {
-    // Not merely noise: more receipts than transactions means the answer is for
-    // a different block, so its derived rows would be attributed to this one.
-    expect(() => assertReceiptCoverage(1, 10, 11, true)).toThrow(/coverage incomplete/)
+    expect(() => assertReceiptCoverage(1, many(10), many(11), true)).toThrow(/coverage incomplete/)
+  })
+
+  // Counts alone cannot see this: 120 receipts for 120 transactions, but one
+  // receipt is repeated and another transaction has none. receiptByTx would
+  // overwrite the duplicate and default-success the missing one.
+  it('rejects a RIGHT-SIZED response that duplicates one receipt and omits another', () => {
+    const txs = many(3)
+    const receipts = [h(0), h(1), h(1)]
+    expect(receipts.length).toBe(txs.length)
+    expect(() => assertReceiptCoverage(1, txs, receipts, true)).toThrow(/duplicate receipt/)
+  })
+
+  it('rejects a right-sized response for an entirely DIFFERENT block', () => {
+    // Same count, disjoint hashes — a reorg splice or a wrong-block answer.
+    expect(() => assertReceiptCoverage(1, [h(1), h(2)], [h(8), h(9)], true))
+      .toThrow(/no receipt for/)
   })
 
   it('accepts an empty block', () => {
-    expect(() => assertReceiptCoverage(1, 0, 0, true)).not.toThrow()
+    expect(() => assertReceiptCoverage(1, [], [], true)).not.toThrow()
+  })
+
+  // No early return for the empty block: receipts arriving for a block with no
+  // transactions means the endpoint answered about a different block.
+  it('rejects receipts arriving for a block with NO transactions', () => {
+    expect(() => assertReceiptCoverage(1, [], [h(1)], true)).toThrow(/coverage incomplete/)
+  })
+
+  it('is case-insensitive on hashes', () => {
+    expect(() => assertReceiptCoverage(1, ['0xABC'], ['0xabc'], true)).not.toThrow()
   })
 
   it('is inert when receipts were deliberately not fetched (skipLogs)', () => {
     // backfill --skip-logs asks for no receipts; an empty set is correct there.
-    expect(() => assertReceiptCoverage(1, 120, 0, false)).not.toThrow()
+    expect(() => assertReceiptCoverage(1, many(120), [], false)).not.toThrow()
   })
 })
 
@@ -92,9 +123,7 @@ describe('isUsableLogIndex', () => {
     expect(isUsableLogIndex(NaN)).toBe(false)
   })
 
-  it('rejects negatives, which are reserved for backfilled legacy rows', () => {
-    // dedupeDexTradesForUniqueIndex assigns negative indexes to pre-existing
-    // rows; a live write must never land in that space.
+  it('rejects negatives — a real EVM log index is never negative', () => {
     expect(isUsableLogIndex(-1)).toBe(false)
   })
 

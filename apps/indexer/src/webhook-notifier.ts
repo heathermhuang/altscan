@@ -108,6 +108,7 @@ export async function notifyWebhooks(
   txs: { hash: string; fromAddress: string; toAddress: string | null; value: string }[],
   blockNumber: number,
   timestamp: Date,
+  blockHash: string,
 ) {
   if (txs.length === 0) return
   const db = getDb()
@@ -183,28 +184,37 @@ export async function notifyWebhooks(
     // payload: a consumer that credits a balance or forwards an alert cannot
     // distinguish the copy from the original, and unlike a duplicated DB row a
     // sent POST can never be taken back. The primary key on
-    // (webhook_id, block_number) IS the idempotency key — an INSERT that
-    // conflicts means this delivery already happened, so skip it.
+    // (webhook_id, block_hash) IS the idempotency key — an INSERT that conflicts
+    // means this delivery already happened, so skip it.
     //
-    // Claiming BEFORE the POST (rather than after) is deliberate: a crash
-    // between send and record would otherwise re-send on replay, which is the
-    // exact failure being prevented. The claim is released again below if the
-    // POST fails, so a failure is never mistaken for a delivery.
+    // Keyed on the block HASH so a reorg still notifies: the replacement block at
+    // height N is a different block and a real event, which a number-keyed claim
+    // would have suppressed.
+    //
+    // Claiming BEFORE the POST is deliberate: a crash between send and record
+    // would otherwise re-send on replay, the exact failure being prevented. This
+    // is at-MOST-once, not at-least-once — the trade is explicit, since a
+    // duplicate side effect at the consumer cannot be undone and a missed one can
+    // be re-requested.
     let claimed = false
     try {
       const res = await db.execute(sql`
-        INSERT INTO webhook_deliveries (webhook_id, block_number)
-        VALUES (${webhook.id}, ${blockNumber})
-        ON CONFLICT (webhook_id, block_number) DO NOTHING
+        INSERT INTO webhook_deliveries (webhook_id, block_hash, block_number)
+        VALUES (${webhook.id}, ${blockHash}, ${blockNumber})
+        ON CONFLICT (webhook_id, block_hash) DO NOTHING
         RETURNING webhook_id
       `)
       claimed = Array.from(res as Iterable<unknown>).length > 0
     } catch (err) {
-      // Ledger unavailable. Deliver anyway — a webhook that silently stops
-      // firing is a worse failure than a rare duplicate, and this path only
-      // opens when the DB is already in trouble.
-      console.error('[webhook-notifier] delivery-ledger claim failed, delivering unguarded:', err)
-      claimed = true
+      // Ledger unreachable. FAIL CLOSED: skip the delivery rather than send
+      // unguarded. The guarantee this table exists to provide is at-most-once,
+      // and a claim we cannot record is a delivery we cannot bound — sending
+      // anyway would mean every writer hitting the same DB fault duplicates the
+      // same POST, which is precisely the failure being prevented. A missed
+      // notification is recoverable by the consumer; an unbounded duplicate that
+      // credits a balance twice is not.
+      console.error(`[webhook-notifier] delivery-ledger claim failed for webhook ${webhook.id} block ${blockNumber} — SKIPPING delivery:`, err)
+      continue
     }
     if (!claimed) continue
 
@@ -212,14 +222,14 @@ export async function notifyWebhooks(
     if (ok) {
       succeededIds.add(webhook.id)
     } else {
-      // Release the claim: this block was NOT delivered, so a later legitimate
-      // attempt must not be suppressed by a record of a delivery that failed.
-      try {
-        await db.execute(sql`
-          DELETE FROM webhook_deliveries
-           WHERE webhook_id = ${webhook.id} AND block_number = ${blockNumber}
-        `)
-      } catch { /* non-fatal: worst case this block is not retried */ }
+      // The claim is deliberately KEPT.
+      //
+      // `ok === false` covers a timeout, a dropped connection and a 5xx alike,
+      // and in every one of those the receiver may already have processed the
+      // POST — the response is what went missing, not necessarily the request.
+      // Releasing the claim would re-send exactly those ambiguous cases on the
+      // next replay, so the release path would itself be a duplicate generator.
+      // At-most-once means an ambiguous outcome counts as delivered.
       const currentFail = (webhook as { failCount?: number }).failCount ?? 0
       failedWebhooks.set(webhook.id, currentFail + 1)
     }

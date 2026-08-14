@@ -248,20 +248,44 @@ export function isUsableLogIndex(n: unknown): n is number {
  */
 export function assertReceiptCoverage(
   blockNumber: number,
-  txCount: number,
-  receiptCount: number,
+  txHashes: readonly string[],
+  receiptHashes: readonly string[],
   wantReceipts: boolean,
 ): void {
   // skipLogs deliberately fetches no receipts — an empty set is correct there,
   // and processBlock already refuses to enqueue transfers in that mode.
   if (!wantReceipts) return
-  // A block with no transactions has no receipts to cover.
-  if (txCount === 0) return
-  if (receiptCount !== txCount) {
+
+  // Matching COUNTS are not coverage. A response can return one receipt twice
+  // and omit another and still be the right length; receiptByTx would then
+  // overwrite the duplicate and silently supply default-success data for the
+  // transaction that never arrived. So compare the SETS, not the sizes.
+  const want = new Set(txHashes.map(h => h.toLowerCase()))
+  const got = new Set<string>()
+  for (const h of receiptHashes) {
+    const k = h.toLowerCase()
+    // A repeated hash means the response is malformed, or is a splice of two
+    // different versions of this block observed across a reorg.
+    if (got.has(k)) {
+      throw new Error(`Block ${blockNumber} receipt set invalid: duplicate receipt for ${k}`)
+    }
+    got.add(k)
+  }
+
+  // Checked in BOTH directions and without an early return for the empty block:
+  // receipts arriving for a block with no transactions means the endpoint
+  // answered about a DIFFERENT block, and attributing its derived rows here
+  // would be worse than missing them.
+  if (want.size !== got.size) {
     throw new Error(
-      `Block ${blockNumber} receipt coverage incomplete: ${receiptCount} receipt(s) for ` +
-      `${txCount} transaction(s)`,
+      `Block ${blockNumber} receipt coverage incomplete: ${got.size} receipt(s) for ` +
+      `${want.size} transaction(s)`,
     )
+  }
+  for (const h of want) {
+    if (!got.has(h)) {
+      throw new Error(`Block ${blockNumber} receipt coverage incomplete: no receipt for ${h}`)
+    }
   }
 }
 
@@ -309,7 +333,12 @@ export async function processBlock(
 
   // Refuse a partially-covered block BEFORE the first write, so rpc-failover can
   // retry it on another endpoint with nothing half-written. See the function.
-  assertReceiptCoverage(blockNumber, block.transactions.length, receipts.length, wantReceipts)
+  assertReceiptCoverage(
+    blockNumber,
+    block.prefetchedTransactions.map(tx => tx.hash),
+    receipts.map(r => r.txHash),
+    wantReceipts,
+  )
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
 
@@ -409,6 +438,7 @@ export async function processBlock(
       txValues.map(tx => ({ hash: tx.hash, fromAddress: tx.fromAddress, toAddress: tx.toAddress ?? null, value: tx.value })),
       block.number,
       timestamp,
+      block.hash,
     ).catch(err => console.error('[webhook-notifier] delivery error:', err))
   }
 
