@@ -177,6 +177,17 @@ type TokenTransferRow = {
 
 type DexTradeRow = {
   txHash: string
+  /**
+   * Position of the Swap log within the block. Together with txHash this is the
+   * event's natural key — the thing that makes a dex_trade re-insertable.
+   *
+   * Without it the table had only `id serial PRIMARY KEY`, so every row was
+   * unique by construction and onConflictDoNothing() could never match: replaying
+   * a block silently doubled its trades. That is why rpc-failover.ts refuses to
+   * fail over past the first write, and why the gap healer restricts itself to
+   * ABSENT blocks.
+   */
+  logIndex: number
   dex: string
   pairAddress: string
   tokenIn: string
@@ -204,6 +215,56 @@ const PAIR_CACHE_MAX = 10_000
  * failover uses this boundary — see rpc-failover.ts. Optional: callers that
  * never retry (backfill.ts) can ignore it.
  */
+/**
+ * Is this log index usable as part of a natural key?
+ *
+ * `NormalizedLog.index` is `parseInt(logIndex, 16)`, which yields NaN on a
+ * malformed or missing value. NaN cannot participate in a unique constraint
+ * (every NaN compares unequal), so admitting one silently restores the
+ * duplicate-on-replay bug for exactly the rows an odd endpoint returns.
+ */
+export function isUsableLogIndex(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0
+}
+
+/**
+ * Refuse a block whose receipt set does not cover all of its transactions.
+ *
+ * Every token_transfer and dex_trade is derived from receipts, and the transfer
+ * writer persists a block by DELETEing its rows and re-inserting whatever it was
+ * handed (writeTransferBlocks). So an under-covered receipt set does not merely
+ * under-report — on REPLAY it destroys rows that were previously correct, and
+ * the block still ends up carrying a full tx_count, which is precisely the shape
+ * every completeness check (including the gap healer's own verification) treats
+ * as healthy. That combination is what turns a visible gap into invisible bad
+ * data reporting `ok`.
+ *
+ * `eth_getBlockReceipts` is all-or-nothing — one receipt per transaction — so
+ * any other count means the endpoint returned a partial answer. Throwing hands
+ * the block back to rpc-failover for a retry elsewhere.
+ *
+ * Exported and pure so the invariant can be asserted directly; the shipped call
+ * site passes the same four values.
+ */
+export function assertReceiptCoverage(
+  blockNumber: number,
+  txCount: number,
+  receiptCount: number,
+  wantReceipts: boolean,
+): void {
+  // skipLogs deliberately fetches no receipts — an empty set is correct there,
+  // and processBlock already refuses to enqueue transfers in that mode.
+  if (!wantReceipts) return
+  // A block with no transactions has no receipts to cover.
+  if (txCount === 0) return
+  if (receiptCount !== txCount) {
+    throw new Error(
+      `Block ${blockNumber} receipt coverage incomplete: ${receiptCount} receipt(s) for ` +
+      `${txCount} transaction(s)`,
+    )
+  }
+}
+
 export async function processBlock(
   blockNumber: number,
   provider: JsonRpcProvider,
@@ -245,6 +306,10 @@ export async function processBlock(
   }
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
+
+  // Refuse a partially-covered block BEFORE the first write, so rpc-failover can
+  // retry it on another endpoint with nothing half-written. See the function.
+  assertReceiptCoverage(blockNumber, block.transactions.length, receipts.length, wantReceipts)
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
 
@@ -524,6 +589,8 @@ async function processReceiptsBatch(
 
     for (const { txHash, log } of dexSwapLogs) {
       try {
+        // log_index is the natural key now, so an unusable one is not cosmetic.
+        if (!isUsableLogIndex(log.index)) continue
         const pairAddress = log.address.toLowerCase()
         const isV2 = log.topics.length === 3 && log.data.length >= 514
         if (!isV2) continue
@@ -549,6 +616,7 @@ async function processReceiptsBatch(
 
         dexRows.push({
           txHash,
+          logIndex: log.index,
           dex: 'PancakeSwap V2',
           pairAddress,
           tokenIn,
@@ -1324,8 +1392,22 @@ export async function fetchBlockReceipts(
     logs: Array<{ address: string; topics: string[]; data: string; logIndex: string }>
   }> | null
 
+  // A null response is NOT an empty block. Collapsing the two (`raw ?? []`) made
+  // an RPC that answered "I don't have this block" indistinguishable from one
+  // that answered "this block has no transactions" — and the difference is
+  // destructive, because writeTransferBlocks DELETEs a block's transfers before
+  // re-inserting whatever it was handed. Replaying a block against an endpoint
+  // that returned null therefore wiped good rows and inserted nothing.
+  //
+  // Throwing hands the block to rpc-failover, which retries it on another
+  // endpoint. This is strictly above the first write, so no partial state exists
+  // to roll back.
+  if (raw === null || raw === undefined) {
+    throw new Error(`Block ${blockNumber} receipts unavailable (null response)`)
+  }
+
   const result: Array<{ txHash: string; receipt: NormalizedReceipt }> = []
-  for (const r of raw ?? []) {
+  for (const r of raw) {
     result.push({
       txHash: r.transactionHash,
       receipt: {

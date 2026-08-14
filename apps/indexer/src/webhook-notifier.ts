@@ -4,7 +4,7 @@
  * Called by block-processor after each block is indexed.
  */
 import { getDb, schema } from './db'
-import { eq, or, and, inArray, isNull } from 'drizzle-orm'
+import { eq, or, and, inArray, isNull, sql } from 'drizzle-orm'
 import crypto from 'crypto'
 import dns from 'node:dns/promises'
 import net from 'node:net'
@@ -179,10 +179,47 @@ export async function notifyWebhooks(
       })),
     }
 
+    // CLAIM before sending. Re-processing a block must not re-deliver its
+    // payload: a consumer that credits a balance or forwards an alert cannot
+    // distinguish the copy from the original, and unlike a duplicated DB row a
+    // sent POST can never be taken back. The primary key on
+    // (webhook_id, block_number) IS the idempotency key — an INSERT that
+    // conflicts means this delivery already happened, so skip it.
+    //
+    // Claiming BEFORE the POST (rather than after) is deliberate: a crash
+    // between send and record would otherwise re-send on replay, which is the
+    // exact failure being prevented. The claim is released again below if the
+    // POST fails, so a failure is never mistaken for a delivery.
+    let claimed = false
+    try {
+      const res = await db.execute(sql`
+        INSERT INTO webhook_deliveries (webhook_id, block_number)
+        VALUES (${webhook.id}, ${blockNumber})
+        ON CONFLICT (webhook_id, block_number) DO NOTHING
+        RETURNING webhook_id
+      `)
+      claimed = Array.from(res as Iterable<unknown>).length > 0
+    } catch (err) {
+      // Ledger unavailable. Deliver anyway — a webhook that silently stops
+      // firing is a worse failure than a rare duplicate, and this path only
+      // opens when the DB is already in trouble.
+      console.error('[webhook-notifier] delivery-ledger claim failed, delivering unguarded:', err)
+      claimed = true
+    }
+    if (!claimed) continue
+
     const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
     if (ok) {
       succeededIds.add(webhook.id)
     } else {
+      // Release the claim: this block was NOT delivered, so a later legitimate
+      // attempt must not be suppressed by a record of a delivery that failed.
+      try {
+        await db.execute(sql`
+          DELETE FROM webhook_deliveries
+           WHERE webhook_id = ${webhook.id} AND block_number = ${blockNumber}
+        `)
+      } catch { /* non-fatal: worst case this block is not retried */ }
       const currentFail = (webhook as { failCount?: number }).failCount ?? 0
       failedWebhooks.set(webhook.id, currentFail + 1)
     }

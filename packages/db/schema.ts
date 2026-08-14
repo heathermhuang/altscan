@@ -1,4 +1,4 @@
-import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, unique, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, uniqueIndex, unique, primaryKey } from 'drizzle-orm/pg-core'
 
 export const tokenTypeEnum = pgEnum('token_type', ['BEP20', 'BEP721', 'BEP1155'])
 export const validatorStatusEnum = pgEnum('validator_status', ['active', 'inactive', 'jailed'])
@@ -144,6 +144,14 @@ export const contracts = pgTable('contracts', {
 export const dexTrades = pgTable('dex_trades', {
   id:           serial('id').primaryKey(),
   txHash:       varchar('tx_hash', { length: 66 }).notNull(),
+  // Position of the Swap log in the block. With tx_hash this is the event's
+  // natural key. Before it existed the only key was the serial `id`, so every
+  // insert was unique by construction, onConflictDoNothing() could never match,
+  // and replaying a block duplicated all of its trades — the hazard
+  // rpc-failover.ts:70 documents and the gap healer works around by touching
+  // only ABSENT blocks. DEFAULT -1 exists solely so the column can be added
+  // NOT NULL to a populated table; live writes always supply the real index.
+  logIndex:     integer('log_index').notNull().default(-1),
   dex:          varchar('dex', { length: 50 }).notNull(),
   pairAddress:  varchar('pair_address', { length: 42 }).notNull(),
   tokenIn:      varchar('token_in', { length: 42 }).notNull(),
@@ -157,6 +165,12 @@ export const dexTrades = pgTable('dex_trades', {
   makerIdx:     index('dex_maker_idx').on(t.maker),
   pairIdx:      index('dex_pair_idx').on(t.pairAddress),
   blockIdx:     index('dex_block_idx').on(t.blockNumber),
+  // What makes replay safe. dex_trades is a PLAIN table (unlike token_transfers,
+  // which is range-partitioned and therefore cannot carry a unique that omits the
+  // partition key), so the natural key can be enforced here directly.
+  // ensure-schema.ts is the runtime DDL authority and builds this CONCURRENTLY
+  // after de-duplicating any rows that predate it.
+  txLogUnique:  uniqueIndex('dex_tx_log_unique').on(t.txHash, t.logIndex),
 }))
 
 export const validators = pgTable('validators', {

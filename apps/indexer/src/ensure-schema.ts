@@ -132,6 +132,7 @@ export async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS dex_trades (
       id           SERIAL PRIMARY KEY,
       tx_hash      VARCHAR(66) NOT NULL,
+      log_index    INTEGER NOT NULL DEFAULT -1,
       dex          VARCHAR(50) NOT NULL,
       pair_address VARCHAR(42) NOT NULL,
       token_in     VARCHAR(42) NOT NULL,
@@ -141,6 +142,26 @@ export async function ensureSchema(): Promise<void> {
       maker        VARCHAR(42) NOT NULL,
       block_number BIGINT NOT NULL,
       timestamp    TIMESTAMPTZ NOT NULL
+    )
+  `))
+
+  // Webhook delivery ledger — what makes a webhook fire AT MOST ONCE per block.
+  //
+  // notifyWebhooks already batches to one POST per webhook per block, so the
+  // remaining hazard is not amplification but REPETITION: re-processing a block
+  // re-delivers its payload to every matching webhook, and a consumer that
+  // credits a balance or forwards an alert has no way to tell the copy from the
+  // original. The primary key IS the idempotency key — a claim that conflicts
+  // means someone already delivered this (webhook, block).
+  //
+  // Pruned by retention on the same cutoff as the other refetchable bodies (see
+  // BODY_PRUNE_OPS), so it cannot grow without bound.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS webhook_deliveries (
+      webhook_id   INTEGER NOT NULL,
+      block_number BIGINT  NOT NULL,
+      delivered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (webhook_id, block_number)
     )
   `))
 
@@ -419,6 +440,13 @@ export async function ensureSchema(): Promise<void> {
   // everything: wasteful at worst, never a false all-clear.
   await addColumnIfMissing('indexer_cursor', 'compact_cutoff_block', 'BIGINT')
 
+  // dex_trades natural key. See schema.ts — until this existed the table's only
+  // key was `id serial`, so replaying a block duplicated every trade in it.
+  // DEFAULT -1 lets the column land NOT NULL on a populated table; live writes
+  // always supply the real log index.
+  await addColumnIfMissing('dex_trades', 'log_index', 'INTEGER NOT NULL DEFAULT -1')
+  await dedupeDexTradesForUniqueIndex()
+
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
   try {
@@ -534,12 +562,91 @@ export function buildConcurrentIndexList(ttPartitioned: boolean): string[] {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
+    // Replay safety. Built AFTER dedupeDexTradesForUniqueIndex() has made the key
+    // buildable. If it still fails (a duplicate raced in), the build leaves an
+    // INVALID index which the next boot drops and retries — the table just keeps
+    // its previous behavior until then, so a failure degrades rather than breaks.
+    'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS dex_tx_log_unique ON dex_trades(tx_hash, log_index)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
     // Top-N tokens by holders (explorer sitemap top-5000, token directory)
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]
+}
+
+/**
+ * Prepare `dex_trades` so `dex_tx_log_unique(tx_hash, log_index)` can be built.
+ *
+ * Runs ONCE — it is skipped entirely as soon as the unique index exists, so the
+ * steady-state cost is a single catalog lookup.
+ *
+ * The subtlety is the backfill default. Every pre-existing row gets
+ * `log_index = -1`, so a transaction containing three swaps ends up with three
+ * rows that all collide at `(tx_hash, -1)`. A naive "delete all but the lowest
+ * id per key" dedupe would therefore destroy two LEGITIMATE trades per such
+ * transaction — losing real history in the name of enabling a constraint. So the
+ * two populations are separated:
+ *
+ *  1. EXACT duplicates — every content column equal — are provably artifacts of
+ *     the replay bug this migration exists to prevent. Those are collapsed.
+ *  2. Everything else is real, distinct history whose log index simply predates
+ *     the column. Those are RENUMBERED to distinct NEGATIVE indexes per tx_hash.
+ *     Negative keeps them permanently clear of real log indexes (always >= 0),
+ *     so a genuine later write can never collide with a backfilled placeholder.
+ *
+ * Result: the unique index becomes buildable without deleting a single row that
+ * carries information.
+ */
+async function dedupeDexTradesForUniqueIndex(): Promise<void> {
+  const db = getDb()
+  try {
+    const existing = await db.execute(sql.raw(`
+      SELECT 1 FROM pg_class WHERE relname = 'dex_tx_log_unique' AND relkind = 'i'
+    `))
+    if (Array.from(existing).length > 0) return
+
+    // 1. Collapse provable replay artifacts (identical content, different id).
+    const dropped = await db.execute(sql.raw(`
+      DELETE FROM dex_trades d
+       WHERE d.log_index = -1
+         AND EXISTS (
+           SELECT 1 FROM dex_trades k
+            WHERE k.log_index = -1
+              AND k.id < d.id
+              AND k.tx_hash = d.tx_hash
+              AND k.pair_address = d.pair_address
+              AND k.token_in = d.token_in
+              AND k.token_out = d.token_out
+              AND k.amount_in = d.amount_in
+              AND k.amount_out = d.amount_out
+              AND k.maker = d.maker
+              AND k.block_number = d.block_number
+         )
+      RETURNING id
+    `))
+    const removed = Array.from(dropped).length
+    if (removed > 0) console.log(`[indexer] dex_trades: removed ${removed} exact duplicate row(s)`)
+
+    // 2. Give every surviving legacy row its own negative index.
+    const renumbered = await db.execute(sql.raw(`
+      UPDATE dex_trades d
+         SET log_index = -sub.rn
+        FROM (
+          SELECT id, row_number() OVER (PARTITION BY tx_hash ORDER BY id) AS rn
+            FROM dex_trades WHERE log_index = -1
+        ) sub
+       WHERE d.id = sub.id
+      RETURNING d.id
+    `))
+    const touched = Array.from(renumbered).length
+    if (touched > 0) console.log(`[indexer] dex_trades: renumbered ${touched} legacy row(s) to negative log_index`)
+  } catch (err) {
+    // Never block boot on this. If it fails the CONCURRENTLY build simply fails
+    // too, leaves an invalid index that the next boot drops, and the table keeps
+    // its current (pre-fix) behavior — degraded, not broken.
+    console.error('[indexer] dex_trades dedupe skipped:', err)
+  }
 }
 
 /**

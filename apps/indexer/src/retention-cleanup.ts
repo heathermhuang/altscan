@@ -81,6 +81,11 @@ export function reportIndexerLag(lag: number): void {
  */
 const ALLOWED_TABLES = [
   'dex_trades', 'token_transfers', 'transactions', 'gas_history', 'blocks', 'logs', 'token_balances',
+  // Webhook delivery ledger. Prunable because a delivery record is only useful
+  // while replaying that block is still possible, and it holds no index data —
+  // but it must be named here as well as in BODY_PRUNE_OPS or this second gate
+  // silently drops the op and the ledger grows forever.
+  'webhook_deliveries',
 ] as const
 type AllowedTable = typeof ALLOWED_TABLES[number]
 const ALLOWED_TABLE_SET: ReadonlySet<string> = new Set(ALLOWED_TABLES)
