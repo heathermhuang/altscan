@@ -174,6 +174,17 @@ export async function ensureSchema(): Promise<void> {
   await db.execute(sql.raw(
     `CREATE INDEX IF NOT EXISTS webhook_deliveries_block_idx ON webhook_deliveries (block_number)`,
   ))
+  // CREATE TABLE IF NOT EXISTS does NOT reshape a table that already exists. An
+  // environment that ran an earlier build of this table (keyed on block_number,
+  // no block_hash) would keep that shape, every claim would reference a missing
+  // column, and the fail-closed claim path would then suppress webhooks entirely
+  // and silently. Add the column and the real key explicitly so the table
+  // converges regardless of which build created it.
+  await addColumnIfMissing('webhook_deliveries', 'block_hash', 'VARCHAR(66)')
+  await db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_hash_key
+      ON webhook_deliveries (webhook_id, block_hash) WHERE block_hash IS NOT NULL
+  `))
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS validators (

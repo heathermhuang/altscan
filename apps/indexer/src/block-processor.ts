@@ -344,8 +344,11 @@ export async function processBlock(
 
   // Map tx hash → receipt so we can populate tx.status / tx.gasUsed at INSERT
   // time instead of via a follow-up UPDATE pass.
+  // Keyed lowercase on both sides — see fetchBlockReceipts. Defensive even though
+  // the fetch normalizes, because this map is what silently substitutes default
+  // receipt data on a miss.
   const receiptByTx = new Map<string, NormalizedReceipt>()
-  for (const r of receipts) receiptByTx.set(r.txHash, r.receipt)
+  for (const r of receipts) receiptByTx.set(r.txHash.toLowerCase(), r.receipt)
 
   // ── 1. Insert block ────────────────────────────────────────────
   // Point of no return: past here the block is partially persisted, so this
@@ -368,7 +371,7 @@ export async function processBlock(
 
   // ── 2. Bulk insert transactions (with receipt data baked in) ───
   const txValues = block.prefetchedTransactions.map((tx, idx) => {
-    const rec = receiptByTx.get(tx.hash)
+    const rec = receiptByTx.get(tx.hash.toLowerCase())
     return {
       hash: tx.hash,
       blockNumber: block.number,
@@ -1439,7 +1442,13 @@ export async function fetchBlockReceipts(
   const result: Array<{ txHash: string; receipt: NormalizedReceipt }> = []
   for (const r of raw) {
     result.push({
-      txHash: r.transactionHash,
+      // Normalized HERE, once, at the boundary. assertReceiptCoverage compares
+      // case-insensitively, so without this a differently-cased hash would PASS
+      // coverage and then miss in receiptByTx — handing the transaction the
+      // default status=true / gasUsed=0 instead of its real receipt, silently.
+      // The raw hash also feeds transfer and dex rows, whose SQL unique keys are
+      // case-SENSITIVE, so a case variant could slip past them too.
+      txHash: r.transactionHash.toLowerCase(),
       receipt: {
         status: r.status === '0x1',
         gasUsed: BigInt(r.gasUsed),

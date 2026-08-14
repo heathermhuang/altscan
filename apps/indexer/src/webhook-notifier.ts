@@ -201,7 +201,7 @@ export async function notifyWebhooks(
       const res = await db.execute(sql`
         INSERT INTO webhook_deliveries (webhook_id, block_hash, block_number)
         VALUES (${webhook.id}, ${blockHash}, ${blockNumber})
-        ON CONFLICT (webhook_id, block_hash) DO NOTHING
+        ON CONFLICT (webhook_id, block_hash) WHERE block_hash IS NOT NULL DO NOTHING
         RETURNING webhook_id
       `)
       claimed = Array.from(res as Iterable<unknown>).length > 0
