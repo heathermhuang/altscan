@@ -53,6 +53,24 @@
 export const DEFAULT_QUARANTINE_AFTER = 5
 
 /**
+ * Prefix stamped into `index_gaps.reason` for a quarantined block, and matched by
+ * the resume scan to recognise its own decisions.
+ *
+ * Shared deliberately. The writer and the reader are in different files and a
+ * quarantine gap means something a `max_lag_skip` gap does not — "this block was
+ * PROVEN unindexable", versus "we ran out of time". If the two ever spelled it
+ * differently the mismatch would be silent, and its symptom would be the restart
+ * deadlock below rather than an error. This repo has already shipped one silently-
+ * failing second gate (retention's ALLOWED_TABLES vs BODY_PRUNE_OPS).
+ */
+export const POISON_GAP_REASON_PREFIX = 'poison_block'
+
+/** The exact `reason` recorded for a quarantined block. */
+export function poisonGapReason(quarantineAfter: number): string {
+  return `${POISON_GAP_REASON_PREFIX}(${quarantineAfter} clean failovers)`
+}
+
+/**
  * Per-height consecutive `exhausted-clean` failure counts.
  *
  * Keyed on HEIGHT, which is only sound because `clearAbove()` is wired into reorg

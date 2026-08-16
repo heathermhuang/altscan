@@ -28,8 +28,11 @@ import {
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
-import { recordIndexGap } from './index-gaps'
-import { PoisonBlockTracker, shouldQuarantine, DEFAULT_QUARANTINE_AFTER } from './poison-block'
+import { recordIndexGap, recordPoisonGapIfAbsent } from './index-gaps'
+import {
+  PoisonBlockTracker, shouldQuarantine, DEFAULT_QUARANTINE_AFTER,
+  POISON_GAP_REASON_PREFIX, poisonGapReason,
+} from './poison-block'
 import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
@@ -402,42 +405,57 @@ async function main() {
    * (its work set is ABSENT blocks only) over a block that reads as present with
    * the right tx_count and no transfers: invisible bad data, permanently.
    */
-  const tryQuarantine = async (blocker: number): Promise<boolean> => {
-    let absent: boolean
+  /**
+   * Is this height already recorded as an unhealed poison gap?
+   *
+   * Queried rather than cached: another deploy generation may have recorded it,
+   * and a stale in-memory set would refuse the very re-skip that unwedges the
+   * cursor. Only ever runs on the failure path, and only while a backfill is
+   * active, so it costs nothing on the common path. Fails CLOSED — an unreadable
+   * answer is treated as "not recorded", which merely declines the exception and
+   * leaves the pre-existing (safe) refusal in place.
+   */
+  const isRecordedPoisonGap = async (blocker: number): Promise<boolean> => {
     try {
-      const rows = Array.from(await db.execute(
-        sql`SELECT 1 AS present FROM blocks WHERE number = ${blocker} LIMIT 1`,
-      ))
-      absent = rows.length === 0
+      const rows = Array.from(await db.execute(sql`
+        SELECT 1 FROM index_gaps
+        WHERE healed_at IS NULL
+          AND reason LIKE ${POISON_GAP_REASON_PREFIX + '%'}
+          AND ${blocker} BETWEEN from_block AND to_block
+        LIMIT 1
+      `))
+      return rows.length > 0
     } catch (err) {
-      // Unverifiable is NOT absent. Fail closed and retry the block instead.
-      console.error(`${TAG} ⚠ could not verify block ${blocker} is absent — NOT quarantining:`, safeErr(err))
+      console.error(`${TAG} could not check poison-gap record for block ${blocker}:`, safeErr(err))
       return false
     }
+  }
 
-    if (!absent) {
-      // The row exists while the cursor sits below it: this block is partially
-      // persisted, almost certainly by an `aborted-dirty` failover. Stepping over
-      // it would be the invisible-bad-data case above. Retrying it is now the
-      // right move and actually converges — PR #96 made processBlock replay-safe
-      // (dedupable dex_trades via the partial unique on (tx_hash, log_index),
-      // set-verified receipt coverage, once-only webhooks), so a replay repairs
-      // the missing derived rows rather than duplicating the ones already there.
-      poisonBlocks.forget(blocker)
-      console.error(`${TAG} ⚠ refusing to quarantine block ${blocker} — its row already EXISTS (partially persisted); retrying instead, replay is safe`)
-      return false
-    }
-
-    // Same invariant as the bulk skip: the cursor must NEVER advance past a range
-    // we failed to RECORD, or the block is abandoned AND untracked — the silent
-    // loss this whole mechanism exists to prevent.
+  const tryQuarantine = async (blocker: number): Promise<boolean> => {
+    // ONE statement: the absence test and the insert are the same operation.
+    // Splitting them leaves a window in which the overlapping deploy generation
+    // crosses its first write, and a gap recorded over a partially-persisted block
+    // is unhealable AND invisible. Also upholds the bulk skip's invariant — the
+    // cursor never advances past a range we failed to RECORD.
     try {
-      await recordIndexGap(db, blocker, blocker, `poison_block(${QUARANTINE_AFTER} clean failovers)`)
+      const recorded = await recordPoisonGapIfAbsent(db, blocker, poisonGapReason(QUARANTINE_AFTER))
+      if (recorded) return true
     } catch (err) {
       console.error(`${TAG} ⚠ could NOT record poison block ${blocker} — NOT skipping, will retry:`, safeErr(err))
       return false
     }
-    return true
+
+    // Nothing recorded means the WHERE NOT EXISTS failed: the block's row is
+    // present while the cursor still sits below it, so it is partially persisted —
+    // almost certainly by an `aborted-dirty` failover. Stepping over it is the
+    // invisible-bad-data case. Retrying it is the right move and now actually
+    // converges: PR #96 made processBlock replay-safe (dedupable dex_trades via the
+    // partial unique on (tx_hash, log_index), set-verified receipt coverage,
+    // once-only webhooks), so a replay repairs the missing derived rows rather than
+    // duplicating the ones already there.
+    poisonBlocks.forget(blocker)
+    console.error(`${TAG} ⚠ refusing to quarantine block ${blocker} — its row already EXISTS (partially persisted); retrying instead, replay is safe`)
+    return false
   }
 
   while (running) {
@@ -655,14 +673,20 @@ async function main() {
         const blocker = lastIndexed + 1
         if (
           QUARANTINE_ENABLED &&
-          // The same guard the bulk MAX_LAG skip carries. During a resume gap
+          shouldQuarantine(blocker, lastIndexed, poisonBlocks.count(blocker), QUARANTINE_AFTER) &&
+          // The same guard the bulk MAX_LAG skip carries: during a resume gap
           // backfill the indexer is DELIBERATELY replaying an old range, so
           // `lastIndexed + 1` is a block being re-indexed rather than the live
-          // frontier. Stepping over it there would advance the cursor — and the
-          // transfer watermark with it — through a range mid-replay, which is
-          // exactly the state the backfill exists to repair.
-          resumeGapBackfillUntil === null &&
-          shouldQuarantine(blocker, lastIndexed, poisonBlocks.count(blocker), QUARANTINE_AFTER)
+          // frontier, and stepping over it would advance the cursor — and the
+          // watermark with it — through a range mid-replay.
+          //
+          // The exception is load-bearing. A block ALREADY recorded as a poison gap
+          // has had its skip decision made durably; re-applying it creates no new
+          // hole. Without the exception the guard is the deadlock: a quarantined
+          // block is absent, an absent block can put the next boot into backfill,
+          // and a backfill that refuses to re-skip pins the cursor on the one block
+          // proven unindexable, with the bulk skip disabled by the same condition.
+          (resumeGapBackfillUntil === null || await isRecordedPoisonGap(blocker))
         ) {
           const failures = poisonBlocks.count(blocker)
           if (await tryQuarantine(blocker)) {
@@ -735,6 +759,23 @@ async function getResumeCursor(
     FROM expected
     LEFT JOIN blocks ON blocks.number = expected.number
     WHERE blocks.number IS NULL
+      -- Exclude blocks we DELIBERATELY abandoned as poison. Without this the scan
+      -- cannot tell a quarantine from an accidental hole, so it rewinds the cursor
+      -- onto the one block already proven unindexable and sets backfillUntil — which
+      -- disables BOTH the quarantine guard and the bulk MAX_LAG skip. The cursor then
+      -- pins on that block and backfillUntil can only clear by passing it, so the
+      -- indexer wedges permanently on the next restart, with every safety valve off.
+      -- Quarantine would have manufactured exactly that state. (codex P1, round 1.)
+      --
+      -- Scoped to UNHEALED gaps: once a gap is healed the block is present anyway, and
+      -- keeping the exclusion tied to healed_at means a re-opened gap resumes being
+      -- treated as a real hole.
+      AND NOT EXISTS (
+        SELECT 1 FROM index_gaps g
+        WHERE g.healed_at IS NULL
+          AND g.reason LIKE ${POISON_GAP_REASON_PREFIX + '%'}
+          AND expected.number BETWEEN g.from_block AND g.to_block
+      )
   `)
   const missingRaw = (Array.from(gapResult)[0] as Record<string, unknown> | undefined)?.missing
   let base: { lastIndexed: number; backfillUntil: number | null }
@@ -754,6 +795,35 @@ async function getResumeCursor(
   // re-write its transfers. Seed the writer with W so it advances from there.
   const W = await getOrInitDurableBlock(db, maxIndexed)
   initTransferWriter(W)
+
+  // Restore quarantine marks above W. They are in-memory state, so a restart loses
+  // them — and then the fold has no way to pass a deliberately-absent height whose
+  // transfers are never coming, leaving W stuck below it forever and the crash-
+  // replay window growing without bound. The gap table is the durable record of
+  // those decisions, so re-apply it. (codex P1, round 1.)
+  //
+  // Bounded to (W, maxIndexed]: marks at or below W are already folded, and
+  // markTransfersUnavailable ignores them anyway.
+  try {
+    const poisonRows = Array.from(await db.execute(sql`
+      SELECT from_block, to_block FROM index_gaps
+      WHERE healed_at IS NULL
+        AND reason LIKE ${POISON_GAP_REASON_PREFIX + '%'}
+        AND to_block > ${W} AND from_block <= ${maxIndexed}
+    `))
+    let restored = 0
+    for (const r of poisonRows) {
+      const row = r as Record<string, unknown>
+      const from = Math.max(Number(row.from_block), W + 1)
+      const to = Math.min(Number(row.to_block), maxIndexed)
+      for (let n = from; n <= to; n++) { markTransfersUnavailable(n); restored++ }
+    }
+    if (restored > 0) console.log(`${TAG} restored ${restored} quarantine mark(s) above W=${W}`)
+  } catch (err) {
+    // Non-fatal: without the marks W simply lags behind a quarantined height until
+    // the gap is healed. Slower, never wrong.
+    console.warn(`${TAG} could not restore quarantine marks:`, err instanceof Error ? err.message : err)
+  }
   const lastIndexed = Math.min(base.lastIndexed, W)
   // When replaying un-durable transfers up to maxIndexed, suppress the MAX_LAG
   // skip until we've caught back up — otherwise the skip would floor past the

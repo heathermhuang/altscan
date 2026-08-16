@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   initTransferWriter, setDurableFloor, markTransfersUnavailable,
-  purgeTransferQueueAbove, getTransferQueueDepth,
+  purgeTransferQueueAbove, getTransferQueueDepth, enqueueTransferWrite,
 } from './block-processor'
 
 /**
@@ -53,6 +53,23 @@ describe('quarantine and the durable watermark', () => {
     // carry transfers. Keeping the mark would let the fold pass over a canonical
     // block that never drained.
     purgeTransferQueueAbove(201)
+    expect(getTransferQueueDepth().skipped).toBe(0)
+  })
+
+  it('enqueuing transfers for a skipped height REVOKES the mark', () => {
+    // A mark asserts "this block will never produce transfers". Rows arriving for
+    // it prove that false — the gap healer re-indexing a quarantined block is
+    // exactly this case. Without the revoke the fold would treat the height as
+    // settled and could carry W past rows that are still only queued.
+    initTransferWriter(400)
+    markTransfersUnavailable(402)
+    expect(getTransferQueueDepth().skipped).toBe(1)
+
+    enqueueTransferWrite(402, [{
+      txHash: '0x402', logIndex: 0, tokenAddress: '0xt', fromAddress: '0xf',
+      toAddress: '0xto', value: '1', tokenId: null, blockNumber: 402,
+      timestamp: new Date(0), tokenType: 'BEP20' as const,
+    }])
     expect(getTransferQueueDepth().skipped).toBe(0)
   })
 

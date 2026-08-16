@@ -1134,6 +1134,12 @@ function evaluateTransferQueueHighWater(): void {
 }
 
 export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
+  // REVOKE any quarantine mark for this height. A mark asserts "this block will
+  // never produce transfers"; rows arriving for it prove that false. The gap
+  // healer re-indexing a quarantined block is exactly this case. Without the
+  // revoke, the fold could treat the height as settled and carry W past rows that
+  // are still only queued. (codex P1, round 1 of the redesign.)
+  transferSkipped.delete(blockNumber)
   const prev = transferPending.get(blockNumber)
   if (prev) transferPendingRows -= prev.length
   transferPending.set(blockNumber, rows)   // latest decode of a block wins
@@ -1163,15 +1169,42 @@ function canFoldSkipped(): boolean {
  * the durable one.
  */
 async function foldSettledPrefix(): Promise<void> {
+  const settled = (n: number): boolean => transferWritten.has(n) || transferSkipped.has(n)
   let newDurable = durableBlock
-  while (transferWritten.has(newDurable + 1) || transferSkipped.has(newDurable + 1)) newDurable++
+  while (settled(newDurable + 1)) newDurable++
   if (newDurable > durableBlock) {
     await persistDurableBlock(newDurable)
-    for (let n = durableBlock + 1; n <= newDurable; n++) {
+    // RE-VALIDATE across the await. The drainer's single-run guard serializes
+    // drains but NOT producers: an enqueue (gap healer, or the overlapping deploy
+    // generation) can land during the await and REVOKE a skip mark this fold
+    // counted on. (codex P1, round 1 of the redesign.)
+    //
+    // The persist above has already written the pre-await figure, so a shrink here
+    // is not merely "commit less" — the DURABLE value is now too high, and a crash
+    // before the next fold would resume past rows that are only queued. Correcting
+    // it therefore means persisting the lower value too, not just holding it in
+    // memory. Rewinding a persisted W is an established operation; it is exactly
+    // what rollbackTransferWriterTo does on a reorg.
+    let revalidated = durableBlock
+    while (revalidated < newDurable && settled(revalidated + 1)) revalidated++
+    if (revalidated < newDurable) {
+      try {
+        await persistDurableBlock(revalidated)
+        console.warn(`[tt-writer] fold corrected ${newDurable} → ${revalidated}: a skip mark was revoked mid-persist`)
+      } catch (err) {
+        // Same posture as the reorg-rollback persist failure: the durable value is
+        // stranded too high, so say so loudly rather than advancing in memory as if
+        // the correction landed.
+        console.error(`[tt-writer] ALERT fold correction ${newDurable} → ${revalidated} FAILED to persist — durable W is ahead of settled work until the next successful fold:`, err instanceof Error ? err.message : err)
+        return
+      }
+    }
+    if (revalidated <= durableBlock) return
+    for (let n = durableBlock + 1; n <= revalidated; n++) {
       transferWritten.delete(n)
       transferSkipped.delete(n)
     }
-    durableBlock = newDurable
+    durableBlock = revalidated
   }
 }
 
@@ -1276,6 +1309,11 @@ function runTransferWriter(): void {
       evaluateTransferQueueHighWater()
     } finally {
       transferWriterRunning = false
+      // Lost-wakeup guard. markTransfersUnavailable() pokes the writer, but that
+      // poke is a no-op while a drain is already running — so a mark that arrives
+      // after this drain's last fold would sit unfolded until the next enqueue
+      // happened to arrive. Re-check on the way out. (codex P2, round 1.)
+      if (!transferWriterPaused && canFoldSkipped()) runTransferWriter()
     }
   })()
 }
