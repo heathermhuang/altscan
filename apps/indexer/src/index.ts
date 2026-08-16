@@ -666,6 +666,13 @@ async function main() {
         ) {
           const failures = poisonBlocks.count(blocker)
           if (await tryQuarantine(blocker)) {
+            // Note: the cursor now sits on a deliberately ABSENT block, so the next
+            // boundary reorg check no-ops (detect-reorg treats a missing stored hash
+            // as "nothing to validate"). The blind spot is exactly one iteration —
+            // the next successfully indexed block restores it — and it is the same
+            // behaviour the bulk MAX_LAG skip has always had, since it also lands the
+            // cursor on a block it never indexed. findForkPoint already skips missing
+            // rows, so a reorg walk across the hole still resolves.
             console.warn(`${TAG} ⚠ QUARANTINING block ${blocker} after ${failures} clean full-failover failures — recorded as a 1-block gap, advancing past it`)
             lastIndexed = blocker
             // NOT setDurableFloor(): blocks below the blocker may be indexed but
