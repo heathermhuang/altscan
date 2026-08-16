@@ -47,6 +47,66 @@ export function isEndpointFault(err: unknown): boolean {
   return !(err && typeof err === 'object' && (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] === true)
 }
 
+/**
+ * Why processWithFailover gave up. Callers that want to act on a block-level
+ * failure — rather than merely log it — MUST distinguish these.
+ *
+ *  • `exhausted-clean` — every endpoint was tried and NONE of them wrote. The
+ *    block is genuinely absent from the database. This is the only failure a
+ *    caller may treat as "this block is unindexable".
+ *
+ *  • `aborted-dirty`   — one endpoint began writing and then failed, so failover
+ *    stopped (see below). The block is PARTIALLY PERSISTED: a `blocks` row with
+ *    the right tx_count, but missing transfers/dex_trades. Critically, the gap
+ *    healer's work set is ABSENT blocks only (gap-healer.ts: "Work set = ABSENT
+ *    blocks ONLY"), so this state is invisible to it and can never be repaired
+ *    by recording a gap over it.
+ *
+ *  • `unknown`         — anything else: a configuration throw, or an error that
+ *    never passed through this module at all.
+ *
+ * The count of failures is NOT a substitute for this. Because failover stops the
+ * instant writes begin, "block B failed N times" can mean N *post-write* aborts
+ * — one endpoint tried each time, never the whole pool. Acting on that count is
+ * what turns a loss-limiting mechanism into a producer of invisible bad data.
+ */
+export type FailoverFailureKind = 'exhausted-clean' | 'aborted-dirty' | 'unknown'
+
+const FAILOVER_KIND = Symbol.for('altscan.failoverKind')
+
+/**
+ * Classify a thrown value.
+ *
+ * FAILS CLOSED: anything this module did not explicitly mark reports `unknown`,
+ * never `exhausted-clean`. A caller gated on `=== 'exhausted-clean'` therefore
+ * cannot be tricked into acting by an error arriving from an unexpected path —
+ * the safe answer is the default, not the permissive one.
+ */
+export function failoverKind(err: unknown): FailoverFailureKind {
+  if (err && typeof err === 'object') {
+    const kind = (err as Record<symbol, unknown>)[FAILOVER_KIND]
+    if (kind === 'exhausted-clean' || kind === 'aborted-dirty') return kind
+  }
+  return 'unknown'
+}
+
+/**
+ * Stamp the classification onto the error being thrown.
+ *
+ * The error object is tagged in place rather than wrapped: wrapping would break
+ * `isEndpointFault` (which reads its own symbol off the same object), discard the
+ * original stack, and defeat formatRedactedError's handling of ethers' `info`
+ * property — the field that leaks raw endpoint URLs into logs.
+ *
+ * A frozen error simply stays `unknown`, which is the safe classification.
+ */
+function markFailoverKind<E>(err: E, kind: Exclude<FailoverFailureKind, 'unknown'>): E {
+  if (err && typeof err === 'object') {
+    try { (err as Record<symbol, unknown>)[FAILOVER_KIND] = kind } catch { /* frozen */ }
+  }
+  return err
+}
+
 /** Notified on each failed attempt, so a sick endpoint is visible in logs. */
 export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
@@ -121,12 +181,15 @@ export async function processWithFailover<P>(
       // so scoring it a failure would blame the endpoint for Postgres. The side
       // effect boundary governs retry SAFETY; it is not evidence about the
       // endpoint either way. (codex P2, round 4.)
-      if (wrote) throw err
+      if (wrote) throw markFailoverKind(err, 'aborted-dirty')
       if (isEndpointFault(err)) health?.recordFailure(provider, 'block')
       onFailover?.(block, provider, err)
     }
   }
-  throw lastErr
+  // Reaching here means the loop ran to completion: every provider was tried and
+  // not one of them reached `onWritesBegan`. That — and only that — is the state
+  // in which the block is known to be absent rather than half-written.
+  throw markFailoverKind(lastErr, 'exhausted-clean')
 }
 
 /**
