@@ -3,13 +3,32 @@ import { buildConcurrentIndexList } from './ensure-schema'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
 
 describe('buildConcurrentIndexList', () => {
-  it('emits only CREATE INDEX CONCURRENTLY IF NOT EXISTS statements (idempotent, non-blocking boot)', () => {
+  // The two properties that actually matter for boot: CONCURRENTLY (never takes a
+  // blocking lock behind the outgoing instance's writes) and IF NOT EXISTS
+  // (idempotent across restarts). UNIQUE is permitted — dex_tx_log_unique is what
+  // makes a dex_trades replay dedupable — but nothing else may vary.
+  it('emits only CONCURRENTLY + IF NOT EXISTS statements (idempotent, non-blocking boot)', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned)
       expect(stmts.length).toBeGreaterThan(0)
       for (const stmt of stmts) {
-        expect(stmt).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS /)
+        expect(stmt).toMatch(/^CREATE (UNIQUE )?INDEX CONCURRENTLY IF NOT EXISTS /)
       }
+    }
+  })
+
+  // The unique index is the one statement here that could FAIL on real data, so
+  // its PARTIAL predicate is what keeps the boot path safe on a populated table.
+  it('builds dex_tx_log_unique on the natural key, in both partition modes', () => {
+    for (const ttPartitioned of [false, true]) {
+      const stmts = buildConcurrentIndexList(ttPartitioned)
+        .filter(s => s.includes('dex_tx_log_unique'))
+      expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
+      expect(stmts[0]).toMatch(/^CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS /)
+      expect(stmts[0]).toContain('ON dex_trades(tx_hash, log_index)')
+      // PARTIAL is load-bearing: it excludes rows predating the column, so the
+      // build cannot fail on legacy data and no migration has to precede it.
+      expect(stmts[0]).toContain('WHERE log_index IS NOT NULL')
     }
   })
 

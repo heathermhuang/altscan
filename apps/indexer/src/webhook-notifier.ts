@@ -4,7 +4,7 @@
  * Called by block-processor after each block is indexed.
  */
 import { getDb, schema } from './db'
-import { eq, or, and, inArray, isNull } from 'drizzle-orm'
+import { eq, or, and, inArray, isNull, sql } from 'drizzle-orm'
 import crypto from 'crypto'
 import dns from 'node:dns/promises'
 import net from 'node:net'
@@ -108,6 +108,7 @@ export async function notifyWebhooks(
   txs: { hash: string; fromAddress: string; toAddress: string | null; value: string }[],
   blockNumber: number,
   timestamp: Date,
+  blockHash: string,
 ) {
   if (txs.length === 0) return
   const db = getDb()
@@ -179,10 +180,56 @@ export async function notifyWebhooks(
       })),
     }
 
+    // CLAIM before sending. Re-processing a block must not re-deliver its
+    // payload: a consumer that credits a balance or forwards an alert cannot
+    // distinguish the copy from the original, and unlike a duplicated DB row a
+    // sent POST can never be taken back. The primary key on
+    // (webhook_id, block_hash) IS the idempotency key — an INSERT that conflicts
+    // means this delivery already happened, so skip it.
+    //
+    // Keyed on the block HASH so a reorg still notifies: the replacement block at
+    // height N is a different block and a real event, which a number-keyed claim
+    // would have suppressed.
+    //
+    // Claiming BEFORE the POST is deliberate: a crash between send and record
+    // would otherwise re-send on replay, the exact failure being prevented. This
+    // is at-MOST-once, not at-least-once — the trade is explicit, since a
+    // duplicate side effect at the consumer cannot be undone and a missed one can
+    // be re-requested.
+    let claimed = false
+    try {
+      const res = await db.execute(sql`
+        INSERT INTO webhook_deliveries (webhook_id, block_hash, block_number)
+        VALUES (${webhook.id}, ${blockHash}, ${blockNumber})
+        ON CONFLICT (webhook_id, block_hash) WHERE block_hash IS NOT NULL DO NOTHING
+        RETURNING webhook_id
+      `)
+      claimed = Array.from(res as Iterable<unknown>).length > 0
+    } catch (err) {
+      // Ledger unreachable. FAIL CLOSED: skip the delivery rather than send
+      // unguarded. The guarantee this table exists to provide is at-most-once,
+      // and a claim we cannot record is a delivery we cannot bound — sending
+      // anyway would mean every writer hitting the same DB fault duplicates the
+      // same POST, which is precisely the failure being prevented. A missed
+      // notification is recoverable by the consumer; an unbounded duplicate that
+      // credits a balance twice is not.
+      console.error(`[webhook-notifier] delivery-ledger claim failed for webhook ${webhook.id} block ${blockNumber} — SKIPPING delivery:`, err)
+      continue
+    }
+    if (!claimed) continue
+
     const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
     if (ok) {
       succeededIds.add(webhook.id)
     } else {
+      // The claim is deliberately KEPT.
+      //
+      // `ok === false` covers a timeout, a dropped connection and a 5xx alike,
+      // and in every one of those the receiver may already have processed the
+      // POST — the response is what went missing, not necessarily the request.
+      // Releasing the claim would re-send exactly those ambiguous cases on the
+      // next replay, so the release path would itself be a duplicate generator.
+      // At-most-once means an ambiguous outcome counts as delivered.
       const currentFail = (webhook as { failCount?: number }).failCount ?? 0
       failedWebhooks.set(webhook.id, currentFail + 1)
     }

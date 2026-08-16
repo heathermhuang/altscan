@@ -132,6 +132,7 @@ export async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS dex_trades (
       id           SERIAL PRIMARY KEY,
       tx_hash      VARCHAR(66) NOT NULL,
+      log_index    INTEGER,
       dex          VARCHAR(50) NOT NULL,
       pair_address VARCHAR(42) NOT NULL,
       token_in     VARCHAR(42) NOT NULL,
@@ -143,6 +144,74 @@ export async function ensureSchema(): Promise<void> {
       timestamp    TIMESTAMPTZ NOT NULL
     )
   `))
+
+  // Webhook delivery ledger — what makes a webhook fire AT MOST ONCE per block.
+  //
+  // notifyWebhooks already batches to one POST per webhook per block, so the
+  // remaining hazard is not amplification but REPETITION: re-processing a block
+  // re-delivers its payload to every matching webhook, and a consumer that
+  // credits a balance or forwards an alert has no way to tell the copy from the
+  // original. The primary key IS the idempotency key — a claim that conflicts
+  // means someone already delivered this (webhook, block).
+  //
+  // Keyed on the block HASH, not just its number. A reorg replaces height N with
+  // a DIFFERENT block N, and that replacement is a genuinely new event its
+  // subscribers must see — under a (webhook_id, block_number) key the orphaned
+  // block's claim would suppress the canonical block's notification outright.
+  // block_number is kept alongside so retention can prune by height.
+  //
+  // Pruned by retention on the same cutoff as the other refetchable bodies (see
+  // BODY_PRUNE_OPS), so it cannot grow without bound.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS webhook_deliveries (
+      webhook_id   INTEGER NOT NULL,
+      block_hash   VARCHAR(66) NOT NULL,
+      block_number BIGINT  NOT NULL,
+      delivered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (webhook_id, block_hash)
+    )
+  `))
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS webhook_deliveries_block_idx ON webhook_deliveries (block_number)`,
+  ))
+  // CREATE TABLE IF NOT EXISTS does NOT reshape a table that already exists. An
+  // environment that ran an earlier build of this table (keyed on block_number,
+  // no block_hash) would keep that shape, every claim would reference a missing
+  // column, and the fail-closed claim path would then suppress webhooks entirely
+  // and silently. Add the column and the real key explicitly so the table
+  // converges regardless of which build created it.
+  await addColumnIfMissing('webhook_deliveries', 'block_hash', 'VARCHAR(66)')
+  await db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_hash_key
+      ON webhook_deliveries (webhook_id, block_hash) WHERE block_hash IS NOT NULL
+  `))
+  // Adding the hash key is not enough on its own: a table created in the earlier
+  // shape still carries PRIMARY KEY (webhook_id, block_number), and that key is
+  // exactly what breaks reorgs. The replacement block at height N has a new hash
+  // but the SAME number, so its claim satisfies the hash key and then violates
+  // the legacy one — an error the hash-specific ON CONFLICT does not catch, which
+  // drops into the fail-closed path and silently suppresses the canonical block's
+  // notification. Drop it so the constraint set matches the intended key.
+  try {
+    const legacy = await db.execute(sql.raw(`
+      SELECT c.conname
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE t.relname = 'webhook_deliveries'
+        AND c.contype IN ('p', 'u')
+        AND (SELECT array_agg(a.attname::text ORDER BY a.attname)
+               FROM unnest(c.conkey) k
+               JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k)
+            = ARRAY['block_number','webhook_id']
+    `))
+    for (const row of Array.from(legacy)) {
+      const name = (row as Record<string, unknown>).conname as string
+      console.log(`[indexer] dropping legacy webhook_deliveries key ${name} (blocks reorg re-delivery)`)
+      await db.execute(sql.raw(`ALTER TABLE webhook_deliveries DROP CONSTRAINT IF EXISTS "${name}"`))
+    }
+  } catch (err) {
+    console.error('[indexer] legacy webhook_deliveries key check skipped:', err)
+  }
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS validators (
@@ -419,6 +488,18 @@ export async function ensureSchema(): Promise<void> {
   // everything: wasteful at worst, never a false all-clear.
   await addColumnIfMissing('indexer_cursor', 'compact_cutoff_block', 'BIGINT')
 
+  // dex_trades natural key. See schema.ts — until this existed the table's only
+  // key was `id serial`, so replaying a block duplicated every trade in it.
+  //
+  // Deliberately NULLABLE with NO DEFAULT. A sentinel default would be actively
+  // harmful: Render overlaps deploy generations, and the outgoing binary does not
+  // write this column, so under a default two real swaps in one transaction would
+  // both take the sentinel and the new unique index would silently drop one via
+  // onConflictDoNothing(). NULL makes that a no-op, and the partial unique index
+  // (WHERE log_index IS NOT NULL) simply excludes rows that predate the column —
+  // so no backfill runs, and none is needed.
+  await addColumnIfMissing('dex_trades', 'log_index', 'INTEGER')
+
   // Drop any invalid indexes left behind by failed CONCURRENTLY builds.
   // CREATE INDEX IF NOT EXISTS won't replace an invalid index, so we must drop first.
   try {
@@ -534,6 +615,12 @@ export function buildConcurrentIndexList(ttPartitioned: boolean): string[] {
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
+    // Replay safety: what finally lets onConflictDoNothing() dedupe a dex_trade.
+    // PARTIAL over rows that carry the key, so rows predating log_index are
+    // excluded rather than depended on to be distinct — the build cannot fail on
+    // legacy data, so no migration has to run first and there is no state where a
+    // failed build wedges the next boot.
+    'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS dex_tx_log_unique ON dex_trades(tx_hash, log_index) WHERE log_index IS NOT NULL',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
     // Top-N tokens by holders (explorer sitemap top-5000, token directory)
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',

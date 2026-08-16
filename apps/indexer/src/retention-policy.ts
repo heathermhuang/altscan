@@ -29,6 +29,11 @@ export const BODY_PRUNE_OPS: PruneOp[] = [
   { table: 'logs',         kind: 'delete-rows' },
   { table: 'dex_trades',   kind: 'delete-rows' },
   { table: 'gas_history',  kind: 'delete-rows' },
+  // Webhook delivery ledger. Bounded here rather than growing forever: a row is
+  // only useful while a replay of that block is still possible, and once the
+  // block's own rows are pruned there is nothing left to replay. Pruning it on
+  // the SAME cutoff as the other refetchable bodies keeps the two in step.
+  { table: 'webhook_deliveries', kind: 'delete-rows' },
   { table: 'transactions', kind: 'null-column', column: 'input', sentinel: '0x', flagColumn: 'body_pruned' },
 ]
 

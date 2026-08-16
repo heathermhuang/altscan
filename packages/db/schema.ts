@@ -1,4 +1,5 @@
-import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, unique, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, bigint, varchar, boolean, timestamp, integer, numeric, text, pgEnum, serial, jsonb, index, uniqueIndex, unique, primaryKey } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 export const tokenTypeEnum = pgEnum('token_type', ['BEP20', 'BEP721', 'BEP1155'])
 export const validatorStatusEnum = pgEnum('validator_status', ['active', 'inactive', 'jailed'])
@@ -144,6 +145,28 @@ export const contracts = pgTable('contracts', {
 export const dexTrades = pgTable('dex_trades', {
   id:           serial('id').primaryKey(),
   txHash:       varchar('tx_hash', { length: 66 }).notNull(),
+  // Position of the Swap log in the block. With tx_hash this is the event's
+  // natural key. Before it existed the only key was the serial `id`, so every
+  // insert was unique by construction, onConflictDoNothing() could never match,
+  // and replaying a block duplicated all of its trades — the hazard
+  // rpc-failover.ts:70 documents and the gap healer works around by touching
+  // only ABSENT blocks.
+  //
+  // NULLABLE, with NO default, and that is load-bearing in three ways:
+  //  - Rows predating the column keep NULL. Postgres treats NULLs as DISTINCT in
+  //    a unique index, so legacy rows never collide with each other. That
+  //    removes any need for a destructive backfill — and there is no safe one,
+  //    because two legitimate Swap logs in a single transaction can share pair,
+  //    tokens, amounts and maker, making them genuinely indistinguishable once
+  //    the real index is lost.
+  //  - A sentinel default would be WORSE THAN NOTHING. Render overlaps deploy
+  //    generations for ~60-80s, and the outgoing binary does not write this
+  //    column: under a default, two real swaps in one tx would both take the
+  //    sentinel, collide, and be silently dropped by onConflictDoNothing(). The
+  //    constraint would destroy live data. NULL makes that write a no-op instead.
+  //  - Any future writer that forgets the column fails CLOSED (NOT NULL would
+  //    have been silently satisfied by the default).
+  logIndex:     integer('log_index'),
   dex:          varchar('dex', { length: 50 }).notNull(),
   pairAddress:  varchar('pair_address', { length: 42 }).notNull(),
   tokenIn:      varchar('token_in', { length: 42 }).notNull(),
@@ -157,6 +180,17 @@ export const dexTrades = pgTable('dex_trades', {
   makerIdx:     index('dex_maker_idx').on(t.maker),
   pairIdx:      index('dex_pair_idx').on(t.pairAddress),
   blockIdx:     index('dex_block_idx').on(t.blockNumber),
+  // What makes replay safe. dex_trades is a PLAIN table (unlike token_transfers,
+  // which is range-partitioned and therefore cannot carry a unique that omits the
+  // partition key), so the natural key can be enforced here directly.
+  //
+  // PARTIAL, over rows that actually carry the key. Legacy NULL rows are excluded
+  // outright rather than relied on to be "distinct enough", so the build cannot
+  // fail on pre-existing data and needs no migration to precede it.
+  // ensure-schema.ts is the runtime DDL authority and builds it CONCURRENTLY.
+  txLogUnique:  uniqueIndex('dex_tx_log_unique')
+                  .on(t.txHash, t.logIndex)
+                  .where(sql`log_index IS NOT NULL`),
 }))
 
 export const validators = pgTable('validators', {

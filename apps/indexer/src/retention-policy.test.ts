@@ -44,7 +44,7 @@ describe('retention guardrail — compact indexes are immortal on the default pa
 
   it('body delete tables are the refetchable/secondary ones only', () => {
     expect(buildRetentionPlan({ env: {}, ttPartitioned: true }).bodyDeleteTables)
-      .toEqual(['logs', 'dex_trades', 'gas_history'])
+      .toEqual(['logs', 'dex_trades', 'gas_history', 'webhook_deliveries'])
   })
 
   // The compact-bridge block also sweeps body tables to the compact cutoff (so a
@@ -53,7 +53,7 @@ describe('retention guardrail — compact indexes are immortal on the default pa
   // env it is still exactly the refetchable set and never a compact table.
   it('body sweep input under a finite compact env is still never a compact table', () => {
     const plan = buildRetentionPlan({ env: { COMPACT_RETENTION_DAYS: '4' }, ttPartitioned: false })
-    expect(plan.bodyDeleteTables).toEqual(['logs', 'dex_trades', 'gas_history'])
+    expect(plan.bodyDeleteTables).toEqual(['logs', 'dex_trades', 'gas_history', 'webhook_deliveries'])
     for (const t of plan.bodyDeleteTables) {
       expect(compact.has(t), `body sweep must not target compact table ${t}`).toBe(false)
     }
@@ -88,6 +88,42 @@ function readRetentionSource(name: string): string {
   if (!hit) throw new Error(`cannot locate ${name} from cwd ${process.cwd()}`)
   return readFileSync(hit, 'utf8')
 }
+
+/**
+ * The two gates must not drift apart.
+ *
+ * retention-cleanup.ts gates every destructive statement on its own
+ * `ALLOWED_TABLES` union, INDEPENDENTLY of the policy manifest — which is the
+ * right design (a rogue table has to defeat both) but has a silent failure
+ * direction: a table added to BODY_PRUNE_OPS and NOT to ALLOWED_TABLES is
+ * dropped by the second gate with no error. The op looks configured, the tests
+ * that read the manifest pass, and the table simply never gets pruned.
+ *
+ * That is exactly how `webhook_deliveries` was first wired — it would have grown
+ * without bound forever. Source-scanned rather than imported because
+ * ALLOWED_TABLES is deliberately module-private.
+ */
+describe('retention gates agree — every prunable table clears BOTH whitelists', () => {
+  it('every BODY_PRUNE_OPS table appears in retention-cleanup ALLOWED_TABLES', () => {
+    const src = readRetentionSource('retention-cleanup.ts')
+    const block = src.match(/const ALLOWED_TABLES = \[([\s\S]*?)\] as const/)
+    expect(block, 'ALLOWED_TABLES literal not found — did it move or get renamed?').toBeTruthy()
+    const allowed = new Set(Array.from(block![1].matchAll(/'([a-z_]+)'/g), m => m[1]))
+    for (const op of BODY_PRUNE_OPS) {
+      expect(
+        allowed.has(op.table),
+        `${op.table} is in BODY_PRUNE_OPS but not ALLOWED_TABLES — the second gate will silently skip it`,
+      ).toBe(true)
+    }
+  })
+
+  it('every COMPACT_PRUNE_TABLES entry appears in ALLOWED_TABLES too', () => {
+    const src = readRetentionSource('retention-cleanup.ts')
+    const block = src.match(/const ALLOWED_TABLES = \[([\s\S]*?)\] as const/)
+    const allowed = new Set(Array.from(block![1].matchAll(/'([a-z_]+)'/g), m => m[1]))
+    for (const t of COMPACT_PRUNE_TABLES) expect(allowed.has(t), `${t} missing from ALLOWED_TABLES`).toBe(true)
+  })
+})
 
 describe('A4b invariant 1 — backfill tables are retention-exempt by construction', () => {
   const BACKFILL_TABLES = [
