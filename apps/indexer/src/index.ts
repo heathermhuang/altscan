@@ -574,6 +574,10 @@ async function main() {
           if (ASYNC_TT_WRITER) {
             const q = getTransferQueueDepth()
             ttInfo = ` | tt:W=${q.durableBlock} q=${q.blocks}blk/${q.rows}rows`
+            // Only when non-zero, so the common line stays unchanged. A quarantine
+            // mark that lingers here means W is held behind a block still waiting on
+            // the prefix beneath it — which is the fold working, but worth seeing.
+            if (q.skipped > 0) ttInfo += ` skip=${q.skipped}`
           }
           console.log(`${TAG} Indexed block ${lastIndexed} (tip: ${latest}, lag: ${latest - lastIndexed}, ${bps} blk/s)${ttInfo}`)
           windowStart = Date.now()

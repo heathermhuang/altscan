@@ -1105,8 +1105,8 @@ export async function rollbackTransferWriterTo(forkPoint: number): Promise<void>
   }
 }
 
-export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number } {
-  return { blocks: transferPending.size, rows: transferPendingRows, durableBlock }
+export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number; skipped: number } {
+  return { blocks: transferPending.size, rows: transferPendingRows, durableBlock, skipped: transferSkipped.size }
 }
 
 // Edge-triggered high-water alert for the pending queue (warn once on the way up,
