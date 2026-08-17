@@ -43,6 +43,12 @@ const GAP = [{ from_block: '100', to_block: '200', heal_from: '100', verify_from
 const SMALL = [{ from_block: '100', to_block: '110', heal_from: '100', verify_from: '100', retention_floor: '50' }]
 
 const okFlush = async () => {}
+/**
+ * The fenced heal_cursor UPDATE now RETURNs its row, and a zero-row result means
+ * the lease lapsed before the write landed. Fixtures that expect the tick to carry
+ * on past the cursor must therefore supply one.
+ */
+const CURSOR_OK = [{ from_block: '100' }]
 
 describe('healNextGap', () => {
   it('refuses to run while the indexer is behind', async () => {
@@ -116,7 +122,7 @@ describe('healNextGap', () => {
 
   it('stamps healed_at only once the whole range is confirmed', async () => {
     // gap, re-verify(clean), advance-cursor, stamp(RETURNING a row = it applied).
-    const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
+    const { db, calls } = stubDb([SMALL, [], [], CURSOR_OK, [{ from_block: '100' }]])
     const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
     })
@@ -127,7 +133,7 @@ describe('healNextGap', () => {
   it('does not stamp healed when the conditional UPDATE matches nothing', async () => {
     // The range changed under us (grew, or lost rows to a reorg). Zero rows
     // updated is NOT a heal — that would be the same false all-clear, quietly.
-    const { db } = stubDb([SMALL, [], [], [], []])
+    const { db } = stubDb([SMALL, [], [], CURSOR_OK, []])
     const out = await healNextGap({ owner: 'test', resumeWindow: 20000,
       db, reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
     })
@@ -191,7 +197,7 @@ describe('healNextGap', () => {
     // Retention has eaten up to 150, so work begins there. Healing from 100 would
     // chase blocks Postgres deletes faster than we can write them.
     const clamped = [{ from_block: '100', to_block: '155', heal_from: '150', verify_from: '150' }]
-    const { db } = stubDb([clamped, [{ n: '150' }], [], [], [{ from_block: '100' }]])
+    const { db } = stubDb([clamped, [{ n: '150' }], [], CURSOR_OK, [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     const out = await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock.mock.calls[0][0]).toBe(150)
@@ -202,7 +208,7 @@ describe('healNextGap', () => {
   it('coerces BIGINT-as-string rows rather than trusting them', async () => {
     // node-postgres hands back BIGINT as a string; untreated, block arithmetic
     // becomes string concatenation.
-    const { db } = stubDb([[{ from_block: '100', to_block: '101', heal_from: '100', verify_from: '100' }], [{ n: '100' }], [], [], []])
+    const { db } = stubDb([[{ from_block: '100', to_block: '101', heal_from: '100', verify_from: '100' }], [{ n: '100' }], [], CURSOR_OK, []])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush })
     expect(reindexBlock).toHaveBeenCalledWith(100)
@@ -214,7 +220,7 @@ describe('healNextGap — fail-closed properties', () => {
   it('does not let batch 0 collapse the window into an instant false heal', async () => {
     // A zero batch must not produce an empty work set that sails through to the
     // stamp. The batch is re-clamped no matter which caller supplied it.
-    const { db } = stubDb([SMALL, [{ n: '100' }], [], [], [{ from_block: '100' }]])
+    const { db } = stubDb([SMALL, [{ n: '100' }], [], CURSOR_OK, [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({ owner: 'test', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush }, 0)
     expect(reindexBlock).toHaveBeenCalled()
@@ -280,7 +286,7 @@ describe('gap lease', () => {
   })
 
   it('claims with THIS owner and fences both writes on it', async () => {
-    const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
+    const { db, calls } = stubDb([SMALL, [], [], CURSOR_OK, [{ from_block: '100' }]])
     await healNextGap({
       owner: 'owner-abc', resumeWindow: 20000, db, reindexBlock: vi.fn(async (_n: number) => {}),
       readLag: async () => 0, flushTransfers: okFlush,
@@ -300,7 +306,7 @@ describe('gap lease', () => {
   it('rejects a lease too short to outlast its own safety margin', async () => {
     // A lease shorter than the abort margin would bail on every tick before doing
     // any work — healing would silently never progress.
-    const { db } = stubDb([SMALL, [{ n: '100' }], [], [], [{ from_block: '100' }]])
+    const { db } = stubDb([SMALL, [{ n: '100' }], [], CURSOR_OK, [{ from_block: '100' }]])
     const reindexBlock = vi.fn(async (_n: number) => {})
     await healNextGap({
       owner: 't', resumeWindow: 20000, db, reindexBlock, readLag: async () => 0, flushTransfers: okFlush,
@@ -312,7 +318,7 @@ describe('gap lease', () => {
 describe('quarantined blocks must not starve the healer, and must not fake a heal', () => {
   // Statement order per tick: 0=claim, 1=work-set, 2=verify-window, 3=cursor, 4=stamp.
   const runTick = async () => {
-    const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
+    const { db, calls } = stubDb([SMALL, [], [], CURSOR_OK, [{ from_block: '100' }]])
     await healNextGap({
       owner: 'owner-abc', resumeWindow: 20000, db, reindexBlock: vi.fn(async (_n: number) => {}),
       readLag: async () => 0, flushTransfers: okFlush,
@@ -320,18 +326,29 @@ describe('quarantined blocks must not starve the healer, and must not fake a hea
     return calls
   }
 
-  it('SELECTION skips a range already worked to its end but never stampable', async () => {
+  it('SELECTION skips only a PROVABLY unfinishable range', async () => {
     // Without this the healer starves: selection nominates the oldest unhealed row
-    // unconditionally, so a range that can never complete is re-picked every tick
+    // unconditionally, so a range that can never be stamped is re-picked every tick
     // and no later gap is ever reached.
+    //
+    // The test is "holds a quarantined block AND holds no repairable defect", NOT
+    // the earlier `heal_cursor >= to_block` proxy. That proxy is reachable while the
+    // range is still healable (a reorg removing an earlier block, the retention floor
+    // advancing past the quarantined height, a lapsed lease between cursor and stamp,
+    // the poison decision being cleared) and would have stranded repairable ranges
+    // forever. Both halves must be present.
     const claim = JSON.stringify((await runTick())[0])
-    expect(claim).toContain('heal_cursor')
-    expect(claim).toContain('to_block')
-    // Present TWICE — once in the candidate CTE, once in the repeated UPDATE
-    // predicate. The repeat is what makes the claim atomic under READ COMMITTED;
-    // omitting it there would hand a terminal range to a losing claimer anyway.
-    const occurrences = claim.split('heal_cursor IS NULL OR').length - 1
-    expect(occurrences).toBe(2)
+    expect(claim).toContain('poison_blocks')      // the quarantined-block half
+    expect(claim).toContain('generate_series')    // the repairable-defect half
+    expect(claim).toContain('tx_count')           // ...which includes overfull blocks
+  })
+
+  it('a fully-repaired range stays selectable so a pending STAMP can still land', async () => {
+    // Falls out of the "no quarantined block ⇒ selectable" half. If selection had
+    // been keyed on "has remaining work", a range repaired but not yet stamped (lease
+    // lapsed before the stamp) would never be picked again and would stay degraded.
+    const claim = JSON.stringify((await runTick())[0])
+    expect(claim).toContain('NOT (')
   })
 
   it('WINDOW verification tolerates quarantined heights so the cursor can advance', async () => {
@@ -349,5 +366,31 @@ describe('quarantined blocks must not starve the healer, and must not fake a hea
     // Relaxing this would stamp healed_at over a real hole and make
     // completenessStatus report `ok` on blocks that are gone for good.
     expect(JSON.stringify((await runTick())[4])).not.toContain('poison_blocks')
+  })
+})
+
+describe('the fenced cursor write is CHECKED, not just fenced', () => {
+  it('a lapsed lease at the cursor stops the tick instead of stamping anyway', async () => {
+    // The fence existed but its RESULT was ignored: a zero-row UPDATE meant the
+    // cursor never moved, yet execution carried on to the stamp and could report the
+    // range finished. The range would then still be selectable and keep starving the
+    // queue while the log claimed otherwise.
+    const { db, calls } = stubDb([SMALL, [], [], [] /* cursor: lease lapsed */, [{ from_block: '100' }]])
+    const out = await healNextGap({
+      owner: 'owner-abc', resumeWindow: 20000, db,
+      reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
+    })
+    expect(out.status).toBe('progressed')
+    // 0=claim, 1=work-set, 2=verify, 3=cursor. The stamp must NOT have been attempted.
+    expect(calls).toHaveLength(4)
+  })
+
+  it('and never reports a heal off a cursor write that did not land', async () => {
+    const { db } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
+    const out = await healNextGap({
+      owner: 'owner-abc', resumeWindow: 20000, db,
+      reindexBlock: vi.fn(async (_n: number) => {}), readLag: async () => 0, flushTransfers: okFlush,
+    })
+    expect(out.status).not.toBe('healed')
   })
 })

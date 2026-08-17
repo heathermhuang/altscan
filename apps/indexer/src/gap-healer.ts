@@ -218,22 +218,54 @@ export async function healNextGap(
              -- it falls out of the resume window, which is hours, against a
              -- retention floor measured in days.
              AND g.to_block < (SELECT MAX(number) FROM blocks) - ${resumeWindow}
-             -- Skip a range that has already been worked to its end but can never
-             -- be stamped healed. heal_cursor >= to_block with healed_at still NULL
-             -- is exactly that terminal state: every healable block in the range is
-             -- done, and the density proof refused because something in it is
-             -- permanently absent — a quarantined block, today.
+             -- Skip a range that is PROVABLY unfinishable, so it cannot starve the
+             -- queue. Selection nominates the oldest unhealed row unconditionally
+             -- (see above — that is what makes overlap impossible), so without this
+             -- a range that can never be stamped is re-picked every tick forever and
+             -- no later gap is ever reached.
              --
-             -- Without this the healer STARVES. Selection nominates the oldest
-             -- unhealed row unconditionally (see above — that is what makes overlap
-             -- impossible), so a range that can never complete would be re-selected
-             -- every tick forever and no later gap would ever be reached.
+             -- Skip iff the retained range holds a quarantined block AND holds no
+             -- repairable defect. Both halves matter:
+             --   • no quarantined block  → ordinary range, always selectable (this
+             --     also keeps a fully-repaired range selectable so it can still be
+             --     STAMPED — the stamp may be pending after a lapsed lease).
+             --   • a repairable defect   → real work remains, keep healing it; one
+             --     quarantined block must not strand the other ~4,799 blocks of a
+             --     max_lag_skip range.
              --
-             -- Deliberately keyed on the CURSOR, not on "contains a poison block".
-             -- The latter would skip the whole range on sight, and a single
-             -- quarantined block inside a ~4,800-block max_lag_skip gap would then
-             -- block healing the other ~4,799.
-             AND (g.heal_cursor IS NULL OR g.heal_cursor < g.to_block)
+             -- Deliberately NOT a heal_cursor >= to_block test, which was the first shape
+             -- of this and is only a PROXY for terminality. That proxy is reachable
+             -- while the range is still healable — a reorg removing an earlier block,
+             -- the retention floor advancing past the quarantined height, a lease
+             -- lapsing between the cursor write and the stamp, or the poison decision
+             -- being cleared — and each of those would have stranded a repairable
+             -- range forever. (codex P2, follow-up round.)
+             --
+             -- Evaluated fresh every tick against current poison/blocks/floor state,
+             -- so all of those cases SELF-HEAL: the moment a range stops being
+             -- provably unfinishable it becomes selectable again, with no terminal
+             -- flag to reset and no revalidation pass to run.
+             AND NOT (
+               EXISTS (
+                 SELECT 1 FROM poison_blocks p
+                 WHERE p.block_number
+                       BETWEEN GREATEST(g.from_block, COALESCE(f.floor, g.from_block)) AND g.to_block
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM generate_series(
+                   GREATEST(g.from_block, COALESCE(f.floor, g.from_block)), g.to_block
+                 ) AS n
+                 WHERE NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+                   AND (
+                     NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
+                     OR EXISTS (
+                          SELECT 1 FROM blocks b
+                          WHERE b.number = n
+                            AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
+                        )
+                   )
+               )
+             )
            ORDER BY g.from_block
            LIMIT 1
          )
@@ -253,11 +285,14 @@ export async function healNextGap(
        -- zero rows and idle. (codex P1, round 8.)
        AND g.healed_at IS NULL
        AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
-       -- Repeated for the same reason as the lease check: the CTE's copy is
-       -- evaluated against a snapshot, this one against the post-lock row version.
-       -- Omitting it here would let a claimer that lost the race be handed a
-       -- terminal range anyway, reviving the starvation the CTE clause prevents.
-       AND (g.heal_cursor IS NULL OR g.heal_cursor < g.to_block)
+       -- The unfinishable-range test above is deliberately NOT repeated here.
+       -- Repetition exists to defeat a row-version race: two claimers pick the same
+       -- row, the loser blocks on the lock, and Postgres re-evaluates THIS predicate
+       -- against the winner's committed version. That race is fully covered by the
+       -- two checks above — the loser sees the fresh lease and updates zero rows.
+       -- The unfinishable test reads poison_blocks/blocks/transactions, not this
+       -- row, so re-evaluating it post-lock guards nothing and would double a
+       -- generate_series scan on every claim.
     RETURNING g.from_block,
               g.to_block,
               GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
@@ -450,13 +485,22 @@ export async function healNextGap(
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
 
-  await db.execute(sql`
+  const advanced = rowsOf(await db.execute(sql`
     UPDATE index_gaps
        SET heal_cursor = GREATEST(COALESCE(heal_cursor, ${healFrom} - 1), ${windowEnd})
      WHERE from_block = ${fromBlock} AND healed_at IS NULL
        -- Fenced: a lapsed owner must not land a late write over the new owner.
        AND heal_lease_owner = ${owner} AND heal_lease_until > now()
-  `)
+    RETURNING from_block
+  `))
+  // The fence was checked but its RESULT was ignored. If the lease lapsed, this
+  // matched zero rows — the cursor did NOT move — yet execution carried on to the
+  // stamp and could log the range as finished. Bail instead: nothing durable
+  // changed, and the next tick re-claims it honestly. (codex P2, follow-up round.)
+  if (advanced.length === 0) {
+    log(`[gap-healer] lease lapsed before the cursor advance on ${fromBlock}..${toBlock} — no progress recorded`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
 
   if (windowEnd < toBlock) {
     log(`[gap-healer] repaired ${repaired} block(s); confirmed through ${windowEnd} of ${fromBlock}..${toBlock}`)
