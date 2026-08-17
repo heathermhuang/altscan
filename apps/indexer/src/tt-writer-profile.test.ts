@@ -40,10 +40,39 @@ describe('tt-writer produce/drain profile wiring', () => {
     // Phase must be snapshotted BEFORE the transaction: a long drain is what
     // parks the workers, so sampling at completion labels everything "blocked".
     const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
-    const wasBlockedIdx = fn.indexOf('const wasBlocked')
+    const phaseIdx = fn.indexOf('const phase =')
     const txIdx = fn.indexOf('await db.transaction')
-    expect(wasBlockedIdx).toBeGreaterThan(-1)
-    expect(wasBlockedIdx).toBeLessThan(txIdx)
+    expect(phaseIdx).toBeGreaterThan(-1)
+    expect(phaseIdx).toBeLessThan(txIdx)
+  })
+
+  /**
+   * codex P2. A binary parked>0 test labels a drain "blocked" when only 1 of 8
+   * workers has parked and the other 7 still hold pool slots — the highest-
+   * contention moment. Folding those into the blocked bucket drags its rate
+   * toward the running rate, making connection starvation look like inherent
+   * oscillation: the exact confusion this experiment exists to resolve.
+   */
+  it('classifies drains in three phases, not two', () => {
+    const s = src('block-processor.ts')
+    expect(s).toMatch(/'none'\s*\|\s*'partial'\s*\|\s*'all'/)
+    expect(s).toContain('function phaseFor(')
+    // ALL must require the whole pool, so a partially-parked window can never be
+    // read as "the writer had the pool to itself".
+    expect(s).toMatch(/parked >= profWorkerCount/)
+  })
+
+  it('binds the worker count before any initTransferWriter call site', () => {
+    const s = src('index.ts')
+    expect(s).toContain('setProfileWorkerCount(CONCURRENCY)')
+    // Module scope, ahead of every initTransferWriter call — there are three.
+    expect(s.indexOf('setProfileWorkerCount(CONCURRENCY)')).toBeLessThan(s.indexOf('initTransferWriter('))
+  })
+
+  it('marks a window inconclusive rather than reporting a clean number', () => {
+    const s = src('block-processor.ts')
+    expect(s).toContain('pool size UNSET')
+    expect(s).toContain('need both none+all passes to conclude')
   })
 
   it('boot states the RESOLVED profile setting, both ways', () => {

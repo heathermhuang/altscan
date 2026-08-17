@@ -26,6 +26,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
   noteWorkerParked,
+  setProfileWorkerCount,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
@@ -59,6 +60,11 @@ const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 // ETH at 12s can run lower. Default = 8 for BNB, 4 for ETH.
 const DEFAULT_CONCURRENCY = chain.key === 'bnb' ? 8 : 4
 const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10)
+// Bound at module scope, not inside the boot path: initTransferWriter has THREE
+// call sites (resume, fresh start, normal boot) and the produce/drain profile
+// needs the pool size before whichever one runs, or it cannot tell "all workers
+// parked" from "some parked" and silently reports an inconclusive window.
+setProfileWorkerCount(CONCURRENCY)
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
 

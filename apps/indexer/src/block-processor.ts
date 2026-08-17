@@ -1015,11 +1015,54 @@ const TT_WRITER_PROFILE = process.env.TT_WRITER_PROFILE === '1'
 const TT_PROFILE_WINDOW_MS = parseInt(process.env.TT_PROFILE_WINDOW_MS ?? '30000', 10) || 30000
 /** Block workers currently parked in the backpressure poll loop (index.ts). */
 let parkedWorkers = 0
+/**
+ * Worker-pool size, so "all parked" is a real state rather than a guess.
+ * 0 = unset, which collapses ALL and PARTIAL into one bucket and is reported as
+ * such — an unset pool size must not silently masquerade as a clean measurement.
+ */
+let profWorkerCount = 0
+/**
+ * Three phases, not two. (codex P2.)
+ *
+ * A binary `parkedWorkers > 0` labels a drain "blocked" even when only 1 of 8
+ * workers has parked and the other 7 are still decoding and holding pool slots.
+ * Those transition periods are exactly where contention is HIGHEST, so folding
+ * them into the blocked bucket drags the blocked rate down toward the running
+ * rate — i.e. it makes M1 (connection starvation) look like M3 (inherent
+ * oscillation), which is the one confusion this experiment exists to resolve.
+ *
+ *   NONE    — every worker decoding. Full competition for the pool.
+ *   PARTIAL — some parked. Transitional; reported but never used to conclude.
+ *   ALL     — every worker parked. The writer has the pool to itself.
+ *
+ * The verdict comes from NONE vs ALL. PARTIAL is printed so a run where most
+ * drains land there is visibly inconclusive rather than quietly wrong.
+ */
+type DrainPhase = 'none' | 'partial' | 'all'
 const ttProf = {
   since: 0,
-  blockedRows: 0, blockedMs: 0,   // drained while >=1 worker was parked
-  runningRows: 0, runningMs: 0,   // drained while every worker was free
-  acquireMs: 0, acquireMaxMs: 0, sqlMs: 0, passes: 0,
+  rows: { none: 0, partial: 0, all: 0 },
+  ms: { none: 0, partial: 0, all: 0 },
+  acq: { none: 0, partial: 0, all: 0 },
+  passesBy: { none: 0, partial: 0, all: 0 },
+  acquireMaxMs: 0, sqlMs: 0, passes: 0,
+}
+
+/**
+ * Tell the profile how many block workers exist, so ALL is distinguishable from
+ * PARTIAL. Called from index.ts with CONCURRENCY.
+ */
+export function setProfileWorkerCount(n: number): void {
+  profWorkerCount = Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function phaseFor(parked: number): DrainPhase {
+  if (parked <= 0) return 'none'
+  // `>=` not `===`: if the count ever over-reports, the safe reading is "the
+  // writer had the pool to itself", which weakens the contention conclusion
+  // rather than inventing one.
+  if (profWorkerCount > 0 && parked >= profWorkerCount) return 'all'
+  return 'partial'
 }
 
 /**
@@ -1035,29 +1078,42 @@ export function noteWorkerParked(delta: number): void {
   parkedWorkers = Math.max(0, parkedWorkers + delta)
 }
 
-function recordDrainPass(rows: number, acquireMs: number, sqlMs: number, wasBlocked: boolean): void {
+function recordDrainPass(rows: number, acquireMs: number, sqlMs: number, phase: DrainPhase): void {
   const now = Date.now()
   if (ttProf.since === 0) ttProf.since = now
   ttProf.passes++
-  ttProf.acquireMs += acquireMs
   if (acquireMs > ttProf.acquireMaxMs) ttProf.acquireMaxMs = acquireMs
   ttProf.sqlMs += sqlMs
-  const total = acquireMs + sqlMs
-  if (wasBlocked) { ttProf.blockedRows += rows; ttProf.blockedMs += total }
-  else { ttProf.runningRows += rows; ttProf.runningMs += total }
+  ttProf.rows[phase] += rows
+  ttProf.ms[phase] += acquireMs + sqlMs
+  ttProf.acq[phase] += acquireMs
+  ttProf.passesBy[phase]++
 
   if (now - ttProf.since < TT_PROFILE_WINDOW_MS) return
-  const rate = (r: number, ms: number) => (ms > 0 ? (r / (ms / 1000)).toFixed(0) : '—')
+  // Every denominator is guarded: a window can legitimately contain zero passes
+  // in a phase (e.g. no worker ever parked), and a NaN in the one line the whole
+  // experiment is read from would be indistinguishable from a real reading.
+  const per = (p: DrainPhase) => {
+    const n = ttProf.passesBy[p]
+    if (n === 0) return `${p} —`
+    const ms = ttProf.ms[p]
+    const rate = ms > 0 ? (ttProf.rows[p] / (ms / 1000)).toFixed(0) : '—'
+    return `${p} ${rate} rows/s (${ttProf.rows[p]}r/${(ms / 1000).toFixed(1)}s, acq ${(ttProf.acq[p] / n).toFixed(0)}ms, n=${n})`
+  }
+  const verdict =
+    profWorkerCount === 0 ? ' [pool size UNSET — all/partial merged, inconclusive]'
+    : ttProf.passesBy.none === 0 || ttProf.passesBy.all === 0 ? ' [need both none+all passes to conclude]'
+    : ''
   console.log(
     `[tt-writer] PROFILE ${((now - ttProf.since) / 1000).toFixed(0)}s: ` +
-    `blocked ${rate(ttProf.blockedRows, ttProf.blockedMs)} rows/s (${ttProf.blockedRows} rows/${(ttProf.blockedMs / 1000).toFixed(1)}s) | ` +
-    `running ${rate(ttProf.runningRows, ttProf.runningMs)} rows/s (${ttProf.runningRows} rows/${(ttProf.runningMs / 1000).toFixed(1)}s) | ` +
-    `acquire avg ${(ttProf.acquireMs / ttProf.passes).toFixed(0)}ms max ${ttProf.acquireMaxMs.toFixed(0)}ms | ` +
-    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms | passes ${ttProf.passes}`,
+    `${per('none')} | ${per('partial')} | ${per('all')} | ` +
+    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms, acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, passes ${ttProf.passes}${verdict}`,
   )
   ttProf.since = now
-  ttProf.blockedRows = ttProf.blockedMs = ttProf.runningRows = ttProf.runningMs = 0
-  ttProf.acquireMs = ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
+  for (const p of ['none', 'partial', 'all'] as const) {
+    ttProf.rows[p] = ttProf.ms[p] = ttProf.acq[p] = ttProf.passesBy[p] = 0
+  }
+  ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
 }
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
@@ -1356,7 +1412,7 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
   // completion would label every pass "blocked", because a long drain is exactly
   // what parks the workers. The question is what the writer was competing with
   // when it STARTED.
-  const wasBlocked = TT_WRITER_PROFILE && parkedWorkers > 0
+  const phase = TT_WRITER_PROFILE ? phaseFor(parkedWorkers) : 'none'
   const tStart = TT_WRITER_PROFILE ? performance.now() : 0
   let tEnter = 0
   await db.transaction(async (tx) => {
@@ -1398,7 +1454,7 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
     // entry); attribute the whole span to acquisition rather than reporting a
     // negative sqlMs.
     const enter = tEnter === 0 ? end : tEnter
-    recordDrainPass(rows.length, enter - tStart, end - enter, wasBlocked)
+    recordDrainPass(rows.length, enter - tStart, end - enter, phase)
   }
 }
 
