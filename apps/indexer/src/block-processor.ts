@@ -1056,12 +1056,40 @@ export function setProfileWorkerCount(n: number): void {
   profWorkerCount = Number.isFinite(n) && n > 0 ? n : 0
 }
 
-function phaseFor(parked: number): DrainPhase {
-  if (parked <= 0) return 'none'
+/** Block workers currently alive in the batch loop (index.ts). */
+let activeWorkers = 0
+
+/**
+ * Report a block worker entering (+1) or leaving (-1) the batch loop.
+ *
+ * NOT redundant with noteWorkerParked. A worker that reaches the tail of a batch
+ * hits `claimNext() === -1` and RETURNS without ever parking, so `parked === 0`
+ * happens both when all 8 workers are hammering the pool and when 7 have gone
+ * home and one straggler remains. Those are opposite contention regimes, and
+ * conflating them drags the `none` bucket toward the `all` bucket — concealing
+ * connection starvation, the exact thing being tested for. (codex P2, round 2.)
+ */
+export function noteWorkerActive(delta: number): void {
+  activeWorkers = Math.max(0, activeWorkers + delta)
+}
+
+/**
+ * Classify a drain pass. Pure and exported so the mapping is tested by CALLING
+ * it — a previous version asserted only that the source contained the right
+ * literals, which would have passed even with the branch dead. (codex P2.)
+ *
+ * `none` demands a FULL pool of active workers and none parked; anything else
+ * short of a full park is `partial`, i.e. reported but never concluded from.
+ */
+export function phaseFor(parked: number, active: number, workerCount: number): DrainPhase {
+  // Without a known pool size nothing can be classified; say so rather than
+  // guessing, and let the log line label the window inconclusive.
+  if (!(workerCount > 0)) return 'partial'
   // `>=` not `===`: if the count ever over-reports, the safe reading is "the
   // writer had the pool to itself", which weakens the contention conclusion
   // rather than inventing one.
-  if (profWorkerCount > 0 && parked >= profWorkerCount) return 'all'
+  if (parked >= workerCount) return 'all'
+  if (parked === 0 && active >= workerCount) return 'none'
   return 'partial'
 }
 
@@ -1412,7 +1440,7 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
   // completion would label every pass "blocked", because a long drain is exactly
   // what parks the workers. The question is what the writer was competing with
   // when it STARTED.
-  const phase = TT_WRITER_PROFILE ? phaseFor(parkedWorkers) : 'none'
+  const phase = TT_WRITER_PROFILE ? phaseFor(parkedWorkers, activeWorkers, profWorkerCount) : 'none'
   const tStart = TT_WRITER_PROFILE ? performance.now() : 0
   let tEnter = 0
   await db.transaction(async (tx) => {

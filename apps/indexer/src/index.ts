@@ -26,6 +26,7 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
   noteWorkerParked,
+  noteWorkerActive,
   setProfileWorkerCount,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
@@ -618,6 +619,13 @@ async function main() {
 
       await Promise.all(
         Array.from({ length: CONCURRENCY }, async (_, workerId) => {
+          // Active-worker accounting for the produce/drain profile. A worker that
+          // reaches the batch tail returns via `claimNext() === -1` WITHOUT ever
+          // parking, so parked===0 alone cannot distinguish "all 8 hammering the
+          // pool" from "7 finished, 1 straggler". finally, so every exit path
+          // (tail return, failure abort, shutdown) is accounted. (codex P2.)
+          noteWorkerActive(1)
+          try {
           while (running && failure === null) {
             // Backpressure: don't let block decoding outrun the transfer writer.
             // Bounds memory (OOM history) and the W↔tip replay window on crash.
@@ -678,6 +686,9 @@ async function main() {
               if (!failure) failure = { block: blockNum, err }
               return
             }
+          }
+          } finally {
+            noteWorkerActive(-1)
           }
         })
       )

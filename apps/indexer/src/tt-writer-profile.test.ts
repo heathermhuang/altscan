@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+// phaseFor is PURE — no getDb(), no queue mutation. Importing block-processor is
+// safe here because its module scope only parses env; getDb() is called inside
+// functions. Do NOT extend this file to call setDurableFloor/enqueueTransferWrite:
+// apps/indexer/.env supplies DATABASE_URL, so those write to a live database.
+import { phaseFor } from './block-processor'
 
 /**
  * Wiring guard for the produce/drain diagnostic.
@@ -46,27 +51,62 @@ describe('tt-writer produce/drain profile wiring', () => {
     expect(phaseIdx).toBeLessThan(txIdx)
   })
 
-  /**
-   * codex P2. A binary parked>0 test labels a drain "blocked" when only 1 of 8
-   * workers has parked and the other 7 still hold pool slots — the highest-
-   * contention moment. Folding those into the blocked bucket drags its rate
-   * toward the running rate, making connection starvation look like inherent
-   * oscillation: the exact confusion this experiment exists to resolve.
-   */
-  it('classifies drains in three phases, not two', () => {
-    const s = src('block-processor.ts')
-    expect(s).toMatch(/'none'\s*\|\s*'partial'\s*\|\s*'all'/)
-    expect(s).toContain('function phaseFor(')
-    // ALL must require the whole pool, so a partially-parked window can never be
-    // read as "the writer had the pool to itself".
-    expect(s).toMatch(/parked >= profWorkerCount/)
-  })
-
   it('binds the worker count before any initTransferWriter call site', () => {
     const s = src('index.ts')
     expect(s).toContain('setProfileWorkerCount(CONCURRENCY)')
     // Module scope, ahead of every initTransferWriter call — there are three.
     expect(s.indexOf('setProfileWorkerCount(CONCURRENCY)')).toBeLessThan(s.indexOf('initTransferWriter('))
+  })
+
+  it('reports worker ACTIVE as well as PARKED around the batch loop', () => {
+    const s = src('index.ts')
+    expect(s).toContain('noteWorkerActive(1)')
+    // finally, so the tail return / failure abort / shutdown paths all account.
+    const body = s.slice(s.indexOf('noteWorkerActive(1)'))
+    expect(body).toMatch(/}\s*finally\s*{\s*noteWorkerActive\(-1\)/s)
+  })
+})
+
+/**
+ * Behavioural test of the phase mapping. (codex P2, round 2.)
+ *
+ * The previous version only matched source literals, so returning the wrong
+ * bucket — or leaving the branch dead — would still have passed, meaning the
+ * regression it claimed to pin was not pinned at all. phaseFor is pure and
+ * exported precisely so this can CALL it. No DB is touched.
+ */
+describe('phaseFor', () => {
+  const N = 8
+  it('NONE only when the pool is full and nobody is parked', () => {
+    expect(phaseFor(0, N, N)).toBe('none')
+  })
+
+  /**
+   * The bug this round fixed. A worker that reaches the batch tail returns via
+   * claimNext() === -1 WITHOUT parking, so parked===0 also describes "7 workers
+   * went home, 1 straggler" — a LOW-contention state. Scoring that as `none`
+   * (full competition) drags the none-bucket's rate toward the all-bucket's and
+   * hides connection starvation, which is what the experiment tests for.
+   */
+  it('is NOT none when workers have drained away, even with nobody parked', () => {
+    expect(phaseFor(0, 1, N)).toBe('partial')
+    expect(phaseFor(0, 0, N)).toBe('partial')
+    expect(phaseFor(0, N - 1, N)).toBe('partial')
+  })
+
+  it('ALL only when every worker is parked', () => {
+    expect(phaseFor(N, 0, N)).toBe('all')
+    expect(phaseFor(N - 1, 1, N)).toBe('partial')
+  })
+
+  it('treats an over-reported park count as ALL, never inventing contention', () => {
+    // Over-reporting must weaken a contention conclusion, not manufacture one.
+    expect(phaseFor(N + 3, 0, N)).toBe('all')
+  })
+
+  it('refuses to classify without a known pool size', () => {
+    expect(phaseFor(0, 8, 0)).toBe('partial')
+    expect(phaseFor(8, 0, 0)).toBe('partial')
   })
 
   it('marks a window inconclusive rather than reporting a clean number', () => {
