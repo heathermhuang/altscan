@@ -28,7 +28,10 @@ vi.mock('./db', async () => {
       execute: (q: unknown) => {
         // The drizzle sql`` tag exposes its literal chunks; find the table name.
         const text = JSON.stringify(q)
-        calls.push(text.includes('poison_blocks') ? 'poison_blocks' : 'execute:other')
+        calls.push(
+          text.includes('poison_blocks') ? 'poison_blocks'
+          : text.includes('heal_cursor') ? 'index_gaps:heal_cursor'
+          : 'execute:other')
         return Promise.resolve([])
       },
       delete: (table: unknown) => {
@@ -50,11 +53,19 @@ describe('unwindFrom ordering', () => {
     expect(calls[0]).toBe('poison_blocks')
   })
 
-  it('still unwinds every table in UNWIND_ORDER after it', async () => {
+  it('rewinds a heal_cursor above the fork, also before the unwind', async () => {
+    // Height-keyed state again: heal_cursor claims "everything up to here was
+    // re-indexed, drained and verified" about blocks this unwind is deleting. Left
+    // alone, the healer's work window starts past the damage it can never reach.
     await unwindFrom(500)
-    // One delete per manifest entry, all after the poison delete.
-    expect(calls.length).toBe(UNWIND_ORDER.length + 1)
-    expect(calls.slice(1).every(c => c !== 'poison_blocks')).toBe(true)
+    expect(calls.slice(0, 2)).toContain('index_gaps:heal_cursor')
+  })
+
+  it('still unwinds every table in UNWIND_ORDER after the pre-deletes', async () => {
+    await unwindFrom(500)
+    // Two pre-deletes (poison_blocks, heal_cursor rewind) then one per manifest entry.
+    expect(calls.length).toBe(UNWIND_ORDER.length + 2)
+    expect(calls.slice(2).every(c => c !== 'poison_blocks')).toBe(true)
   })
 
   it('blocks is unwound LAST, so the FK from transactions still holds', async () => {

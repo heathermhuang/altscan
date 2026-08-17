@@ -218,6 +218,96 @@ export async function healNextGap(
              -- it falls out of the resume window, which is hours, against a
              -- retention floor measured in days.
              AND g.to_block < (SELECT MAX(number) FROM blocks) - ${resumeWindow}
+             -- Skip a range that is PROVABLY unfinishable, so it cannot starve the
+             -- queue. Selection nominates the oldest unhealed row unconditionally
+             -- (see above — that is what makes overlap impossible), so without this
+             -- a range that can never be stamped is re-picked every tick forever and
+             -- no later gap is ever reached.
+             --
+             -- Skip iff the retained range holds a quarantined block AND holds no
+             -- repairable defect. Both halves matter:
+             --   • no quarantined block  → ordinary range, always selectable (this
+             --     also keeps a fully-repaired range selectable so it can still be
+             --     STAMPED — the stamp may be pending after a lapsed lease).
+             --   • a repairable defect   → real work remains, keep healing it; one
+             --     quarantined block must not strand the other ~4,799 blocks of a
+             --     max_lag_skip range.
+             --
+             -- Deliberately NOT a heal_cursor >= to_block test, which was the first shape
+             -- of this and is only a PROXY for terminality. That proxy is reachable
+             -- while the range is still healable — a reorg removing an earlier block,
+             -- the retention floor advancing past the quarantined height, a lease
+             -- lapsing between the cursor write and the stamp, or the poison decision
+             -- being cleared — and each of those would have stranded a repairable
+             -- range forever. (codex P2, follow-up round.)
+             --
+             -- Evaluated fresh every tick against current poison/blocks/floor state,
+             -- so all of those cases SELF-HEAL: the moment a range stops being
+             -- provably unfinishable it becomes selectable again, with no terminal
+             -- flag to reset and no revalidation pass to run.
+             AND NOT (
+               -- An UNEXECUTABLE blocker: a defect in the retained range that this
+               -- tick's work set can never act on. Two kinds, and both must count.
+               --
+               --   • quarantined AND STILL ABSENT. Testing merely for a poison_blocks
+               --     row was wrong: a height can be quarantined and then legitimately
+               --     become present (the documented deploy-overlap window in
+               --     index-gaps.ts), and nothing deletes the row outside reorg
+               --     cleanup. That stranded a range the strict proof would happily
+               --     have stamped.
+               --   • PRESENT with a transaction-count mismatch. The work set is
+               --     absent-only, so an underfull or overfull block is never repaired.
+               --     Left out of this arm it starved every later gap on its own,
+               --     without any quarantine involved — reachable whenever processBlock
+               --     inserts the block and then fails inserting its transactions.
+               --
+               -- Note the role reversal from an earlier revision: the count mismatch is
+               -- a BLOCKER here, not repairable work. Counting it as repairable was the
+               -- previous bug.
+               EXISTS (
+                 SELECT 1 FROM generate_series(
+                   GREATEST(g.from_block, COALESCE(f.floor, g.from_block)), g.to_block
+                 ) AS n
+                 WHERE (
+                   EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+                   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
+                 ) OR EXISTS (
+                   SELECT 1 FROM blocks b
+                   WHERE b.number = n
+                     AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
+                 )
+               )
+               -- "Repairable" must mean EXECUTABLE, and by exactly the definition the
+               -- work set uses: an ABSENT, non-quarantined block at or after where the
+               -- next tick would actually start. Two ways this went wrong:
+               --
+               --   • Counting a tx_count mismatch. The work set is absent-blocks-only
+               --     (processBlock is a first-time indexer, not a repair tool), so an
+               --     underfull or overfull PRESENT block is never fixed — selection
+               --     would pick the range every tick, verification would reject it,
+               --     the cursor would never move, and every later gap starves. The
+               --     mismatch still gates the cursor and the stamp, where it belongs.
+               --
+               --   • Scanning from the retention floor while execution starts at
+               --     heal_cursor + 1. A defect BEHIND the cursor would be seen but
+               --     never reached: the later window verifies empty, the strict stamp
+               --     refuses on the unreached block, and the row repeats forever.
+               --     Reorg damage below the cursor is handled where it arises —
+               --     unwindFrom rewinds heal_cursor above the fork — rather than by
+               --     selecting a range the tick cannot act on.
+               AND NOT EXISTS (
+                 SELECT 1 FROM generate_series(
+                   GREATEST(
+                     g.from_block,
+                     COALESCE(f.floor, g.from_block),
+                     COALESCE(g.heal_cursor + 1, g.from_block)
+                   ),
+                   g.to_block
+                 ) AS n
+                 WHERE NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+                   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
+               )
+             )
            ORDER BY g.from_block
            LIMIT 1
          )
@@ -237,6 +327,14 @@ export async function healNextGap(
        -- zero rows and idle. (codex P1, round 8.)
        AND g.healed_at IS NULL
        AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
+       -- The unfinishable-range test above is deliberately NOT repeated here.
+       -- Repetition exists to defeat a row-version race: two claimers pick the same
+       -- row, the loser blocks on the lock, and Postgres re-evaluates THIS predicate
+       -- against the winner's committed version. That race is fully covered by the
+       -- two checks above — the loser sees the fresh lease and updates zero rows.
+       -- The unfinishable test reads poison_blocks/blocks/transactions, not this
+       -- row, so re-evaluating it post-lock guards nothing and would double a
+       -- generate_series scan on every claim.
     RETURNING g.from_block,
               g.to_block,
               GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
@@ -280,14 +378,32 @@ export async function healNextGap(
   //
   // Safe at the retention boundary: retention deletes strictly BELOW the cutoff
   // and heal_from starts AT it, so pruned transactions are never read as damage.
+  // WINDOW verification — gates the heal_cursor only, NOT the healed_at stamp.
+  //
+  // Quarantined heights are excluded here, and the distinction from the final
+  // stamp is the whole point. This question is "did this window make all the
+  // progress it could?", and a quarantined block is absent BY DECISION — the work
+  // set skips it deliberately, so counting it here holds the cursor forever, the
+  // range is re-selected every tick, and no other gap is ever healed.
+  //
+  // The final density proof at the bottom of this function does NOT get this
+  // exclusion. It answers a different question — "is this range actually
+  // complete?" — and the honest answer over a quarantined block is no. So the
+  // range heals everything it can, then stays unhealed and visibly `degraded`
+  // rather than being stamped complete over a real hole. Relaxing the stamp too
+  // would recreate the bug where completenessStatus reports `ok` over blocks that
+  // are permanently gone.
   const incompleteIn = (lo: number, hi: number) => sql`
     SELECT n FROM generate_series(${lo}::bigint, ${hi}::bigint) AS n
-    WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
-       OR EXISTS (
-            SELECT 1 FROM blocks b
-            WHERE b.number = n
-              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
-          )
+    WHERE NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+      AND (
+        NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+        OR EXISTS (
+             SELECT 1 FROM blocks b
+             WHERE b.number = n
+               AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
+           )
+      )
     ORDER BY n
   `
   // Work set = ABSENT blocks ONLY. Nothing else is safe to process.
@@ -411,13 +527,22 @@ export async function healNextGap(
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
 
-  await db.execute(sql`
+  const advanced = rowsOf(await db.execute(sql`
     UPDATE index_gaps
        SET heal_cursor = GREATEST(COALESCE(heal_cursor, ${healFrom} - 1), ${windowEnd})
      WHERE from_block = ${fromBlock} AND healed_at IS NULL
        -- Fenced: a lapsed owner must not land a late write over the new owner.
        AND heal_lease_owner = ${owner} AND heal_lease_until > now()
-  `)
+    RETURNING from_block
+  `))
+  // The fence was checked but its RESULT was ignored. If the lease lapsed, this
+  // matched zero rows — the cursor did NOT move — yet execution carried on to the
+  // stamp and could log the range as finished. Bail instead: nothing durable
+  // changed, and the next tick re-claims it honestly. (codex P2, follow-up round.)
+  if (advanced.length === 0) {
+    log(`[gap-healer] lease lapsed before the cursor advance on ${fromBlock}..${toBlock} — no progress recorded`)
+    return { status: 'progressed', fromBlock, toBlock, repaired }
+  }
 
   if (windowEnd < toBlock) {
     log(`[gap-healer] repaired ${repaired} block(s); confirmed through ${windowEnd} of ${fromBlock}..${toBlock}`)
@@ -446,7 +571,24 @@ export async function healNextGap(
   `)
   // A conditional UPDATE that matches nothing is NOT a heal. (codex P2.)
   if (rowsOf(res).length === 0) {
-    log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
+    // Two very different reasons land here, and calling both "changed under us"
+    // would misreport the common one. The window verified, so the cursor has just
+    // reached to_block; if the range holds a quarantined block the strict density
+    // proof above refuses forever and selection will now skip this range as
+    // terminal. Say which, so a permanently-degraded range is legible rather than
+    // looking like a transient race that never resolves.
+    let poisoned = 0
+    try {
+      poisoned = toNum(rowsOf(await db.execute(sql`
+        SELECT count(*)::int AS n FROM poison_blocks
+        WHERE block_number BETWEEN ${verifyFrom} AND ${toBlock}
+      `))[0]?.n) ?? 0
+    } catch { /* diagnostic only — never fail the tick for a log line */ }
+    if (poisoned > 0) {
+      log(`[gap-healer] ${fromBlock}..${toBlock} worked to completion but holds ${poisoned} quarantined block(s) — PERMANENTLY incomplete, left degraded and no longer selected`)
+    } else {
+      log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
+    }
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
   log(`[gap-healer] healed ${fromBlock}..${toBlock} (retained window complete)`)
