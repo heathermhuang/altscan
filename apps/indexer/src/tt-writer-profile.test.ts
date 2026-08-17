@@ -115,6 +115,53 @@ describe('phaseFor', () => {
     expect(s).toContain('need both none+all passes to conclude')
   })
 
+  /**
+   * codex P1. `tEnter - tStart` includes callback SCHEDULING delay, not just
+   * pool acquisition — so a saturated event loop (M2) inflates the very number
+   * meant to identify pool starvation (M1). An independent loop-lag measurement
+   * is what makes acq interpretable at all; without it the headline discriminator
+   * is unsound.
+   */
+  it('measures event-loop lag independently of acquisition', () => {
+    const s = src('block-processor.ts')
+    expect(s).toContain('startLoopLagProbe')
+    expect(s).toContain('loopLag')
+    // Must not hold the process open at shutdown.
+    expect(s).toMatch(/timer\.unref\?\.\(\)/)
+  })
+
+  /**
+   * codex P2. A pool timeout throws BEFORE the callback runs, so it never reaches
+   * the success path — the strongest evidence for M1 would vanish entirely,
+   * leaving only fast successful acquisitions and a false "no starvation here".
+   */
+  it('counts acquisitions that fail before callback entry, and rethrows', () => {
+    const s = src('block-processor.ts')
+    const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
+    expect(fn).toMatch(/tEnter === 0\) ttProf\.acquireFailures\+\+/)
+    // The writer's retry/alerting owns this error — the probe must not swallow it.
+    const catchBlock = fn.slice(fn.indexOf('} catch (err) {'))
+    expect(catchBlock).toMatch(/throw err/)
+  })
+
+  it('reports batch SHAPE, not just rate, so a rate gap is attributable', () => {
+    // An `all` pass drains a high-water backlog; a `none` pass is small. Fixed
+    // per-transaction overhead alone makes those rates differ at identical
+    // resource availability. (codex P2.)
+    const s = src('block-processor.ts')
+    expect(s).toMatch(/r\+\$\{.*blocks\[p\].*\}blk\/pass/s)
+  })
+
+  it('routes the writer through getWriterDb and announces the A/B arm', () => {
+    const s = src('block-processor.ts')
+    const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
+    expect(fn).toMatch(/const db = getWriterDb\(\)/)
+    // Both arms printed from the resolved env value, so a run can never be
+    // attributed to the wrong arm after the fact.
+    expect(s).toContain('dedicated writer pool ON')
+    expect(s).toContain('dedicated writer pool OFF')
+  })
+
   it('boot states the RESOLVED profile setting, both ways', () => {
     const s = src('block-processor.ts')
     expect(s).toContain('produce/drain PROFILE ON')

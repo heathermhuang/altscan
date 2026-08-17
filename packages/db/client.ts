@@ -11,6 +11,8 @@ const g = globalThis as typeof globalThis & {
   __db_sql?: Map<string, postgres.Sql>
   __maint_instances?: Map<string, ReturnType<typeof drizzle>>
   __maint_sql?: Map<string, postgres.Sql>
+  __writer_instances?: Map<string, ReturnType<typeof drizzle>>
+  __writer_sql?: Map<string, postgres.Sql>
 }
 
 /**
@@ -119,6 +121,58 @@ export function getMaintenanceDb(envVarName = 'DATABASE_URL') {
   g.__maint_sql.set(envVarName, sql)
   const db = drizzle(sql, { schema })
   g.__maint_instances.set(envVarName, db)
+  return db
+}
+
+/**
+ * Dedicated pool for the indexer's async transfer writer.
+ *
+ * WHY THIS EXISTS. Measured on BNB 2026-08-17: the writer sustains 919 rows/s
+ * while block workers are parked on backpressure, and only ~701 rows/s is needed
+ * to match chain — yet the system averages ~594 and the lag grows. The writer is
+ * fast enough; producing and draining just do not overlap. One candidate cause is
+ * that the writer is the (INDEX_CONCURRENCY + 1)-th consumer of a DB_POOL_SIZE
+ * pool — 8 and 8 on BNB — and `writeTransferBlocks` holds a slot for an entire
+ * transaction, so it competes with the very workers whose output it is draining.
+ *
+ * This is deliberately the INTERVENTION rather than another observational probe.
+ * Timing the writer's connection checkout from inside the process cannot separate
+ * pool wait from event-loop scheduling delay (both inflate the same span), so the
+ * sound test is to remove the contention and measure throughput — the same
+ * "verify by intervention" correction that a mis-sampled queue depth forced
+ * earlier the same day.
+ *
+ * Same isolation rationale as getMaintenanceDb: separate connection SLOTS, not
+ * separate disk I/O. Opt-in via TT_WRITER_DEDICATED_POOL so it can be A/B'd
+ * against a known baseline and reverted with an env var, and sized by
+ * TT_WRITER_POOL_SIZE (default 2 — the writer is a single serialized drainer, so
+ * it needs one slot plus headroom for the watermark UPDATE, not a pool).
+ *
+ * NOTE total connections: this ADDS to the process's footprint (ingestion +
+ * maintenance + writer). Render's plan caps max_connections, so raising
+ * TT_WRITER_POOL_SIZE is not free.
+ */
+export function getWriterDb(envVarName = 'DATABASE_URL') {
+  if (process.env.TT_WRITER_DEDICATED_POOL !== '1') return getDb(envVarName)
+  if (!g.__writer_instances) g.__writer_instances = new Map()
+  if (!g.__writer_sql) g.__writer_sql = new Map()
+
+  const cached = g.__writer_instances.get(envVarName)
+  if (cached) return cached
+
+  const url = process.env[envVarName]
+  if (!url) return getDb(envVarName)
+
+  const poolSize = parseInt(process.env.TT_WRITER_POOL_SIZE ?? '2', 10) || 2
+  const sql = postgres(url, {
+    max: poolSize,
+    idle_timeout: 20,
+    max_lifetime: 300,
+    connect_timeout: 10,
+  })
+  g.__writer_sql.set(envVarName, sql)
+  const db = drizzle(sql, { schema })
+  g.__writer_instances.set(envVarName, db)
   return db
 }
 

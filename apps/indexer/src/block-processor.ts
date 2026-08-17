@@ -1,6 +1,6 @@
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
-import { getDb, schema } from './db'
+import { getDb, getWriterDb, schema } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider } from './provider'
@@ -1046,6 +1046,38 @@ const ttProf = {
   acq: { none: 0, partial: 0, all: 0 },
   passesBy: { none: 0, partial: 0, all: 0 },
   acquireMaxMs: 0, sqlMs: 0, passes: 0,
+  blocks: { none: 0, partial: 0, all: 0 },
+  acquireFailures: 0,
+  loopLagMaxMs: 0, loopLagSumMs: 0, loopLagSamples: 0,
+}
+
+/**
+ * Event-loop lag probe. (codex P1.)
+ *
+ * `tEnter - tStart` around db.transaction() CANNOT be read as pool-acquisition
+ * time on its own: when the event loop is saturated, the transaction callback is
+ * scheduled late even after a connection was already available, so M2 inflates
+ * exactly the number that was supposed to identify M1. Measuring loop lag
+ * independently makes the two separable:
+ *
+ *   high acquire + LOW lag  -> real pool wait          (M1)
+ *   high acquire + HIGH lag -> scheduling delay        (M2)
+ *
+ * A timer scheduled for `interval` that fires at `interval + d` has observed
+ * `d` ms of loop lag. Unref'd so it can never hold the process open at shutdown.
+ */
+const LOOP_LAG_INTERVAL_MS = 500
+function startLoopLagProbe(): void {
+  let last = performance.now()
+  const timer = setInterval(() => {
+    const now = performance.now()
+    const lag = Math.max(0, now - last - LOOP_LAG_INTERVAL_MS)
+    last = now
+    ttProf.loopLagSumMs += lag
+    ttProf.loopLagSamples++
+    if (lag > ttProf.loopLagMaxMs) ttProf.loopLagMaxMs = lag
+  }, LOOP_LAG_INTERVAL_MS)
+  timer.unref?.()
 }
 
 /**
@@ -1106,13 +1138,14 @@ export function noteWorkerParked(delta: number): void {
   parkedWorkers = Math.max(0, parkedWorkers + delta)
 }
 
-function recordDrainPass(rows: number, acquireMs: number, sqlMs: number, phase: DrainPhase): void {
+function recordDrainPass(rows: number, blocks: number, acquireMs: number, sqlMs: number, phase: DrainPhase): void {
   const now = Date.now()
   if (ttProf.since === 0) ttProf.since = now
   ttProf.passes++
   if (acquireMs > ttProf.acquireMaxMs) ttProf.acquireMaxMs = acquireMs
   ttProf.sqlMs += sqlMs
   ttProf.rows[phase] += rows
+  ttProf.blocks[phase] += blocks
   ttProf.ms[phase] += acquireMs + sqlMs
   ttProf.acq[phase] += acquireMs
   ttProf.passesBy[phase]++
@@ -1121,27 +1154,43 @@ function recordDrainPass(rows: number, acquireMs: number, sqlMs: number, phase: 
   // Every denominator is guarded: a window can legitimately contain zero passes
   // in a phase (e.g. no worker ever parked), and a NaN in the one line the whole
   // experiment is read from would be indistinguishable from a real reading.
+  // Mean rows AND blocks per pass are printed alongside the rate because the two
+  // phases drain differently shaped batches — an `all` pass empties a backlog
+  // accumulated at the high-water bound, a `none` pass is usually small — and
+  // fixed per-transaction overhead alone makes those rates differ at identical
+  // resource availability. Without the shape, a rate gap cannot be attributed.
+  // (codex P2.)
   const per = (p: DrainPhase) => {
     const n = ttProf.passesBy[p]
     if (n === 0) return `${p} —`
     const ms = ttProf.ms[p]
     const rate = ms > 0 ? (ttProf.rows[p] / (ms / 1000)).toFixed(0) : '—'
-    return `${p} ${rate} rows/s (${ttProf.rows[p]}r/${(ms / 1000).toFixed(1)}s, acq ${(ttProf.acq[p] / n).toFixed(0)}ms, n=${n})`
+    return `${p} ${rate} rows/s (n=${n}, ${(ttProf.rows[p] / n).toFixed(0)}r+${(ttProf.blocks[p] / n).toFixed(0)}blk/pass, acq ${(ttProf.acq[p] / n).toFixed(0)}ms)`
   }
+  const lagAvg = ttProf.loopLagSamples > 0 ? ttProf.loopLagSumMs / ttProf.loopLagSamples : 0
   const verdict =
-    profWorkerCount === 0 ? ' [pool size UNSET — all/partial merged, inconclusive]'
+    profWorkerCount === 0 ? ' [pool size UNSET — inconclusive]'
     : ttProf.passesBy.none === 0 || ttProf.passesBy.all === 0 ? ' [need both none+all passes to conclude]'
     : ''
   console.log(
     `[tt-writer] PROFILE ${((now - ttProf.since) / 1000).toFixed(0)}s: ` +
     `${per('none')} | ${per('partial')} | ${per('all')} | ` +
-    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms, acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, passes ${ttProf.passes}${verdict}`,
+    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms, acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, ` +
+    // Loop lag is what makes acq interpretable: high acq with LOW lag is a real
+    // pool wait (M1); high acq with HIGH lag is just scheduling delay (M2).
+    `loopLag avg ${lagAvg.toFixed(0)}ms max ${ttProf.loopLagMaxMs.toFixed(0)}ms, ` +
+    // Acquisition failures never reach the success path, so they are counted
+    // separately — a pool timeout is the STRONGEST evidence for M1 and would
+    // otherwise vanish from the profile entirely. (codex P2.)
+    `acqFail ${ttProf.acquireFailures}, passes ${ttProf.passes}${verdict}`,
   )
   ttProf.since = now
   for (const p of ['none', 'partial', 'all'] as const) {
-    ttProf.rows[p] = ttProf.ms[p] = ttProf.acq[p] = ttProf.passesBy[p] = 0
+    ttProf.rows[p] = ttProf.blocks[p] = ttProf.ms[p] = ttProf.acq[p] = ttProf.passesBy[p] = 0
   }
   ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
+  ttProf.acquireFailures = 0
+  ttProf.loopLagMaxMs = ttProf.loopLagSumMs = ttProf.loopLagSamples = 0
 }
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
@@ -1163,6 +1212,14 @@ export function initTransferWriter(seedDurableBlock: number): void {
       ? `[tt-writer] produce/drain PROFILE ON (window ${TT_PROFILE_WINDOW_MS}ms) — emits "[tt-writer] PROFILE" lines`
       : `[tt-writer] produce/drain profile OFF (set TT_WRITER_PROFILE=1 to diagnose backpressure oscillation)`,
   )
+  // The A/B arm. Printed unconditionally and from the RESOLVED env value, so a
+  // run can never be attributed to the wrong arm after the fact.
+  console.log(
+    process.env.TT_WRITER_DEDICATED_POOL === '1'
+      ? `[tt-writer] dedicated writer pool ON (TT_WRITER_POOL_SIZE=${process.env.TT_WRITER_POOL_SIZE ?? '2'}) — not competing with block workers for slots`
+      : `[tt-writer] dedicated writer pool OFF — sharing the ingestion pool with block workers`,
+  )
+  if (TT_WRITER_PROFILE) startLoopLagProbe()
   runTransferWriter()  // flush anything enqueued during startup
 }
 
@@ -1435,7 +1492,11 @@ function runTransferWriter(): void {
  * non-contiguous drain can't wipe an already-written neighbour.
  */
 async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]): Promise<void> {
-  const db = getDb()
+  // Shared ingestion pool unless TT_WRITER_DEDICATED_POOL=1. When enabled, the
+  // writer stops competing for slots with the 8 block workers whose output it is
+  // draining — the direct test of the connection-starvation hypothesis, and its
+  // fix if confirmed.
+  const db = getWriterDb()
   // Phase is snapshotted BEFORE the await: attributing the pass by the state at
   // completion would label every pass "blocked", because a long drain is exactly
   // what parks the workers. The question is what the writer was competing with
@@ -1443,6 +1504,7 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
   const phase = TT_WRITER_PROFILE ? phaseFor(parkedWorkers, activeWorkers, profWorkerCount) : 'none'
   const tStart = TT_WRITER_PROFILE ? performance.now() : 0
   let tEnter = 0
+  try {
   await db.transaction(async (tx) => {
     // First statement inside the callback — the gap from tStart to here is
     // connection-acquisition time, which is what separates M1 from M2.
@@ -1476,13 +1538,22 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
       .onConflictDoNothing()
     }
   })
+  } catch (err) {
+    // A throw BEFORE the callback ran means acquisition itself failed — a pool
+    // timeout (connect_timeout) is exactly that, and it is the single strongest
+    // signal for M1. On the success path it can never be observed, so counting
+    // it here is the difference between "no evidence of starvation" and "never
+    // looked". Rethrow untouched: the writer's retry/alerting owns this error.
+    if (TT_WRITER_PROFILE && tEnter === 0) ttProf.acquireFailures++
+    throw err
+  }
   if (TT_WRITER_PROFILE) {
     const end = performance.now()
-    // tEnter stays 0 only if the callback never ran (transaction threw before
-    // entry); attribute the whole span to acquisition rather than reporting a
-    // negative sqlMs.
+    // tEnter can still be 0 if the transaction resolved without ever invoking
+    // the callback; attribute the whole span to acquisition rather than
+    // reporting a negative sqlMs.
     const enter = tEnter === 0 ? end : tEnter
-    recordDrainPass(rows.length, enter - tStart, end - enter, phase)
+    recordDrainPass(rows.length, blockNums.length, enter - tStart, end - enter, phase)
   }
 }
 
