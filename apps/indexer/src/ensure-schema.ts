@@ -301,6 +301,29 @@ export async function ensureSchema(): Promise<void> {
       CONSTRAINT index_gaps_range CHECK (to_block >= from_block)
     )
   `))
+  // Heights the indexer has PROVEN unindexable and deliberately stepped over.
+  //
+  // Deliberately NOT a `reason` value on index_gaps, which is where this lived
+  // first. index_gaps is keyed on from_block and its writers merge on conflict
+  // (GREATEST on to_block, overwrite on reason), so two gaps that happen to start
+  // at the same height silently become one: a bulk max_lag_skip landing on a
+  // quarantine erases the quarantine's identity, and a quarantine landing on a
+  // max_lag range relabels thousands of blocks as poison. Either direction breaks
+  // the resume scan that depends on telling them apart. (codex P1, round 2.)
+  //
+  // They are genuinely different facts and now live apart: index_gaps records
+  // "these blocks are missing" (a range, healable, drives completeness reporting),
+  // while this records "this exact height was proven unindexable and skipped" (a
+  // per-height decision that the resume scan must honour). Nothing merges here —
+  // the height IS the key.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS poison_blocks (
+      block_number BIGINT PRIMARY KEY,
+      failures     INTEGER NOT NULL DEFAULT 0,
+      recorded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `))
+
   // Durable heal progress. Blocks at or below heal_cursor have been re-indexed,
   // had the transfer queue DRAINED, and been re-verified — so healing survives a
   // crash. Without it, a crash after re-indexing but before the drain loses the

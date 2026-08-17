@@ -18,6 +18,7 @@ import {
   processBlock,
   initTransferWriter,
   setDurableFloor,
+  enqueueQuarantinedBlock,
   getTransferQueueDepth,
   flushTransferWriter,
   rollbackTransferWriterTo,
@@ -25,9 +26,12 @@ import {
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
-import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout } from './rpc-failover'
+import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
-import { recordIndexGap } from './index-gaps'
+import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock } from './index-gaps'
+import {
+  PoisonBlockTracker, shouldQuarantine, DEFAULT_QUARANTINE_AFTER, poisonGapReason,
+} from './poison-block'
 import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
@@ -225,6 +229,12 @@ async function main() {
   }
 
   const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
+  // Consecutive PROVABLY-CLEAN failover failures before a block is stepped over.
+  // Lives OUTSIDE the poll loop on purpose: a per-pass tracker would reset every
+  // iteration and could never reach the threshold.
+  const QUARANTINE_AFTER = positiveIntEnv(process.env.POISON_BLOCK_QUARANTINE_AFTER, DEFAULT_QUARANTINE_AFTER)
+  const QUARANTINE_ENABLED = process.env.POISON_BLOCK_QUARANTINE !== '0'
+  const poisonBlocks = new PoisonBlockTracker()
 
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
   const REORG_CHECK = process.env.REORG_CHECK !== '0'
@@ -288,6 +298,12 @@ async function main() {
   const healOwner = `${process.env.RENDER_INSTANCE_ID ?? 'local'}:${process.pid}:${Date.now().toString(36)}`
   console.log(
     `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG}, owner ${healOwner})` : 'OFF'}`,
+  )
+  // Printed so the RESOLVED value is verifiable from a boot log rather than
+  // inferred from the config literal — env can override it, and this repo has
+  // already lost 9 days to trusting a checked-in default over the deployed one.
+  console.log(
+    `${TAG} poison-block quarantine ${QUARANTINE_ENABLED ? `ON (after ${QUARANTINE_AFTER} clean full-failover failures)` : 'OFF'} (MAX_LAG ${MAX_LAG})`,
   )
   if (HEAL_ENABLED) {
     const healTimer = setInterval(() => {
@@ -360,7 +376,81 @@ async function main() {
     if (ASYNC_TT_WRITER) await rollbackTransferWriterTo(forkPoint)
     await unwindFrom(forkPoint + 1)
     lastIndexed = forkPoint
+    // Poison counts are keyed on HEIGHT and this line moves the cursor BACKWARDS,
+    // so every count above the fork now describes a block that no longer exists.
+    // Left in place they would be charged to the canonical replacements: 4 clean
+    // failures against the orphaned block at H plus ONE transient failure against
+    // its replacement would quarantine a perfectly good block.
+    const clearedPoison = poisonBlocks.clearAbove(forkPoint)
+    if (clearedPoison > 0) {
+      console.log(`${TAG} reorg cleared ${clearedPoison} poison-block count(s) above ${forkPoint}`)
+    }
+    // The DURABLE poison rows above the fork are cleared inside unwindFrom(), which
+    // runs just above — placed there so a failure THROWS and re-detects the reorg
+    // instead of being logged and stepped over. (codex P1, round 4.)
     reportIndexerLag(0)
+  }
+
+  /**
+   * Decide whether the cursor may step over `blocker`, and record the hole if so.
+   *
+   * Returns true ONLY when the one-block gap is durably recorded and the block is
+   * confirmed absent. The caller advances the cursor on true and does nothing on
+   * false — a refusal simply leaves the block pinned and retried, which is the
+   * pre-existing behaviour and loses nothing.
+   *
+   * The absence check is the load-bearing gate, not a belt-and-braces extra. The
+   * failure classification that got us here is in-memory, so it cannot know about
+   * a half-write left by a PREVIOUS process generation — and Render overlaps deploy
+   * generations by 60-80s, so the indexer genuinely meets that state. Quarantining
+   * a block whose row already exists would record a gap the healer can never act on
+   * (its work set is ABSENT blocks only) over a block that reads as present with
+   * the right tx_count and no transfers: invisible bad data, permanently.
+   */
+  /**
+   * Is this height already recorded as an unhealed poison gap?
+   *
+   * Queried rather than cached: another deploy generation may have recorded it,
+   * and a stale in-memory set would refuse the very re-skip that unwedges the
+   * cursor. Only ever runs on the failure path, and only while a backfill is
+   * active, so it costs nothing on the common path. Fails CLOSED — an unreadable
+   * answer is treated as "not recorded", which merely declines the exception and
+   * leaves the pre-existing (safe) refusal in place.
+   */
+  const isRecordedPoisonGap = async (blocker: number): Promise<boolean> => {
+    try {
+      return await isPoisonBlock(db, blocker)
+    } catch (err) {
+      console.error(`${TAG} could not check poison-block record for ${blocker}:`, safeErr(err))
+      return false
+    }
+  }
+
+  const tryQuarantine = async (blocker: number, failures: number): Promise<boolean> => {
+    // ONE statement: the absence test and the insert are the same operation.
+    // Splitting them leaves a window in which the overlapping deploy generation
+    // crosses its first write, and a gap recorded over a partially-persisted block
+    // is unhealable AND invisible. Also upholds the bulk skip's invariant — the
+    // cursor never advances past a range we failed to RECORD.
+    try {
+      const recorded = await recordPoisonGapIfAbsent(db, blocker, poisonGapReason(QUARANTINE_AFTER), failures)
+      if (recorded) return true
+    } catch (err) {
+      console.error(`${TAG} ⚠ could NOT record poison block ${blocker} — NOT skipping, will retry:`, safeErr(err))
+      return false
+    }
+
+    // Nothing recorded means the WHERE NOT EXISTS failed: the block's row is
+    // present while the cursor still sits below it, so it is partially persisted —
+    // almost certainly by an `aborted-dirty` failover. Stepping over it is the
+    // invisible-bad-data case. Retrying it is the right move and now actually
+    // converges: PR #96 made processBlock replay-safe (dedupable dex_trades via the
+    // partial unique on (tx_hash, log_index), set-verified receipt coverage,
+    // once-only webhooks), so a replay repairs the missing derived rows rather than
+    // duplicating the ones already there.
+    poisonBlocks.forget(blocker)
+    console.error(`${TAG} ⚠ refusing to quarantine block ${blocker} — its row already EXISTS (partially persisted); retrying instead, replay is safe`)
+    return false
   }
 
   while (running) {
@@ -537,9 +627,20 @@ async function main() {
                 endpointHealth,
               )
               blockStatus[idx] = 2
+              // Proves this block is not poison, whatever it did on earlier passes.
+              poisonBlocks.recordSuccess(blockNum)
               advanceLastIndexed()
             } catch (err) {
               blockStatus[idx] = 3
+              // Only a failure that provably exhausted EVERY endpoint without
+              // writing is evidence the block is unindexable. An `aborted-dirty`
+              // throw means one endpoint began writing and failover stopped — the
+              // block is half-written, which the gap healer can never repair — and
+              // `unknown` means the error never came from failover at all. Both
+              // reset the count rather than advancing it, so a block can only
+              // reach the threshold through an unbroken run of clean exhaustions.
+              if (failoverKind(err) === 'exhausted-clean') poisonBlocks.recordCleanFailure(blockNum)
+              else poisonBlocks.recordUnclean(blockNum)
               if (!failure) failure = { block: blockNum, err }
               return
             }
@@ -552,8 +653,86 @@ async function main() {
         // the message, and this line is how raw endpoints reached production
         // logs before redaction existed. Scrub it here too.
         console.error(`${TAG} Block ${failure.block} failed:`, safeErr(failure.err))
+
+        // QUARANTINE the one block that is pinning the cursor.
+        //
+        // Left alone it pins `lastIndexed` while the chain advances, and once lag
+        // crosses MAX_LAG the bulk skip above abandons everything through
+        // `latest - 200`: ~4,800 blocks discarded because of one, nearly all of
+        // them perfectly indexable. A recorded ONE-block gap keeps the loss
+        // proportional to the actual damage.
+        const blocker = lastIndexed + 1
+        if (
+          QUARANTINE_ENABLED &&
+          shouldQuarantine(blocker, lastIndexed, poisonBlocks.count(blocker), QUARANTINE_AFTER) &&
+          // The same guard the bulk MAX_LAG skip carries: during a resume gap
+          // backfill the indexer is DELIBERATELY replaying an old range, so
+          // `lastIndexed + 1` is a block being re-indexed rather than the live
+          // frontier, and stepping over it would advance the cursor — and the
+          // watermark with it — through a range mid-replay.
+          //
+          // The exception is load-bearing. A block ALREADY recorded as a poison gap
+          // has had its skip decision made durably; re-applying it creates no new
+          // hole. Without the exception the guard is the deadlock: a quarantined
+          // block is absent, an absent block can put the next boot into backfill,
+          // and a backfill that refuses to re-skip pins the cursor on the one block
+          // proven unindexable, with the bulk skip disabled by the same condition.
+          (resumeGapBackfillUntil === null || await isRecordedPoisonGap(blocker))
+        ) {
+          const failures = poisonBlocks.count(blocker)
+          if (await tryQuarantine(blocker, failures)) {
+            // Note: the cursor now sits on a deliberately ABSENT block, so the next
+            // boundary reorg check no-ops (detect-reorg treats a missing stored hash
+            // as "nothing to validate"). The blind spot is exactly one iteration —
+            // the next successfully indexed block restores it — and it is the same
+            // behaviour the bulk MAX_LAG skip has always had, since it also lands the
+            // cursor on a block it never indexed. findForkPoint already skips missing
+            // rows, so a reorg walk across the hole still resolves.
+            console.warn(`${TAG} ⚠ QUARANTINING block ${blocker} after ${failures} clean full-failover failures — recorded as a 1-block gap, advancing past it`)
+            lastIndexed = blocker
+            // Move the transfer watermark with a QUARANTINE batch, not with
+            // setDurableFloor() and not with an empty ordinary batch.
+            //
+            // setDurableFloor jumps W unconditionally. That is fine for the bulk
+            // MAX_LAG skip, which leaps to `latest - 200` over blocks nothing has
+            // touched, but it is wrong here: quarantine steps over `lastIndexed + 1`,
+            // directly above blocks the indexer just finished. Workers advance
+            // lastIndexed when processBlock RETURNS and processBlock only ENQUEUES
+            // transfers, so blocks below the blocker are routinely written-but-
+            // undrained. Jumping W over them would claim their rows are durable while
+            // they sit in the queue, and a crash there loses them permanently —
+            // crash-resume replays only from W upward.
+            //
+            // An ordinary empty batch would be wrong, and dangerously so:
+            // writeTransferBlocks DELETEs every block it drains, so an empty batch is
+            // empty-by-OMISSION and would delete rows it never decoded. That is the
+            // same failure that lost data on `--skip-logs` backfills (PR #42, and the
+            // warning above the enqueue in processBlock). The window is real here —
+            // the batch can sit in the 250ms requeue-retry loop, or in an outgoing
+            // deploy generation, while a heal writes this block's real transfers.
+            //
+            // A quarantine batch makes no claim about the block: never deleted, never
+            // inserted, so a stale retry is a complete no-op. It only contributes its
+            // height, which lands in `transferWritten` so the EXISTING contiguous-
+            // prefix fold carries W past it once everything beneath has committed.
+            // Revocation stays automatic — a real decode replaces the entry under the
+            // usual "latest decode of a block wins" rule.
+            //
+            // The fold itself is untouched. An earlier design folded quarantined
+            // heights through a SECOND set alongside transferWritten, and codex found
+            // a fresh P1 in that fold on each of two review rounds — the revocation
+            // race, then the re-validation race in its fix. The flag here rides inside
+            // the queued batch, so there is no parallel state to drift.
+            if (ASYNC_TT_WRITER) enqueueQuarantinedBlock(blocker)
+            poisonBlocks.forget(blocker)
+          }
+        }
         await sleep(1000)
       }
+
+      // Bound the tracker: counts for blocks the cursor has passed can never be
+      // acted on again, and without this the map grows for the process lifetime.
+      poisonBlocks.prune(lastIndexed)
 
       if (lastIndexed >= latest) await sleep(POLL_MS)
     } catch (err) {
@@ -599,6 +778,22 @@ async function getResumeCursor(
     FROM expected
     LEFT JOIN blocks ON blocks.number = expected.number
     WHERE blocks.number IS NULL
+      -- Exclude blocks we DELIBERATELY abandoned as poison. Without this the scan
+      -- cannot tell a quarantine from an accidental hole, so it rewinds the cursor
+      -- onto the one block already proven unindexable and sets backfillUntil — which
+      -- disables BOTH the quarantine guard and the bulk MAX_LAG skip. The cursor then
+      -- pins on that block and backfillUntil can only clear by passing it, so the
+      -- indexer wedges permanently on the next restart, with every safety valve off.
+      -- Quarantine would have manufactured exactly that state. (codex P1, round 1.)
+      --
+      -- Keyed on poison_blocks, NOT on index_gaps.reason. Gap rows are keyed by
+      -- from_block and merge on conflict, so an unrelated max_lag_skip starting at the
+      -- same height would overwrite the reason and silently un-recognise the
+      -- quarantine — reintroducing the deadlock with no error anywhere. A poison
+      -- height is its own row and nothing merges into it. (codex P1, round 2.)
+      AND NOT EXISTS (
+        SELECT 1 FROM poison_blocks p WHERE p.block_number = expected.number
+      )
   `)
   const missingRaw = (Array.from(gapResult)[0] as Record<string, unknown> | undefined)?.missing
   let base: { lastIndexed: number; backfillUntil: number | null }
@@ -618,6 +813,20 @@ async function getResumeCursor(
   // re-write its transfers. Seed the writer with W so it advances from there.
   const W = await getOrInitDurableBlock(db, maxIndexed)
   initTransferWriter(W)
+
+  // No quarantine state is restored here, and none needs to be.
+  //
+  // An earlier design kept quarantined heights in an in-memory set that the fold
+  // consulted, so a restart lost them and W could strand below a deliberately-absent
+  // block forever — which forced a restoration pass, which codex then found could
+  // mark a height whose block was no longer absent. Enqueuing an empty batch removes
+  // the whole problem: W only advances past a quarantined height AFTER that empty
+  // batch has been written and folded, so the state is either already durable in W or
+  // simply not yet applied.
+  //
+  // The not-yet-applied case self-heals. Resuming from min(cursor, W) replays the
+  // block, it fails again, and it is re-quarantined — permitted even mid-backfill
+  // because the gap is already recorded (see the guard in the poll loop).
   const lastIndexed = Math.min(base.lastIndexed, W)
   // When replaying un-durable transfers up to maxIndexed, suppress the MAX_LAG
   // skip until we've caught back up — otherwise the skip would floor past the

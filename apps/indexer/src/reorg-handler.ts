@@ -23,7 +23,7 @@
  */
 
 import { getDb, schema } from './db'
-import { eq, gte } from 'drizzle-orm'
+import { eq, gte, sql } from 'drizzle-orm'
 import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
 import { positiveIntEnv } from './gap-healer'
 
@@ -205,6 +205,29 @@ export const UNWIND_ORDER = [
 export async function unwindFrom(fromBlockNumber: number): Promise<void> {
   const db = getDb()
   console.warn(`[reorg-handler] unwinding all index rows for blocks >= ${fromBlockNumber}`)
+
+  // Poison decisions are block-scoped index state too, and above a fork the height
+  // refers to a DIFFERENT block — a surviving row would keep excluding that height
+  // from the resume gap scan forever, silently suppressing a genuine hole.
+  //
+  // FIRST, before any other delete, and that ordering is the whole point. Running it
+  // last looked equivalent — a throw propagates, the caller has not advanced
+  // lastIndexed, so the reorg is re-detected and retried. It is not equivalent: by
+  // then the ordinary deletes have already committed, so the stored tip row is GONE,
+  // and detectReorg treats a missing stored hash as "nothing to validate" and reports
+  // no reorg. The deleted canonical tail would go unreprocessed until a restart.
+  // Failing here instead leaves the index untouched, so the next check still sees the
+  // mismatch. (codex P1, round 5.)
+  //
+  // The reverse failure is benign: poison rows dropped while the unwind then fails
+  // only means those heights lose an exclusion, and they are still present in
+  // `blocks`, which the resume scan skips anyway. The retry re-runs the whole unwind.
+  //
+  // Deliberately NOT in UNWIND_ORDER: that manifest is guardrail-tested to cover
+  // exactly the drizzle schema tables carrying a block number, and poison_blocks is
+  // created in ensure-schema.ts rather than declared in the schema.
+  await db.execute(sql`DELETE FROM poison_blocks WHERE block_number >= ${fromBlockNumber}`)
+
   for (const t of UNWIND_ORDER) {
     switch (t) {
       case 'logs':           await db.delete(schema.logs).where(gte(schema.logs.blockNumber, fromBlockNumber)); break

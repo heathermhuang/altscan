@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { recordIndexGap } from './index-gaps'
+import { recordIndexGap, isPoisonBlock, recordPoisonGapIfAbsent } from './index-gaps'
 
 /**
  * The MAX_LAG_BLOCKS skip has always existed and always recorded nothing, so
@@ -48,5 +48,69 @@ describe('recordIndexGap', () => {
   it('propagates a database error to the caller', async () => {
     const execute = vi.fn().mockRejectedValue(new Error('relation "index_gaps" does not exist'))
     await expect(recordIndexGap({ execute }, 1, 2, 'x')).rejects.toThrow(/index_gaps/)
+  })
+})
+
+describe('driver result shapes are read strictly, never guessed', () => {
+  // These helpers gate quarantine, and callers read `false` as the positive claim
+  // "the block already exists". A shape we do not genuinely understand must not be
+  // flattened into that answer — an earlier version accepted anything with a numeric
+  // `length`, which quietly admitted '' and { length: 0 } as "zero rows". Throwing
+  // instead lands in the caller's catch, which declines to skip and retries.
+  const db = (result: unknown) => ({ execute: async () => result })
+
+  it('reads a real row set', async () => {
+    expect(await isPoisonBlock(db([{ '?column?': 1 }]) as never, 5)).toBe(true)
+    expect(await isPoisonBlock(db([]) as never, 5)).toBe(false)
+  })
+
+  it('accepts an array-like AND iterable RowList (what postgres-js returns)', async () => {
+    const rowList = Object.assign(Object.create(null), {
+      length: 1, 0: { x: 1 }, [Symbol.iterator]: function* () { yield { x: 1 } },
+    })
+    expect(await isPoisonBlock(db(rowList) as never, 5)).toBe(true)
+  })
+
+  it('THROWS on shapes that merely look array-like', async () => {
+    // '' is array-like and iterable, but iterating it yields characters, not rows.
+    await expect(isPoisonBlock(db('') as never, 5)).rejects.toThrow(/unrecognised/)
+    await expect(isPoisonBlock(db({ length: 0 }) as never, 5)).rejects.toThrow(/unrecognised/)
+    await expect(isPoisonBlock(db(undefined) as never, 5)).rejects.toThrow(/unrecognised/)
+    await expect(isPoisonBlock(db(null) as never, 5)).rejects.toThrow(/unrecognised/)
+    await expect(isPoisonBlock(db(42) as never, 5)).rejects.toThrow(/unrecognised/)
+  })
+
+  it('a non-finite block number is rejected before any query runs', async () => {
+    const execute = vi.fn()
+    expect(await isPoisonBlock({ execute } as never, NaN)).toBe(false)
+    expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('recordPoisonGapIfAbsent reads shapes as strictly as isPoisonBlock', () => {
+  // Round 5 caught rowCount() being DEFINED but adopted at only one of its two call
+  // sites — the classic "fix is not wired" miss. Both are covered now so the gap
+  // cannot reopen silently.
+  const db = (result: unknown) => ({ execute: async () => result })
+  const REASON = 'poison_block(5 clean failovers)'
+
+  it('a returned row means recorded', async () => {
+    expect(await recordPoisonGapIfAbsent(db([{ block_number: 5 }]) as never, 5, REASON, 5)).toBe(true)
+  })
+
+  it('no rows means the block was present — the ONE meaning of false', async () => {
+    expect(await recordPoisonGapIfAbsent(db([]) as never, 5, REASON, 5)).toBe(false)
+  })
+
+  it('THROWS rather than reporting a confident, wrong "block present"', async () => {
+    await expect(recordPoisonGapIfAbsent(db('') as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+    await expect(recordPoisonGapIfAbsent(db({ length: 0 }) as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+    await expect(recordPoisonGapIfAbsent(db(undefined) as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+  })
+
+  it('rejects a non-finite failure count before querying', async () => {
+    const execute = vi.fn()
+    expect(await recordPoisonGapIfAbsent({ execute } as never, 5, REASON, NaN)).toBe(false)
+    expect(execute).not.toHaveBeenCalled()
   })
 })
