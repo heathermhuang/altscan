@@ -317,9 +317,25 @@ export async function healNextGap(
   // unhealed and loudly logged — visibly degraded, which is honest, rather than
   // silently stamped or endlessly reprocessed. Repairing them needs a
   // transactional block rebuild, which is a separate piece of work.
+  // QUARANTINED heights are excluded from the work set.
+  //
+  // Not because they are unhealable in principle, but because healing one is unsafe
+  // with the machinery that exists today. Quarantine advances the transfer watermark
+  // W past the height (that is its purpose). Re-indexing it then writes the block and
+  // transaction rows and merely ENQUEUES the transfers — so a crash before that queue
+  // drains leaves the block PRESENT with its transfers missing, and nothing can
+  // recover it: W already covers the height so resume will not replay it, and this
+  // very work set is absent-blocks-only so a later pass skips it. The range could
+  // then be stamped healed with transfers permanently gone. (codex P1, round 4.)
+  //
+  // Making them healable needs a durable per-height transfer-completion marker, or a
+  // W rewind fenced across the heal. Until then a quarantined block stays a recorded,
+  // /api/health-visible one-block hole — which is honest, and is the whole point of
+  // having quarantined it.
   const missing = rowsOf(await db.execute(sql`
     SELECT n FROM generate_series(${healFrom}::bigint, ${windowEnd}::bigint) AS n
     WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+      AND NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
     ORDER BY n
   `))
     .map(r => toNum(r.n))

@@ -385,20 +385,9 @@ async function main() {
     if (clearedPoison > 0) {
       console.log(`${TAG} reorg cleared ${clearedPoison} poison-block count(s) above ${forkPoint}`)
     }
-    // The DURABLE decisions need the same treatment, for the same reason. Clearing
-    // only the in-memory counts left poison_blocks rows above the fork describing
-    // blocks that no longer exist — and the resume scan excludes those heights
-    // PERMANENTLY, so a canonical replacement at one of them would never be
-    // reported missing by the gap scan. Height-keyed state is invalid above a fork
-    // whether it lives in memory or in Postgres. (codex P1, round 3.)
-    try {
-      await db.execute(sql`DELETE FROM poison_blocks WHERE block_number > ${forkPoint}`)
-    } catch (err) {
-      // Loud, not fatal: the rollback itself has already happened, and refusing to
-      // continue would leave the indexer wedged. A stale row costs a suppressed
-      // gap report, which the next reorg or a manual delete clears.
-      console.error(`${TAG} ⚠ reorg could NOT clear poison_blocks above ${forkPoint} — a stale row may suppress a genuine gap report:`, safeErr(err))
-    }
+    // The DURABLE poison rows above the fork are cleared inside unwindFrom(), which
+    // runs just above — placed there so a failure THROWS and re-detects the reorg
+    // instead of being logged and stepped over. (codex P1, round 4.)
     reportIndexerLag(0)
   }
 

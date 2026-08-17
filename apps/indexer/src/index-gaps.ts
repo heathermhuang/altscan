@@ -17,6 +17,31 @@ import { sql } from 'drizzle-orm'
 type DbLike = { execute: (query: unknown) => Promise<unknown> }
 
 /**
+ * Row count of a driver result, or a throw if the shape is not one we recognise.
+ *
+ * Strict on purpose. These helpers gate quarantine, and their callers read `false`
+ * as the positive claim "the block already exists" — so any shape we do not
+ * genuinely understand must NOT be flattened into that answer. An earlier version
+ * accepted anything with a numeric `length`, which quietly admitted `''` and
+ * `{ length: 0 }` as "zero rows". A throw lands in the caller's catch, which
+ * declines to skip and retries: the block stays pinned, which is the safe outcome.
+ * (codex P2, rounds 3 and 4.)
+ */
+function rowCount(res: unknown): number {
+  if (Array.isArray(res)) return res.length
+  // postgres-js returns a RowList: array-like AND iterable. Require both, so a bare
+  // string (array-like, iterable over characters) cannot pass as a row set.
+  if (
+    res != null && typeof res === 'object' &&
+    typeof (res as ArrayLike<unknown>).length === 'number' &&
+    typeof (res as Iterable<unknown>)[Symbol.iterator] === 'function'
+  ) {
+    return (res as ArrayLike<unknown>).length
+  }
+  throw new Error(`[index-gaps] unrecognised db.execute result shape: ${Object.prototype.toString.call(res)}`)
+}
+
+/**
  * Record a ONE-block quarantine gap, but only if the block is still absent.
  *
  * Separate from recordIndexGap because the absence test must be part of the SAME
@@ -106,9 +131,8 @@ export async function isPoisonBlock(db: DbLike, block: number): Promise<boolean>
   if (!Number.isFinite(block)) return false
   const res = (await db.execute(
     sql`SELECT 1 FROM poison_blocks WHERE block_number = ${block} LIMIT 1`,
-  )) as ArrayLike<unknown> | null | undefined
-  if (res == null || typeof (res as ArrayLike<unknown>).length !== 'number') return false
-  return Array.from(res).length > 0
+  ))
+  return rowCount(res) > 0
 }
 
 export async function recordIndexGap(

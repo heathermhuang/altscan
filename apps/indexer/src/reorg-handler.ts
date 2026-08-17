@@ -23,7 +23,7 @@
  */
 
 import { getDb, schema } from './db'
-import { eq, gte } from 'drizzle-orm'
+import { eq, gte, sql } from 'drizzle-orm'
 import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
 import { positiveIntEnv } from './gap-healer'
 
@@ -215,5 +215,18 @@ export async function unwindFrom(fromBlockNumber: number): Promise<void> {
       case 'blocks':         await db.delete(schema.blocks).where(gte(schema.blocks.number, fromBlockNumber)); break
     }
   }
+  // Poison decisions are block-scoped index state too, and above a fork the height
+  // refers to a DIFFERENT block — so a surviving row would keep excluding that
+  // height from the resume gap scan forever, silently suppressing a genuine hole.
+  //
+  // Deliberately NOT in UNWIND_ORDER: that manifest is guardrail-tested to cover
+  // exactly the drizzle schema tables carrying a block number, and poison_blocks is
+  // created in ensure-schema.ts rather than declared in the schema.
+  //
+  // Done HERE rather than in recoverFromReorg because a throw must propagate. The
+  // caller ran this before advancing its cursor, so a failure re-detects the reorg
+  // and retries — fail-closed. Catching and continuing (the previous shape) turned a
+  // correctness-critical cleanup into a best-effort one. (codex P1, round 4.)
+  await db.execute(sql`DELETE FROM poison_blocks WHERE block_number >= ${fromBlockNumber}`)
   console.warn(`[reorg-handler] unwind complete from block ${fromBlockNumber}`)
 }
