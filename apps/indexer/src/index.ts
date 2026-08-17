@@ -25,6 +25,7 @@ import {
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
+  noteWorkerParked,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
@@ -618,10 +619,22 @@ async function main() {
               // Throttle on EITHER bound: pending rows (busy ranges) OR pending block
               // count (transfer-less ranges where rows stays ~0 but the pending Map
               // grows unbounded if the writer stalls — codex P2 from PR #43/#44).
-              while (running && failure === null) {
-                const q = getTransferQueueDepth()
-                if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
-                await sleep(20)
+              // Parked/unparked is reported to the tt-writer so it can attribute
+              // each drain pass to a phase. Without that split, "the writer does
+              // 919 rows/s" is unattributable — it is the difference between the
+              // blocked and running rates that says whether producing and
+              // draining actually overlap. try/finally so an abort can't leave
+              // the count stuck high and mislabel every later pass.
+              let parked = false
+              try {
+                while (running && failure === null) {
+                  const q = getTransferQueueDepth()
+                  if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
+                  if (!parked) { parked = true; noteWorkerParked(1) }
+                  await sleep(20)
+                }
+              } finally {
+                if (parked) noteWorkerParked(-1)
               }
             }
             const idx = claimNext()

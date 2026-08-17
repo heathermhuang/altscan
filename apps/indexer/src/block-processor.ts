@@ -990,6 +990,75 @@ let transferWriterSeeded = false
 let transferWriterRunning = false
 let transferWriterPaused = false            // reorg rollback quiesce (see rollbackTransferWriterTo)
 let ttWriterDrainCount = 0
+
+// ── produce/drain overlap diagnostics (TT_WRITER_PROFILE=1) ──────────────────
+//
+// Measured 2026-08-17: the writer sustains 919 rows/s while block workers are
+// parked on backpressure, but the system averages only ~594 rows/s — and 919
+// already exceeds the ~701 rows/s needed to match chain. So the deficit is NOT
+// write capacity; it is that producing and draining do not overlap. Three
+// mechanisms explain that and they are distinguishable only by measuring AT the
+// event, which is the whole reason this exists (a sampled queue depth was what
+// produced the wrong root cause earlier that day):
+//
+//   M1 connection starvation — the writer is the 9th consumer of a
+//      DB_POOL_SIZE=8 pool and holds one slot for a whole transaction.
+//      Signature: acquireMs high while workers run, ~0 while they are parked.
+//   M2 event-loop starvation — 8 decoding workers saturate the single Node
+//      thread. Signature: acquireMs low, sqlMs inflated while workers run.
+//   M3 pure rate mismatch — oscillation is inherent.
+//      Signature: rows/s IDENTICAL in both phases.
+//
+// Diagnostic only: nothing here changes behaviour, and it is off unless
+// TT_WRITER_PROFILE=1 so the default path pays only a boolean test.
+const TT_WRITER_PROFILE = process.env.TT_WRITER_PROFILE === '1'
+const TT_PROFILE_WINDOW_MS = parseInt(process.env.TT_PROFILE_WINDOW_MS ?? '30000', 10) || 30000
+/** Block workers currently parked in the backpressure poll loop (index.ts). */
+let parkedWorkers = 0
+const ttProf = {
+  since: 0,
+  blockedRows: 0, blockedMs: 0,   // drained while >=1 worker was parked
+  runningRows: 0, runningMs: 0,   // drained while every worker was free
+  acquireMs: 0, acquireMaxMs: 0, sqlMs: 0, passes: 0,
+}
+
+/**
+ * Report a block worker entering (+1) or leaving (-1) the backpressure wait.
+ *
+ * Called from the poll loop in index.ts. This is what lets the writer attribute
+ * each drain pass to a PHASE — the single number that discriminates M3 (rates
+ * equal) from M1/M2 (rates differ). Cheap and monotonic; never let it drift
+ * negative, since a stuck negative count would silently mislabel every
+ * subsequent pass as "running".
+ */
+export function noteWorkerParked(delta: number): void {
+  parkedWorkers = Math.max(0, parkedWorkers + delta)
+}
+
+function recordDrainPass(rows: number, acquireMs: number, sqlMs: number, wasBlocked: boolean): void {
+  const now = Date.now()
+  if (ttProf.since === 0) ttProf.since = now
+  ttProf.passes++
+  ttProf.acquireMs += acquireMs
+  if (acquireMs > ttProf.acquireMaxMs) ttProf.acquireMaxMs = acquireMs
+  ttProf.sqlMs += sqlMs
+  const total = acquireMs + sqlMs
+  if (wasBlocked) { ttProf.blockedRows += rows; ttProf.blockedMs += total }
+  else { ttProf.runningRows += rows; ttProf.runningMs += total }
+
+  if (now - ttProf.since < TT_PROFILE_WINDOW_MS) return
+  const rate = (r: number, ms: number) => (ms > 0 ? (r / (ms / 1000)).toFixed(0) : '—')
+  console.log(
+    `[tt-writer] PROFILE ${((now - ttProf.since) / 1000).toFixed(0)}s: ` +
+    `blocked ${rate(ttProf.blockedRows, ttProf.blockedMs)} rows/s (${ttProf.blockedRows} rows/${(ttProf.blockedMs / 1000).toFixed(1)}s) | ` +
+    `running ${rate(ttProf.runningRows, ttProf.runningMs)} rows/s (${ttProf.runningRows} rows/${(ttProf.runningMs / 1000).toFixed(1)}s) | ` +
+    `acquire avg ${(ttProf.acquireMs / ttProf.passes).toFixed(0)}ms max ${ttProf.acquireMaxMs.toFixed(0)}ms | ` +
+    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms | passes ${ttProf.passes}`,
+  )
+  ttProf.since = now
+  ttProf.blockedRows = ttProf.blockedMs = ttProf.runningRows = ttProf.runningMs = 0
+  ttProf.acquireMs = ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
+}
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
 
@@ -1002,6 +1071,14 @@ export function initTransferWriter(seedDurableBlock: number): void {
   durableBlock = seedDurableBlock
   transferWriterSeeded = true
   console.log(`[tt-writer] seeded durable watermark = ${durableBlock} (backpressure bounds ${TT_QUEUE_HIGH_WATER_ROWS} rows / ${TT_QUEUE_HIGH_WATER_BLOCKS} blocks, alert bound ${TT_QUEUE_ALERT_ROWS} rows)`)
+  // State the resolved value, not the intent. An env-gated diagnostic that is
+  // silently off looks identical to one that is on and finding nothing, and this
+  // codebase has shipped an inert fix that way before (#92). Grep this line.
+  console.log(
+    TT_WRITER_PROFILE
+      ? `[tt-writer] produce/drain PROFILE ON (window ${TT_PROFILE_WINDOW_MS}ms) — emits "[tt-writer] PROFILE" lines`
+      : `[tt-writer] produce/drain profile OFF (set TT_WRITER_PROFILE=1 to diagnose backpressure oscillation)`,
+  )
   runTransferWriter()  // flush anything enqueued during startup
 }
 
@@ -1275,7 +1352,17 @@ function runTransferWriter(): void {
  */
 async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]): Promise<void> {
   const db = getDb()
+  // Phase is snapshotted BEFORE the await: attributing the pass by the state at
+  // completion would label every pass "blocked", because a long drain is exactly
+  // what parks the workers. The question is what the writer was competing with
+  // when it STARTED.
+  const wasBlocked = TT_WRITER_PROFILE && parkedWorkers > 0
+  const tStart = TT_WRITER_PROFILE ? performance.now() : 0
+  let tEnter = 0
   await db.transaction(async (tx) => {
+    // First statement inside the callback — the gap from tStart to here is
+    // connection-acquisition time, which is what separates M1 from M2.
+    if (TT_WRITER_PROFILE && tEnter === 0) tEnter = performance.now()
     for (let i = 0; i < blockNums.length; i += SQL_BATCH_CHUNK) {
       const chunk = blockNums.slice(i, i + SQL_BATCH_CHUNK)
       await tx.execute(sql`
@@ -1305,6 +1392,14 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
       .onConflictDoNothing()
     }
   })
+  if (TT_WRITER_PROFILE) {
+    const end = performance.now()
+    // tEnter stays 0 only if the callback never ran (transaction threw before
+    // entry); attribute the whole span to acquisition rather than reporting a
+    // negative sqlMs.
+    const enter = tEnter === 0 ? end : tEnter
+    recordDrainPass(rows.length, enter - tStart, end - enter, wasBlocked)
+  }
 }
 
 async function persistDurableBlock(block: number): Promise<void> {
