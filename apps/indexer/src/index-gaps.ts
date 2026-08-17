@@ -105,17 +105,14 @@ export async function recordPoisonGapIfAbsent(
       SET failures    = EXCLUDED.failures,
           recorded_at = now()
     RETURNING block_number
-  `)) as ArrayLike<unknown> | null | undefined
+  `))
   // A `false` return MUST mean exactly one thing: the block is present. The caller
   // reads it as proof of that and logs "its row already EXISTS". Folding an
   // unrecognised result shape into the same `false` would let a driver or adapter
   // change silently disable quarantine while reporting a confident, wrong reason —
-  // so an unexpected shape throws instead, landing in the caller's catch, which
-  // declines to skip and retries. (codex P2, round 3.)
-  if (res == null || typeof (res as ArrayLike<unknown>).length !== 'number') {
-    throw new Error('[index-gaps] recordPoisonGapIfAbsent: unrecognised result shape from db.execute')
-  }
-  return Array.from(res).length > 0
+  // so rowCount() throws on anything it does not recognise, landing in the caller's
+  // catch, which declines to skip and retries. (codex P2, rounds 3–5.)
+  return rowCount(res) > 0
 }
 
 /**

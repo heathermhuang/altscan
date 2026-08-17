@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { recordIndexGap, isPoisonBlock } from './index-gaps'
+import { recordIndexGap, isPoisonBlock, recordPoisonGapIfAbsent } from './index-gaps'
 
 /**
  * The MAX_LAG_BLOCKS skip has always existed and always recorded nothing, so
@@ -83,6 +83,34 @@ describe('driver result shapes are read strictly, never guessed', () => {
   it('a non-finite block number is rejected before any query runs', async () => {
     const execute = vi.fn()
     expect(await isPoisonBlock({ execute } as never, NaN)).toBe(false)
+    expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('recordPoisonGapIfAbsent reads shapes as strictly as isPoisonBlock', () => {
+  // Round 5 caught rowCount() being DEFINED but adopted at only one of its two call
+  // sites — the classic "fix is not wired" miss. Both are covered now so the gap
+  // cannot reopen silently.
+  const db = (result: unknown) => ({ execute: async () => result })
+  const REASON = 'poison_block(5 clean failovers)'
+
+  it('a returned row means recorded', async () => {
+    expect(await recordPoisonGapIfAbsent(db([{ block_number: 5 }]) as never, 5, REASON, 5)).toBe(true)
+  })
+
+  it('no rows means the block was present — the ONE meaning of false', async () => {
+    expect(await recordPoisonGapIfAbsent(db([]) as never, 5, REASON, 5)).toBe(false)
+  })
+
+  it('THROWS rather than reporting a confident, wrong "block present"', async () => {
+    await expect(recordPoisonGapIfAbsent(db('') as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+    await expect(recordPoisonGapIfAbsent(db({ length: 0 }) as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+    await expect(recordPoisonGapIfAbsent(db(undefined) as never, 5, REASON, 5)).rejects.toThrow(/unrecognised/)
+  })
+
+  it('rejects a non-finite failure count before querying', async () => {
+    const execute = vi.fn()
+    expect(await recordPoisonGapIfAbsent({ execute } as never, 5, REASON, NaN)).toBe(false)
     expect(execute).not.toHaveBeenCalled()
   })
 })
