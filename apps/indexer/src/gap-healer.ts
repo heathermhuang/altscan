@@ -218,6 +218,22 @@ export async function healNextGap(
              -- it falls out of the resume window, which is hours, against a
              -- retention floor measured in days.
              AND g.to_block < (SELECT MAX(number) FROM blocks) - ${resumeWindow}
+             -- Skip a range that has already been worked to its end but can never
+             -- be stamped healed. heal_cursor >= to_block with healed_at still NULL
+             -- is exactly that terminal state: every healable block in the range is
+             -- done, and the density proof refused because something in it is
+             -- permanently absent — a quarantined block, today.
+             --
+             -- Without this the healer STARVES. Selection nominates the oldest
+             -- unhealed row unconditionally (see above — that is what makes overlap
+             -- impossible), so a range that can never complete would be re-selected
+             -- every tick forever and no later gap would ever be reached.
+             --
+             -- Deliberately keyed on the CURSOR, not on "contains a poison block".
+             -- The latter would skip the whole range on sight, and a single
+             -- quarantined block inside a ~4,800-block max_lag_skip gap would then
+             -- block healing the other ~4,799.
+             AND (g.heal_cursor IS NULL OR g.heal_cursor < g.to_block)
            ORDER BY g.from_block
            LIMIT 1
          )
@@ -237,6 +253,11 @@ export async function healNextGap(
        -- zero rows and idle. (codex P1, round 8.)
        AND g.healed_at IS NULL
        AND (g.heal_lease_until IS NULL OR g.heal_lease_until < now())
+       -- Repeated for the same reason as the lease check: the CTE's copy is
+       -- evaluated against a snapshot, this one against the post-lock row version.
+       -- Omitting it here would let a claimer that lost the race be handed a
+       -- terminal range anyway, reviving the starvation the CTE clause prevents.
+       AND (g.heal_cursor IS NULL OR g.heal_cursor < g.to_block)
     RETURNING g.from_block,
               g.to_block,
               GREATEST(g.from_block, f.floor, COALESCE(g.heal_cursor + 1, g.from_block)) AS heal_from,
@@ -280,14 +301,32 @@ export async function healNextGap(
   //
   // Safe at the retention boundary: retention deletes strictly BELOW the cutoff
   // and heal_from starts AT it, so pruned transactions are never read as damage.
+  // WINDOW verification — gates the heal_cursor only, NOT the healed_at stamp.
+  //
+  // Quarantined heights are excluded here, and the distinction from the final
+  // stamp is the whole point. This question is "did this window make all the
+  // progress it could?", and a quarantined block is absent BY DECISION — the work
+  // set skips it deliberately, so counting it here holds the cursor forever, the
+  // range is re-selected every tick, and no other gap is ever healed.
+  //
+  // The final density proof at the bottom of this function does NOT get this
+  // exclusion. It answers a different question — "is this range actually
+  // complete?" — and the honest answer over a quarantined block is no. So the
+  // range heals everything it can, then stays unhealed and visibly `degraded`
+  // rather than being stamped complete over a real hole. Relaxing the stamp too
+  // would recreate the bug where completenessStatus reports `ok` over blocks that
+  // are permanently gone.
   const incompleteIn = (lo: number, hi: number) => sql`
     SELECT n FROM generate_series(${lo}::bigint, ${hi}::bigint) AS n
-    WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
-       OR EXISTS (
-            SELECT 1 FROM blocks b
-            WHERE b.number = n
-              AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
-          )
+    WHERE NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+      AND (
+        NOT EXISTS (SELECT 1 FROM blocks WHERE blocks.number = n)
+        OR EXISTS (
+             SELECT 1 FROM blocks b
+             WHERE b.number = n
+               AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
+           )
+      )
     ORDER BY n
   `
   // Work set = ABSENT blocks ONLY. Nothing else is safe to process.
@@ -446,7 +485,24 @@ export async function healNextGap(
   `)
   // A conditional UPDATE that matches nothing is NOT a heal. (codex P2.)
   if (rowsOf(res).length === 0) {
-    log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
+    // Two very different reasons land here, and calling both "changed under us"
+    // would misreport the common one. The window verified, so the cursor has just
+    // reached to_block; if the range holds a quarantined block the strict density
+    // proof above refuses forever and selection will now skip this range as
+    // terminal. Say which, so a permanently-degraded range is legible rather than
+    // looking like a transient race that never resolves.
+    let poisoned = 0
+    try {
+      poisoned = toNum(rowsOf(await db.execute(sql`
+        SELECT count(*)::int AS n FROM poison_blocks
+        WHERE block_number BETWEEN ${verifyFrom} AND ${toBlock}
+      `))[0]?.n) ?? 0
+    } catch { /* diagnostic only — never fail the tick for a log line */ }
+    if (poisoned > 0) {
+      log(`[gap-healer] ${fromBlock}..${toBlock} worked to completion but holds ${poisoned} quarantined block(s) — PERMANENTLY incomplete, left degraded and no longer selected`)
+    } else {
+      log(`[gap-healer] ${fromBlock}..${toBlock} changed under us — left unhealed`)
+    }
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
   log(`[gap-healer] healed ${fromBlock}..${toBlock} (retained window complete)`)

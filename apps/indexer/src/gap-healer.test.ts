@@ -308,3 +308,46 @@ describe('gap lease', () => {
     expect(reindexBlock).toHaveBeenCalled()
   })
 })
+
+describe('quarantined blocks must not starve the healer, and must not fake a heal', () => {
+  // Statement order per tick: 0=claim, 1=work-set, 2=verify-window, 3=cursor, 4=stamp.
+  const runTick = async () => {
+    const { db, calls } = stubDb([SMALL, [], [], [], [{ from_block: '100' }]])
+    await healNextGap({
+      owner: 'owner-abc', resumeWindow: 20000, db, reindexBlock: vi.fn(async (_n: number) => {}),
+      readLag: async () => 0, flushTransfers: okFlush,
+    })
+    return calls
+  }
+
+  it('SELECTION skips a range already worked to its end but never stampable', async () => {
+    // Without this the healer starves: selection nominates the oldest unhealed row
+    // unconditionally, so a range that can never complete is re-picked every tick
+    // and no later gap is ever reached.
+    const claim = JSON.stringify((await runTick())[0])
+    expect(claim).toContain('heal_cursor')
+    expect(claim).toContain('to_block')
+    // Present TWICE — once in the candidate CTE, once in the repeated UPDATE
+    // predicate. The repeat is what makes the claim atomic under READ COMMITTED;
+    // omitting it there would hand a terminal range to a losing claimer anyway.
+    const occurrences = claim.split('heal_cursor IS NULL OR').length - 1
+    expect(occurrences).toBe(2)
+  })
+
+  it('WINDOW verification tolerates quarantined heights so the cursor can advance', async () => {
+    expect(JSON.stringify((await runTick())[2])).toContain('poison_blocks')
+  })
+
+  it('the work set skips quarantined heights', async () => {
+    expect(JSON.stringify((await runTick())[1])).toContain('poison_blocks')
+  })
+
+  it('the FINAL stamp stays strict — it must NOT excuse a quarantined block', async () => {
+    // The load-bearing honesty property. The window check answers "did this window
+    // make all the progress it could?"; the stamp answers "is this range actually
+    // complete?", and over a permanently-absent block the honest answer is no.
+    // Relaxing this would stamp healed_at over a real hole and make
+    // completenessStatus report `ok` on blocks that are gone for good.
+    expect(JSON.stringify((await runTick())[4])).not.toContain('poison_blocks')
+  })
+})
