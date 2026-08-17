@@ -239,6 +239,21 @@ async function main() {
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
   const REORG_CHECK = process.env.REORG_CHECK !== '0'
   const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
+  // The healer's territory rule assumes a reorg can never reach a range the healer
+  // owns: the healer only takes gaps older than RESUME_GAP_SCAN_BLOCKS from the tip,
+  // and a reorg is bounded at K. Defaults hold that by a wide margin (K = 15 BNB / 3
+  // ETH against a 20,000-block separation), but REORG_DEPTH accepts any positive
+  // override, and if one ever exceeded the separation, unwindFrom's heal_cursor
+  // rewind could race a healer whose lease is still valid — the healer's fenced
+  // GREATEST() write would restore the old high cursor and strand the blocks the
+  // unwind just deleted beneath it. Assert the relationship rather than leaving it as
+  // an unwritten assumption between two modules. (codex P2, follow-up round 3.)
+  if (REORG_DEPTH >= RESUME_GAP_SCAN_BLOCKS) {
+    throw new Error(
+      `${TAG} REORG_DEPTH=${REORG_DEPTH} must stay well below RESUME_GAP_SCAN_BLOCKS=${RESUME_GAP_SCAN_BLOCKS}: ` +
+      'a reorg deeper than the resume/healer separation can rewind a heal_cursor out from under a live heal lease.',
+    )
+  }
   // Throttle the idle (tip-mode) check — it costs 2 header calls; every poll would
   // double idle RPC load for a condition the next boundary check surfaces anyway.
   const IDLE_REORG_CHECK_MS = parseInt(process.env.IDLE_REORG_CHECK_MS ?? '30000', 10)

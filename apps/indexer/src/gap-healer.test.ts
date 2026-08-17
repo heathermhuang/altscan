@@ -347,10 +347,11 @@ describe('quarantined blocks must not starve the healer, and must not fake a hea
     // absent-only — so an underfull/overfull PRESENT block inside a quarantined range
     // would be selected every tick, rejected by verification, and starve every later
     // gap. The mismatch still gates the cursor and the stamp, where it belongs.
-    // Asserted on the correlated count itself, not the bare column name — the
-    // rationale comment above the predicate mentions tx_count, and matching that
-    // would make this pass or fail on prose.
-    expect(claim).not.toContain('FROM transactions')
+    // The count mismatch appears in the BLOCKER arm (a defect the absent-only work
+    // set can never repair), NOT in the executable arm. An earlier revision had it
+    // the other way round and that was the bug: counted as repairable, a
+    // mismatch-only range was selected every tick and starved every later gap.
+    expect(claim).toContain('FROM transactions')
     // And it must start where the next tick starts, not at the retention floor: a
     // defect behind heal_cursor would otherwise be selected but never reached.
     expect(claim).toContain('heal_cursor + 1')

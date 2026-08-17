@@ -246,10 +246,36 @@ export async function healNextGap(
              -- provably unfinishable it becomes selectable again, with no terminal
              -- flag to reset and no revalidation pass to run.
              AND NOT (
+               -- An UNEXECUTABLE blocker: a defect in the retained range that this
+               -- tick's work set can never act on. Two kinds, and both must count.
+               --
+               --   • quarantined AND STILL ABSENT. Testing merely for a poison_blocks
+               --     row was wrong: a height can be quarantined and then legitimately
+               --     become present (the documented deploy-overlap window in
+               --     index-gaps.ts), and nothing deletes the row outside reorg
+               --     cleanup. That stranded a range the strict proof would happily
+               --     have stamped.
+               --   • PRESENT with a transaction-count mismatch. The work set is
+               --     absent-only, so an underfull or overfull block is never repaired.
+               --     Left out of this arm it starved every later gap on its own,
+               --     without any quarantine involved — reachable whenever processBlock
+               --     inserts the block and then fails inserting its transactions.
+               --
+               -- Note the role reversal from an earlier revision: the count mismatch is
+               -- a BLOCKER here, not repairable work. Counting it as repairable was the
+               -- previous bug.
                EXISTS (
-                 SELECT 1 FROM poison_blocks p
-                 WHERE p.block_number
-                       BETWEEN GREATEST(g.from_block, COALESCE(f.floor, g.from_block)) AND g.to_block
+                 SELECT 1 FROM generate_series(
+                   GREATEST(g.from_block, COALESCE(f.floor, g.from_block)), g.to_block
+                 ) AS n
+                 WHERE (
+                   EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
+                   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
+                 ) OR EXISTS (
+                   SELECT 1 FROM blocks b
+                   WHERE b.number = n
+                     AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
+                 )
                )
                -- "Repairable" must mean EXECUTABLE, and by exactly the definition the
                -- work set uses: an ABSENT, non-quarantined block at or after where the
