@@ -18,7 +18,7 @@ import {
   processBlock,
   initTransferWriter,
   setDurableFloor,
-  enqueueTransferWrite,
+  enqueueQuarantinedBlock,
   getTransferQueueDepth,
   flushTransferWriter,
   rollbackTransferWriterTo,
@@ -701,8 +701,8 @@ async function main() {
             // rows, so a reorg walk across the hole still resolves.
             console.warn(`${TAG} ⚠ QUARANTINING block ${blocker} after ${failures} clean full-failover failures — recorded as a 1-block gap, advancing past it`)
             lastIndexed = blocker
-            // Move the transfer watermark by enqueuing an EMPTY batch for this
-            // height, NOT with setDurableFloor().
+            // Move the transfer watermark with a QUARANTINE batch, not with
+            // setDurableFloor() and not with an empty ordinary batch.
             //
             // setDurableFloor jumps W unconditionally. That is fine for the bulk
             // MAX_LAG skip, which leaps to `latest - 200` over blocks nothing has
@@ -714,21 +714,27 @@ async function main() {
             // they sit in the queue, and a crash there loses them permanently —
             // crash-resume replays only from W upward.
             //
-            // An empty batch needs no new watermark machinery. writeTransferBlocks
-            // DELETEs this block's rows (none — the block is absent) and its INSERT
-            // loop does nothing, so the height simply lands in `transferWritten` and
-            // the EXISTING contiguous-prefix fold carries W past it once everything
-            // beneath has genuinely committed. Revocation is automatic too: if the
-            // healer later re-indexes this block, its real decode replaces the empty
-            // one ("latest decode of a block wins" in enqueueTransferWrite).
+            // An ordinary empty batch would be wrong, and dangerously so:
+            // writeTransferBlocks DELETEs every block it drains, so an empty batch is
+            // empty-by-OMISSION and would delete rows it never decoded. That is the
+            // same failure that lost data on `--skip-logs` backfills (PR #42, and the
+            // warning above the enqueue in processBlock). The window is real here —
+            // the batch can sit in the 250ms requeue-retry loop, or in an outgoing
+            // deploy generation, while a heal writes this block's real transfers.
             //
-            // This deliberately reuses the drain path that is already in production
-            // and already covered by tests, rather than a parallel one. The earlier
-            // design tracked quarantined heights in a second set folded alongside
-            // transferWritten, and codex found a fresh P1 in that fold on each of two
-            // review rounds — the revocation race, then the re-validation race in its
-            // fix. There is no second path here to get wrong.
-            if (ASYNC_TT_WRITER) enqueueTransferWrite(blocker, [])
+            // A quarantine batch makes no claim about the block: never deleted, never
+            // inserted, so a stale retry is a complete no-op. It only contributes its
+            // height, which lands in `transferWritten` so the EXISTING contiguous-
+            // prefix fold carries W past it once everything beneath has committed.
+            // Revocation stays automatic — a real decode replaces the entry under the
+            // usual "latest decode of a block wins" rule.
+            //
+            // The fold itself is untouched. An earlier design folded quarantined
+            // heights through a SECOND set alongside transferWritten, and codex found
+            // a fresh P1 in that fold on each of two review rounds — the revocation
+            // race, then the re-validation race in its fix. The flag here rides inside
+            // the queued batch, so there is no parallel state to drift.
+            if (ASYNC_TT_WRITER) enqueueQuarantinedBlock(blocker)
             poisonBlocks.forget(blocker)
           }
         }

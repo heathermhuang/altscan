@@ -965,7 +965,24 @@ const TT_QUEUE_ALERT_ROWS = Math.max(
 // "deactivate after 5 consecutive failures" pattern — here we never give up (transfers
 // are primary data), we just get loud so log-based monitoring fires.
 const TT_WRITER_FAILURE_ALERT_THRESHOLD = parseInt(process.env.TT_WRITER_FAILURE_ALERT_THRESHOLD ?? '5', 10)
-let transferPending = new Map<number, TokenTransferRow[]>()
+/**
+ * A queued write for one block.
+ *
+ * `quarantine` marks a batch that asserts NOTHING about the block's transfers —
+ * it exists only so the watermark fold can advance past a height the indexer has
+ * given up on. Such a batch must never DELETE and never INSERT.
+ *
+ * The flag rides WITH the batch rather than living in a parallel set, and that is
+ * deliberate. It has to survive the drain, the 250ms requeue-retry, and the reorg
+ * purge, and every earlier attempt at holding quarantine state alongside the queue
+ * drifted out of sync in a way review caught only after the fact. Carried inline,
+ * there is nothing to keep in sync: a later real decode simply replaces the entry
+ * (see enqueueTransferWrite), which revokes the quarantine as a side effect of the
+ * existing "latest decode of a block wins" rule.
+ */
+type PendingBatch = { rows: TokenTransferRow[]; quarantine: boolean }
+
+let transferPending = new Map<number, PendingBatch>()
 let transferPendingRows = 0
 const transferWritten = new Set<number>()   // committed, not yet folded into W
 let durableBlock = 0
@@ -1016,9 +1033,12 @@ export function purgeTransferQueueAbove(forkPoint: number): void {
   let dropped = 0
   for (const [n, batch] of transferPending) {
     if (n > forkPoint) {
+      // Quarantine batches are dropped here too, and must be: above the fork the
+      // height refers to a DIFFERENT block, so a decision made about the orphan
+      // must not let the fold step over its canonical replacement.
       transferPending.delete(n)
-      transferPendingRows -= batch.length
-      dropped += batch.length
+      transferPendingRows -= batch.rows.length
+      dropped += batch.rows.length
     }
   }
   for (const n of transferWritten) if (n > forkPoint) transferWritten.delete(n)
@@ -1095,10 +1115,38 @@ function evaluateTransferQueueHighWater(): void {
 
 export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
   const prev = transferPending.get(blockNumber)
-  if (prev) transferPendingRows -= prev.length
-  transferPending.set(blockNumber, rows)   // latest decode of a block wins
+  if (prev) transferPendingRows -= prev.rows.length
+  // latest decode of a block wins — and because this always writes quarantine:false,
+  // a real decode arriving for a quarantined height revokes the quarantine for free.
+  transferPending.set(blockNumber, { rows, quarantine: false })
   transferPendingRows += rows.length
   evaluateTransferQueueHighWater()
+  runTransferWriter()
+}
+
+/**
+ * Let the watermark advance past a block the indexer has quarantined.
+ *
+ * NOT `enqueueTransferWrite(n, [])`. An empty batch is indistinguishable from a
+ * transfer-less block, and writeTransferBlocks DELETEs every block it drains — so
+ * an empty batch is empty-by-OMISSION and would delete rows it never decoded. That
+ * is the same failure that made `--skip-logs` backfills lose data (see the comment
+ * above the enqueue in processBlock, and PR #42). The window is real here: this
+ * batch can sit in the 250ms requeue-retry loop, or in an outgoing deploy
+ * generation, while a heal writes the block's real transfers — and the stale retry
+ * would then delete them.
+ *
+ * A quarantine batch instead carries no claim about the block at all. It is never
+ * deleted and never inserted, so a stale retry is a complete no-op; it only ever
+ * contributes its height to the fold. If a real decode shows up first, it replaces
+ * this entry and normal semantics resume.
+ */
+export function enqueueQuarantinedBlock(blockNumber: number): void {
+  const prev = transferPending.get(blockNumber)
+  // A real decode already queued for this height OUTRANKS the quarantine — it
+  // carries actual rows, and downgrading it to a no-op would drop them.
+  if (prev && !prev.quarantine) return
+  transferPending.set(blockNumber, { rows: [], quarantine: true })
   runTransferWriter()
 }
 
@@ -1118,15 +1166,23 @@ function runTransferWriter(): void {
         transferPending = new Map()
         transferPendingRows = 0
 
+        // blockNums drives the FOLD (every drained height counts, quarantined or
+        // not — that is the whole point of a quarantine batch). deleteNums drives
+        // the DELETE, and deliberately excludes quarantined heights so a stale
+        // retry can never destroy rows written by a heal in the meantime.
         const blockNums = Array.from(drained.keys())
+        const deleteNums: number[] = []
         const rows: TokenTransferRow[] = []
-        for (const batch of drained.values()) for (const r of batch) rows.push(r)
+        for (const [n, batch] of drained) {
+          if (!batch.quarantine) deleteNums.push(n)
+          for (const r of batch.rows) rows.push(r)
+        }
         // Sort by (block_number, log_index): keeps tt_block_idx writes sequential
         // and clusters same-block rows for better index-leaf locality.
         rows.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
 
         try {
-          await writeTransferBlocks(blockNums, rows)
+          await writeTransferBlocks(deleteNums, rows)
 
           // Fold written blocks into W through the contiguous prefix. Compute the new
           // watermark first and only advance durableBlock / clear transferWritten AFTER
@@ -1164,11 +1220,14 @@ function runTransferWriter(): void {
         } catch (err) {
           ttWriterConsecutiveFailures++
           const msg = err instanceof Error ? err.message : String(err)
-          // Re-queue (don't clobber a newer decode of the same block).
+          // Re-queue (don't clobber a newer decode of the same block). The
+          // quarantine flag travels inside the batch, so a requeued quarantine
+          // stays a no-op and a requeued real batch stays a real write — no
+          // separate bookkeeping to fall out of step across the retry.
           for (const [n, batch] of drained) {
             if (!transferPending.has(n)) {
               transferPending.set(n, batch)
-              transferPendingRows += batch.length
+              transferPendingRows += batch.rows.length
             }
           }
           // A requeue can push the pending count back over the bound without an enqueue —
