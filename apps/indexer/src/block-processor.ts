@@ -1003,11 +1003,27 @@ let ttWriterDrainCount = 0
 //
 //   M1 connection starvation — the writer is the 9th consumer of a
 //      DB_POOL_SIZE=8 pool and holds one slot for a whole transaction.
-//      Signature: acquireMs high while workers run, ~0 while they are parked.
 //   M2 event-loop starvation — 8 decoding workers saturate the single Node
-//      thread. Signature: acquireMs low, sqlMs inflated while workers run.
+//      thread.
 //   M3 pure rate mismatch — oscillation is inherent.
-//      Signature: rows/s IDENTICAL in both phases.
+//
+// ⚠ READ THIS BEFORE DRAWING A CONCLUSION FROM THESE NUMBERS.
+//
+// The metrics below are HINTS, not the verdict. Review established that the
+// acq/lag split cannot cleanly separate M1 from M2/M3 from inside the process:
+//   • `tEnter - tStart` also contains connection setup, network RTT and the
+//     server-side BEGIN, none of which shows up as event-loop lag — so high acq
+//     with low lag can mean a busy DATABASE rather than a starved local pool;
+//   • the `none` bucket counts workers that are alive and unparked, but those
+//     may all be awaiting RPC inside processBlock and holding no DB slot at all,
+//     so `none` mixes real contention with idle periods.
+//
+// The VERDICT comes from the A/B on TT_WRITER_DEDICATED_POOL against the
+// measured baseline (1.880 blk/s indexed, 64.7% of wall clock stalled), because
+// that removes the contention instead of trying to observe it. Treating one of
+// these observational numbers as proof is exactly the error that produced a
+// confidently wrong root cause earlier the same day, from a queue depth that was
+// only ever a lower bound. Use them to explain a result, never to establish one.
 //
 // Diagnostic only: nothing here changes behaviour, and it is off unless
 // TT_WRITER_PROFILE=1 so the default path pays only a boolean test.
