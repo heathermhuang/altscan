@@ -23,13 +23,45 @@
  *     is restored). A demotion that never lifted would permanently shrink the
  *     pool on the strength of one bad minute, so it lapses after a cooldown and
  *     the endpoint gets a probationary turn in normal rotation.
+ *
+ * ...but the probationary turn is not free, and a FLAT cooldown charges for it
+ * at a fixed rate forever. Measured on BNB 2026-08-17: bsc.publicnode.com cannot
+ * serve archive requests at all, and the indexer only issues archive requests
+ * while it is behind, so that endpoint could never recover on its own. The flat
+ * 60s cooldown lapsed it into full rotation once a minute; ~1/3 of concurrent
+ * blocks started on it, each burned RPC_FETCH_TIMEOUT_MS=8s, and because
+ * index.ts advances `lastIndexed` only through the contiguous DONE prefix, one
+ * stuck block froze the whole 40-block batch. The result was a ~50s slow segment
+ * every ~77s — a period set by nothing but this constant — leaving 62.7% of wall
+ * clock running at 0.69 blk/s against a 2.226 blk/s chain, i.e. a permanent
+ * throughput deficit that grew the lag monotonically until MAX_LAG_BLOCKS fired
+ * and abandoned ~4,900 blocks at a time. Segments where the endpoint stayed
+ * demoted ran at 4.17 blk/s, so the pool was always fast enough; the re-probe
+ * was the whole cost.
+ *
+ * So the cooldown ESCALATES with the failure streak (doubling, capped). A
+ * one-off blip still costs only the base cooldown, while an endpoint that never
+ * recovers converges on the cap and its tax decays toward zero. Invariant 2 is
+ * preserved by the cap: every demotion still expires. Recovery is not gated on
+ * the escalated wait — `recordSuccess` clears the streak outright, so the first
+ * request an endpoint serves restores it to full rotation immediately.
  */
 
 /** Consecutive failures before an endpoint is demoted to last resort. */
 export const DEFAULT_DEMOTE_AFTER = 3
 
-/** How long a demotion lasts before the endpoint is retried in normal order. */
+/**
+ * Base demotion length, charged at exactly DEFAULT_DEMOTE_AFTER failures. Each
+ * additional consecutive failure doubles it, up to DEFAULT_MAX_COOLDOWN_MS.
+ */
 export const DEFAULT_COOLDOWN_MS = 60_000
+
+/**
+ * Ceiling on the escalated cooldown. Bounds how long a recovered endpoint can
+ * stay demoted after a long streak — the price of invariant 2. With the defaults
+ * a hopeless endpoint reaches this after 7 consecutive failures.
+ */
+export const DEFAULT_MAX_COOLDOWN_MS = 900_000
 
 /**
  * Operation class. Health is tracked PER KIND, because endpoints fail per
@@ -56,16 +88,36 @@ export type EndpointHealth<P> = {
   demoted(providers: readonly P[], kind: HealthKind): P[]
 }
 
-type State = { consecutiveFailures: number; lastFailureAt: number }
+type State = { consecutiveFailures: number; lastFailureAt: number; failedWaves: number }
 
 export function createEndpointHealth<P>(opts?: {
   demoteAfter?: number
   cooldownMs?: number
+  maxCooldownMs?: number
   now?: () => number
 }): EndpointHealth<P> {
   const demoteAfter = opts?.demoteAfter ?? DEFAULT_DEMOTE_AFTER
   const cooldownMs = opts?.cooldownMs ?? DEFAULT_COOLDOWN_MS
+  // Floored AT the base: a cap below it would SHORTEN the base cooldown, turning
+  // a misconfiguration into "demotion barely applies" — the opposite of what a
+  // ceiling is for.
+  const maxCooldownMs = Math.max(opts?.maxCooldownMs ?? DEFAULT_MAX_COOLDOWN_MS, cooldownMs)
   const now = opts?.now ?? (() => Date.now())
+
+  /**
+   * Demotion length after `failedWaves` blown probations: the base, doubled per
+   * WAVE, capped.
+   *
+   * A high wave count overflows the shift — `2 ** 2000` is Infinity — and that
+   * is SAFE here only because the cap is applied with Math.min, which returns
+   * the cap against Infinity. The cap is therefore load-bearing for invariant 2
+   * at extreme counts, not merely a tuning knob, and `a huge wave count cannot
+   * produce a non-finite cooldown` pins that. (An explicit exponent clamp was
+   * tried here first; mutation testing showed it could not fail, so it was
+   * removed rather than left as a guard nothing verifies.)
+   */
+  const cooldownFor = (failedWaves: number): number =>
+    Math.min(cooldownMs * 2 ** failedWaves, maxCooldownMs)
   // Keyed by provider IDENTITY. Two differently-keyed endpoints on the same host
   // redact to the same label, so a label-keyed map would merge their health and
   // let one endpoint's failures demote the other. (Same trap the failover logger
@@ -80,8 +132,10 @@ export function createEndpointHealth<P>(opts?: {
   const isDemoted = (p: P, kind: HealthKind): boolean => {
     const s = stateFor(kind).get(p)
     if (!s || s.consecutiveFailures < demoteAfter) return false
-    // Lapsed demotions return to normal rotation — endpoints do recover.
-    return now() - s.lastFailureAt < cooldownMs
+    // Lapsed demotions return to normal rotation — endpoints do recover. The
+    // wait scales with the number of blown probations so a hopeless endpoint is
+    // re-probed exponentially less often (see cooldownFor).
+    return now() - s.lastFailureAt < cooldownFor(s.failedWaves)
   }
 
   return {
@@ -94,9 +148,26 @@ export function createEndpointHealth<P>(opts?: {
 
     recordFailure(provider, kind) {
       const m = stateFor(kind)
-      const s = m.get(provider) ?? { consecutiveFailures: 0, lastFailureAt: 0 }
+      const s = m.get(provider) ?? { consecutiveFailures: 0, lastFailureAt: 0, failedWaves: 0 }
+      const at = now()
+      // Escalate per PROBATION WAVE, not per failure. index.ts runs
+      // INDEX_CONCURRENCY block workers, so the instant a demotion lapses
+      // several of them select this endpoint together and all fail before any
+      // one records a result — a single wave arrives as 3-8 failures. Charging
+      // a doubling each would turn one bad minute into an 8-minute exile for an
+      // endpoint that may have recovered immediately, shrinking the pool during
+      // a TRANSIENT outage. That is the opposite of the goal, which is to stop
+      // paying for a PERMANENTLY broken one. (codex P2.)
+      //
+      // A wave counts only when the failure lands after the previous demotion
+      // had already expired — i.e. "it got another turn and blew it". Failures
+      // arriving while still demoted, or before the endpoint has been demoted at
+      // all, belong to a wave already counted.
+      if (s.consecutiveFailures >= demoteAfter && at - s.lastFailureAt >= cooldownFor(s.failedWaves)) {
+        s.failedWaves += 1
+      }
       s.consecutiveFailures += 1
-      s.lastFailureAt = now()
+      s.lastFailureAt = at
       m.set(provider, s)
     },
 
