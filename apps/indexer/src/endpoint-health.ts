@@ -88,7 +88,7 @@ export type EndpointHealth<P> = {
   demoted(providers: readonly P[], kind: HealthKind): P[]
 }
 
-type State = { consecutiveFailures: number; lastFailureAt: number }
+type State = { consecutiveFailures: number; lastFailureAt: number; failedWaves: number }
 
 export function createEndpointHealth<P>(opts?: {
   demoteAfter?: number
@@ -105,19 +105,19 @@ export function createEndpointHealth<P>(opts?: {
   const now = opts?.now ?? (() => Date.now())
 
   /**
-   * Demotion length for a streak of `failures`: the base, doubled once per
-   * failure past the threshold, capped.
+   * Demotion length after `failedWaves` blown probations: the base, doubled per
+   * WAVE, capped.
    *
-   * A long streak overflows the shift — `2 ** 5000` is Infinity — and that is
-   * SAFE here only because the cap is applied with Math.min, which returns the
-   * cap against Infinity. The cap is therefore load-bearing for invariant 2 at
-   * extreme streaks, not merely a tuning knob, and `a huge failure streak cannot
+   * A high wave count overflows the shift — `2 ** 2000` is Infinity — and that
+   * is SAFE here only because the cap is applied with Math.min, which returns
+   * the cap against Infinity. The cap is therefore load-bearing for invariant 2
+   * at extreme counts, not merely a tuning knob, and `a huge wave count cannot
    * produce a non-finite cooldown` pins that. (An explicit exponent clamp was
    * tried here first; mutation testing showed it could not fail, so it was
    * removed rather than left as a guard nothing verifies.)
    */
-  const cooldownFor = (failures: number): number =>
-    Math.min(cooldownMs * 2 ** Math.max(0, failures - demoteAfter), maxCooldownMs)
+  const cooldownFor = (failedWaves: number): number =>
+    Math.min(cooldownMs * 2 ** failedWaves, maxCooldownMs)
   // Keyed by provider IDENTITY. Two differently-keyed endpoints on the same host
   // redact to the same label, so a label-keyed map would merge their health and
   // let one endpoint's failures demote the other. (Same trap the failover logger
@@ -133,9 +133,9 @@ export function createEndpointHealth<P>(opts?: {
     const s = stateFor(kind).get(p)
     if (!s || s.consecutiveFailures < demoteAfter) return false
     // Lapsed demotions return to normal rotation — endpoints do recover. The
-    // wait scales with the streak so a hopeless endpoint is re-probed
-    // exponentially less often (see cooldownFor).
-    return now() - s.lastFailureAt < cooldownFor(s.consecutiveFailures)
+    // wait scales with the number of blown probations so a hopeless endpoint is
+    // re-probed exponentially less often (see cooldownFor).
+    return now() - s.lastFailureAt < cooldownFor(s.failedWaves)
   }
 
   return {
@@ -148,9 +148,26 @@ export function createEndpointHealth<P>(opts?: {
 
     recordFailure(provider, kind) {
       const m = stateFor(kind)
-      const s = m.get(provider) ?? { consecutiveFailures: 0, lastFailureAt: 0 }
+      const s = m.get(provider) ?? { consecutiveFailures: 0, lastFailureAt: 0, failedWaves: 0 }
+      const at = now()
+      // Escalate per PROBATION WAVE, not per failure. index.ts runs
+      // INDEX_CONCURRENCY block workers, so the instant a demotion lapses
+      // several of them select this endpoint together and all fail before any
+      // one records a result — a single wave arrives as 3-8 failures. Charging
+      // a doubling each would turn one bad minute into an 8-minute exile for an
+      // endpoint that may have recovered immediately, shrinking the pool during
+      // a TRANSIENT outage. That is the opposite of the goal, which is to stop
+      // paying for a PERMANENTLY broken one. (codex P2.)
+      //
+      // A wave counts only when the failure lands after the previous demotion
+      // had already expired — i.e. "it got another turn and blew it". Failures
+      // arriving while still demoted, or before the endpoint has been demoted at
+      // all, belong to a wave already counted.
+      if (s.consecutiveFailures >= demoteAfter && at - s.lastFailureAt >= cooldownFor(s.failedWaves)) {
+        s.failedWaves += 1
+      }
       s.consecutiveFailures += 1
-      s.lastFailureAt = now()
+      s.lastFailureAt = at
       m.set(provider, s)
     },
 

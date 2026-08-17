@@ -96,6 +96,42 @@ describe('createEndpointHealth', () => {
    * Backoff must therefore scale with the failure streak, so an endpoint that
    * never recovers costs a bounded, shrinking share of throughput.
    */
+  /**
+   * codex P2. Backoff must count PROBATION WAVES, not individual failures.
+   *
+   * index.ts runs INDEX_CONCURRENCY (8 on BNB) block workers, so the instant a
+   * demotion lapses several of them select the endpoint together and all fail
+   * before any one of them records a result. Charging a doubling per failure
+   * turns ONE bad wave into 3-8 doublings: a 60s demotion becomes 8 minutes for
+   * an endpoint that may have recovered a second later. That shrinks the pool
+   * during a TRANSIENT outage — the opposite of what this backoff is for, which
+   * is to stop paying for a PERMANENTLY broken one.
+   *
+   * Serial-failure tests cannot see this; the burst has to be simultaneous.
+   */
+  it('does not escalate for concurrent failures inside one probation wave', () => {
+    let t = 1_000
+    const h = createEndpointHealth<string>({ cooldownMs: 10_000, maxCooldownMs: 1_000_000, now: () => t })
+    // 8 workers all fail at the same instant — one wave, not eight.
+    for (let i = 0; i < 8; i++) h.recordFailure(P.a, 'block')
+    t += 10_001
+    expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
+  })
+
+  it('escalates once per probation wave, however wide the wave is', () => {
+    let t = 1_000
+    const h = createEndpointHealth<string>({ cooldownMs: 10_000, maxCooldownMs: 1_000_000, now: () => t })
+    for (let i = 0; i < 8; i++) h.recordFailure(P.a, 'block')   // wave 1 -> base
+    t += 10_001
+    expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
+
+    for (let i = 0; i < 8; i++) h.recordFailure(P.a, 'block')   // wave 2 -> 2x base
+    t += 10_001
+    expect(h.order(ALL, 0, 'block')).toEqual(['B', 'C', 'A'])
+    t += 10_000
+    expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
+  })
+
   it('escalates the cooldown with the failure streak', () => {
     let t = 1_000
     const h = createEndpointHealth<string>({ cooldownMs: 10_000, maxCooldownMs: 1_000_000, now: () => t })
@@ -129,17 +165,23 @@ describe('createEndpointHealth', () => {
   it('caps the escalating cooldown so a demotion always expires', () => {
     let t = 1_000
     const h = createEndpointHealth<string>({ cooldownMs: 10_000, maxCooldownMs: 40_000, now: () => t })
-    for (let i = 0; i < 500; i++) h.recordFailure(P.a, 'block')
-    t += 40_001
+    // Drive many real WAVES (each needs the prior demotion to lapse first).
+    for (let w = 0; w < 500; w++) {
+      h.recordFailure(P.a, 'block')
+      t += 40_001
+    }
     expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
   })
 
-  it('a huge failure streak cannot produce a non-finite cooldown', () => {
+  it('a huge wave count cannot produce a non-finite cooldown', () => {
     let t = 1_000
     const h = createEndpointHealth<string>({ cooldownMs: 60_000, maxCooldownMs: 900_000, now: () => t })
-    for (let i = 0; i < 5_000; i++) h.recordFailure(P.a, 'block')
-    // 2 ** 5000 is Infinity; an unclamped exponent would make the endpoint
-    // permanently demoted no matter how far the clock advances.
+    // 2_000 waves puts the exponent far past 1024, where 2 ** n is Infinity.
+    // Only Math.min against the cap keeps the endpoint reachable at all.
+    for (let w = 0; w < 2_000; w++) {
+      h.recordFailure(P.a, 'block')
+      t += 900_001
+    }
     t += 900_001
     expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
   })
