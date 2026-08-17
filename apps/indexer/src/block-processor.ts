@@ -1146,7 +1146,15 @@ export function enqueueQuarantinedBlock(blockNumber: number): void {
   // A real decode already queued for this height OUTRANKS the quarantine — it
   // carries actual rows, and downgrading it to a no-op would drop them.
   if (prev && !prev.quarantine) return
+  // Keep the row counter honest. Today `prev` can only be another quarantine batch
+  // (zero rows), so this subtracts nothing — but transferPendingRows drives both the
+  // backpressure bound and the high-water ALERT, and leaving the only thing that
+  // protects it as the guard above means a future edit there corrupts the counter
+  // silently. It also makes that guard testable: without the subtraction, replacing
+  // a real batch leaves the count unchanged, so nothing observable would change.
+  if (prev) transferPendingRows -= prev.rows.length
   transferPending.set(blockNumber, { rows: [], quarantine: true })
+  evaluateTransferQueueHighWater()
   runTransferWriter()
 }
 
