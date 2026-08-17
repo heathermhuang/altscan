@@ -39,24 +39,66 @@ export async function recordPoisonGapIfAbsent(
   db: DbLike,
   block: number,
   reason: string,
+  failures: number,
 ): Promise<boolean> {
-  if (!Number.isFinite(block)) return false
+  if (!Number.isFinite(block) || !Number.isFinite(failures)) return false
+  // ONE statement, so all three parts share a snapshot and commit together:
+  //   • the absence test      — never quarantine a block that already exists
+  //   • the index_gaps row    — completeness reporting (/api/health degraded)
+  //   • the poison_blocks row — the durable skip DECISION the resume scan honours
+  //
+  // Both-or-neither matters. A gap without a decision leaves the next boot unable
+  // to recognise the skip (the restart deadlock); a decision without a gap steps
+  // over a block that health reports as fine — the exact silent loss this whole
+  // mechanism exists to prevent. Two sequential statements make either half
+  // reachable on a failure in between. A data-modifying CTE is one implicit
+  // transaction and every branch reads the same `absent` CTE, so the two inserts
+  // cannot disagree about absence.
+  //
   // DbLike.execute is intentionally `unknown`-returning so this module stays
   // unit-testable without a drizzle client. Narrow it here rather than widening
   // the shared type, and treat a non-iterable result as "not recorded" — the
   // fail-closed answer, since it leaves the cursor pinned and retrying.
   const res = (await db.execute(sql`
-    INSERT INTO index_gaps (from_block, to_block, reason)
-    SELECT ${block}, ${block}, ${reason}
-    WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE number = ${block})
-    ON CONFLICT (from_block) DO UPDATE
-      SET to_block  = GREATEST(index_gaps.to_block, EXCLUDED.to_block),
-          reason    = EXCLUDED.reason,
-          healed_at = NULL,
-          heal_cursor = CASE WHEN index_gaps.healed_at IS NOT NULL
-                             THEN NULL ELSE index_gaps.heal_cursor END
-    RETURNING from_block
+    WITH absent AS (
+      SELECT 1 AS ok WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE number = ${block})
+    ),
+    gap AS (
+      INSERT INTO index_gaps (from_block, to_block, reason)
+      SELECT ${block}, ${block}, ${reason} FROM absent
+      ON CONFLICT (from_block) DO UPDATE
+        SET to_block  = GREATEST(index_gaps.to_block, EXCLUDED.to_block),
+            reason    = EXCLUDED.reason,
+            healed_at = NULL,
+            heal_cursor = CASE WHEN index_gaps.healed_at IS NOT NULL
+                               THEN NULL ELSE index_gaps.heal_cursor END
+      RETURNING from_block
+    )
+    INSERT INTO poison_blocks (block_number, failures)
+    SELECT ${block}, ${failures} FROM absent
+    ON CONFLICT (block_number) DO UPDATE
+      SET failures    = EXCLUDED.failures,
+          recorded_at = now()
+    RETURNING block_number
   `)) as ArrayLike<unknown> | null | undefined
+  if (res == null || typeof (res as ArrayLike<unknown>).length !== 'number') return false
+  return Array.from(res).length > 0
+}
+
+/**
+ * Does this exact height carry a durable skip decision?
+ *
+ * Reads poison_blocks, NOT `index_gaps.reason`. The reason column is overwritten
+ * by whichever gap writer touches the row last, so matching on it meant an
+ * unrelated max_lag_skip could silently erase a quarantine's identity — and the
+ * symptom of that erasure is the restart deadlock, not an error. (codex P1,
+ * round 2.)
+ */
+export async function isPoisonBlock(db: DbLike, block: number): Promise<boolean> {
+  if (!Number.isFinite(block)) return false
+  const res = (await db.execute(
+    sql`SELECT 1 FROM poison_blocks WHERE block_number = ${block} LIMIT 1`,
+  )) as ArrayLike<unknown> | null | undefined
   if (res == null || typeof (res as ArrayLike<unknown>).length !== 'number') return false
   return Array.from(res).length > 0
 }

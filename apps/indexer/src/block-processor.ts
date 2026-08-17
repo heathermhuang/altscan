@@ -968,7 +968,6 @@ const TT_WRITER_FAILURE_ALERT_THRESHOLD = parseInt(process.env.TT_WRITER_FAILURE
 let transferPending = new Map<number, TokenTransferRow[]>()
 let transferPendingRows = 0
 const transferWritten = new Set<number>()   // committed, not yet folded into W
-const transferSkipped = new Set<number>()   // quarantined: will NEVER produce transfers (see markTransfersUnavailable)
 let durableBlock = 0
 let transferWriterSeeded = false
 let transferWriterRunning = false
@@ -1000,42 +999,8 @@ export function setDurableFloor(block: number): void {
   if (!transferWriterSeeded || block <= durableBlock) return
   durableBlock = block
   for (const n of transferWritten) if (n <= durableBlock) transferWritten.delete(n)
-  for (const n of transferSkipped) if (n <= durableBlock) transferSkipped.delete(n)
   persistDurableBlock(durableBlock).catch(err =>
     console.warn('[tt-writer] floor persist failed:', err instanceof Error ? err.message : err))
-}
-
-/**
- * Declare that a block will NEVER produce transfers, so the fold may pass over it.
- *
- * This is the quarantine path's replacement for setDurableFloor(), and the
- * difference is the whole point. setDurableFloor JUMPS the watermark to a height
- * unconditionally. That is tolerable for the MAX_LAG bulk skip, which leaps to
- * `latest - 200` over blocks that were never processed at all — but it is unsafe
- * for quarantine, which steps over `lastIndexed + 1`, immediately above blocks the
- * indexer just finished.
- *
- * "Just finished" is the trap: workers advance lastIndexed when processBlock
- * returns, and processBlock only ENQUEUES transfers (enqueueTransferWrite) — it
- * does not wait for them to be written. So at the moment quarantine fires, an
- * arbitrary number of blocks BELOW the blocker can be indexed-but-undrained.
- * Jumping W over them would assert their transfers are durable when they are
- * still sitting in `transferPending`, and a crash in that window would lose them
- * permanently and silently: crash-resume replays only from W upward.
- *
- * Modelling the skip as a set member instead leaves the existing contiguous-prefix
- * fold in charge. W advances past a quarantined height only once every block
- * beneath it has genuinely committed, so the invariant "every block ≤ W has all
- * its transfers" survives verbatim.
- */
-export function markTransfersUnavailable(blockNumber: number): void {
-  if (!transferWriterSeeded || blockNumber <= durableBlock) return
-  transferSkipped.add(blockNumber)
-  // The fold normally runs at the end of a drain. If the queue is empty right now
-  // (quarantine can fire in a quiet moment) no drain is pending, so nothing would
-  // move W until the next block happens to arrive. Poke the writer, which knows
-  // how to fold a skipped prefix with nothing to write.
-  runTransferWriter()
 }
 
 /**
@@ -1057,11 +1022,6 @@ export function purgeTransferQueueAbove(forkPoint: number): void {
     }
   }
   for (const n of transferWritten) if (n > forkPoint) transferWritten.delete(n)
-  // Quarantine marks are height-keyed, so a reorg invalidates them exactly as it
-  // invalidates transferWritten: above the fork the height now refers to a
-  // DIFFERENT block, and that replacement may well carry transfers. Leaving the
-  // mark would let the fold step over a canonical block that never drained.
-  for (const n of transferSkipped) if (n > forkPoint) transferSkipped.delete(n)
   if (dropped > 0) {
     console.warn(`[tt-writer] reorg purge: dropped ${dropped} queued rows above block ${forkPoint}`)
     evaluateTransferQueueHighWater()
@@ -1105,8 +1065,8 @@ export async function rollbackTransferWriterTo(forkPoint: number): Promise<void>
   }
 }
 
-export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number; skipped: number } {
-  return { blocks: transferPending.size, rows: transferPendingRows, durableBlock, skipped: transferSkipped.size }
+export function getTransferQueueDepth(): { blocks: number; rows: number; durableBlock: number } {
+  return { blocks: transferPending.size, rows: transferPendingRows, durableBlock }
 }
 
 // Edge-triggered high-water alert for the pending queue (warn once on the way up,
@@ -1134,12 +1094,6 @@ function evaluateTransferQueueHighWater(): void {
 }
 
 export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow[]): void {
-  // REVOKE any quarantine mark for this height. A mark asserts "this block will
-  // never produce transfers"; rows arriving for it prove that false. The gap
-  // healer re-indexing a quarantined block is exactly this case. Without the
-  // revoke, the fold could treat the height as settled and carry W past rows that
-  // are still only queued. (codex P1, round 1 of the redesign.)
-  transferSkipped.delete(blockNumber)
   const prev = transferPending.get(blockNumber)
   if (prev) transferPendingRows -= prev.length
   transferPending.set(blockNumber, rows)   // latest decode of a block wins
@@ -1148,89 +1102,15 @@ export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow
   runTransferWriter()
 }
 
-/** True when the very next height after W is a settled quarantine mark. */
-function canFoldSkipped(): boolean {
-  return transferSkipped.has(durableBlock + 1)
-}
-
-/**
- * Advance W through the contiguous prefix of SETTLED heights — committed
- * (transferWritten) or quarantined (transferSkipped) alike.
- *
- * Contiguity is the safety property. A height that is merely enqueued appears in
- * neither set, so it halts the fold, which is precisely why quarantine routes
- * through here instead of through setDurableFloor().
- *
- * Ordering is unchanged from the original inline fold and is load-bearing: the
- * new watermark is computed first and durableBlock / the sets are only mutated
- * AFTER persistDurableBlock() commits. Advancing in memory first would leave a
- * failed persist un-retried (the next cycle would see nothing to move) and hide a
- * sustained indexer_cursor outage behind an in-memory watermark running ahead of
- * the durable one.
- */
-async function foldSettledPrefix(): Promise<void> {
-  const settled = (n: number): boolean => transferWritten.has(n) || transferSkipped.has(n)
-  let newDurable = durableBlock
-  while (settled(newDurable + 1)) newDurable++
-  if (newDurable > durableBlock) {
-    await persistDurableBlock(newDurable)
-    // RE-VALIDATE across the await. The drainer's single-run guard serializes
-    // drains but NOT producers: an enqueue (gap healer, or the overlapping deploy
-    // generation) can land during the await and REVOKE a skip mark this fold
-    // counted on. (codex P1, round 1 of the redesign.)
-    //
-    // The persist above has already written the pre-await figure, so a shrink here
-    // is not merely "commit less" — the DURABLE value is now too high, and a crash
-    // before the next fold would resume past rows that are only queued. Correcting
-    // it therefore means persisting the lower value too, not just holding it in
-    // memory. Rewinding a persisted W is an established operation; it is exactly
-    // what rollbackTransferWriterTo does on a reorg.
-    let revalidated = durableBlock
-    while (revalidated < newDurable && settled(revalidated + 1)) revalidated++
-    if (revalidated < newDurable) {
-      try {
-        await persistDurableBlock(revalidated)
-        console.warn(`[tt-writer] fold corrected ${newDurable} → ${revalidated}: a skip mark was revoked mid-persist`)
-      } catch (err) {
-        // Same posture as the reorg-rollback persist failure: the durable value is
-        // stranded too high, so say so loudly rather than advancing in memory as if
-        // the correction landed.
-        console.error(`[tt-writer] ALERT fold correction ${newDurable} → ${revalidated} FAILED to persist — durable W is ahead of settled work until the next successful fold:`, err instanceof Error ? err.message : err)
-        return
-      }
-    }
-    if (revalidated <= durableBlock) return
-    for (let n = durableBlock + 1; n <= revalidated; n++) {
-      transferWritten.delete(n)
-      transferSkipped.delete(n)
-    }
-    durableBlock = revalidated
-  }
-}
-
 function runTransferWriter(): void {
   if (!transferWriterSeeded) return        // never write/persist before the seed
   if (transferWriterPaused) return         // reorg rollback in progress — resumed by rollbackTransferWriterTo
   if (transferWriterRunning) return
-  // A foldable quarantine mark is work even with an empty queue — see
-  // markTransfersUnavailable. Without this clause W would sit behind a quarantined
-  // height until the next block happened to arrive.
-  if (transferPending.size === 0 && !canFoldSkipped()) return
+  if (transferPending.size === 0) return
   transferWriterRunning = true
   // Fire-and-forget single drainer — coalesces the entire current queue per pass.
   ;(async () => {
     try {
-      // Runs under the same single-drainer guard as the loop below, so the fold
-      // can never execute concurrently with a drain's own fold.
-      if (!transferWriterPaused && transferPending.size === 0 && canFoldSkipped()) {
-        try {
-          await foldSettledPrefix()
-        } catch (err) {
-          // Same posture as a failed drain: the mark is still in transferSkipped
-          // and W is unmoved, so the next pass retries. Never fatal.
-          console.warn('[tt-writer] quarantine fold failed (will retry):', err instanceof Error ? err.message : err)
-        }
-      }
       // Checking paused per iteration lets an in-flight drain finish its current
       // batch (commit or requeue) and then yield to a waiting reorg rollback.
       while (!transferWriterPaused && transferPending.size > 0) {
@@ -1256,7 +1136,13 @@ function runTransferWriter(): void {
           // sustained indexer_cursor outage. Holding state until the persist lands makes
           // the failure recur every cycle, so it both retries and feeds the failure ALERT.
           for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
-          await foldSettledPrefix()
+          let newDurable = durableBlock
+          while (transferWritten.has(newDurable + 1)) newDurable++
+          if (newDurable > durableBlock) {
+            await persistDurableBlock(newDurable)
+            for (let n = durableBlock + 1; n <= newDurable; n++) transferWritten.delete(n)
+            durableBlock = newDurable
+          }
 
           // Rows are durable now — let holder-balance tracking see them.
           // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
@@ -1309,11 +1195,6 @@ function runTransferWriter(): void {
       evaluateTransferQueueHighWater()
     } finally {
       transferWriterRunning = false
-      // Lost-wakeup guard. markTransfersUnavailable() pokes the writer, but that
-      // poke is a no-op while a drain is already running — so a mark that arrives
-      // after this drain's last fold would sit unfolded until the next enqueue
-      // happened to arrive. Re-check on the way out. (codex P2, round 1.)
-      if (!transferWriterPaused && canFoldSkipped()) runTransferWriter()
     }
   })()
 }

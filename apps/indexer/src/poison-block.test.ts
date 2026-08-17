@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { processWithFailover, failoverKind } from './rpc-failover'
 import {
   PoisonBlockTracker, shouldQuarantine, DEFAULT_QUARANTINE_AFTER,
@@ -165,26 +167,32 @@ describe('tracker stays bounded', () => {
   })
 })
 
-describe('the poison gap reason is a single shared spelling', () => {
-  // The resume scan matches `reason LIKE 'poison_block%'` to recognise its OWN
-  // decisions and refuse to rewind onto them. If the writer and that matcher ever
-  // drifted apart the failure would be SILENT, and its symptom is the restart
-  // deadlock: the scan stops recognising a quarantine, rewinds the cursor onto the
-  // one block proven unindexable, and sets backfillUntil — which disables both the
-  // quarantine guard and the bulk MAX_LAG skip. Pin them together.
-  it('poisonGapReason always starts with the prefix the resume scan matches', () => {
+describe('the poison gap reason is descriptive, not identity', () => {
+  // It briefly WAS identity: the resume scan matched `reason LIKE 'poison_block%'`.
+  // That could be erased by an unrelated max_lag_skip merging onto the same
+  // from_block, silently reintroducing the restart deadlock — so identity moved to
+  // its own poison_blocks row. These pin the remaining, weaker contract: the text
+  // stays recognisable to a human reading index_gaps.
+  it('always carries the prefix and the threshold actually used', () => {
     for (const n of [1, 5, 50, DEFAULT_QUARANTINE_AFTER]) {
       expect(poisonGapReason(n).startsWith(POISON_GAP_REASON_PREFIX)).toBe(true)
+      expect(poisonGapReason(n)).toContain(String(n))
     }
   })
 
-  it('the prefix does not collide with the bulk skip\'s reason', () => {
-    // Both land in the same column; only poison gaps may be excluded from the
-    // resume scan, because a max_lag range is genuinely worth re-indexing.
+  it('does not collide with the bulk skip\'s reason', () => {
     expect('max_lag_skip(5000)'.startsWith(POISON_GAP_REASON_PREFIX)).toBe(false)
   })
 
-  it('records the threshold actually used, so the log explains itself', () => {
-    expect(poisonGapReason(5)).toContain('5')
+  it('no code path makes a DECISION from this string', () => {
+    // Guards the regression directly: if someone reintroduces reason-matching, the
+    // deadlock comes back silently. poison_blocks is the only identity.
+    // vitest roots at the repo root. Assert the path resolves rather than letting
+    // a miss turn this guard into a silent no-op.
+    const indexPath = resolve(process.cwd(), 'apps/indexer/src/index.ts')
+    expect(existsSync(indexPath)).toBe(true)
+    const src = readFileSync(indexPath, 'utf8')
+    expect(src).not.toContain('POISON_GAP_REASON_PREFIX')
+    expect(src).toContain('poison_blocks')
   })
 })

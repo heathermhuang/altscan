@@ -53,15 +53,19 @@
 export const DEFAULT_QUARANTINE_AFTER = 5
 
 /**
- * Prefix stamped into `index_gaps.reason` for a quarantined block, and matched by
- * the resume scan to recognise its own decisions.
+ * Prefix stamped into `index_gaps.reason` for a quarantined block.
  *
- * Shared deliberately. The writer and the reader are in different files and a
- * quarantine gap means something a `max_lag_skip` gap does not — "this block was
- * PROVEN unindexable", versus "we ran out of time". If the two ever spelled it
- * differently the mismatch would be silent, and its symptom would be the restart
- * deadlock below rather than an error. This repo has already shipped one silently-
- * failing second gate (retention's ALLOWED_TABLES vs BODY_PRUNE_OPS).
+ * DESCRIPTIVE ONLY — nothing reads it to make a decision. It exists so a human
+ * scanning index_gaps can see why a range was abandoned.
+ *
+ * It briefly WAS load-bearing: the resume scan matched `reason LIKE 'poison_block%'`
+ * to recognise its own skips. That was wrong, because index_gaps rows are keyed on
+ * from_block and its writers merge on conflict — a bulk max_lag_skip starting at the
+ * same height overwrites `reason` and silently erases the quarantine's identity,
+ * whose only symptom is the restart deadlock. Identity now lives in its own
+ * `poison_blocks` row, where nothing can merge into it. (codex P1, round 2.)
+ *
+ * Do not reintroduce a decision that reads this string.
  */
 export const POISON_GAP_REASON_PREFIX = 'poison_block'
 
