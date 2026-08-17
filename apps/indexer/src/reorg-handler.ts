@@ -228,6 +228,21 @@ export async function unwindFrom(fromBlockNumber: number): Promise<void> {
   // created in ensure-schema.ts rather than declared in the schema.
   await db.execute(sql`DELETE FROM poison_blocks WHERE block_number >= ${fromBlockNumber}`)
 
+  // Rewind any heal_cursor that sits above the fork, for the same reason: it is a
+  // height-keyed claim ("everything up to here was re-indexed, drained and verified")
+  // about blocks this unwind is deleting.
+  //
+  // Without it the healer can loop forever making no progress. Its work window starts
+  // at heal_cursor + 1, so damage the unwind creates BELOW a high cursor is
+  // unreachable: the later window verifies clean, the strict density proof refuses on
+  // the block nothing re-indexed, and the range is re-selected on every tick. Rewinding
+  // here — where the damage is created — keeps the healer's own selection honest about
+  // what a tick can actually reach. (codex P2, follow-up round 2.)
+  await db.execute(sql`
+    UPDATE index_gaps SET heal_cursor = ${fromBlockNumber} - 1
+     WHERE heal_cursor >= ${fromBlockNumber}
+  `)
+
   for (const t of UNWIND_ORDER) {
     switch (t) {
       case 'logs':           await db.delete(schema.logs).where(gte(schema.logs.blockNumber, fromBlockNumber)); break

@@ -339,8 +339,21 @@ describe('quarantined blocks must not starve the healer, and must not fake a hea
     // forever. Both halves must be present.
     const claim = JSON.stringify((await runTick())[0])
     expect(claim).toContain('poison_blocks')      // the quarantined-block half
-    expect(claim).toContain('generate_series')    // the repairable-defect half
-    expect(claim).toContain('tx_count')           // ...which includes overfull blocks
+    expect(claim).toContain('generate_series')    // the executable-defect half
+
+    // The executable arm must match what the work set can ACTUALLY do: absent,
+    // non-quarantined blocks only. An earlier version counted a tx_count mismatch as
+    // repairable, but processBlock is a first-time indexer and the work set is
+    // absent-only — so an underfull/overfull PRESENT block inside a quarantined range
+    // would be selected every tick, rejected by verification, and starve every later
+    // gap. The mismatch still gates the cursor and the stamp, where it belongs.
+    // Asserted on the correlated count itself, not the bare column name — the
+    // rationale comment above the predicate mentions tx_count, and matching that
+    // would make this pass or fail on prose.
+    expect(claim).not.toContain('FROM transactions')
+    // And it must start where the next tick starts, not at the retention floor: a
+    // defect behind heal_cursor would otherwise be selected but never reached.
+    expect(claim).toContain('heal_cursor + 1')
   })
 
   it('a fully-repaired range stays selectable so a pending STAMP can still land', async () => {

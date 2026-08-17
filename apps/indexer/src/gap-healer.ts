@@ -251,19 +251,35 @@ export async function healNextGap(
                  WHERE p.block_number
                        BETWEEN GREATEST(g.from_block, COALESCE(f.floor, g.from_block)) AND g.to_block
                )
+               -- "Repairable" must mean EXECUTABLE, and by exactly the definition the
+               -- work set uses: an ABSENT, non-quarantined block at or after where the
+               -- next tick would actually start. Two ways this went wrong:
+               --
+               --   • Counting a tx_count mismatch. The work set is absent-blocks-only
+               --     (processBlock is a first-time indexer, not a repair tool), so an
+               --     underfull or overfull PRESENT block is never fixed — selection
+               --     would pick the range every tick, verification would reject it,
+               --     the cursor would never move, and every later gap starves. The
+               --     mismatch still gates the cursor and the stamp, where it belongs.
+               --
+               --   • Scanning from the retention floor while execution starts at
+               --     heal_cursor + 1. A defect BEHIND the cursor would be seen but
+               --     never reached: the later window verifies empty, the strict stamp
+               --     refuses on the unreached block, and the row repeats forever.
+               --     Reorg damage below the cursor is handled where it arises —
+               --     unwindFrom rewinds heal_cursor above the fork — rather than by
+               --     selecting a range the tick cannot act on.
                AND NOT EXISTS (
                  SELECT 1 FROM generate_series(
-                   GREATEST(g.from_block, COALESCE(f.floor, g.from_block)), g.to_block
+                   GREATEST(
+                     g.from_block,
+                     COALESCE(f.floor, g.from_block),
+                     COALESCE(g.heal_cursor + 1, g.from_block)
+                   ),
+                   g.to_block
                  ) AS n
                  WHERE NOT EXISTS (SELECT 1 FROM poison_blocks p WHERE p.block_number = n)
-                   AND (
-                     NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
-                     OR EXISTS (
-                          SELECT 1 FROM blocks b
-                          WHERE b.number = n
-                            AND (SELECT count(*) FROM transactions t WHERE t.block_number = n) <> b.tx_count
-                        )
-                   )
+                   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.number = n)
                )
              )
            ORDER BY g.from_block
