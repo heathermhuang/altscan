@@ -25,6 +25,9 @@ import {
   ASYNC_TT_WRITER,
   TT_QUEUE_HIGH_WATER_ROWS,
   TT_QUEUE_HIGH_WATER_BLOCKS,
+  noteWorkerParked,
+  noteWorkerActive,
+  setProfileWorkerCount,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
@@ -58,6 +61,11 @@ const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
 // ETH at 12s can run lower. Default = 8 for BNB, 4 for ETH.
 const DEFAULT_CONCURRENCY = chain.key === 'bnb' ? 8 : 4
 const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10)
+// Bound at module scope, not inside the boot path: initTransferWriter has THREE
+// call sites (resume, fresh start, normal boot) and the produce/drain profile
+// needs the pool size before whichever one runs, or it cannot tell "all workers
+// parked" from "some parked" and silently reports an inconclusive window.
+setProfileWorkerCount(CONCURRENCY)
 const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
 const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
 
@@ -611,6 +619,13 @@ async function main() {
 
       await Promise.all(
         Array.from({ length: CONCURRENCY }, async (_, workerId) => {
+          // Active-worker accounting for the produce/drain profile. A worker that
+          // reaches the batch tail returns via `claimNext() === -1` WITHOUT ever
+          // parking, so parked===0 alone cannot distinguish "all 8 hammering the
+          // pool" from "7 finished, 1 straggler". finally, so every exit path
+          // (tail return, failure abort, shutdown) is accounted. (codex P2.)
+          noteWorkerActive(1)
+          try {
           while (running && failure === null) {
             // Backpressure: don't let block decoding outrun the transfer writer.
             // Bounds memory (OOM history) and the W↔tip replay window on crash.
@@ -618,10 +633,22 @@ async function main() {
               // Throttle on EITHER bound: pending rows (busy ranges) OR pending block
               // count (transfer-less ranges where rows stays ~0 but the pending Map
               // grows unbounded if the writer stalls — codex P2 from PR #43/#44).
-              while (running && failure === null) {
-                const q = getTransferQueueDepth()
-                if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
-                await sleep(20)
+              // Parked/unparked is reported to the tt-writer so it can attribute
+              // each drain pass to a phase. Without that split, "the writer does
+              // 919 rows/s" is unattributable — it is the difference between the
+              // blocked and running rates that says whether producing and
+              // draining actually overlap. try/finally so an abort can't leave
+              // the count stuck high and mislabel every later pass.
+              let parked = false
+              try {
+                while (running && failure === null) {
+                  const q = getTransferQueueDepth()
+                  if (q.rows <= TT_QUEUE_HIGH_WATER_ROWS && q.blocks <= TT_QUEUE_HIGH_WATER_BLOCKS) break
+                  if (!parked) { parked = true; noteWorkerParked(1) }
+                  await sleep(20)
+                }
+              } finally {
+                if (parked) noteWorkerParked(-1)
               }
             }
             const idx = claimNext()
@@ -659,6 +686,9 @@ async function main() {
               if (!failure) failure = { block: blockNum, err }
               return
             }
+          }
+          } finally {
+            noteWorkerActive(-1)
           }
         })
       )

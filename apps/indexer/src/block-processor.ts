@@ -1,6 +1,6 @@
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
-import { getDb, schema } from './db'
+import { getDb, getWriterDb, schema } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider } from './provider'
@@ -990,6 +990,254 @@ let transferWriterSeeded = false
 let transferWriterRunning = false
 let transferWriterPaused = false            // reorg rollback quiesce (see rollbackTransferWriterTo)
 let ttWriterDrainCount = 0
+
+// ── produce/drain overlap diagnostics (TT_WRITER_PROFILE=1) ──────────────────
+//
+// Measured 2026-08-17: the writer sustains 919 rows/s while block workers are
+// parked on backpressure, but the system averages only ~594 rows/s — and 919
+// already exceeds the ~701 rows/s needed to match chain. So the deficit is NOT
+// write capacity; it is that producing and draining do not overlap. Three
+// mechanisms explain that and they are distinguishable only by measuring AT the
+// event, which is the whole reason this exists (a sampled queue depth was what
+// produced the wrong root cause earlier that day):
+//
+//   M1 connection starvation — the writer is the 9th consumer of a
+//      DB_POOL_SIZE=8 pool and holds one slot for a whole transaction.
+//   M2 event-loop starvation — 8 decoding workers saturate the single Node
+//      thread.
+//   M3 pure rate mismatch — oscillation is inherent.
+//
+// ⚠ READ THIS BEFORE DRAWING A CONCLUSION FROM THESE NUMBERS.
+//
+// The metrics below are HINTS, not the verdict. Review established that the
+// acq/lag split cannot cleanly separate M1 from M2/M3 from inside the process:
+//   • `tEnter - tStart` also contains connection setup, network RTT and the
+//     server-side BEGIN, none of which shows up as event-loop lag — so high acq
+//     with low lag can mean a busy DATABASE rather than a starved local pool;
+//   • the `none` bucket counts workers that are alive and unparked, but those
+//     may all be awaiting RPC inside processBlock and holding no DB slot at all,
+//     so `none` mixes real contention with idle periods.
+//
+// The VERDICT comes from the A/B on TT_WRITER_DEDICATED_POOL against the
+// measured baseline (1.880 blk/s indexed, 64.7% of wall clock stalled), because
+// that removes the contention instead of trying to observe it. Treating one of
+// these observational numbers as proof is exactly the error that produced a
+// confidently wrong root cause earlier the same day, from a queue depth that was
+// only ever a lower bound. Use them to explain a result, never to establish one.
+//
+// Diagnostic only: nothing here changes behaviour, and it is off unless
+// TT_WRITER_PROFILE=1 so the default path pays only a boolean test.
+const TT_WRITER_PROFILE = process.env.TT_WRITER_PROFILE === '1'
+const TT_PROFILE_WINDOW_MS = parseInt(process.env.TT_PROFILE_WINDOW_MS ?? '30000', 10) || 30000
+/** Block workers currently parked in the backpressure poll loop (index.ts). */
+let parkedWorkers = 0
+/**
+ * Worker-pool size, so "all parked" is a real state rather than a guess.
+ * 0 = unset, which collapses ALL and PARTIAL into one bucket and is reported as
+ * such — an unset pool size must not silently masquerade as a clean measurement.
+ */
+let profWorkerCount = 0
+/**
+ * Three phases, not two. (codex P2.)
+ *
+ * A binary `parkedWorkers > 0` labels a drain "blocked" even when only 1 of 8
+ * workers has parked and the other 7 are still decoding and holding pool slots.
+ * Those transition periods are exactly where contention is HIGHEST, so folding
+ * them into the blocked bucket drags the blocked rate down toward the running
+ * rate — i.e. it makes M1 (connection starvation) look like M3 (inherent
+ * oscillation), which is the one confusion this experiment exists to resolve.
+ *
+ *   NONE    — every worker decoding. Full competition for the pool.
+ *   PARTIAL — some parked. Transitional; reported but never used to conclude.
+ *   ALL     — every worker parked. The writer has the pool to itself.
+ *
+ * The verdict comes from NONE vs ALL. PARTIAL is printed so a run where most
+ * drains land there is visibly inconclusive rather than quietly wrong.
+ */
+type DrainPhase = 'none' | 'partial' | 'all'
+const ttProf = {
+  since: 0,
+  rows: { none: 0, partial: 0, all: 0 },
+  ms: { none: 0, partial: 0, all: 0 },
+  acq: { none: 0, partial: 0, all: 0 },
+  passesBy: { none: 0, partial: 0, all: 0 },
+  acquireMaxMs: 0, sqlMs: 0, passes: 0,
+  blocks: { none: 0, partial: 0, all: 0 },
+  // NOT "pool starvation count". postgres.js `connect_timeout` covers TCP,
+  // protocol and auth startup — NOT waiting on an occupied local pool slot — and
+  // this catch sees every pre-callback throw, so a network or auth failure lands
+  // here too. Reported as a neutral "preCbFail" and never as M1 evidence on its
+  // own; a spike here means "go read the writer's error logs", not "starvation
+  // confirmed". (codex P2.)
+  preCbFail: 0,
+  // Lag is bucketed BY PHASE. A window-wide average lets a lag spike during
+  // `all` make high `none` acquisition look scheduler-bound, and lets low-lag
+  // `all` samples dilute genuine event-loop starvation during `none` — which
+  // reintroduces exactly the M1/M2 confusion the probe was added to remove.
+  // (codex P2.)
+  lagSum: { none: 0, partial: 0, all: 0 },
+  lagN: { none: 0, partial: 0, all: 0 },
+  lagMax: { none: 0, partial: 0, all: 0 },
+}
+
+/**
+ * Event-loop lag probe. (codex P1.)
+ *
+ * `tEnter - tStart` around db.transaction() CANNOT be read as pool-acquisition
+ * time on its own: when the event loop is saturated, the transaction callback is
+ * scheduled late even after a connection was already available, so M2 inflates
+ * exactly the number that was supposed to identify M1. Measuring loop lag
+ * independently makes the two separable:
+ *
+ *   high acquire + LOW lag  -> real pool wait          (M1)
+ *   high acquire + HIGH lag -> scheduling delay        (M2)
+ *
+ * A timer scheduled for `interval` that fires at `interval + d` has observed
+ * `d` ms of loop lag. Unref'd so it can never hold the process open at shutdown.
+ */
+const LOOP_LAG_INTERVAL_MS = 500
+function startLoopLagProbe(): void {
+  let last = performance.now()
+  const timer = setInterval(() => {
+    const now = performance.now()
+    const lag = Math.max(0, now - last - LOOP_LAG_INTERVAL_MS)
+    last = now
+    // Attribute each sample to the phase in effect right now, so lag is
+    // comparable against that phase's acquisition time.
+    const p = phaseFor(parkedWorkers, activeWorkers, profWorkerCount)
+    ttProf.lagSum[p] += lag
+    ttProf.lagN[p]++
+    if (lag > ttProf.lagMax[p]) ttProf.lagMax[p] = lag
+    // Emission is driven from HERE, not from a completed drain. If transactions
+    // keep failing before callback entry, no drain ever completes — so a
+    // drain-driven emitter would print nothing for the entire failure period and
+    // then start a fresh window on the first recovery, hiding the failure by
+    // another full interval. This ticks regardless. (codex P2.)
+    maybeEmitProfile()
+  }, LOOP_LAG_INTERVAL_MS)
+  timer.unref?.()
+}
+
+/**
+ * Tell the profile how many block workers exist, so ALL is distinguishable from
+ * PARTIAL. Called from index.ts with CONCURRENCY.
+ */
+export function setProfileWorkerCount(n: number): void {
+  profWorkerCount = Number.isFinite(n) && n > 0 ? n : 0
+}
+
+/** Block workers currently alive in the batch loop (index.ts). */
+let activeWorkers = 0
+
+/**
+ * Report a block worker entering (+1) or leaving (-1) the batch loop.
+ *
+ * NOT redundant with noteWorkerParked. A worker that reaches the tail of a batch
+ * hits `claimNext() === -1` and RETURNS without ever parking, so `parked === 0`
+ * happens both when all 8 workers are hammering the pool and when 7 have gone
+ * home and one straggler remains. Those are opposite contention regimes, and
+ * conflating them drags the `none` bucket toward the `all` bucket — concealing
+ * connection starvation, the exact thing being tested for. (codex P2, round 2.)
+ */
+export function noteWorkerActive(delta: number): void {
+  activeWorkers = Math.max(0, activeWorkers + delta)
+}
+
+/**
+ * Classify a drain pass. Pure and exported so the mapping is tested by CALLING
+ * it — a previous version asserted only that the source contained the right
+ * literals, which would have passed even with the branch dead. (codex P2.)
+ *
+ * `none` demands a FULL pool of active workers and none parked; anything else
+ * short of a full park is `partial`, i.e. reported but never concluded from.
+ */
+export function phaseFor(parked: number, active: number, workerCount: number): DrainPhase {
+  // Without a known pool size nothing can be classified; say so rather than
+  // guessing, and let the log line label the window inconclusive.
+  if (!(workerCount > 0)) return 'partial'
+  // `>=` not `===`: if the count ever over-reports, the safe reading is "the
+  // writer had the pool to itself", which weakens the contention conclusion
+  // rather than inventing one.
+  if (parked >= workerCount) return 'all'
+  if (parked === 0 && active >= workerCount) return 'none'
+  return 'partial'
+}
+
+/**
+ * Report a block worker entering (+1) or leaving (-1) the backpressure wait.
+ *
+ * Called from the poll loop in index.ts. This is what lets the writer attribute
+ * each drain pass to a PHASE — the single number that discriminates M3 (rates
+ * equal) from M1/M2 (rates differ). Cheap and monotonic; never let it drift
+ * negative, since a stuck negative count would silently mislabel every
+ * subsequent pass as "running".
+ */
+export function noteWorkerParked(delta: number): void {
+  parkedWorkers = Math.max(0, parkedWorkers + delta)
+}
+
+function recordDrainPass(rows: number, blocks: number, acquireMs: number, sqlMs: number, phase: DrainPhase): void {
+  const now = Date.now()
+  if (ttProf.since === 0) ttProf.since = now
+  ttProf.passes++
+  if (acquireMs > ttProf.acquireMaxMs) ttProf.acquireMaxMs = acquireMs
+  ttProf.sqlMs += sqlMs
+  ttProf.rows[phase] += rows
+  ttProf.blocks[phase] += blocks
+  ttProf.ms[phase] += acquireMs + sqlMs
+  ttProf.acq[phase] += acquireMs
+  ttProf.passesBy[phase]++
+  maybeEmitProfile()
+}
+
+function maybeEmitProfile(): void {
+  const now = Date.now()
+  if (ttProf.since === 0) ttProf.since = now
+  if (now - ttProf.since < TT_PROFILE_WINDOW_MS) return
+  // Nothing observed at all — don't emit an empty line every window.
+  if (ttProf.passes === 0 && ttProf.preCbFail === 0) { ttProf.since = now; return }
+  // Every denominator is guarded: a window can legitimately contain zero passes
+  // in a phase (e.g. no worker ever parked), and a NaN in the one line the whole
+  // experiment is read from would be indistinguishable from a real reading.
+  // Mean rows AND blocks per pass are printed alongside the rate because the two
+  // phases drain differently shaped batches — an `all` pass empties a backlog
+  // accumulated at the high-water bound, a `none` pass is usually small — and
+  // fixed per-transaction overhead alone makes those rates differ at identical
+  // resource availability. Without the shape, a rate gap cannot be attributed.
+  // (codex P2.)
+  // acq and lag are printed TOGETHER per phase — that pairing is the whole
+  // discriminator. High acq with LOW lag in the same phase is a real pool wait
+  // (M1); high acq with HIGH lag is scheduling delay (M2).
+  const per = (p: DrainPhase) => {
+    const n = ttProf.passesBy[p]
+    const ln = ttProf.lagN[p]
+    const lag = ln > 0 ? `${(ttProf.lagSum[p] / ln).toFixed(0)}/${ttProf.lagMax[p].toFixed(0)}ms` : '—'
+    if (n === 0) return `${p} — (lag ${lag})`
+    const ms = ttProf.ms[p]
+    const rate = ms > 0 ? (ttProf.rows[p] / (ms / 1000)).toFixed(0) : '—'
+    return `${p} ${rate} rows/s (n=${n}, ${(ttProf.rows[p] / n).toFixed(0)}r+${(ttProf.blocks[p] / n).toFixed(0)}blk/pass, acq ${(ttProf.acq[p] / n).toFixed(0)}ms, lag ${lag})`
+  }
+  const verdict =
+    profWorkerCount === 0 ? ' [pool size UNSET — inconclusive]'
+    : ttProf.passesBy.none === 0 || ttProf.passesBy.all === 0 ? ' [need both none+all passes to conclude]'
+    : ''
+  console.log(
+    `[tt-writer] PROFILE ${((now - ttProf.since) / 1000).toFixed(0)}s: ` +
+    `${per('none')} | ${per('partial')} | ${per('all')} | ` +
+    `sql avg ${ttProf.passes > 0 ? (ttProf.sqlMs / ttProf.passes).toFixed(0) : '—'}ms, ` +
+    `acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, ` +
+    // Deliberately NOT called a starvation count — see the field comment. A
+    // spike means "read the writer's error logs", not "M1 confirmed".
+    `preCbFail ${ttProf.preCbFail}, passes ${ttProf.passes}${verdict}`,
+  )
+  ttProf.since = now
+  for (const p of ['none', 'partial', 'all'] as const) {
+    ttProf.rows[p] = ttProf.blocks[p] = ttProf.ms[p] = ttProf.acq[p] = ttProf.passesBy[p] = 0
+    ttProf.lagSum[p] = ttProf.lagN[p] = ttProf.lagMax[p] = 0
+  }
+  ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
+  ttProf.preCbFail = 0
+}
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
 
@@ -1002,6 +1250,22 @@ export function initTransferWriter(seedDurableBlock: number): void {
   durableBlock = seedDurableBlock
   transferWriterSeeded = true
   console.log(`[tt-writer] seeded durable watermark = ${durableBlock} (backpressure bounds ${TT_QUEUE_HIGH_WATER_ROWS} rows / ${TT_QUEUE_HIGH_WATER_BLOCKS} blocks, alert bound ${TT_QUEUE_ALERT_ROWS} rows)`)
+  // State the resolved value, not the intent. An env-gated diagnostic that is
+  // silently off looks identical to one that is on and finding nothing, and this
+  // codebase has shipped an inert fix that way before (#92). Grep this line.
+  console.log(
+    TT_WRITER_PROFILE
+      ? `[tt-writer] produce/drain PROFILE ON (window ${TT_PROFILE_WINDOW_MS}ms) — emits "[tt-writer] PROFILE" lines`
+      : `[tt-writer] produce/drain profile OFF (set TT_WRITER_PROFILE=1 to diagnose backpressure oscillation)`,
+  )
+  // The A/B arm. Printed unconditionally and from the RESOLVED env value, so a
+  // run can never be attributed to the wrong arm after the fact.
+  console.log(
+    process.env.TT_WRITER_DEDICATED_POOL === '1'
+      ? `[tt-writer] dedicated writer pool ON (TT_WRITER_POOL_SIZE=${process.env.TT_WRITER_POOL_SIZE ?? '2'}) — not competing with block workers for slots`
+      : `[tt-writer] dedicated writer pool OFF — sharing the ingestion pool with block workers`,
+  )
+  if (TT_WRITER_PROFILE) startLoopLagProbe()
   runTransferWriter()  // flush anything enqueued during startup
 }
 
@@ -1274,8 +1538,23 @@ function runTransferWriter(): void {
  * non-contiguous drain can't wipe an already-written neighbour.
  */
 async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]): Promise<void> {
-  const db = getDb()
+  // Shared ingestion pool unless TT_WRITER_DEDICATED_POOL=1. When enabled, the
+  // writer stops competing for slots with the 8 block workers whose output it is
+  // draining — the direct test of the connection-starvation hypothesis, and its
+  // fix if confirmed.
+  const db = getWriterDb()
+  // Phase is snapshotted BEFORE the await: attributing the pass by the state at
+  // completion would label every pass "blocked", because a long drain is exactly
+  // what parks the workers. The question is what the writer was competing with
+  // when it STARTED.
+  const phase = TT_WRITER_PROFILE ? phaseFor(parkedWorkers, activeWorkers, profWorkerCount) : 'none'
+  const tStart = TT_WRITER_PROFILE ? performance.now() : 0
+  let tEnter = 0
+  try {
   await db.transaction(async (tx) => {
+    // First statement inside the callback — the gap from tStart to here is
+    // connection-acquisition time, which is what separates M1 from M2.
+    if (TT_WRITER_PROFILE && tEnter === 0) tEnter = performance.now()
     for (let i = 0; i < blockNums.length; i += SQL_BATCH_CHUNK) {
       const chunk = blockNums.slice(i, i + SQL_BATCH_CHUNK)
       await tx.execute(sql`
@@ -1305,10 +1584,32 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
       .onConflictDoNothing()
     }
   })
+  } catch (err) {
+    // A throw BEFORE the callback ran means acquisition itself failed — a pool
+    // timeout (connect_timeout) is exactly that, and it is the single strongest
+    // signal for M1. On the success path it can never be observed, so counting
+    // it here is the difference between "no evidence of starvation" and "never
+    // looked". Rethrow untouched: the writer's retry/alerting owns this error.
+    if (TT_WRITER_PROFILE && tEnter === 0) ttProf.preCbFail++
+    throw err
+  }
+  if (TT_WRITER_PROFILE) {
+    const end = performance.now()
+    // tEnter can still be 0 if the transaction resolved without ever invoking
+    // the callback; attribute the whole span to acquisition rather than
+    // reporting a negative sqlMs.
+    const enter = tEnter === 0 ? end : tEnter
+    recordDrainPass(rows.length, blockNums.length, enter - tStart, end - enter, phase)
+  }
 }
 
 async function persistDurableBlock(block: number): Promise<void> {
-  const db = getDb()
+  // MUST be the writer pool, not getDb(). Every successful drain awaits this
+  // UPDATE before the writer can continue, so leaving it on the shared pool
+  // would leave the writer queued behind the very block workers the dedicated
+  // arm exists to escape — and a "no improvement" result would then fail to rule
+  // out connection starvation, silently invalidating the whole A/B. (codex P2.)
+  const db = getWriterDb()
   await db.execute(sql`UPDATE indexer_cursor SET transfers_durable_block = ${block} WHERE id = 1`)
 }
 
