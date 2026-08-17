@@ -122,12 +122,34 @@ describe('phaseFor', () => {
    * is what makes acq interpretable at all; without it the headline discriminator
    * is unsound.
    */
-  it('measures event-loop lag independently of acquisition', () => {
+  it('measures event-loop lag independently, bucketed BY PHASE', () => {
     const s = src('block-processor.ts')
     expect(s).toContain('startLoopLagProbe')
-    expect(s).toContain('loopLag')
+    // Window-wide lag lets an `all` spike make `none` acquisition look
+    // scheduler-bound, reintroducing the M1/M2 confusion. (codex P2.)
+    expect(s).toMatch(/ttProf\.lagSum\[p\] \+= lag/)
+    expect(s).toMatch(/const p = phaseFor\(parkedWorkers, activeWorkers, profWorkerCount\)/)
     // Must not hold the process open at shutdown.
     expect(s).toMatch(/timer\.unref\?\.\(\)/)
+  })
+
+  it('emits on a timer, not only after a successful drain', () => {
+    // If transactions keep failing before callback entry no drain completes, so
+    // a drain-driven emitter prints nothing for the whole failure period.
+    const s = src('block-processor.ts')
+    const probe = s.slice(s.indexOf('function startLoopLagProbe'))
+    expect(probe.slice(0, probe.indexOf('timer.unref'))).toContain('maybeEmitProfile()')
+  })
+
+  it('routes the watermark UPDATE through the writer pool too', () => {
+    // Every drain awaits persistDurableBlock; on the shared pool it would queue
+    // behind the very workers the dedicated arm exists to escape, so a
+    // no-improvement result could not rule out starvation. (codex P2.)
+    const s = src('block-processor.ts')
+    const fn = s.slice(s.indexOf('async function persistDurableBlock'))
+    // Bound the window at the function's own body, not a byte count — a longer
+    // comment must not silently move the assertion off the code it guards.
+    expect(fn.slice(0, fn.indexOf('await db.execute'))).toMatch(/const db = getWriterDb\(\)/)
   })
 
   /**
@@ -138,7 +160,7 @@ describe('phaseFor', () => {
   it('counts acquisitions that fail before callback entry, and rethrows', () => {
     const s = src('block-processor.ts')
     const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
-    expect(fn).toMatch(/tEnter === 0\) ttProf\.acquireFailures\+\+/)
+    expect(fn).toMatch(/tEnter === 0\) ttProf\.preCbFail\+\+/)
     // The writer's retry/alerting owns this error — the probe must not swallow it.
     const catchBlock = fn.slice(fn.indexOf('} catch (err) {'))
     expect(catchBlock).toMatch(/throw err/)

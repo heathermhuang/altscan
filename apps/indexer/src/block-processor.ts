@@ -1047,8 +1047,21 @@ const ttProf = {
   passesBy: { none: 0, partial: 0, all: 0 },
   acquireMaxMs: 0, sqlMs: 0, passes: 0,
   blocks: { none: 0, partial: 0, all: 0 },
-  acquireFailures: 0,
-  loopLagMaxMs: 0, loopLagSumMs: 0, loopLagSamples: 0,
+  // NOT "pool starvation count". postgres.js `connect_timeout` covers TCP,
+  // protocol and auth startup — NOT waiting on an occupied local pool slot — and
+  // this catch sees every pre-callback throw, so a network or auth failure lands
+  // here too. Reported as a neutral "preCbFail" and never as M1 evidence on its
+  // own; a spike here means "go read the writer's error logs", not "starvation
+  // confirmed". (codex P2.)
+  preCbFail: 0,
+  // Lag is bucketed BY PHASE. A window-wide average lets a lag spike during
+  // `all` make high `none` acquisition look scheduler-bound, and lets low-lag
+  // `all` samples dilute genuine event-loop starvation during `none` — which
+  // reintroduces exactly the M1/M2 confusion the probe was added to remove.
+  // (codex P2.)
+  lagSum: { none: 0, partial: 0, all: 0 },
+  lagN: { none: 0, partial: 0, all: 0 },
+  lagMax: { none: 0, partial: 0, all: 0 },
 }
 
 /**
@@ -1073,9 +1086,18 @@ function startLoopLagProbe(): void {
     const now = performance.now()
     const lag = Math.max(0, now - last - LOOP_LAG_INTERVAL_MS)
     last = now
-    ttProf.loopLagSumMs += lag
-    ttProf.loopLagSamples++
-    if (lag > ttProf.loopLagMaxMs) ttProf.loopLagMaxMs = lag
+    // Attribute each sample to the phase in effect right now, so lag is
+    // comparable against that phase's acquisition time.
+    const p = phaseFor(parkedWorkers, activeWorkers, profWorkerCount)
+    ttProf.lagSum[p] += lag
+    ttProf.lagN[p]++
+    if (lag > ttProf.lagMax[p]) ttProf.lagMax[p] = lag
+    // Emission is driven from HERE, not from a completed drain. If transactions
+    // keep failing before callback entry, no drain ever completes — so a
+    // drain-driven emitter would print nothing for the entire failure period and
+    // then start a fresh window on the first recovery, hiding the failure by
+    // another full interval. This ticks regardless. (codex P2.)
+    maybeEmitProfile()
   }, LOOP_LAG_INTERVAL_MS)
   timer.unref?.()
 }
@@ -1149,8 +1171,15 @@ function recordDrainPass(rows: number, blocks: number, acquireMs: number, sqlMs:
   ttProf.ms[phase] += acquireMs + sqlMs
   ttProf.acq[phase] += acquireMs
   ttProf.passesBy[phase]++
+  maybeEmitProfile()
+}
 
+function maybeEmitProfile(): void {
+  const now = Date.now()
+  if (ttProf.since === 0) ttProf.since = now
   if (now - ttProf.since < TT_PROFILE_WINDOW_MS) return
+  // Nothing observed at all — don't emit an empty line every window.
+  if (ttProf.passes === 0 && ttProf.preCbFail === 0) { ttProf.since = now; return }
   // Every denominator is guarded: a window can legitimately contain zero passes
   // in a phase (e.g. no worker ever parked), and a NaN in the one line the whole
   // experiment is read from would be indistinguishable from a real reading.
@@ -1160,14 +1189,18 @@ function recordDrainPass(rows: number, blocks: number, acquireMs: number, sqlMs:
   // fixed per-transaction overhead alone makes those rates differ at identical
   // resource availability. Without the shape, a rate gap cannot be attributed.
   // (codex P2.)
+  // acq and lag are printed TOGETHER per phase — that pairing is the whole
+  // discriminator. High acq with LOW lag in the same phase is a real pool wait
+  // (M1); high acq with HIGH lag is scheduling delay (M2).
   const per = (p: DrainPhase) => {
     const n = ttProf.passesBy[p]
-    if (n === 0) return `${p} —`
+    const ln = ttProf.lagN[p]
+    const lag = ln > 0 ? `${(ttProf.lagSum[p] / ln).toFixed(0)}/${ttProf.lagMax[p].toFixed(0)}ms` : '—'
+    if (n === 0) return `${p} — (lag ${lag})`
     const ms = ttProf.ms[p]
     const rate = ms > 0 ? (ttProf.rows[p] / (ms / 1000)).toFixed(0) : '—'
-    return `${p} ${rate} rows/s (n=${n}, ${(ttProf.rows[p] / n).toFixed(0)}r+${(ttProf.blocks[p] / n).toFixed(0)}blk/pass, acq ${(ttProf.acq[p] / n).toFixed(0)}ms)`
+    return `${p} ${rate} rows/s (n=${n}, ${(ttProf.rows[p] / n).toFixed(0)}r+${(ttProf.blocks[p] / n).toFixed(0)}blk/pass, acq ${(ttProf.acq[p] / n).toFixed(0)}ms, lag ${lag})`
   }
-  const lagAvg = ttProf.loopLagSamples > 0 ? ttProf.loopLagSumMs / ttProf.loopLagSamples : 0
   const verdict =
     profWorkerCount === 0 ? ' [pool size UNSET — inconclusive]'
     : ttProf.passesBy.none === 0 || ttProf.passesBy.all === 0 ? ' [need both none+all passes to conclude]'
@@ -1175,22 +1208,19 @@ function recordDrainPass(rows: number, blocks: number, acquireMs: number, sqlMs:
   console.log(
     `[tt-writer] PROFILE ${((now - ttProf.since) / 1000).toFixed(0)}s: ` +
     `${per('none')} | ${per('partial')} | ${per('all')} | ` +
-    `sql avg ${(ttProf.sqlMs / ttProf.passes).toFixed(0)}ms, acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, ` +
-    // Loop lag is what makes acq interpretable: high acq with LOW lag is a real
-    // pool wait (M1); high acq with HIGH lag is just scheduling delay (M2).
-    `loopLag avg ${lagAvg.toFixed(0)}ms max ${ttProf.loopLagMaxMs.toFixed(0)}ms, ` +
-    // Acquisition failures never reach the success path, so they are counted
-    // separately — a pool timeout is the STRONGEST evidence for M1 and would
-    // otherwise vanish from the profile entirely. (codex P2.)
-    `acqFail ${ttProf.acquireFailures}, passes ${ttProf.passes}${verdict}`,
+    `sql avg ${ttProf.passes > 0 ? (ttProf.sqlMs / ttProf.passes).toFixed(0) : '—'}ms, ` +
+    `acq max ${ttProf.acquireMaxMs.toFixed(0)}ms, ` +
+    // Deliberately NOT called a starvation count — see the field comment. A
+    // spike means "read the writer's error logs", not "M1 confirmed".
+    `preCbFail ${ttProf.preCbFail}, passes ${ttProf.passes}${verdict}`,
   )
   ttProf.since = now
   for (const p of ['none', 'partial', 'all'] as const) {
     ttProf.rows[p] = ttProf.blocks[p] = ttProf.ms[p] = ttProf.acq[p] = ttProf.passesBy[p] = 0
+    ttProf.lagSum[p] = ttProf.lagN[p] = ttProf.lagMax[p] = 0
   }
   ttProf.acquireMaxMs = ttProf.sqlMs = ttProf.passes = 0
-  ttProf.acquireFailures = 0
-  ttProf.loopLagMaxMs = ttProf.loopLagSumMs = ttProf.loopLagSamples = 0
+  ttProf.preCbFail = 0
 }
 let ttQueueOverHighWater = false      // edge-trigger so the high-water alert fires once per breach
 let ttWriterConsecutiveFailures = 0   // resets on a successful drain; drives the write-failing alert
@@ -1544,7 +1574,7 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
     // signal for M1. On the success path it can never be observed, so counting
     // it here is the difference between "no evidence of starvation" and "never
     // looked". Rethrow untouched: the writer's retry/alerting owns this error.
-    if (TT_WRITER_PROFILE && tEnter === 0) ttProf.acquireFailures++
+    if (TT_WRITER_PROFILE && tEnter === 0) ttProf.preCbFail++
     throw err
   }
   if (TT_WRITER_PROFILE) {
@@ -1558,7 +1588,12 @@ async function writeTransferBlocks(blockNums: number[], rows: TokenTransferRow[]
 }
 
 async function persistDurableBlock(block: number): Promise<void> {
-  const db = getDb()
+  // MUST be the writer pool, not getDb(). Every successful drain awaits this
+  // UPDATE before the writer can continue, so leaving it on the shared pool
+  // would leave the writer queued behind the very block workers the dedicated
+  // arm exists to escape — and a "no improvement" result would then fail to rule
+  // out connection starvation, silently invalidating the whole A/B. (codex P2.)
+  const db = getWriterDb()
   await db.execute(sql`UPDATE indexer_cursor SET transfers_durable_block = ${block} WHERE id = 1`)
 }
 
