@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
@@ -20,10 +21,46 @@ import { NftsLazy } from './NftsLazy'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
+import { resolveContractStatus, resolveNativeBalance } from '@/lib/contract-status'
 import { AbiReader } from '@/components/contracts/AbiReader'
 import { AdSlot } from '@/components/ads/AdSlot'
 
 export const revalidate = 300
+
+// One DB+RPC lookup per request, shared by generateMetadata and the page render
+// (cache() dedupes), so the <title>, the meta description and the page body can
+// never disagree about what this address is.
+//
+// Contract-ness is derived HERE rather than read from addresses.is_contract,
+// which is always false — see lib/contract-status.ts for why, and why fixing it
+// at index time is not viable. The getCode call rides along in an RPC batch the
+// page already issued, so this costs one extra call per render.
+const getAddressChainState = cache(async (addr: string) => {
+  let contract: typeof schema.contracts.$inferSelect | null = null
+  try {
+    const [row] = await db.select().from(schema.contracts).where(eq(schema.contracts.address, addr)).limit(1)
+    contract = row ?? null
+  } catch { /* DB error — registry signal unavailable, getCode still decides */ }
+
+  let live: bigint | null = null
+  let nonce: number | null = null
+  let code: string | null = null
+  try {
+    const provider = await getWebProvider()
+    ;[live, nonce, code] = await Promise.all([
+      provider.getBalance(addr).catch(() => null),
+      provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
+      provider.getCode(addr).catch(() => null),
+    ])
+  } catch { /* provider unavailable — every field stays null and resolves to unknown */ }
+
+  return {
+    contract,
+    status: resolveContractStatus({ code, verified: contract !== null }),
+    balance: resolveNativeBalance({ live, indexed: null }),
+    nonce,
+  }
+})
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
@@ -32,15 +69,24 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
     info = row ?? null
   } catch { /* DB error */ }
-  const type = info?.isContract ? 'Contract' : 'Address'
+  const { status, balance } = await getAddressChainState(address.toLowerCase())
+  // Only claim "Contract" when we actually know. An unknown address keeps the
+  // neutral wording rather than being mislabelled an EOA.
+  const type = status.isContract ? 'Contract' : 'Address'
+  // ⚠ Never interpolate a balance we do not have. This used to read
+  // addresses.balance, a column fixed at '0', so EVERY address page advertised
+  // "Balance: 0 BNB" to crawlers regardless of what the address actually held.
+  const balanceText = balance.known
+    ? `Balance: ${formatNativeToken(balance.value)} ${chainConfig.currency}`
+    : `Balance unavailable`
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${type} ${address.slice(0, 14)}…`,
-    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — Balance: ${formatNativeToken(safeBigInt(info?.balance))} ${chainConfig.currency}, ${info?.txCount ?? 0} transactions`,
+    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — ${balanceText}, ${info?.txCount ?? 0} transactions`,
     alternates: { canonical: `/address/${address.toLowerCase()}` },
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
-      description: `Balance: ${formatNativeToken(safeBigInt(info?.balance))} ${chainConfig.currency}`,
+      description: balanceText,
     },
   }
 }
@@ -66,20 +112,16 @@ export default async function AddressPage({
   // txCount and firstSeen come from the addresses table (instant PK lookup)
   // instead of COUNT(*)/MIN(timestamp) on 36M-row transactions table (OOM risk).
   let addressInfo: typeof schema.addresses.$inferSelect | null = null
-  let contractResult: typeof schema.contracts.$inferSelect | null = null
+
 
   try {
-    ;[addressInfo, contractResult] = await Promise.all([
+    // The contracts row now comes from getAddressChainState so the badge, the
+    // Contract section and the page <title> all read one resolved answer.
+    ;[addressInfo] = await Promise.all([
       db
         .select()
         .from(schema.addresses)
         .where(eq(schema.addresses.address, addr))
-        .limit(1)
-        .then((r) => r[0] ?? null),
-      db
-        .select()
-        .from(schema.contracts)
-        .where(eq(schema.contracts.address, addr))
         .limit(1)
         .then((r) => r[0] ?? null),
     ])
@@ -99,7 +141,6 @@ export default async function AddressPage({
   // view; humans still get the Moralis fallback. (The transfers/holdings/nfts tabs already honor this.)
   const isBot = isBotRequest((await headers()).get('user-agent'))
   const noLocalData = txCount === 0 && !addressInfo
-  const provider = await getWebProvider()
 
   // Batch 1: lightweight lookups (name resolution, risk check, price)
   const [resolvedName, riskData, nativePrice] = await Promise.all([
@@ -138,15 +179,12 @@ export default async function AddressPage({
   // Batch 2: heavier RPC calls (after batch 1 frees its memory).
   // Moralis txn history is now fetched lazily on the client via TxnsLazy — no SSR prefetch,
   // so HTML scrapers (fake browser UAs, no JS) never trigger getWalletHistory during render.
-  const [liveBalance, rpcTxCount] = await Promise.all([
-    provider.getBalance(addr).catch(() => null),
-    provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
-  ])
-
-  // Use live RPC balance when the address isn't in our index yet
-  const displayBalance = liveBalance !== null
-    ? liveBalance
-    : safeBigInt(addressInfo?.balance)
+  const { contract: contractResult, status: contractStatus, balance, nonce: rpcTxCount } =
+    await getAddressChainState(addr)
+  // ⚠ No fallback to addressInfo.balance: that column is a literal '0' nothing
+  // maintains, so falling back turned an RPC blip into a confident wrong zero.
+  const displayBalance = balance.value
+  const balanceKnown = balance.known
   // Transaction count: prefer DB, then RPC nonce. Moralis history is now loaded lazily on the
   // client, so we no longer have it available here during SSR.
   const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || 0
@@ -154,7 +192,7 @@ export default async function AddressPage({
     ? new Date(addressInfo.firstSeen)
     : null
   // USD value of native token balance
-  const nativeUsd = nativePrice && displayBalance
+  const nativeUsd = balanceKnown && nativePrice && displayBalance
     ? (Number(displayBalance) / 1e18 * nativePrice)
     : null
 
@@ -162,11 +200,15 @@ export default async function AddressPage({
   const lowGasBalanceWei = chainConfig.key === 'bnb'
     ? 10_000_000_000_000_000n
     : 5_000_000_000_000_000n
-  const gasReferralContext = displayBalance === 0n
-    ? 'address_zero_balance'
-    : displayBalance < lowGasBalanceWei
-      ? 'address_low_balance'
-      : null
+  // Only pitch gas top-ups on a balance we actually read. An unknown balance is
+  // not a zero balance, and pitching on a failed lookup is a wrong ad.
+  const gasReferralContext = !balanceKnown
+    ? null
+    : displayBalance === 0n
+      ? 'address_zero_balance'
+      : displayBalance < lowGasBalanceWei
+        ? 'address_low_balance'
+        : null
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -202,7 +244,7 @@ export default async function AddressPage({
             <span>🪪</span> {resolvedName}
           </Badge>
         )}
-        {addressInfo?.isContract && <Badge variant="default">Contract</Badge>}
+        {contractStatus.isContract && <Badge variant="default">Contract</Badge>}
         {(addressInfo?.label ?? getAddressLabel(addr)) && (
           <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
         )}
@@ -218,7 +260,7 @@ export default async function AddressPage({
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <StatItem
             label={`${chainConfig.currency} Balance`}
-            value={`${formatNativeToken(displayBalance)} ${chainConfig.currency}`}
+            value={balanceKnown ? `${formatNativeToken(displayBalance)} ${chainConfig.currency}` : 'Unavailable'}
             subValue={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
           />
           <StatItem
@@ -242,7 +284,7 @@ export default async function AddressPage({
       )}
 
       {/* Contract section */}
-      {addressInfo?.isContract && (
+      {contractStatus.isContract && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
           <h2 className="font-semibold mb-3">Contract</h2>
           {contractResult?.verifiedAt ? (

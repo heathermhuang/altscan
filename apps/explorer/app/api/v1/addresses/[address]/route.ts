@@ -3,6 +3,8 @@ import { db, schema } from '@/lib/db'
 import { eq, desc, or } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
+import { getWebProvider } from '@/lib/rpc'
+import { resolveContractStatus } from '@/lib/contract-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,7 +59,18 @@ export async function GET(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 
-  const isContract = contracts.length > 0
+  // ⚠ Registry presence proves a contract; registry ABSENCE proves nothing.
+  // schema.contracts is only written on a successful Sourcify verification, so
+  // `contracts.length > 0` reported isContract:false for every unverified
+  // contract on the chain — which is most of them. eth_getCode is the only
+  // complete signal. Deliberately outside the try/catch above: an RPC blip must
+  // degrade to the registry answer, never turn a working request into a 500.
+  let code: string | null = null
+  try {
+    const provider = await getWebProvider()
+    code = await provider.getCode(address).catch(() => null)
+  } catch { /* provider unavailable — fall back to the registry signal */ }
+  const { isContract } = resolveContractStatus({ code, verified: contracts.length > 0 })
 
   return apiJson({ transactions, tokenTransfers, isContract })
 }
