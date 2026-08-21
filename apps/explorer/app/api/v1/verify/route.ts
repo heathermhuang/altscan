@@ -44,7 +44,11 @@ export async function POST(request: Request) {
       await db
         .insert(schema.contracts)
         .values({
-          address,
+          // ⚠ MUST be lowercased. contracts.address is the primary key and every
+          // reader looks it up lowercased, but ADDRESS_REGEX accepts checksummed
+          // input — so persisting the caller's casing wrote a row nothing could
+          // find, and the address page showed a verified contract as Unverified.
+          address: address.toLowerCase(),
           bytecode: '0x',
           verifySource: 'sourcify',
           compilerVersion: compilerVersion || null,

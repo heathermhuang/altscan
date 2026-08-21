@@ -70,7 +70,13 @@ export async function GET(
     const provider = await getWebProvider()
     code = await provider.getCode(address).catch(() => null)
   } catch { /* provider unavailable — fall back to the registry signal */ }
-  const { isContract } = resolveContractStatus({ code, verified: contracts.length > 0 })
+  const { isContract, isContractKnown } = (() => {
+    const r = resolveContractStatus({ code, verified: contracts.length > 0 })
+    return { isContract: r.isContract, isContractKnown: r.known }
+  })()
 
-  return apiJson({ transactions, tokenTransfers, isContract })
+  // isContract stays a boolean for v1 compatibility, but during an RPC outage a
+  // bare `false` is indistinguishable from a real EOA. isContractKnown is
+  // additive, so existing clients are unaffected and careful ones can tell.
+  return apiJson({ transactions, tokenTransfers, isContract, isContractKnown })
 }

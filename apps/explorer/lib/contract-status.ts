@@ -27,12 +27,25 @@ export type ContractStatus = {
   known: boolean
 }
 
-/** eth_getCode returns '0x' for an account with no code. Be liberal about shape. */
-function hasBytecode(code: string): boolean {
+export type CodeClass = 'none' | 'code' | 'malformed'
+
+/**
+ * eth_getCode returns EXACTLY '0x' for an account with no code. Anything else
+ * well-formed is a deployed program.
+ *
+ * ⚠ Do NOT test for a non-zero hex digit. `0x00` is one byte of runtime code
+ * whose opcode is STOP — a real, deployed contract. Treating all-zero bytecode
+ * as "empty" would confidently classify it as an EOA.
+ *
+ * Bytecode is whole bytes, so a well-formed answer is '0x' plus an EVEN number
+ * of hex digits. An odd-length or non-hex response ('0x0', '') is not a node
+ * telling us the account is empty — it is a broken answer, and it resolves to
+ * 'malformed' so the caller reports UNKNOWN rather than inventing an EOA.
+ */
+export function classifyCode(code: string): CodeClass {
   const c = code.trim().toLowerCase()
-  if (!c.startsWith('0x')) return c.length > 0 && /[1-9a-f]/.test(c)
-  // '0x', '0x0', '0x00', '0x0000…' all mean "no code".
-  return /[1-9a-f]/.test(c.slice(2))
+  if (!/^0x([0-9a-f]{2})*$/.test(c)) return 'malformed'
+  return c === '0x' ? 'none' : 'code'
 }
 
 /**
@@ -47,13 +60,19 @@ function hasBytecode(code: string): boolean {
 export function resolveContractStatus(input: { code: string | null; verified: boolean }): ContractStatus {
   const { code, verified } = input
   if (code !== null) {
-    // A verified contract that self-destructed returns '0x'. It was still deployed
-    // as a contract, and the page has verified source to show for it, so the
-    // registry wins over the absent bytecode rather than the other way round.
-    return { isContract: hasBytecode(code) || verified, known: true }
+    const cls = classifyCode(code)
+    if (cls === 'code') return { isContract: true, known: true }
+    if (cls === 'none') {
+      // A verified contract that self-destructed returns '0x'. It was still
+      // deployed as a contract and the page has verified source to show for it,
+      // so the registry wins over the absent bytecode.
+      return { isContract: verified, known: true }
+    }
+    // 'malformed' — a broken response tells us nothing, so fall through and be
+    // treated exactly like a failed call rather than read as an empty account.
   }
-  // RPC failed. The registry can still prove a contract, but it can never
-  // disprove one — so an unverified address here is UNKNOWN, not an EOA.
+  // RPC failed or answered garbage. The registry can still prove a contract, but
+  // it can never disprove one — so an unverified address here is UNKNOWN, not an EOA.
   return verified ? { isContract: true, known: true } : { isContract: false, known: false }
 }
 
