@@ -55,7 +55,10 @@ describe('partitionRetentionPlan — the boundary DELETE stays removed', () => {
 
   it('RETAINS the straddling partition and reports the overshoot it is keeping', () => {
     expect(partitionRetentionPlan([p(100, 200)], 175)).toEqual([
-      { kind: 'retain-boundary', part: p(100, 200), overshootBlocks: 75, releasedAtBlock: 200 },
+      {
+        kind: 'retain-boundary', part: p(100, 200), overshootBlocks: 75,
+        releasedAtBlock: 200, widthBlocks: 100, oversized: false,
+      },
     ])
   })
 
@@ -83,6 +86,8 @@ describe('partitionRetentionPlan — the boundary DELETE stays removed', () => {
       part: p(116730552, 116826552),
       overshootBlocks: 116763966 - 116730552,
       releasedAtBlock: 116826552,
+      widthBlocks: 96000,
+      oversized: false,
     })
   })
 
@@ -111,6 +116,7 @@ describe('partitionRetentionPlan — the boundary DELETE stays removed', () => {
         expect(b.overshootBlocks).toBeGreaterThan(0)
         expect(b.overshootBlocks).toBeLessThan(b.part.hi - b.part.lo)
         expect(b.releasedAtBlock).toBe(b.part.hi)
+        expect(b.widthBlocks).toBe(b.part.hi - b.part.lo)
       }
     }
   })
@@ -119,5 +125,58 @@ describe('partitionRetentionPlan — the boundary DELETE stays removed', () => {
     const parts = [p(0, 100), p(100, 200), p(200, 300)]
     const plan = partitionRetentionPlan(parts, 150)
     expect(plan.map(a => a.part.name)).toEqual(parts.map(q => q.name))
+  })
+
+  describe('oversized straddler — the ATTACHed legacy partition case', () => {
+    // migrate-partition-tt ATTACHes the whole pre-migration table as
+    // token_transfers_legacy FOR VALUES FROM (0) TO (S). For ~COMPACT_RETENTION_DAYS
+    // after a migration the cutoff sits inside it, and "retain until the DROP"
+    // silently means "retain all of history" on a disk already near capacity.
+    const legacy = p(0, 116_000_000, 'token_transfers_legacy')
+    const fwd = (lo: number) => p(lo, lo + 96_000)
+
+    it('flags a legacy straddler as oversized', () => {
+      const plan = partitionRetentionPlan([legacy, fwd(116_000_000), fwd(116_096_000)], 50_000_000)
+      const b = plan[0]
+      expect(b.kind).toBe('retain-boundary')
+      if (b.kind !== 'retain-boundary') return
+      expect(b.oversized).toBe(true)
+      expect(b.widthBlocks).toBe(116_000_000)
+      // The overshoot really is 50M blocks — the number that makes the alarm honest.
+      expect(b.overshootBlocks).toBe(50_000_000)
+    })
+
+    it('does NOT flag a normal straddler in a uniform ladder', () => {
+      const plan = partitionRetentionPlan([fwd(0), fwd(96_000), fwd(192_000)], 100_000)
+      const b = plan.find(a => a.kind === 'retain-boundary')
+      expect(b?.kind).toBe('retain-boundary')
+      if (b?.kind !== 'retain-boundary') return
+      expect(b.oversized).toBe(false)
+    })
+
+    it('never flags a lone partition — nothing to compare against', () => {
+      const plan = partitionRetentionPlan([legacy], 50_000_000)
+      const b = plan[0]
+      if (b.kind !== 'retain-boundary') throw new Error('expected retain-boundary')
+      expect(b.oversized).toBe(false)
+    })
+
+    it('sits three orders of magnitude clear of normal — not a hair-trigger', () => {
+      // The 86-vs-85 disk switch fired on healthy cycles because normal sat one
+      // point below the line. Pin the margin here so that cannot recur: a normal
+      // straddler is 1x its siblings, a legacy one ~1208x, and the line is 4x.
+      const normalRatio = 96_000 / 96_000
+      const legacyRatio = 116_000_000 / 96_000
+      expect(normalRatio).toBeLessThan(4)
+      expect(legacyRatio).toBeGreaterThan(1000)
+    })
+
+    it('flags exactly at the 4x line, not below it', () => {
+      const wide = (w: number) => partitionRetentionPlan([p(0, w, 'wide'), p(w, w + 100)], 50)
+      const at4x = wide(400)   // 400 vs sibling 100 → 4x, NOT > 4x
+      const over = wide(401)   // 401 vs sibling 100 → over the line
+      expect(at4x[0].kind === 'retain-boundary' && at4x[0].oversized).toBe(false)
+      expect(over[0].kind === 'retain-boundary' && over[0].oversized).toBe(true)
+    })
   })
 })

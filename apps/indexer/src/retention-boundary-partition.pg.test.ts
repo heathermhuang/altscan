@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { sql as sqlTag } from 'drizzle-orm'
 
 /**
  * INTERVENTION proof, against a real Postgres, that the boundary-partition
@@ -31,9 +32,17 @@ const DB_NAME = (() => {
   }
 })()
 const DISPOSABLE = /test/.test(DB_NAME)
-// getMaintenanceDb() resolves BNB's dbEnvVar (DATABASE_URL) lazily at call time,
-// so pointing it at the throwaway DB must happen before the module is imported.
-if (PG_URL && DISPOSABLE) process.env.DATABASE_URL = PG_URL
+// ⚠ The executor does NOT read DATABASE_URL unconditionally: getMaintenanceDb()
+// resolves getChainConfig().dbEnvVar, which is DATABASE_URL only for CHAIN=bnb
+// and ETH_DATABASE_URL for CHAIN=eth. Setting DATABASE_URL alone would leave a
+// CHAIN=eth run pointed at a DIFFERENT database while this file's disposable-name
+// guard happily validated BOUNDARY_TEST_PG_URL — and this suite issues DROP TABLE.
+// So pin the chain too, and verify the real connection below before pruning.
+if (PG_URL && DISPOSABLE) {
+  process.env.CHAIN = 'bnb'
+  process.env.DATABASE_URL = PG_URL
+  process.env.ETH_DATABASE_URL = PG_URL
+}
 
 describe.skipIf(!PG_URL)('boundary partition is RETAINED, not deleted — real Postgres', () => {
   let prune: (cutoff: number) => Promise<number>
@@ -66,6 +75,20 @@ describe.skipIf(!PG_URL)('boundary partition is RETAINED, not deleted — real P
 
     const mod = await import('./retention-cleanup')
     prune = mod.pruneTokenTransfersPartitioned
+
+    // FAIL CLOSED on the connection the EXECUTOR actually uses, not the one this
+    // file opened. A name guard on BOUNDARY_TEST_PG_URL proves nothing about
+    // where getMaintenanceDb() lands; only asking that pool itself does.
+    const { getMaintenanceDb } = await import('./db')
+    const who = Array.from(await getMaintenanceDb().execute(
+      sqlTag`SELECT current_database() AS db`)) as Array<Record<string, unknown>>
+    const execDb = String(who[0]?.db ?? '')
+    if (execDb !== DB_NAME || !/test/.test(execDb)) {
+      throw new Error(
+        `refusing to run: the executor's pool is connected to "${execDb}", not the ` +
+          `disposable "${DB_NAME}" — this suite issues DROP TABLE`,
+      )
+    }
   })
 
   afterAll(async () => {

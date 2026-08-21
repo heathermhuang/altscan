@@ -403,7 +403,16 @@ export type PartitionBound = { name: string; schema: string; lo: number; hi: num
  */
 export type PartitionAction =
   | { kind: 'drop'; part: PartitionBound }
-  | { kind: 'retain-boundary'; part: PartitionBound; overshootBlocks: number; releasedAtBlock: number }
+  | {
+      kind: 'retain-boundary'
+      part: PartitionBound
+      overshootBlocks: number
+      releasedAtBlock: number
+      /** hi - lo of the straddler. THIS, not PARTITION_BLOCKS, is the real bound. */
+      widthBlocks: number
+      /** Straddler is far wider than the rest of the ladder — see partitionRetentionPlan. */
+      oversized: boolean
+    }
   | { kind: 'keep'; part: PartitionBound }
 
 /**
@@ -425,25 +434,52 @@ export type PartitionAction =
  * confirmed root cause of this indexer's chronic lag.
  *
  * The cost of retaining is bounded and self-correcting: at most ONE partition,
- * at most one partition-width of blocks past the cutoff, released by the DROP on
- * a later run. Nothing accumulates. No FK depends on the removal either —
- * token_transfers has none (the schema declares exactly one, transactions →
- * blocks), so the blocks/transactions deletes that follow are unaffected.
+ * released by the DROP on a later run. Nothing accumulates. No FK depends on the
+ * removal either — token_transfers has none (the schema declares exactly one,
+ * transactions → blocks), so the blocks/transactions deletes that follow are
+ * unaffected. Read-side coherence is preserved by the tx page's existing RPC
+ * fallback, which already serves transactions deleted below the retention window.
+ *
+ * ⚠ The bound is the STRADDLER'S OWN WIDTH (hi - lo), NOT PARTITION_BLOCKS and
+ * NOT ~12h. Those are unrelated: PARTITION_BLOCKS only sizes partitions created
+ * from now on, while existing children keep whatever width made them. The case
+ * that matters is real, not hypothetical — migrate-partition-tt ATTACHes the
+ * whole pre-migration table as token_transfers_legacy FOR VALUES FROM (0) TO (S),
+ * which is tens of millions of blocks wide. For the ~COMPACT_RETENTION_DAYS after
+ * a migration the cutoff sits INSIDE that partition, and retaining it means
+ * retaining all of history — on a disk already near capacity, that is fatal.
+ *
+ * So the plan flags an oversized straddler instead of pretending the bound is
+ * uniform. Self-calibrating against the ladder rather than a threshold someone
+ * has to keep in sync with PARTITION_BLOCKS: a normal straddler is the same
+ * width as its neighbours (ratio 1), a legacy straddler is ~1000x them. The 4x
+ * line sits in that gap with three orders of magnitude of margin — deliberately
+ * unlike the 86-vs-85 hair-trigger that made the disk switch fire on healthy
+ * cycles. It only WARNS: this is a capacity alarm for a human, never a
+ * self-arming DELETE.
  */
 export function partitionRetentionPlan(
   parts: readonly PartitionBound[],
   cutoffBlock: number,
 ): PartitionAction[] {
+  // Narrowest sibling is the ladder's "normal" width: ensureForwardPartitions
+  // creates every partition at one width, so only an ATTACHed legacy table is an
+  // outlier. Guard the single-partition case, where there is nothing to compare.
+  const widths = parts.map(q => q.hi - q.lo).filter(w => w > 0)
+  const minWidth = widths.length ? Math.min(...widths) : 0
   return parts.map((part): PartitionAction => {
     // Unchanged from the pre-removal source: hi is EXCLUSIVE, so hi <= cutoff
     // means every row is below the cutoff.
     if (part.hi <= cutoffBlock) return { kind: 'drop', part }
     if (part.lo < cutoffBlock && cutoffBlock < part.hi) {
+      const widthBlocks = part.hi - part.lo
       return {
         kind: 'retain-boundary',
         part,
         overshootBlocks: cutoffBlock - part.lo,
         releasedAtBlock: part.hi,
+        widthBlocks,
+        oversized: minWidth > 0 && parts.length > 1 && widthBlocks > 4 * minWidth,
       }
     }
     return { kind: 'keep', part }
@@ -490,8 +526,18 @@ export async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promi
       // the overshoot we are choosing to hold is visible: if PARTITION_BLOCKS is
       // ever widened past the retention window this line says so in blocks,
       // instead of the disk quietly growing.
-      console.log(`[retention] boundary partition ${p.name}: retaining ${action.overshootBlocks} blocks ` +
-        `below cutoff ${cutoffBlock} — released by DROP once the cutoff passes ${action.releasedAtBlock}`)
+      const line = `boundary partition ${p.name}: retaining ${action.overshootBlocks} blocks ` +
+        `below cutoff ${cutoffBlock} — released by DROP once the cutoff passes ${action.releasedAtBlock}`
+      if (action.oversized) {
+        // Almost certainly an ATTACHed legacy partition: the cutoff is inside a
+        // child spanning all of pre-migration history, so "retain until the DROP"
+        // means "retain everything" for the rest of the compact window.
+        console.warn(`[retention] ⚠⚠ ${line} — this partition is ${action.widthBlocks} blocks wide, ` +
+          `far wider than the rest of the ladder. Retention is effectively PAUSED for token_transfers ` +
+          `until the cutoff passes it. If disk is tight, prune inside it manually or re-partition.`)
+      } else {
+        console.log(`[retention] ${line}`)
+      }
     }
   }
   return dropped
