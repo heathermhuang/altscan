@@ -47,6 +47,32 @@ const RETENTION_BATCH_SLEEP_MS = (() => {
   const v = parseInt(process.env.RETENTION_BATCH_SLEEP_MS ?? '250', 10)
   return Number.isFinite(v) && v >= 0 ? v : 250
 })()
+// ── Yield-to-the-indexer tuning ─────────────────────────────────────
+// Lag (in blocks) above which retention pauses between batches. Measured on prod
+// 2026-08-18: a concurrent prune costs the transfer writer ~13% (65.9s vs 75.4s
+// per ~52.5k-row batch, buffer pool held at 256MB, restart-free comparison). That
+// cost is only ever PAID while the writer is saturated, which only happens while
+// the indexer is behind the tip — at the tip there is headroom. So yield exactly
+// when it competes and run at full speed otherwise. 0 disables (kill-switch).
+// Default 500 (~3.7min behind at 2.2215 blk/s) is well clear of routine blips:
+// the observed at-tip maximum on 08-18 was 21 blocks.
+const RETENTION_LAG_THRESHOLD = (() => {
+  const v = parseInt(process.env.RETENTION_LAG_THRESHOLD ?? '500', 10)
+  return Number.isFinite(v) && v >= 0 ? v : 500
+})()
+// ⚠ HARD safety valve, not a nicety. Retention is the only thing between this DB
+// and a full disk; BNB already runs at the retention floor (RETENTION_DAYS=1 ==
+// EMERGENCY_RETENTION_MIN_DAYS) with disk at ~72%. A chronically-behind indexer
+// must therefore NOT be able to stall the prune indefinitely — past this budget
+// it proceeds regardless of lag. A slow writer is recoverable; a full disk is the
+// 2026-04-08 WAL-checkpoint crash loop. Budget is spent ONCE PER RUN across all
+// batch loops, not once per table.
+const RETENTION_MAX_YIELD_MS = (() => {
+  const v = parseInt(process.env.RETENTION_MAX_YIELD_MIN ?? '30', 10)
+  return (Number.isFinite(v) && v >= 0 ? v : 30) * 60_000
+})()
+const RETENTION_YIELD_POLL_MS = 5_000
+
 const HOLDER_RECOMPUTE_CHUNK = parseInt(process.env.HOLDER_RECOMPUTE_CHUNK ?? '2000', 10) || 2000
 const HOLDER_RECOMPUTE_SLEEP_MS = (() => {
   const v = parseInt(process.env.HOLDER_RECOMPUTE_SLEEP_MS ?? '100', 10)
@@ -223,6 +249,58 @@ async function cutoffBlockNumber(cutoff: Date, days: number): Promise<number | n
 }
 
 /**
+ * Retention's yield-to-the-indexer gate. Pauses between batches while the indexer
+ * is behind the tip, because that is the only time the prune's I/O actually costs
+ * the transfer writer anything (see RETENTION_LAG_THRESHOLD).
+ *
+ * Pure and fully injected (lag source, sleep) so the budget arithmetic is testable
+ * without a real timer — same shape as makeSingleFlight. The budget is decremented
+ * across calls, so one instance = one run's worth of yielding.
+ *
+ * Disabled (returns immediately, silently) when either the threshold or the budget
+ * is non-positive: threshold 0 is the env kill-switch, budget 0 is how the
+ * emergency disk-pressure re-run opts out — that path must never yield.
+ */
+export function makeIndexerYielder(opts: {
+  thresholdBlocks: number
+  budgetMs: number
+  pollMs: number
+  getLag: () => number
+  sleep: (ms: number) => Promise<void>
+  onYield?: (info: { lag: number; waitedMs: number; budgetLeftMs: number }) => void
+  onBudgetExhausted?: (lag: number) => void
+}): () => Promise<void> {
+  const enabled = opts.thresholdBlocks > 0 && opts.budgetMs > 0
+  let budgetLeft = opts.budgetMs
+  let warned = false
+  return async () => {
+    if (!enabled) return
+    for (;;) {
+      const lag = opts.getLag()
+      if (lag <= opts.thresholdBlocks) return
+      if (budgetLeft <= 0) {
+        // Budget spent and still behind: proceed anyway. Disk safety outranks
+        // writer throughput — warn ONCE per run, not once per batch.
+        if (!warned) {
+          warned = true
+          opts.onBudgetExhausted?.(lag)
+        }
+        return
+      }
+      const wait = Math.min(opts.pollMs, budgetLeft)
+      await opts.sleep(wait)
+      budgetLeft -= wait
+      opts.onYield?.({ lag, waitedMs: wait, budgetLeftMs: budgetLeft })
+    }
+  }
+}
+
+// Per-RUN yielder, installed at the top of every runCleanup so one budget is
+// shared across every batch loop in that run. Inert until then (and in tests
+// that call the loops directly).
+let yieldToIndexer: () => Promise<void> = async () => {}
+
+/**
  * Batched, throttled delete. Repeatedly removes up to RETENTION_DELETE_BATCH rows
  * matching `where`, sleeping between batches so a multi-million-row prune trickles
  * disk I/O to the live indexer instead of monopolizing it for minutes.
@@ -239,6 +317,7 @@ async function deleteBatchLoop(table: SafeIdent, where: SQL): Promise<number> {
   const ident = identSql(table)
   let total = 0
   for (;;) {
+    await yieldToIndexer()
     const result = await db.execute(sql`
       DELETE FROM ${ident}
       WHERE ctid IN (
@@ -281,6 +360,7 @@ async function nullColumnBatchLoop(table: SafeIdent, setSql: SQL, where: SQL, or
   const orderClause = orderBy ? sql` ORDER BY ${orderBy}` : sql.raw('')
   let total = 0
   for (;;) {
+    await yieldToIndexer()
     const result = await db.execute(sql`
       UPDATE ${ident} SET ${setSql}
       WHERE ctid IN (
@@ -615,10 +695,6 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   console.log(`[retention] Running cleanup — body cutoff ${cutoff.toISOString()} (${tag}); ` +
     `compact retention = ${Number.isFinite(compactDays) ? compactDays + 'd' : '∞ (immortal)'}`)
 
-  // Sample disk BEFORE the destructive work. This is the sawtooth PEAK — the
-  // partition DROP below returns ~12GB in one step, so the post-run reading that
-  // reportSizes() produces is the TROUGH and systematically understates how full
-  // the volume actually got. Both feed the emergency decision at the end.
   // Disk readings across this run's sawtooth. The PEAK is created BY the run —
   // pruneTransactionBodies inflates the table before the partition DROP releases
   // space — so start and end alone are both troughs and miss it entirely
@@ -631,6 +707,28 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     return p
   }
   await sampleDisk('at start of run')
+
+  // Install this run's yield budget. The emergency disk-pressure re-run passes
+  // budget 0 — when the disk is the thing about to fail, the prune must not stop
+  // for a lagging indexer. Logs at most two lines per run (first pause, and
+  // exhaustion) rather than one per 5s poll.
+  let pauseLogged = false
+  yieldToIndexer = makeIndexerYielder({
+    thresholdBlocks: RETENTION_LAG_THRESHOLD,
+    budgetMs: override === undefined ? RETENTION_MAX_YIELD_MS : 0,
+    pollMs: RETENTION_YIELD_POLL_MS,
+    getLag: () => reportedLag,
+    sleep,
+    onYield: ({ lag, budgetLeftMs }) => {
+      if (pauseLogged) return
+      pauseLogged = true
+      console.log(`[retention] ⏸ yielding to indexer — lag ${lag} > ${RETENTION_LAG_THRESHOLD}; ` +
+        `up to ${Math.round(budgetLeftMs / 60_000)}min of pause budget this run`)
+    },
+    onBudgetExhausted: lag => console.warn(
+      `[retention] ⚠ yield budget spent and indexer still ${lag} behind — resuming anyway ` +
+      `(disk safety outranks writer throughput)`),
+  })
 
   // Translate timestamp cutoff → block_number cutoff ONCE. Every high-volume
   // table has a block_number index; only some have a timestamp index. Deleting
