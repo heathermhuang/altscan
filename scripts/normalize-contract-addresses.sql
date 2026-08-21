@@ -32,44 +32,73 @@ SELECT
                                       WHERE l.address = lower(c.address)))     AS simple_renames
 FROM contracts c;
 
+-- Addresses with MORE THAN ONE casing variant. These are what break a naive
+-- in-place rename, so it is worth knowing whether any exist before you start.
+SELECT lower(address) AS dst, count(*) AS variants, array_agg(address) AS casings
+  FROM contracts
+ GROUP BY lower(address) HAVING count(*) > 1;
+
 -- Inspect them before changing anything:
 -- SELECT address, verified_at, verify_source FROM contracts
 --  WHERE address <> lower(address) ORDER BY verified_at DESC NULLS LAST;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- STEP 1 — MIGRATION. Idempotent: a second run matches zero rows.
+-- STEP 1 — MIGRATION. Idempotent: a second run finds no targets and does nothing.
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN;
 
--- 1a. Collisions: a lowercase row for the same address already exists, because
---     someone re-verified after the code fix. Keep the more recent verification.
---     A mixed-case row can never match itself here -- lower(m.address) <> m.address
---     is what put it in this set.
-UPDATE contracts l
-   SET abi              = m.abi,
-       source_code      = m.source_code,
-       compiler_version = m.compiler_version,
-       verified_at      = m.verified_at,
-       verify_source    = m.verify_source,
-       license          = m.license,
-       bytecode         = m.bytecode
-  FROM contracts m
- WHERE m.address <> lower(m.address)
-   AND l.address = lower(m.address)
-   AND m.verified_at IS NOT NULL
-   AND (l.verified_at IS NULL OR m.verified_at > l.verified_at);
+-- Block concurrent verification writes for the duration. Without this, a
+-- verification landing mid-transaction can be deleted without being merged.
+-- `contracts` holds only verified contracts so it is small, and SHARE ROW
+-- EXCLUSIVE still permits readers.
+LOCK TABLE contracts IN SHARE ROW EXCLUSIVE MODE;
 
--- 1b. Drop the now-redundant mixed-case duplicates. Only those whose lowercase
---     counterpart exists -- 1c handles the rest.
-DELETE FROM contracts m
- WHERE m.address <> lower(m.address)
-   AND EXISTS (SELECT 1 FROM contracts l WHERE l.address = lower(m.address));
+-- Collapse every casing variant of an affected address into ONE best row.
+--
+-- Aggregating field-by-field rather than picking a single winning ROW is the
+-- point. The public verify route writes only bytecode/verified_at/verify_source/
+-- compiler_version, leaving abi, source_code and license NULL, while the
+-- indexer's Sourcify path fills them in. Choosing the newest row wholesale would
+-- therefore let a newer, thinner public-route row destroy richer older data.
+--
+-- Each ORDER BY puts non-NULL (and, for bytecode, non-placeholder) values first,
+-- then most-recently-verified. So every field independently takes the freshest
+-- REAL value available across all variants, including the lowercase row itself —
+-- it is joined in deliberately so the merge can never lose what it already had.
+CREATE TEMP TABLE _merged ON COMMIT DROP AS
+WITH targets AS (
+  SELECT DISTINCT lower(address) AS dst FROM contracts WHERE address <> lower(address)
+)
+SELECT t.dst,
+       (array_agg(c.bytecode ORDER BY (c.bytecode IS NULL OR c.bytecode IN ('', '0x')),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS bytecode,
+       (array_agg(c.abi ORDER BY (c.abi IS NULL),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS abi,
+       (array_agg(c.source_code ORDER BY (c.source_code IS NULL),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS source_code,
+       (array_agg(c.compiler_version ORDER BY (c.compiler_version IS NULL),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS compiler_version,
+       (array_agg(c.verify_source ORDER BY (c.verify_source IS NULL),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS verify_source,
+       (array_agg(c.license ORDER BY (c.license IS NULL),
+                  c.verified_at DESC NULLS LAST, c.address))[1]                      AS license,
+       max(c.verified_at)                                                            AS verified_at
+  FROM targets t
+  JOIN contracts c ON lower(c.address) = t.dst
+ GROUP BY t.dst;
 
--- 1c. No collision: normalize in place. Safe now that 1b removed every row whose
---     lowercased form would have conflicted.
-UPDATE contracts
-   SET address = lower(address)
- WHERE address <> lower(address);
+-- Replace rather than rename. An in-place `SET address = lower(address)` breaks
+-- the moment an address has two mixed-case variants (0xAAA1 and 0xAaA1 both
+-- lowercase to the same key): they collide on the primary key and roll the whole
+-- migration back. Deleting every variant and inserting the single merged row
+-- cannot collide, whatever the number of variants.
+DELETE FROM contracts WHERE lower(address) IN (SELECT dst FROM _merged);
+
+INSERT INTO contracts (address, bytecode, abi, source_code, compiler_version,
+                       verified_at, verify_source, license)
+SELECT dst, COALESCE(bytecode, '0x'), abi, source_code, compiler_version,
+       verified_at, verify_source, license
+  FROM _merged;
 
 COMMIT;
 

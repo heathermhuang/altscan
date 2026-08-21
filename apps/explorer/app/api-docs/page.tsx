@@ -132,7 +132,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/addresses/:address',
     description:
       'Returns an address\u2019s most recent transactions and token transfers, plus whether it is a contract. ' +
-      'isContractKnown is false when the code lookup could not be completed \u2014 treat isContract as unknown, not false, in that case.',
+      'isContractKnown is false only when contract status could not be determined at all \u2014 the code lookup failed AND the address is not in the verification registry. Treat isContract as unknown, not false, in that case.',
     params: [
       { name: 'address', type: 'string', required: true, description: 'The Ethereum/BNB address (0x-prefixed, 42 chars). Case-insensitive.' },
     ],
@@ -146,7 +146,7 @@ const endpoints: Endpoint[] = [
             toAddress: '0xeee...',
             value: '5000000000000000000',
             gasUsed: '21000',
-            status: 1,
+            status: true,
             timestamp: '2024-01-01T00:00:00Z',
             bodyPruned: false,
           },

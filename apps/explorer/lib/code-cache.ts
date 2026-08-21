@@ -14,8 +14,13 @@ export interface CodeClassCache {
  *
  * The address page reads searchParams and headers(), so it is dynamically
  * rendered on every request — its `revalidate = 300` never applied. Deriving
- * contract-ness from getCode therefore costs one RPC call per hit, crawler
- * sweeps included. This bounds that.
+ * contract-ness from getCode therefore costs one RPC call per hit.
+ *
+ * ⚠ Be honest about what this does and does not buy. A crawler sweeping many
+ * DISTINCT addresses MISSES every time, so this does not blunt that traffic at
+ * all. What it removes is the repeat cost on popular addresses — the tokens and
+ * exchange wallets people actually load over and over, and the API route hitting
+ * the same address the page just rendered.
  *
  * Stores the VERDICT, never the bytecode: runtime code runs to ~24KB a piece, so
  * caching it would trade an RPC bill for a memory one on a page whose enrichment
@@ -77,6 +82,9 @@ export function makeCodeClassCache(opts: {
 // and Render runs a long-lived Node server so this survives between requests.
 export const codeClassCache = makeCodeClassCache({
   max: 5000,
-  codeTtlMs: 24 * 60 * 60 * 1000,   // a contract stays a contract
+  // 1h, not a day. A reorg that orphans a deployment would otherwise leave a
+  // wrong 'code' verdict pinned for 24h, and the extra hit rate beyond an hour is
+  // negligible: repeat views of one address cluster far tighter than that.
+  codeTtlMs: 60 * 60 * 1000,
   noneTtlMs: 5 * 60 * 1000,         // an EOA may be deployed to at any moment
 })
