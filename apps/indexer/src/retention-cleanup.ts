@@ -449,7 +449,46 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
  * with a tighter retention window. Bounded by EMERGENCY_RETENTION_MIN_DAYS
  * so we never nuke the site's recent-data window entirely.
  */
-const EMERGENCY_DISK_PCT = 85
+// ⚠ TWO thresholds, deliberately separated.
+//
+// ALARM is where we start shouting; ACT is where retention starts DELETING data
+// it would otherwise have kept. Collapsing them was wrong: measured 2026-08-21,
+// this database's NORMAL peak is ~86% of its 150GB volume — the sawtooth's high
+// phase plus the in-flight body prune — so a single 85% trigger fires on a
+// healthy cycle and silently drops COMPACT_RETENTION_DAYS to the floor every
+// time, destroying the compact/body_pruned population Track A1 tx pages need.
+// Deleted history does not come back when the policy relaxes.
+//
+// So: shout at 85 (early, harmless, actionable by a human), act at 93 (genuinely
+// close to full). At the measured +0.6-1.4 GB/day of organic growth, 93% of
+// 150GB still leaves ~7-17 days before the volume fills.
+/**
+ * Strict percent parse. Deliberately NOT parseInt: parseInt('93.9') is 93 and
+ * parseInt('8x') is 8, so a typo silently lowers a safety threshold instead of
+ * being rejected — and an 8 here would clamp to the alarm line and restore
+ * destructive cleanup at the normal 86% peak. Whole value or nothing.
+ */
+function parsePercentEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || !/^\s*\d+\s*$/.test(raw)) {
+    if (raw !== undefined) {
+      console.warn(`[retention] ignoring malformed disk-threshold value "${raw}" — using ${fallback}%`)
+    }
+    return fallback
+  }
+  const n = Number(raw.trim())
+  if (!Number.isInteger(n) || n <= 0 || n > 100) {
+    console.warn(`[retention] disk-threshold ${n} out of range (1-100) — using ${fallback}%`)
+    return fallback
+  }
+  return n
+}
+const EMERGENCY_DISK_ALARM_PCT = parsePercentEnv(process.env.EMERGENCY_DISK_ALARM_PCT, 85)
+// Acting below the alarm line would make the alarm band unreachable and restore
+// the hair-trigger, so ACT is clamped up to ALARM rather than trusted blindly.
+const EMERGENCY_DISK_ACT_PCT = Math.max(
+  parsePercentEnv(process.env.EMERGENCY_DISK_ACT_PCT, 93),
+  EMERGENCY_DISK_ALARM_PCT,
+)
 const EMERGENCY_RETENTION_MIN_DAYS = 1
 
 /**
@@ -478,7 +517,7 @@ const EMERGENCY_RETENTION_MIN_DAYS = 1
  */
 export type RemainingLever = 'compact' | 'body' | 'set-compact' | 'none'
 export type EmergencyDecision =
-  | { fire: false; peakPct: number; reason: 'unknown-disk' | 'is-override' | 'below-threshold' | 'at-floor' | 'compact-immortal'; remainingLever: RemainingLever }
+  | { fire: false; peakPct: number; reason: 'unknown-disk' | 'is-override' | 'below-threshold' | 'alarm-only' | 'at-floor' | 'compact-immortal'; remainingLever: RemainingLever }
   | { fire: true; kind: 'compact' | 'body'; days: number; peakPct: number }
 
 /** Operator-facing remedy for a remaining lever — never say "grow the disk" while
@@ -502,7 +541,8 @@ function remainingLeverFor(compactDays: number, bodyDays: number, minDays: numbe
 
 export function emergencyRetentionDecision(input: {
   samplesPct: readonly (number | null)[]
-  thresholdPct: number
+  alarmPct: number
+  actPct: number
   isOverride: boolean
   compactDays: number
   bodyDays: number
@@ -517,7 +557,7 @@ export function emergencyRetentionDecision(input: {
   const lever = remainingLeverFor(input.compactDays, input.bodyDays, input.minDays)
   // 0 (or no usable sample) means UNKNOWN. Never destructive on unknown.
   if (peakPct <= 0) return { fire: false, peakPct, reason: 'unknown-disk', remainingLever: lever }
-  if (peakPct < input.thresholdPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
+  if (peakPct < input.alarmPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
   // Past this line the PEAK was above the threshold. The override guard stops
   // RECURSION; it must not stop DIAGNOSIS — an emergency re-run that itself ends
   // high is unresolved pressure and should be the loudest thing in the log.
@@ -528,12 +568,17 @@ export function emergencyRetentionDecision(input: {
   if (input.isOverride) {
     const finalPct = known.length ? known[known.length - 1] : undefined
     if (finalPct === undefined) return { fire: false, peakPct, reason: 'unknown-disk', remainingLever: lever }
-    if (finalPct < input.thresholdPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
+    if (finalPct < input.alarmPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
     return { fire: false, peakPct, reason: 'is-override', remainingLever: lever }
   }
   // Tighten the window that actually holds the disk. On the heavy chains that is
   // the compact tables; fall back to the body window when compact is already at
   // the floor.
+  // Above the ALARM line but below ACT: say so loudly, delete nothing. This is the
+  // band a healthy cycle lives in, and it is the whole reason the two are split.
+  if (peakPct < input.actPct) {
+    return { fire: false, peakPct, reason: 'alarm-only', remainingLever: lever }
+  }
   if (Number.isFinite(input.compactDays) && input.compactDays > input.minDays) {
     return { fire: true, kind: 'compact', days: input.minDays, peakPct }
   }
@@ -969,7 +1014,8 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   }
   const decision = emergencyRetentionDecision({
     samplesPct: allSamples,
-    thresholdPct: EMERGENCY_DISK_PCT,
+    alarmPct: EMERGENCY_DISK_ALARM_PCT,
+    actPct: EMERGENCY_DISK_ACT_PCT,
     isOverride: override !== undefined,
     compactDays,
     bodyDays: days,
@@ -986,8 +1032,15 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     // The emergency re-run itself finished above the line (judged on its FINAL
     // reading, not its peak). We must not recurse again — but say what is still
     // available, because "grow the disk" is only true once retention is exhausted.
-    console.error(`[retention] ⚠⚠ emergency re-run FINISHED above ${EMERGENCY_DISK_PCT}% ` +
+    console.error(`[retention] ⚠⚠ emergency re-run FINISHED above ${EMERGENCY_DISK_ALARM_PCT}% ` +
       `[${trail}] — tightened retention did not clear the pressure. ${leverAdvice(decision.remainingLever)}`)
+  } else if (decision.reason === 'alarm-only') {
+    // Above the alarm line but not yet at the act line. Loud, but NOT destructive:
+    // this database's healthy peak sits here, and auto-deleting retained history
+    // every normal cycle would be far worse than the disk pressure it "fixes".
+    console.warn(`[retention] ⚠ disk PEAK ${decision.peakPct.toFixed(1)}% [${trail}] — above the ` +
+      `${EMERGENCY_DISK_ALARM_PCT}% alarm line but below the ${EMERGENCY_DISK_ACT_PCT}% action line, so ` +
+      `retention is NOT tightening on its own. ${leverAdvice(decision.remainingLever)}`)
   } else if (decision.reason === 'compact-immortal' || decision.reason === 'at-floor') {
     // Above the line with nothing this run can tighten. Say so loudly — silence
     // here reads as "handled" — and name the remedy that actually applies, since
