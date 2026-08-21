@@ -58,9 +58,21 @@ export function classifyCode(code: string): CodeClass {
  * unverified. Never treat `!verified` as "is an EOA".
  */
 export function resolveContractStatus(input: { code: string | null; verified: boolean }): ContractStatus {
-  const { code, verified } = input
-  if (code !== null) {
-    const cls = classifyCode(code)
+  return resolveContractStatusFromClass({
+    cls: input.code === null ? null : classifyCode(input.code),
+    verified: input.verified,
+  })
+}
+
+/**
+ * Same decision, but from an already-classified verdict — the form a cache can
+ * hold. Raw bytecode is never worth storing (see lib/code-cache.ts).
+ *
+ * @param cls null when the code could not be read at all (RPC failure).
+ */
+export function resolveContractStatusFromClass(input: { cls: CodeClass | null; verified: boolean }): ContractStatus {
+  const { cls, verified } = input
+  if (cls !== null) {
     if (cls === 'code') return { isContract: true, known: true }
     if (cls === 'none') {
       // A verified contract that self-destructed returns '0x'. It was still

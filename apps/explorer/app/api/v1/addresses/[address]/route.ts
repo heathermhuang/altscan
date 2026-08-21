@@ -4,7 +4,8 @@ import { eq, desc, or } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { getWebProvider } from '@/lib/rpc'
-import { resolveContractStatus } from '@/lib/contract-status'
+import { classifyCode, resolveContractStatusFromClass, type CodeClass } from '@/lib/contract-status'
+import { codeClassCache } from '@/lib/code-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,13 +73,21 @@ export async function GET(
   // contract on the chain — which is most of them. eth_getCode is the only
   // complete signal. Deliberately outside the try/catch above: an RPC blip must
   // degrade to the registry answer, never turn a working request into a 500.
-  let code: string | null = null
-  try {
-    const provider = await getWebProvider()
-    code = await provider.getCode(address).catch(() => null)
-  } catch { /* provider unavailable — fall back to the registry signal */ }
+  // Shares the process-wide verdict cache with the address page, so a hot
+  // address costs no RPC call here at all.
+  let cls: CodeClass | null = codeClassCache.get(address) ?? null
+  if (cls === null) {
+    try {
+      const provider = await getWebProvider()
+      const rawCode = await provider.getCode(address).catch(() => null)
+      if (rawCode !== null) {
+        cls = classifyCode(rawCode)
+        if (cls !== 'malformed') codeClassCache.set(address, cls)
+      }
+    } catch { /* provider unavailable — fall back to the registry signal */ }
+  }
   const { isContract, isContractKnown } = (() => {
-    const r = resolveContractStatus({ code, verified: contracts.length > 0 })
+    const r = resolveContractStatusFromClass({ cls, verified: contracts.length > 0 })
     return { isContract: r.isContract, isContractKnown: r.known }
   })()
 

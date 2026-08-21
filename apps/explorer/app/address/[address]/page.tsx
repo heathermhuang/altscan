@@ -21,7 +21,8 @@ import { NftsLazy } from './NftsLazy'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
-import { resolveContractStatus, resolveNativeBalance } from '@/lib/contract-status'
+import { classifyCode, resolveContractStatusFromClass, resolveNativeBalance, type CodeClass } from '@/lib/contract-status'
+import { codeClassCache } from '@/lib/code-cache'
 import { AbiReader } from '@/components/contracts/AbiReader'
 import { AdSlot } from '@/components/ads/AdSlot'
 
@@ -34,7 +35,8 @@ export const revalidate = 300
 // Contract-ness is derived HERE rather than read from addresses.is_contract,
 // which is always false — see lib/contract-status.ts for why, and why fixing it
 // at index time is not viable. The getCode call rides along in an RPC batch the
-// page already issued, so this costs one extra call per render.
+// page already issued, and its verdict is cached across requests, so a repeat
+// visit to the same address costs no extra call at all.
 const getAddressChainState = cache(async (addr: string) => {
   let contract: typeof schema.contracts.$inferSelect | null = null
   try {
@@ -42,21 +44,34 @@ const getAddressChainState = cache(async (addr: string) => {
     contract = row ?? null
   } catch { /* DB error — registry signal unavailable, getCode still decides */ }
 
+  // Contract-ness is near-immutable, so its verdict is cached ACROSS requests;
+  // balance and nonce are not. This page reads searchParams and headers(), so it
+  // renders dynamically on every hit and `revalidate = 300` never bounded the
+  // RPC cost — a crawler sweep paid for getCode on every single address.
+  const cached = codeClassCache.get(addr)
+  let cls: CodeClass | null = cached ?? null
   let live: bigint | null = null
   let nonce: number | null = null
-  let code: string | null = null
   try {
     const provider = await getWebProvider()
-    ;[live, nonce, code] = await Promise.all([
+    const [b, n, rawCode] = await Promise.all([
       provider.getBalance(addr).catch(() => null),
       provider.getTransactionCount(addr).catch(() => null),   // nonce = outgoing tx count (free RPC)
-      provider.getCode(addr).catch(() => null),
+      cached ? Promise.resolve<string | null>(null) : provider.getCode(addr).catch(() => null),
     ])
+    live = b
+    nonce = n
+    if (!cached && rawCode !== null) {
+      cls = classifyCode(rawCode)
+      // Never cache a broken answer — a transient outage must not pin a wrong
+      // verdict for the whole TTL.
+      if (cls !== 'malformed') codeClassCache.set(addr, cls)
+    }
   } catch { /* provider unavailable — every field stays null and resolves to unknown */ }
 
   return {
     contract,
-    status: resolveContractStatus({ code, verified: contract !== null }),
+    status: resolveContractStatusFromClass({ cls, verified: contract !== null }),
     balance: resolveNativeBalance({ live, indexed: null }),
     nonce,
   }
