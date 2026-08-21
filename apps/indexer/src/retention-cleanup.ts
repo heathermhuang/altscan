@@ -395,17 +395,75 @@ async function pruneTransactionBodies(cutoffBlock: number): Promise<number> {
   )
 }
 
+export type PartitionBound = { name: string; schema: string; lo: number; hi: number }
+
+/**
+ * What retention does to each token_transfers partition. Note what is NOT here:
+ * there is no row-delete action. See partitionRetentionPlan.
+ */
+export type PartitionAction =
+  | { kind: 'drop'; part: PartitionBound }
+  | { kind: 'retain-boundary'; part: PartitionBound; overshootBlocks: number; releasedAtBlock: number }
+  | { kind: 'keep'; part: PartitionBound }
+
+/**
+ * Pure classification of every partition against the cutoff. Extracted so the
+ * policy is testable without a database, the same way emergencyRetentionDecision
+ * is — the executor below only carries it out.
+ *
+ * DROP whole partitions below the cutoff; RETAIN the one that straddles it.
+ *
+ * ⚠ The straddling partition is deliberately left ALONE. It used to get a
+ * batched DELETE of its below-cutoff rows, and that was pure waste: measured on
+ * BNB prod 2026-08-17 → 08-21, 132.6M rows across 12 runs (~33M rows/day,
+ * ~55 min/day of DELETE I/O) that returned ZERO bytes to the OS. A DELETE only
+ * marks tuples dead, and token_transfers is excluded from retention's VACUUM
+ * list while partitioned, so the dead tuples were not even reclaimed for reuse.
+ * The space came back ~12h later when the cutoff passed p.hi and the partition
+ * was DROPped — with or without the DELETE. Meanwhile the deletes dirtied a
+ * large share of shared_buffers, and backend dirty-buffer eviction is the
+ * confirmed root cause of this indexer's chronic lag.
+ *
+ * The cost of retaining is bounded and self-correcting: at most ONE partition,
+ * at most one partition-width of blocks past the cutoff, released by the DROP on
+ * a later run. Nothing accumulates. No FK depends on the removal either —
+ * token_transfers has none (the schema declares exactly one, transactions →
+ * blocks), so the blocks/transactions deletes that follow are unaffected.
+ */
+export function partitionRetentionPlan(
+  parts: readonly PartitionBound[],
+  cutoffBlock: number,
+): PartitionAction[] {
+  return parts.map((part): PartitionAction => {
+    // Unchanged from the pre-removal source: hi is EXCLUSIVE, so hi <= cutoff
+    // means every row is below the cutoff.
+    if (part.hi <= cutoffBlock) return { kind: 'drop', part }
+    if (part.lo < cutoffBlock && cutoffBlock < part.hi) {
+      return {
+        kind: 'retain-boundary',
+        part,
+        overshootBlocks: cutoffBlock - part.lo,
+        releasedAtBlock: part.hi,
+      }
+    }
+    return { kind: 'keep', part }
+  })
+}
+
 /**
  * Retention for the RANGE-partitioned token_transfers: DROP every partition whose
  * entire block range is below the cutoff (instant, reclaims disk to the OS, no
- * 12-min sequential DELETE, no VACUUM bloat), then a bounded DELETE on the single
- * partition that straddles the cutoff. Returns the number of partitions dropped.
+ * sequential DELETE, no VACUUM bloat). The partition straddling the cutoff is
+ * RETAINED and reported, never deleted from — see partitionRetentionPlan for the
+ * measurements behind that. Returns the number of partitions dropped.
  */
 async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
   const db = getMaintenanceDb()
   const parts = await listTokenTransferPartitions()
+  const plan = partitionRetentionPlan(parts, cutoffBlock)
   let dropped = 0
-  for (const p of parts) {
+  for (const action of plan) {
+    const p = action.part
     // partitionIdent enforces the `token_transfers_` prefix (+ injection shape),
     // so a mis-named relation is skipped and never reaches a DROP/DELETE. A
     // backfill_* table can't arrive here anyway (it is not a token_transfers
@@ -418,7 +476,7 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
       console.warn(`[retention] skipping partition with unexpected name/schema: "${p.schema}"."${p.name}"`)
       continue
     }
-    if (p.hi <= cutoffBlock) {
+    if (action.kind === 'drop') {
       // Entire partition is older than the cutoff → drop it outright.
       try {
         await db.execute(sql`DROP TABLE IF EXISTS ${identSql(partId)}`)
@@ -427,18 +485,13 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
       } catch (err) {
         console.warn(`[retention] drop partition ${p.name} failed:`, err instanceof Error ? err.message : err)
       }
-    } else if (p.lo < cutoffBlock && cutoffBlock < p.hi) {
-      // Partition straddles the cutoff → delete only the rows below it. Delete
-      // directly from the CHILD partition (p.name), not the parent token_transfers:
-      // ctid is not unique across a partitioned parent, so the batched ctid-IN loop
-      // must target the physical partition. Every row here is in [p.lo, p.hi), so
-      // `block_number < cutoffBlock` selects exactly the below-cutoff rows.
-      try {
-        const n = await deleteBatchLoop(partId, sql`block_number < ${cutoffBlock}`)
-        if (n > 0) console.log(`[retention] boundary partition ${p.name}: deleted ${n} rows below block ${cutoffBlock}`)
-      } catch (err) {
-        console.warn(`[retention] boundary delete on ${p.name} failed:`, err instanceof Error ? err.message : err)
-      }
+    } else if (action.kind === 'retain-boundary') {
+      // Straddles the cutoff → RETAINED on purpose. Logged rather than silent so
+      // the overshoot we are choosing to hold is visible: if PARTITION_BLOCKS is
+      // ever widened past the retention window this line says so in blocks,
+      // instead of the disk quietly growing.
+      console.log(`[retention] boundary partition ${p.name}: retaining ${action.overshootBlocks} blocks ` +
+        `below cutoff ${cutoffBlock} — released by DROP once the cutoff passes ${action.releasedAtBlock}`)
     }
   }
   return dropped
