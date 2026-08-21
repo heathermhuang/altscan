@@ -12,7 +12,8 @@ import { emergencyRetentionDecision } from './retention-cleanup'
  * which is exactly how this switch was quiet while the volume was over the line.
  */
 const base = {
-  thresholdPct: 85,
+  alarmPct: 85,
+  actPct: 93,
   isOverride: false,
   compactDays: 2,
   bodyDays: 1,
@@ -20,11 +21,38 @@ const base = {
 }
 
 describe('emergencyRetentionDecision (disk dead-man switch)', () => {
+  it('does NOT delete retained history at this database\'s NORMAL peak', () => {
+    // THE REGRESSION THIS SPLIT EXISTS FOR. Measured 2026-08-21: the healthy
+    // sawtooth peak is ~86% (high phase + in-flight body prune). A single 85%
+    // trigger fired a compact re-run at the floor on every normal cycle, silently
+    // destroying the compact/body_pruned rows Track A1 tx pages serve — and
+    // deleted history does not come back when the policy relaxes.
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [79.5, 86.2, 77.1], compactDays: 2, bodyDays: 1 })
+    expect(d.fire).toBe(false)
+    expect(d).toMatchObject({ reason: 'alarm-only' })
+    // ...but it is NOT silent: the operator still gets told, with the live lever.
+    expect(d).toMatchObject({ remainingLever: 'compact' })
+  })
+
+  it('DOES act once the peak reaches the action line', () => {
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [93.1], compactDays: 2, bodyDays: 1 })
+    expect(d).toMatchObject({ fire: true, kind: 'compact', days: 1 })
+  })
+
+  it('never lets the action line sit below the alarm line', () => {
+    // A misconfigured actPct under alarmPct would make alarm-only unreachable and
+    // restore the exact hair-trigger this split removes.
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [86], alarmPct: 85, actPct: 85 })
+    expect(d.fire).toBe(true)   // collapsed thresholds == old behaviour, by choice
+    const split = emergencyRetentionDecision({ ...base, samplesPct: [86], alarmPct: 85, actPct: 93 })
+    expect(split.fire).toBe(false)
+  })
+
   it('FIRES on the mid-run peak that both end samples miss', () => {
     // The exact 2026-08-21 shape.
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [77.1, 86.2, 77.1] })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [77.1, 96.2, 77.1] })
     expect(d.fire).toBe(true)
-    expect(d.peakPct).toBeCloseTo(86.2)
+    expect(d.peakPct).toBeCloseTo(96.2)
     if (d.fire) expect(d.kind).toBe('compact')
   })
 
@@ -35,14 +63,14 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
   })
 
   it('still fires when only the FINAL sample is high (peak sampling must not lose cases)', () => {
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [70, 72, 88] })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [70, 72, 98] })
     expect(d.fire).toBe(true)
-    expect(d.peakPct).toBeCloseTo(88)
+    expect(d.peakPct).toBeCloseTo(98)
   })
 
   it('fires exactly AT the threshold, not just above', () => {
-    expect(emergencyRetentionDecision({ ...base, samplesPct: [85] }).fire).toBe(true)
-    expect(emergencyRetentionDecision({ ...base, samplesPct: [84.9] }).fire).toBe(false)
+    expect(emergencyRetentionDecision({ ...base, samplesPct: [93] }).fire).toBe(true)
+    expect(emergencyRetentionDecision({ ...base, samplesPct: [92.9] }).fire).toBe(false)
   })
 
   it('NEVER fires on the emergency re-run itself — no unbounded recursion', () => {
@@ -64,7 +92,7 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
     const d = emergencyRetentionDecision({ ...base, samplesPct: [91], isOverride: true, compactDays: 2, bodyDays: 3 })
     expect(d).toMatchObject({ reason: 'is-override', remainingLever: 'compact' })
     // ...and that IS the kind a non-override run at those settings fires.
-    const fired = emergencyRetentionDecision({ ...base, samplesPct: [91], compactDays: 2, bodyDays: 3 })
+    const fired = emergencyRetentionDecision({ ...base, samplesPct: [95], compactDays: 2, bodyDays: 3 })
     expect(fired).toMatchObject({ fire: true, kind: 'compact' })
   })
 
@@ -108,9 +136,9 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
 
   it('drops FAILED probes rather than letting null drag the peak down', () => {
     // A lost probe must not read as 0% and mask a real peak in the other samples.
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [null, 90, null] })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [null, 96, null] })
     expect(d.fire).toBe(true)
-    expect(d.peakPct).toBeCloseTo(90)
+    expect(d.peakPct).toBeCloseTo(96)
   })
 
   it('treats an all-failed run as UNKNOWN and refuses to act destructively', () => {
@@ -119,17 +147,17 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
   })
 
   it('tightens COMPACT first when compact retention is above the floor', () => {
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [90], compactDays: 2, bodyDays: 3 })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [95], compactDays: 2, bodyDays: 3 })
     expect(d).toMatchObject({ fire: true, kind: 'compact', days: 1 })
   })
 
   it('falls back to the BODY window once compact is already at the floor', () => {
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [90], compactDays: 1, bodyDays: 3 })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [95], compactDays: 1, bodyDays: 3 })
     expect(d).toMatchObject({ fire: true, kind: 'body', days: 1 })
   })
 
   it('tightens the body window when compact retention is infinite (immortal)', () => {
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [90], compactDays: Infinity, bodyDays: 7 })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [95], compactDays: Infinity, bodyDays: 7 })
     expect(d).toMatchObject({ fire: true, kind: 'body', days: 1 })
   })
 
@@ -137,7 +165,7 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
     // Body at the floor + immortal compact is NOT "nothing left to tighten":
     // setting COMPACT_RETENTION_DAYS is still a lever. Reporting this as at-floor
     // would tell the operator to buy disk when a config change would do.
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [90], compactDays: Infinity, bodyDays: 1 })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [95], compactDays: Infinity, bodyDays: 1 })
     expect(d).toMatchObject({ fire: false, reason: 'compact-immortal' })
   })
 
@@ -158,14 +186,14 @@ describe('emergencyRetentionDecision (disk dead-man switch)', () => {
     // Only here is that guard load-bearing: a bare `peak < threshold` test would
     // let an UNKNOWN disk satisfy `0 >= 0` and fire a destructive re-run on a
     // database whose size we cannot see. Unknown must fail CLOSED.
-    expect(emergencyRetentionDecision({ ...base, samplesPct: [0], thresholdPct: 0 }).fire).toBe(false)
+    expect(emergencyRetentionDecision({ ...base, samplesPct: [0], alarmPct: 0, actPct: 0 }).fire).toBe(false)
     // ...while a real, known reading at the same threshold still fires.
-    expect(emergencyRetentionDecision({ ...base, samplesPct: [0.1], thresholdPct: 0 }).fire).toBe(true)
+    expect(emergencyRetentionDecision({ ...base, samplesPct: [0.1], alarmPct: 0, actPct: 0 }).fire).toBe(true)
   })
 
   it('ignores NaN/Infinity samples instead of poisoning the max', () => {
-    const d = emergencyRetentionDecision({ ...base, samplesPct: [NaN, Infinity, 90] })
+    const d = emergencyRetentionDecision({ ...base, samplesPct: [NaN, Infinity, 96] })
     expect(d.fire).toBe(true)
-    expect(d.peakPct).toBeCloseTo(90)
+    expect(d.peakPct).toBeCloseTo(96)
   })
 })
