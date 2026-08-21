@@ -130,20 +130,30 @@ const endpoints: Endpoint[] = [
   {
     method: 'GET',
     path: '/api/v1/addresses/:address',
-    description: 'Returns detailed information about an address including balance, transaction count, contract status, and recent transactions.',
+    description:
+      'Returns an address\u2019s most recent transactions and token transfers, plus whether it is a contract. ' +
+      'isContractKnown is false only when contract status could not be determined at all \u2014 the code lookup failed AND the address is not in the verification registry. Treat isContract as unknown, not false, in that case.',
     params: [
-      { name: 'address', type: 'string', required: true, description: 'The Ethereum/BNB address (0x-prefixed, 42 chars)' },
+      { name: 'address', type: 'string', required: true, description: 'The Ethereum/BNB address (0x-prefixed, 42 chars). Case-insensitive.' },
     ],
     exampleResponse: JSON.stringify(
       {
-        address: '0xddd...',
-        balance: '5000000000000000000',
-        txCount: 42,
+        transactions: [
+          {
+            hash: '0xabc...',
+            blockNumber: 41234567,
+            fromAddress: '0xddd...',
+            toAddress: '0xeee...',
+            value: '5000000000000000000',
+            gasUsed: '21000',
+            status: true,
+            timestamp: '2024-01-01T00:00:00Z',
+            bodyPruned: false,
+          },
+        ],
+        tokenTransfers: [],
         isContract: false,
-        label: null,
-        firstSeen: '2023-06-01T00:00:00Z',
-        lastSeen: '2024-01-01T00:00:00Z',
-        recentTxs: [],
+        isContractKnown: true,
       },
       null,
       2
