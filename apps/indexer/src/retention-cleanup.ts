@@ -373,6 +373,128 @@ const EMERGENCY_DISK_PCT = 85
 const EMERGENCY_RETENTION_MIN_DAYS = 1
 
 /**
+ * Decide whether disk pressure warrants an emergency retention re-run.
+ *
+ * ⚠ Takes EVERY disk reading captured during the run and triggers on the MAX,
+ * because BNB disk is a SAWTOOTH and the peak is CREATED BY THE RUN ITSELF. The
+ * `transactions.input` UPDATE inflates the table (MVCC — every pruned row leaves a
+ * full-size dead tuple), then the `token_transfers` partition DROP hands ~12GB back
+ * to the OS in one step.
+ *
+ * Measured on prod 2026-08-21: 115.58GB (77.1%) at the start of the run, 129.28GB
+ * (86.2%) mid-run after the UPDATE, ~77% again after the DROP. A threshold of 85%
+ * is crossed ONLY at that middle point — so sampling the start and the end alone
+ * still reads 77/77 and stays silent. That is why the caller must sample between
+ * the body prune and the partition drop, and why this takes a list, not two ends.
+ *
+ * A disk that fills at the peak is the 2026-04-08 incident: the WAL checkpoint
+ * fails on recovery and Postgres crash-loops.
+ *
+ * `null` entries are FAILED probes, not zeros — they are dropped rather than
+ * dragging the max down. 0 means "DB_DISK_GB unset", i.e. size unknown, which must
+ * fail CLOSED (no destructive re-run) rather than reading as "0% full".
+ *
+ * Pure, so the sawtooth arithmetic is testable without a database.
+ */
+export type RemainingLever = 'compact' | 'body' | 'set-compact' | 'none'
+export type EmergencyDecision =
+  | { fire: false; peakPct: number; reason: 'unknown-disk' | 'is-override' | 'below-threshold' | 'at-floor' | 'compact-immortal'; remainingLever: RemainingLever }
+  | { fire: true; kind: 'compact' | 'body'; days: number; peakPct: number }
+
+/** Operator-facing remedy for a remaining lever — never say "grow the disk" while
+ *  a retention window is still unused. */
+function leverAdvice(lever: RemainingLever): string {
+  switch (lever) {
+    case 'compact': return 'COMPACT_RETENTION_DAYS can still be tightened.'
+    case 'body': return 'RETENTION_DAYS can still be tightened.'
+    case 'set-compact': return 'COMPACT retention is ∞ (immortal) — set COMPACT_RETENTION_DAYS to bound the compact tables.'
+    case 'none': return 'BOTH retention windows are at the floor — retention cannot free more; disk must grow or ingest must shrink.'
+  }
+}
+
+/** What retention lever, if any, is still available at these settings. */
+function remainingLeverFor(compactDays: number, bodyDays: number, minDays: number): RemainingLever {
+  if (Number.isFinite(compactDays) && compactDays > minDays) return 'compact'
+  if (bodyDays > minDays) return 'body'
+  if (!Number.isFinite(compactDays)) return 'set-compact'
+  return 'none'
+}
+
+export function emergencyRetentionDecision(input: {
+  samplesPct: readonly (number | null)[]
+  thresholdPct: number
+  isOverride: boolean
+  compactDays: number
+  bodyDays: number
+  minDays: number
+}): EmergencyDecision {
+  // Usable == strictly positive. null is a FAILED probe and 0 is "size unknown"
+  // (DB_DISK_GB unset, or reportSizes' own catch) — neither is a real reading, and
+  // admitting 0 here would let a failed FINAL report select 0 as finalPct and
+  // classify unresolved pressure as a successful re-run.
+  const known = input.samplesPct.filter((n): n is number => n !== null && Number.isFinite(n) && n > 0)
+  const peakPct = known.length ? Math.max(...known) : 0
+  const lever = remainingLeverFor(input.compactDays, input.bodyDays, input.minDays)
+  // 0 (or no usable sample) means UNKNOWN. Never destructive on unknown.
+  if (peakPct <= 0) return { fire: false, peakPct, reason: 'unknown-disk', remainingLever: lever }
+  if (peakPct < input.thresholdPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
+  // Past this line the PEAK was above the threshold. The override guard stops
+  // RECURSION; it must not stop DIAGNOSIS — an emergency re-run that itself ends
+  // high is unresolved pressure and should be the loudest thing in the log.
+  //
+  // ⚠ But judge that from the run's FINAL reading, not the peak. A rerun that
+  // starts at 90%, drops a partition and ends at 70% has SUCCEEDED; reporting its
+  // peak as failure would cry wolf on exactly the path that worked.
+  if (input.isOverride) {
+    const finalPct = known.length ? known[known.length - 1] : undefined
+    if (finalPct === undefined) return { fire: false, peakPct, reason: 'unknown-disk', remainingLever: lever }
+    if (finalPct < input.thresholdPct) return { fire: false, peakPct, reason: 'below-threshold', remainingLever: lever }
+    return { fire: false, peakPct, reason: 'is-override', remainingLever: lever }
+  }
+  // Tighten the window that actually holds the disk. On the heavy chains that is
+  // the compact tables; fall back to the body window when compact is already at
+  // the floor.
+  if (Number.isFinite(input.compactDays) && input.compactDays > input.minDays) {
+    return { fire: true, kind: 'compact', days: input.minDays, peakPct }
+  }
+  if (input.bodyDays > input.minDays) {
+    return { fire: true, kind: 'body', days: input.minDays, peakPct }
+  }
+  // Nothing left to tighten — but WHY matters, because the remedies differ. An
+  // immortal compact window is not "at the floor": enabling COMPACT_RETENTION_DAYS
+  // is still an available lever, whereas a genuinely floored config needs disk.
+  if (!Number.isFinite(input.compactDays)) {
+    return { fire: false, peakPct, reason: 'compact-immortal', remainingLever: lever }
+  }
+  return { fire: false, peakPct, reason: 'at-floor', remainingLever: lever }
+}
+
+/**
+ * Cheap disk-% probe, called at each sawtooth inflection during a run.
+ * Deliberately not reportSizes(): that walks every partition through pg_inherits to
+ * build the per-table line, which is far more work than one pg_database_size().
+ *
+ * Returns 0 when DB_DISK_GB is unset (size unknown by configuration) but `null`
+ * when the query FAILED — the caller must be able to tell "we chose not to measure"
+ * from "we tried and lost the sample", because losing the peak sample silently is
+ * exactly how this switch goes quiet again.
+ */
+async function diskPctNow(): Promise<number | null> {
+  if (DB_DISK_GB <= 0) return 0
+  try {
+    const r = await getMaintenanceDb().execute(
+      sql`SELECT pg_database_size(current_database())::bigint AS b`
+    )
+    const bytes = Number((Array.from(r)[0] as Record<string, unknown>).b)
+    return (bytes / 1024 / 1024 / 1024 / DB_DISK_GB) * 100
+  } catch (err) {
+    console.warn('[retention] ⚠ disk probe FAILED — peak sample lost for this point:',
+      err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/**
  * Log the per-table sizes and total DB size at the end of each retention run.
  * If DB_DISK_GB is set, also logs the disk-% used and WARNs at >70%.
  *
@@ -493,6 +615,23 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   console.log(`[retention] Running cleanup — body cutoff ${cutoff.toISOString()} (${tag}); ` +
     `compact retention = ${Number.isFinite(compactDays) ? compactDays + 'd' : '∞ (immortal)'}`)
 
+  // Sample disk BEFORE the destructive work. This is the sawtooth PEAK — the
+  // partition DROP below returns ~12GB in one step, so the post-run reading that
+  // reportSizes() produces is the TROUGH and systematically understates how full
+  // the volume actually got. Both feed the emergency decision at the end.
+  // Disk readings across this run's sawtooth. The PEAK is created BY the run —
+  // pruneTransactionBodies inflates the table before the partition DROP releases
+  // space — so start and end alone are both troughs and miss it entirely
+  // (measured 2026-08-21: 77.1 / 86.2 / 77.1). Sampled again below, mid-run.
+  const diskSamples: (number | null)[] = []
+  const sampleDisk = async (where: string) => {
+    const p = await diskPctNow()
+    diskSamples.push(p)
+    if (p !== null && p > 0) console.log(`[retention] disk ${where}: ${p.toFixed(1)}% of ${DB_DISK_GB}GB`)
+    return p
+  }
+  await sampleDisk('at start of run')
+
   // Translate timestamp cutoff → block_number cutoff ONCE. Every high-volume
   // table has a block_number index; only some have a timestamp index. Deleting
   // by block_number is 100-1000x faster on large tables (observed: 12min/0-row
@@ -550,6 +689,12 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   } else {
     console.log('[retention] Skipping body prune — no cutoff block found (blocks table empty or entirely beyond cutoff)')
   }
+
+  // THE PEAK. Everything above only added dead tuples (the input UPDATE rewrites
+  // rows in place); everything below releases space (partition DROP). This is the
+  // one sample that can exceed the threshold, and the reason the old end-of-run
+  // check could never see it.
+  await sampleDisk('after body prune (peak)')
 
   // COMPACT-BRIDGE prune — runs ONLY when COMPACT_RETENTION_DAYS is finite (the
   // explicit per-chain override for the heavy legacy chains). On the default path
@@ -614,6 +759,11 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
           console.error(`[retention] [compact] ${table} body sweep failed:`, err instanceof Error ? err.message : err)
         }
       }
+      // Last inflection before space is RELEASED: the compact body sweep above
+      // added its own dead tuples, so this — not the pre-compact reading — is the
+      // true high-water mark of the run.
+      await sampleDisk('before partition drop (peak)')
+
       // token_transfers: partition-drop when partitioned, else row-delete.
       try {
         if (ttPartitioned) {
@@ -709,18 +859,43 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
       console.warn('[retention] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
   }
 
-  // Self-heal: if still above the emergency threshold, tighten the window that
-  // actually holds the disk. When a finite compact override is active, the compact
-  // tables are the mass on the heavy chains → tighten compact; otherwise tighten
-  // the body window. Only recurses once (override passed = minimum).
-  if (override === undefined && diskPct >= EMERGENCY_DISK_PCT) {
-    if (Number.isFinite(compactDays) && compactDays > EMERGENCY_RETENTION_MIN_DAYS) {
-      console.warn(`[retention] disk at ${diskPct.toFixed(1)}% — emergency compact re-run at ${EMERGENCY_RETENTION_MIN_DAYS}d`)
-      await runCleanup({ compactDays: EMERGENCY_RETENTION_MIN_DAYS })
-    } else if (days > EMERGENCY_RETENTION_MIN_DAYS) {
-      console.warn(`[retention] disk at ${diskPct.toFixed(1)}% — emergency body re-run at ${EMERGENCY_RETENTION_MIN_DAYS}d`)
-      await runCleanup({ bodyDays: EMERGENCY_RETENTION_MIN_DAYS })
-    }
+  // Self-heal: tighten the window that actually holds the disk. Decided on the
+  // MAX across every sample taken this run — the peak is created mid-run by the
+  // body prune, so the start and end readings are both troughs. See
+  // emergencyRetentionDecision; that distinction is the whole point of the switch.
+  const allSamples = [...diskSamples, diskPct]
+  const lostSamples = diskSamples.filter(n => n === null).length
+  if (lostSamples > 0) {
+    console.warn(`[retention] ⚠ ${lostSamples} disk probe(s) failed this run — the peak reading may be ` +
+      `missing, so the emergency threshold was evaluated on incomplete data`)
+  }
+  const decision = emergencyRetentionDecision({
+    samplesPct: allSamples,
+    thresholdPct: EMERGENCY_DISK_PCT,
+    isOverride: override !== undefined,
+    compactDays,
+    bodyDays: days,
+    minDays: EMERGENCY_RETENTION_MIN_DAYS,
+  })
+  const trail = allSamples.map(n => n === null ? 'ERR' : `${n.toFixed(1)}%`).join(' -> ')
+  if (decision.fire) {
+    console.warn(`[retention] disk PEAK ${decision.peakPct.toFixed(1)}% [${trail}] — ` +
+      `emergency ${decision.kind} re-run at ${decision.days}d`)
+    await runCleanup(decision.kind === 'compact'
+      ? { compactDays: decision.days }
+      : { bodyDays: decision.days })
+  } else if (decision.reason === 'is-override') {
+    // The emergency re-run itself finished above the line (judged on its FINAL
+    // reading, not its peak). We must not recurse again — but say what is still
+    // available, because "grow the disk" is only true once retention is exhausted.
+    console.error(`[retention] ⚠⚠ emergency re-run FINISHED above ${EMERGENCY_DISK_PCT}% ` +
+      `[${trail}] — tightened retention did not clear the pressure. ${leverAdvice(decision.remainingLever)}`)
+  } else if (decision.reason === 'compact-immortal' || decision.reason === 'at-floor') {
+    // Above the line with nothing this run can tighten. Say so loudly — silence
+    // here reads as "handled" — and name the remedy that actually applies, since
+    // "grow the disk" is wrong while a retention lever is still unused.
+    console.error(`[retention] ⚠⚠ disk PEAK ${decision.peakPct.toFixed(1)}% [${trail}] — ` +
+      `${leverAdvice(decision.remainingLever)}`)
   }
 }
 
