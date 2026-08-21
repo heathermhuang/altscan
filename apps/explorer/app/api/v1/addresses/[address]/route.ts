@@ -18,11 +18,18 @@ export async function GET(
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 
-  const { address } = await params
+  const { address: rawAddress } = await params
 
-  if (!ADDRESS_REGEX.test(address)) {
+  if (!ADDRESS_REGEX.test(rawAddress)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
+  // ⚠ Normalize BEFORE querying. The indexer stores every address lowercased
+  // (block-processor lowercases from/to/token/miner) and contracts.address is a
+  // lowercased primary key, but ADDRESS_REGEX accepts checksummed input. This
+  // route was the one reader that did not normalize, so a checksummed request
+  // silently returned empty transactions, empty transfers, AND a missed contracts
+  // row — the address page has always done this at its own entry point.
+  const address = rawAddress.toLowerCase()
 
   let transactions, tokenTransfers, contracts
   try {
