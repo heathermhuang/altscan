@@ -395,17 +395,111 @@ async function pruneTransactionBodies(cutoffBlock: number): Promise<number> {
   )
 }
 
+export type PartitionBound = { name: string; schema: string; lo: number; hi: number }
+
+/**
+ * What retention does to each token_transfers partition. Note what is NOT here:
+ * there is no row-delete action. See partitionRetentionPlan.
+ */
+export type PartitionAction =
+  | { kind: 'drop'; part: PartitionBound }
+  | {
+      kind: 'retain-boundary'
+      part: PartitionBound
+      overshootBlocks: number
+      releasedAtBlock: number
+      /** hi - lo of the straddler. THIS, not PARTITION_BLOCKS, is the real bound. */
+      widthBlocks: number
+      /** Straddler is far wider than the rest of the ladder — see partitionRetentionPlan. */
+      oversized: boolean
+    }
+  | { kind: 'keep'; part: PartitionBound }
+
+/**
+ * Pure classification of every partition against the cutoff. Extracted so the
+ * policy is testable without a database, the same way emergencyRetentionDecision
+ * is — the executor below only carries it out.
+ *
+ * DROP whole partitions below the cutoff; RETAIN the one that straddles it.
+ *
+ * ⚠ The straddling partition is deliberately left ALONE. It used to get a
+ * batched DELETE of its below-cutoff rows, and that was pure waste: measured on
+ * BNB prod 2026-08-17 → 08-21, 132.6M rows across 12 runs (~33M rows/day,
+ * ~55 min/day of DELETE I/O) that returned ZERO bytes to the OS. A DELETE only
+ * marks tuples dead, and token_transfers is excluded from retention's VACUUM
+ * list while partitioned, so the dead tuples were not even reclaimed for reuse.
+ * The space came back ~12h later when the cutoff passed p.hi and the partition
+ * was DROPped — with or without the DELETE. Meanwhile the deletes dirtied a
+ * large share of shared_buffers, and backend dirty-buffer eviction is the
+ * confirmed root cause of this indexer's chronic lag.
+ *
+ * The cost of retaining is bounded and self-correcting: at most ONE partition,
+ * released by the DROP on a later run. Nothing accumulates. No FK depends on the
+ * removal either — token_transfers has none (the schema declares exactly one,
+ * transactions → blocks), so the blocks/transactions deletes that follow are
+ * unaffected. Read-side coherence is preserved by the tx page's existing RPC
+ * fallback, which already serves transactions deleted below the retention window.
+ *
+ * ⚠ The bound is the STRADDLER'S OWN WIDTH (hi - lo), NOT PARTITION_BLOCKS and
+ * NOT ~12h. Those are unrelated: PARTITION_BLOCKS only sizes partitions created
+ * from now on, while existing children keep whatever width made them. The case
+ * that matters is real, not hypothetical — migrate-partition-tt ATTACHes the
+ * whole pre-migration table as token_transfers_legacy FOR VALUES FROM (0) TO (S),
+ * which is tens of millions of blocks wide. For the ~COMPACT_RETENTION_DAYS after
+ * a migration the cutoff sits INSIDE that partition, and retaining it means
+ * retaining all of history — on a disk already near capacity, that is fatal.
+ *
+ * So the plan flags an oversized straddler instead of pretending the bound is
+ * uniform. Self-calibrating against the ladder rather than a threshold someone
+ * has to keep in sync with PARTITION_BLOCKS: a normal straddler is the same
+ * width as its neighbours (ratio 1), a legacy straddler is ~1000x them. The 4x
+ * line sits in that gap with three orders of magnitude of margin — deliberately
+ * unlike the 86-vs-85 hair-trigger that made the disk switch fire on healthy
+ * cycles. It only WARNS: this is a capacity alarm for a human, never a
+ * self-arming DELETE.
+ */
+export function partitionRetentionPlan(
+  parts: readonly PartitionBound[],
+  cutoffBlock: number,
+): PartitionAction[] {
+  // Narrowest sibling is the ladder's "normal" width: ensureForwardPartitions
+  // creates every partition at one width, so only an ATTACHed legacy table is an
+  // outlier. Guard the single-partition case, where there is nothing to compare.
+  const widths = parts.map(q => q.hi - q.lo).filter(w => w > 0)
+  const minWidth = widths.length ? Math.min(...widths) : 0
+  return parts.map((part): PartitionAction => {
+    // Unchanged from the pre-removal source: hi is EXCLUSIVE, so hi <= cutoff
+    // means every row is below the cutoff.
+    if (part.hi <= cutoffBlock) return { kind: 'drop', part }
+    if (part.lo < cutoffBlock && cutoffBlock < part.hi) {
+      const widthBlocks = part.hi - part.lo
+      return {
+        kind: 'retain-boundary',
+        part,
+        overshootBlocks: cutoffBlock - part.lo,
+        releasedAtBlock: part.hi,
+        widthBlocks,
+        oversized: minWidth > 0 && parts.length > 1 && widthBlocks > 4 * minWidth,
+      }
+    }
+    return { kind: 'keep', part }
+  })
+}
+
 /**
  * Retention for the RANGE-partitioned token_transfers: DROP every partition whose
  * entire block range is below the cutoff (instant, reclaims disk to the OS, no
- * 12-min sequential DELETE, no VACUUM bloat), then a bounded DELETE on the single
- * partition that straddles the cutoff. Returns the number of partitions dropped.
+ * sequential DELETE, no VACUUM bloat). The partition straddling the cutoff is
+ * RETAINED and reported, never deleted from — see partitionRetentionPlan for the
+ * measurements behind that. Returns the number of partitions dropped.
  */
-async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
+export async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
   const db = getMaintenanceDb()
   const parts = await listTokenTransferPartitions()
+  const plan = partitionRetentionPlan(parts, cutoffBlock)
   let dropped = 0
-  for (const p of parts) {
+  for (const action of plan) {
+    const p = action.part
     // partitionIdent enforces the `token_transfers_` prefix (+ injection shape),
     // so a mis-named relation is skipped and never reaches a DROP/DELETE. A
     // backfill_* table can't arrive here anyway (it is not a token_transfers
@@ -418,7 +512,7 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
       console.warn(`[retention] skipping partition with unexpected name/schema: "${p.schema}"."${p.name}"`)
       continue
     }
-    if (p.hi <= cutoffBlock) {
+    if (action.kind === 'drop') {
       // Entire partition is older than the cutoff → drop it outright.
       try {
         await db.execute(sql`DROP TABLE IF EXISTS ${identSql(partId)}`)
@@ -427,17 +521,22 @@ async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<numb
       } catch (err) {
         console.warn(`[retention] drop partition ${p.name} failed:`, err instanceof Error ? err.message : err)
       }
-    } else if (p.lo < cutoffBlock && cutoffBlock < p.hi) {
-      // Partition straddles the cutoff → delete only the rows below it. Delete
-      // directly from the CHILD partition (p.name), not the parent token_transfers:
-      // ctid is not unique across a partitioned parent, so the batched ctid-IN loop
-      // must target the physical partition. Every row here is in [p.lo, p.hi), so
-      // `block_number < cutoffBlock` selects exactly the below-cutoff rows.
-      try {
-        const n = await deleteBatchLoop(partId, sql`block_number < ${cutoffBlock}`)
-        if (n > 0) console.log(`[retention] boundary partition ${p.name}: deleted ${n} rows below block ${cutoffBlock}`)
-      } catch (err) {
-        console.warn(`[retention] boundary delete on ${p.name} failed:`, err instanceof Error ? err.message : err)
+    } else if (action.kind === 'retain-boundary') {
+      // Straddles the cutoff → RETAINED on purpose. Logged rather than silent so
+      // the overshoot we are choosing to hold is visible: if PARTITION_BLOCKS is
+      // ever widened past the retention window this line says so in blocks,
+      // instead of the disk quietly growing.
+      const line = `boundary partition ${p.name}: retaining ${action.overshootBlocks} blocks ` +
+        `below cutoff ${cutoffBlock} — released by DROP once the cutoff passes ${action.releasedAtBlock}`
+      if (action.oversized) {
+        // Almost certainly an ATTACHed legacy partition: the cutoff is inside a
+        // child spanning all of pre-migration history, so "retain until the DROP"
+        // means "retain everything" for the rest of the compact window.
+        console.warn(`[retention] ⚠⚠ ${line} — this partition is ${action.widthBlocks} blocks wide, ` +
+          `far wider than the rest of the ladder. Retention is effectively PAUSED for token_transfers ` +
+          `until the cutoff passes it. If disk is tight, prune inside it manually or re-partition.`)
+      } else {
+        console.log(`[retention] ${line}`)
       }
     }
   }
