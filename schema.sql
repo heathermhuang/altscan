@@ -56,9 +56,7 @@ CREATE INDEX IF NOT EXISTS tx_timestamp_idx ON transactions (timestamp);
 -- addresses
 CREATE TABLE IF NOT EXISTS addresses (
   address       VARCHAR(42) PRIMARY KEY,
-  balance       NUMERIC(36, 18) NOT NULL DEFAULT '0',
   tx_count      INTEGER NOT NULL DEFAULT 0,
-  is_contract   BOOLEAN NOT NULL DEFAULT FALSE,
   label         VARCHAR(255),
   first_seen    TIMESTAMPTZ,
   last_seen     TIMESTAMPTZ
