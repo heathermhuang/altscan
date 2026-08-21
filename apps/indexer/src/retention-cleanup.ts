@@ -457,7 +457,7 @@ export function partitionRetentionPlan(
  * RETAINED and reported, never deleted from — see partitionRetentionPlan for the
  * measurements behind that. Returns the number of partitions dropped.
  */
-async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
+export async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promise<number> {
   const db = getMaintenanceDb()
   const parts = await listTokenTransferPartitions()
   const plan = partitionRetentionPlan(parts, cutoffBlock)
