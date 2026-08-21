@@ -52,9 +52,15 @@ export const transactions = pgTable('transactions', {
 
 export const addresses = pgTable('addresses', {
   address:      varchar('address', { length: 42 }).primaryKey(),
-  balance:      numeric('balance', { precision: 36, scale: 18 }).notNull().default('0'),
+  // ⚠ No `balance` and no `isContract`. Both were write-only fictions: the
+  // indexer inserted the literals '0' and false and never updated either, so
+  // every read of them was wrong. is_contract gated the address page's Contract
+  // badge AND its whole verified-contract section, which is why contract
+  // verification was invisible sitewide until #105. Contract-ness now comes from
+  // eth_getCode and the balance from a live RPC call (lib/contract-status.ts).
+  // Dropped from the schema first: two call sites use a bare .select(), which
+  // expands to every declared column and would break the moment prod drops them.
   txCount:      integer('tx_count').notNull().default(0),
-  isContract:   boolean('is_contract').notNull().default(false),
   label:        varchar('label', { length: 255 }),
   firstSeen:    timestamp('first_seen', { withTimezone: true }),
   lastSeen:     timestamp('last_seen', { withTimezone: true }),

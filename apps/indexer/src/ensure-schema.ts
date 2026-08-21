@@ -53,9 +53,7 @@ export async function ensureSchema(): Promise<void> {
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS addresses (
       address     VARCHAR(42) PRIMARY KEY,
-      balance     NUMERIC(36,18) NOT NULL DEFAULT 0,
       tx_count    INTEGER NOT NULL DEFAULT 0,
-      is_contract BOOLEAN NOT NULL DEFAULT false,
       label       VARCHAR(255),
       first_seen  TIMESTAMPTZ,
       last_seen   TIMESTAMPTZ

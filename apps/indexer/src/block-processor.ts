@@ -744,10 +744,10 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await db.execute(sql`
-          INSERT INTO addresses (address, balance, tx_count, is_contract, first_seen, last_seen)
+          INSERT INTO addresses (address, tx_count, first_seen, last_seen)
           VALUES ${sql.join(
             chunk.map(([addr, d]) =>
-              sql`(${addr}, '0'::numeric, ${d.count}, false, ${d.ts.toISOString()}::timestamptz, ${d.ts.toISOString()}::timestamptz)`,
+              sql`(${addr}, ${d.count}, ${d.ts.toISOString()}::timestamptz, ${d.ts.toISOString()}::timestamptz)`,
             ),
             sql`, `,
           )}
