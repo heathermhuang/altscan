@@ -9,6 +9,9 @@ import {
   isSyncableService,
   redactIds,
   planFailureRecovery,
+  assessUtilisation,
+  parseCriticalPct,
+  shouldFailRun,
 } from './sync-db-disk-size.mjs'
 
 const GIB = 1024 ** 3
@@ -252,5 +255,90 @@ describe('planFailureRecovery — the marker must outlive a failed reconciliatio
       rollback: false,
       clearMarker: false,
     })
+  })
+})
+
+describe('assessUtilisation — the only honest disk figure in the system', () => {
+  const GIB = 1024 ** 3
+
+  it('reports TRUE volume use, which pg_database_size structurally cannot see', () => {
+    // Real BNB reading 2026-08-24: 130.50 GiB used of 147.53 GiB, where
+    // pg_database_size saw only 126.40 GiB. The 4.10 GiB it misses is WAL,
+    // temp files and logs sharing the volume -- and pg_ls_waldir() is
+    // permission-denied for the app role, so SQL cannot close the gap at all.
+    const r = assessUtilisation({
+      usageBytes: 130.50 * GIB,
+      capacityBytes: 147.53 * GIB,
+      criticalPct: 93,
+    })
+    expect(r.ok).toBe(true)
+    expect(r.pct).toBeCloseTo(88.5, 1)
+    // The indexer would report 126.40/147 = 86.0% for this same moment.
+    expect(r.critical).toBe(false)
+  })
+
+  it('flags critical only at or above the threshold', () => {
+    const at = (u: number) =>
+      assessUtilisation({ usageBytes: u * GIB, capacityBytes: 100 * GIB, criticalPct: 93 })
+    expect(at(92.9).critical).toBe(false)
+    expect(at(93).critical).toBe(true)
+    expect(at(99).critical).toBe(true)
+  })
+
+  it('does NOT fail the run for the 85-90% band BNB legitimately lives in', () => {
+    // A monitor pinned red is one people stop reading. BNB sawtooths through
+    // the high 80s every cycle; only genuine near-full should break the build.
+    for (const pct of [85, 86, 88.5, 90, 92]) {
+      expect(
+        assessUtilisation({ usageBytes: pct * GIB, capacityBytes: 100 * GIB, criticalPct: 93 })
+          .critical,
+      ).toBe(false)
+    }
+  })
+
+  it('reports unusable metrics instead of inventing a percentage', () => {
+    for (const bad of [undefined, null, NaN, -1, '90']) {
+      expect(
+        assessUtilisation({ usageBytes: bad as never, capacityBytes: 100 * GIB, criticalPct: 93 }).ok,
+      ).toBe(false)
+    }
+    // A zero or missing capacity would divide by zero into Infinity and fire.
+    expect(assessUtilisation({ usageBytes: 1, capacityBytes: 0, criticalPct: 93 }).ok).toBe(false)
+    expect(assessUtilisation({ usageBytes: 1, capacityBytes: NaN, criticalPct: 93 }).ok).toBe(false)
+  })
+})
+
+describe('parseCriticalPct', () => {
+  it('defaults to the indexer own action threshold so both speak the same language', () => {
+    expect(parseCriticalPct(undefined)).toBe(93)
+    expect(parseCriticalPct('')).toBe(93)
+    expect(parseCriticalPct(null)).toBe(93)
+  })
+
+  it('accepts a valid override and rejects nonsense back to the default', () => {
+    expect(parseCriticalPct('88')).toBe(88)
+    expect(parseCriticalPct('95.5')).toBe(95.5)
+    for (const bad of ['0', '-5', '101', 'abc', '  ']) expect(parseCriticalPct(bad)).toBe(93)
+  })
+})
+
+describe('shouldFailRun', () => {
+  it('passes only when nothing is wrong', () => {
+    expect(shouldFailRun({ failed: 0, critical: 0, blind: 0 })).toBe(false)
+    expect(shouldFailRun()).toBe(false)
+  })
+
+  it('fails on an UNMEASURED disk, not just a full or unsynced one', () => {
+    // The regression this pins: an unusable disk-usage metric previously only
+    // warned, so the job exited 0 and summarised "0 at/over" while measuring
+    // nothing at all. The disk could then cross the line for days behind a
+    // green workflow. Blindness is a failure, not a footnote.
+    expect(shouldFailRun({ blind: 1 })).toBe(true)
+  })
+
+  it('fails independently for each reason', () => {
+    expect(shouldFailRun({ failed: 1 })).toBe(true)
+    expect(shouldFailRun({ critical: 1 })).toBe(true)
+    expect(shouldFailRun({ failed: 1, critical: 2, blind: 3 })).toBe(true)
   })
 })

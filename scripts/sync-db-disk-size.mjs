@@ -209,6 +209,63 @@ export function isSyncableService(service) {
 }
 
 /**
+ * Report TRUE volume utilisation, which the indexer structurally cannot.
+ *
+ * `diskPctNow()` divides `pg_database_size()` by the disk size, and
+ * `pg_database_size()` counts database pages only — WAL, temp files and logs
+ * share the volume and are invisible to it. Measured on BNB 2026-08-24 that
+ * overhead was 4.10 GiB: real utilisation 88.5% against a reported 86.0%, so
+ * the 93% destructive trigger actually fires at ~95.4% of the real volume.
+ * `pg_ls_waldir()` is permission-denied for the app role and it is not in
+ * `pg_monitor`, so this gap cannot be closed from inside SQL at all.
+ *
+ * WHY THIS IS A REPORT AND NOT A CORRECTION. The obvious fix — shrink
+ * DB_DISK_GB by the overhead so the indexer's percentage matches reality — ties
+ * a DATA-DESTROYING trigger to WAL volume, which spikes on writes and collapses
+ * at checkpoints. A spike would shrink the denominator, inflate the reported
+ * percentage and fire `runCleanup({compactDays:1})`, permanently deleting A1
+ * compact history. That trades "fires ~2.4 points late" for "may fire early and
+ * destroy data", which is the wrong direction for a last-resort trigger. So the
+ * job reports the honest number and leaves the indexer's threshold alone.
+ *
+ * Only CRITICAL fails the run. A monitor pinned red gets ignored, and BNB
+ * legitimately sits in the 85-90% band through its sawtooth.
+ */
+export function assessUtilisation({ usageBytes, capacityBytes, criticalPct }) {
+  if (
+    typeof usageBytes !== 'number' || !Number.isFinite(usageBytes) || usageBytes < 0 ||
+    typeof capacityBytes !== 'number' || !Number.isFinite(capacityBytes) || capacityBytes <= 0
+  ) {
+    return { ok: false, critical: false, reason: 'usage/capacity metrics unusable' }
+  }
+  const pct = (usageBytes / capacityBytes) * 100
+  return { ok: true, pct, critical: pct >= criticalPct }
+}
+
+/** Percent of the REAL volume at which this job starts failing. Defaults to the
+ *  indexer's own action threshold so the two speak the same language, but
+ *  measured honestly. */
+/**
+ * Whether the run should fail, kept pure so each reason is pinned.
+ *
+ * `blind` is the subtle one and the reason this is a function at all: an
+ * unusable disk-usage metric used to emit only a warning, so the job exited 0
+ * and summarised "0 at/over" while measuring nothing. A monitor that silently
+ * stops measuring is worth as little as one pinned red — the disk could cross
+ * the line for days with the workflow green.
+ */
+export function shouldFailRun({ failed = 0, critical = 0, blind = 0 } = {}) {
+  return failed > 0 || critical > 0 || blind > 0
+}
+
+export function parseCriticalPct(raw, fallback = 93) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback
+  const n = Number(String(raw).trim())
+  if (!Number.isFinite(n) || n <= 0 || n > 100) return fallback
+  return n
+}
+
+/**
  * What to do when a deploy fails, which differs sharply by how we got here.
  *
  * NORMAL UPDATE: we wrote a new value over a known previous one, so restoring
@@ -229,7 +286,7 @@ export function planFailureRecovery({ interrupted }) {
     : { rollback: true, clearMarker: true }
 }
 
-async function api(path, { method = 'GET', body, key } = {}) {
+async function api(path, { method = 'GET', body, key, timeoutMs } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -237,6 +294,10 @@ async function api(path, { method = 'GET', body, key } = {}) {
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    // Only the ADVISORY call passes a deadline. The sync calls deliberately do
+    // not: aborting a deploy poll mid-flight is how you get a config/process
+    // disagreement, which is the failure this whole script guards against.
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   })
   const text = await res.text()
   if (!res.ok) {
@@ -251,14 +312,31 @@ async function api(path, { method = 'GET', body, key } = {}) {
 
 /** Newest sample of the disk-capacity series, in bytes.
  *  NOTE the filter param is `resource`, not `postgresId` — the latter 400s. */
-export async function fetchCapacityBytes(postgresId, key) {
-  const series = await api(`/metrics/disk-capacity?resource=${encodeURIComponent(postgresId)}`, { key })
+async function newestMetric(metric, postgresId, key, timeoutMs) {
+  const series = await api(`/metrics/${metric}?resource=${encodeURIComponent(postgresId)}`, {
+    key,
+    timeoutMs,
+  })
   const values = Array.isArray(series) && series.length ? series[0].values : null
   if (!Array.isArray(values) || values.length === 0) {
-    throw new Error('no disk-capacity samples returned for this database')
+    throw new Error(`no ${metric} samples returned for this database`)
   }
   return values[values.length - 1].value
 }
+
+export const fetchCapacityBytes = (postgresId, key) =>
+  newestMetric('disk-capacity', postgresId, key)
+
+/** Render's disk-usage counts the WHOLE volume — WAL, temp files and logs
+ *  included — which is the number the indexer structurally cannot see.
+ *
+ *  DEADLINED, unlike every other call here. This request is advisory, and an
+ *  endpoint that accepts the connection then stalls would otherwise hang until
+ *  the transport gives up — delaying or blocking the corrective sync it is
+ *  explicitly meant never to block. A timeout simply counts as `blind`. */
+export const USAGE_TIMEOUT_MS = 20_000
+export const fetchUsageBytes = (postgresId, key) =>
+  newestMetric('disk-usage', postgresId, key, USAGE_TIMEOUT_MS)
 
 /** Poll a deploy until it is terminally successful or not. Returns a verdict
  *  string rather than throwing, so the caller can roll back uniformly. */
@@ -311,8 +389,12 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run')
   const targets = parseTargets(process.env.DISK_SYNC_TARGETS)
 
+  const criticalPct = parseCriticalPct(process.env.DISK_ALERT_PCT)
+
   let changed = 0
   let failed = 0
+  let critical = 0
+  let blind = 0
   for (const [i, { serviceId, postgresId }] of targets.entries()) {
     let label = `target ${i + 1}/${targets.length}`
     try {
@@ -327,6 +409,45 @@ async function main() {
       }
 
       const capacityBytes = await fetchCapacityBytes(postgresId, key)
+
+      // Reported EVERY run, before and independently of any sync decision —
+      // this is the only honest disk figure in the system, and it stays useful
+      // on the no-op runs that make up almost all of them.
+      //
+      // ISOLATED IN ITS OWN try/catch ON PURPOSE. Reporting is a strictly
+      // ADVISORY concern and must never be able to block the corrective one: a
+      // transient disk-usage metric failure sharing the outer catch would
+      // `continue` past the sync, so a monitoring blip could stop DB_DISK_GB
+      // being fixed — the opposite of what this job is for.
+      let usage = { ok: false, reason: 'not measured' }
+      try {
+        usage = assessUtilisation({
+          usageBytes: await fetchUsageBytes(postgresId, key),
+          capacityBytes,
+          criticalPct,
+        })
+      } catch (metricErr) {
+        usage = {
+          ok: false,
+          reason: redactIds(metricErr instanceof Error ? metricErr.message : metricErr),
+        }
+      }
+      if (!usage.ok) {
+        // BLIND, not merely quiet. A monitor that silently stops measuring is
+        // worth nothing: without this counter an unusable metric would leave
+        // the run green and the summary reading "0 at/over", so the disk could
+        // cross the line for days with nobody looking. Counted separately from
+        // `failed` because the sync itself is fine — the summary says which.
+        blind++
+        console.error(`WARN   ${label}: ${usage.reason} — real utilisation unknown this run`)
+      } else {
+        console.log(
+          `disk   ${label}: ${usage.pct.toFixed(1)}% of the real volume` +
+            (usage.critical ? `  ⚠ AT OR OVER ${criticalPct}%` : ''),
+        )
+        if (usage.critical) critical++
+      }
+
       const vars = await api(`/services/${serviceId}/env-vars?limit=100`, { key })
       const { diskGb: currentGb, rawDiskGb, pendingTarget, bound } = readServiceEnv(vars, postgresId)
 
@@ -443,8 +564,16 @@ async function main() {
     }
   }
 
-  console.log(`\n${targets.length} target(s), ${changed} updated, ${failed} failed`)
-  if (failed > 0) process.exitCode = 1
+  console.log(
+    `\n${targets.length} target(s), ${changed} updated, ${failed} failed, ` +
+      `${critical} at/over ${criticalPct}% real disk, ${blind} unmeasured`,
+  )
+  // All three fail the run, and the summary above says which — a sync that
+  // could not complete, a volume genuinely close to full, and a monitor that
+  // could not measure are different problems needing different responses. The
+  // last one matters most for being easy to miss: staying green on an
+  // unmeasured disk is how a monitor goes blind for days unnoticed.
+  if (shouldFailRun({ failed, critical, blind })) process.exitCode = 1
 }
 
 // Only run when executed directly, so the test can import the pure helpers.
