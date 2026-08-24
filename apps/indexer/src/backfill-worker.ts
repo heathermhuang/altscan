@@ -20,6 +20,7 @@ import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
 import { getChainConfig, isBackfillEnabled } from '@altscan/chain-config'
+import { sanitizeNullableText, sanitizeTokenMetadata } from './postgres-text'
 // @altscan/providers is imported LAZILY (see loadProviders) and only as types
 // here. HISTORY: the package used to ship TS source (`main: src/index.ts`) with
 // extension-less relative imports; the indexer runs compiled CommonJS under
@@ -155,8 +156,12 @@ export function mapHistoryRows(address: string, txs: ProviderTx[]): HistoryInser
     fromAddress: t.fromAddress,
     toAddress: t.toAddress,
     value: t.value,
-    category: t.category ?? null,
-    summary: t.summary ?? null,
+    // Provider free text reaches a Postgres column here. Both reject U+0000
+    // outright. category is VARCHAR(64) so it is capped at the column width;
+    // summary is TEXT, which has no width to respect — capping it would only
+    // discard data Postgres would have stored.
+    category: sanitizeNullableText(t.category, 64),
+    summary: sanitizeNullableText(t.summary),
     possibleSpam: !!t.possibleSpam,
   }))
 }
@@ -204,8 +209,17 @@ export function mapTransferRows(
       fromAddress: r.fromAddress,
       toAddress: r.toAddress,
       value: r.value,
-      valueFormatted: r.valueFormatted ?? null,
-      tokenSymbol: r.tokenSymbol ?? null,
+      // token_symbol is VARCHAR(64) and value_formatted is TEXT. A NUL byte in
+      // a token symbol is the single most common unstorable value a provider
+      // hands back (padded or malformed ERC-20 metadata) and it fails the whole
+      // multi-row INSERT, not just its own row.
+      //
+      // value_formatted is deliberately NOT capped: it is a decimal string, and
+      // a token with very high decimals can push the first significant digit
+      // arbitrarily far right, so a cap could truncate a real amount down to
+      // zero for the serve path that parses it.
+      valueFormatted: sanitizeNullableText(r.valueFormatted),
+      tokenSymbol: sanitizeNullableText(r.tokenSymbol, 64),
       tokenDecimals: /^\d+$/.test(dec) ? Number(dec) : null,
       blockNumber: Number(r.blockNumber),
       blockTimestamp: parseBlockTimestamp(r.blockTimestamp),
@@ -275,6 +289,14 @@ const stampOf = (entity: ClaimedEntity): string | null =>
   entity.last_attempt_at ? new Date(entity.last_attempt_at).toISOString() : null
 
 /** Apply `set` only if this claim still holds the lease. True = the row moved. */
+/** `last_error` is itself a Postgres TEXT column, so a raw error string can
+ *  carry the very byte that caused the failure — writing it unsanitized would
+ *  make the recovery UPDATE throw too, turning a recoverable page into an
+ *  unrecoverable one. Bounded as well: provider errors can be very long. */
+function lastErrorText(err: unknown): string {
+  return sanitizeTokenMetadata(String(err), 'unknown error', 500)
+}
+
 async function fencedUpdate(ex: Executor, entity: ClaimedEntity, set: SQL): Promise<boolean> {
   const stamp = stampOf(entity)
   if (!stamp) return false
@@ -310,7 +332,7 @@ export async function processOnePage(
     const moved = await fencedUpdate(
       db,
       entity,
-      sql`status='error', attempts=attempts+1, last_error=${String(err)}, last_attempt_at=now(), updated_at=now()`,
+      sql`status='error', attempts=attempts+1, last_error=${lastErrorText(err)}, last_attempt_at=now(), updated_at=now()`,
     )
     return moved ? 'error' : 'lease_lost'
   }
@@ -398,7 +420,27 @@ export async function processOnePage(
     })
   } catch (err) {
     if (err instanceof LeaseLostError) return 'lease_lost'
-    throw err
+    // A failed WRITE has to burn an attempt exactly like a failed provider
+    // call does. Rethrowing instead left the row `running` with attempts=0,
+    // so buildClaimSql's LEAST(pow(2, attempts), 1800) cooldown — which only
+    // applies to status='error' — was unreachable, and the entity came back
+    // every lease forever. Observed on ETH 2026-08-21..24: one NUL byte in a
+    // token symbol looped at ~100 non-refunded budget pages/hour, starving
+    // every other entity behind it.
+    //
+    // The UPDATE runs on `db`, not `tx` — the transaction it is recovering
+    // from has already rolled back.
+    console.warn(
+      `[backfill] write failed for ${entity.entity_type} ${entity.entity_id}:`,
+      err instanceof Error ? err.message : err,
+    )
+    const moved = await fencedUpdate(
+      db,
+      entity,
+      sql`status='error', attempts=attempts+1, last_error=${lastErrorText(err)},
+          last_attempt_at=now(), updated_at=now()`,
+    )
+    return moved ? 'error' : 'lease_lost'
   }
 }
 
