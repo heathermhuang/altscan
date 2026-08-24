@@ -1,0 +1,56 @@
+name: Sync DB_DISK_GB
+
+# Keeps each indexer's DB_DISK_GB equal to its database's real provisioned disk.
+# See scripts/sync-db-disk-size.mjs for why this runs here instead of inside the
+# indexer: a Render API key is unscopable (it can delete every service and
+# database in the account), and the indexer is the process with the largest
+# untrusted-input surface in the system.
+#
+# TRIGGERS ARE DELIBERATELY MINIMAL — `schedule` ONLY. This repo is PUBLIC and
+# this job holds that key.
+#   • `pull_request` / `push` would let branch content choose the code that runs
+#     beside the secret.
+#   • `workflow_dispatch` is omitted for the SAME reason, which is less obvious:
+#     manual dispatch is branch-selectable, so anyone who can dispatch could run
+#     an unreviewed branch's workflow and script with the key, bypassing main's
+#     review entirely. Scheduled runs always use the default branch.
+# To re-run after a failure, use "Re-run jobs" on the run itself — that replays
+# the same default-branch commit. To try changes, run the script locally with
+# --dry-run (it needs only RENDER_API_KEY and DISK_SYNC_TARGETS).
+on:
+  schedule:
+    # Every 2 hours. Retention runs roughly every 6h, so at most one retention
+    # cycle can use a stale denominator after Render resizes a disk.
+    - cron: '17 */2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two runs race an env write + deploy against the same service.
+  group: sync-db-disk-size
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to immutable commit SHAs, not tags. A moved or
+      # compromised tag would otherwise be able to swap the checked-out script
+      # or the `node` binary that runs in the next step holding the Render key.
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 20
+
+      # No install step: the script uses only global fetch (Node 18+) and has no
+      # imports, so there is nothing from the lockfile to build or trust here.
+      - name: Sync DB_DISK_GB to real disk capacity
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          DISK_SYNC_TARGETS: ${{ secrets.DISK_SYNC_TARGETS }}
+        run: node scripts/sync-db-disk-size.mjs
