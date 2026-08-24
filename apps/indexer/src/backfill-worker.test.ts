@@ -155,7 +155,7 @@ describe('mapTransferRows — O1: skip rows with no usable log_index, never inve
 
 // ── Task 2.3: processOnePage status machine (fake db — effects proven in the PG suite) ──
 
-function fakeDb(opts: { fenceMatches?: boolean } = {}) {
+function fakeDb(opts: { fenceMatches?: boolean; writeFails?: Error } = {}) {
   // Guarded UPDATEs use RETURNING id — a matched fence returns a row, a lost
   // lease returns none.
   const guardRow = opts.fenceMatches === false ? [] : [{ id: 1 }]
@@ -169,12 +169,27 @@ function fakeDb(opts: { fenceMatches?: boolean } = {}) {
       fn({
         execute: async (q: unknown) => {
           executed.push(q)
+          // The upsert is the FIRST statement inside the page transaction, so
+          // throwing here reproduces the shipped failure exactly: Postgres
+          // rejects the row and the whole transaction rolls back, taking the
+          // watermark advance with it.
+          if (opts.writeFails) throw opts.writeFails
           return guardRow
         },
       }),
     ),
   }
   return { db: db as unknown as WorkerDb, executed, raw: db }
+}
+
+/** The literal SQL text of a drizzle template (bound params excluded) — enough
+ *  to pin which columns a guarded UPDATE actually sets. Recurses, because
+ *  fencedUpdate nests the caller's `set` clause inside its own template. */
+function sqlText(q: unknown): string {
+  const node = q as { queryChunks?: unknown[]; value?: unknown }
+  if (Array.isArray(node?.queryChunks)) return node.queryChunks.map(sqlText).join('')
+  if (Array.isArray(node?.value)) return node.value.join('')
+  return ''
 }
 
 const entity = (over: Partial<ClaimedEntity> = {}): ClaimedEntity => ({
@@ -383,5 +398,110 @@ describe('sharedBucketOverHeadroom — BNB politeness, per-bucket, inert without
         throw new Error('redis blip')
       }),
     ).toBe(false)
+  })
+})
+
+// ---- The ETH hot loop (2026-08-24): provider metadata must be STORABLE ----
+//
+// `sanitizeTokenMetadata` has existed (and been tested) since the live-indexer
+// path needed it, but the backfill mappers bound provider strings raw. One NUL
+// byte in a token symbol made every INSERT throw, and because a failed write
+// never marked the watermark, the entity was re-claimed every lease forever at
+// ~100 non-refunded budget pages/hour. Both halves are pinned below.
+
+describe('mapper sanitization -- unstorable provider metadata', () => {
+  it('strips the NUL byte Postgres rejects from a token symbol', () => {
+    const { rows } = mapTransferRows(ADDR, [transfer({ tokenSymbol: 'TK\u0000N' })])
+    expect(rows[0].tokenSymbol).toBe('TKN')
+  })
+
+  it('strips control bytes from value_formatted', () => {
+    const { rows } = mapTransferRows(ADDR, [transfer({ valueFormatted: '0.5\u0000\u0007' })])
+    expect(rows[0].valueFormatted).toBe('0.5')
+  })
+
+  it('truncates an over-long symbol to VARCHAR(64) rather than letting the INSERT fail', () => {
+    const { rows } = mapTransferRows(ADDR, [transfer({ tokenSymbol: 'S'.repeat(200) })])
+    expect(rows[0].tokenSymbol).toHaveLength(64)
+  })
+
+  it('never truncates value_formatted or summary — TEXT columns, and a cap would corrupt', () => {
+    // A high-decimals token puts the first significant digit far to the right.
+    // Truncating before it turns a real amount into "0.000..." on the serve
+    // path, which is worse than the unstorable byte we came here to fix.
+    const tiny = '0.' + '0'.repeat(300) + '42'
+    const { rows } = mapTransferRows(ADDR, [transfer({ valueFormatted: tiny })])
+    expect(rows[0].valueFormatted).toBe(tiny)
+
+    const long = 'y'.repeat(9000)
+    const [h] = mapHistoryRows(ADDR, [tx({ summary: long })])
+    expect(h.summary).toBe(long)
+  })
+
+  it('keeps a genuinely absent symbol NULL instead of fabricating one', () => {
+    const { rows } = mapTransferRows(ADDR, [
+      transfer({ tokenSymbol: null as unknown as string }),
+    ])
+    expect(rows[0].tokenSymbol).toBeNull()
+  })
+
+  it('strips control bytes from history summary and category', () => {
+    const [row] = mapHistoryRows(ADDR, [tx({ summary: 'a\u0000b', category: 'se\u0000nd' })])
+    expect(row.summary).toBe('ab')
+    expect(row.category).toBe('send')
+  })
+
+  it('leaves clean metadata byte-identical', () => {
+    const { rows } = mapTransferRows(ADDR, [transfer()])
+    expect(rows[0].tokenSymbol).toBe('TKN')
+    expect(rows[0].valueFormatted).toBe('0.000005')
+    const [h] = mapHistoryRows(ADDR, [tx()])
+    expect(h.summary).toBe('s')
+    expect(h.category).toBe('send')
+  })
+})
+
+describe('processOnePage -- a failed WRITE must burn an attempt', () => {
+  const pageOfOne = () =>
+    providerOf({
+      getAddressHistory: async () => ({
+        ok: true as const,
+        data: { txs: [tx()], cursor: null, totalTxs: 1 },
+      }),
+    })
+  const writeFails = () => new Error('invalid byte sequence for encoding "UTF8": 0x00')
+
+  it('marks the watermark error instead of rethrowing out of the worker loop', async () => {
+    const { db } = fakeDb({ writeFails: writeFails() })
+    await expect(processOnePage(db, pageOfOne(), entity())).resolves.toBe('error')
+  })
+
+  it('increments attempts, which is the ONLY thing that arms the claim cooldown', async () => {
+    // buildClaimSql re-claims an errored row after LEAST(pow(2, attempts),
+    // 1800)s. Leaving status='running' with attempts=0 makes that cooldown
+    // unreachable -- the row returns every lease, forever.
+    const { db, executed } = fakeDb({ writeFails: writeFails() })
+    await processOnePage(db, pageOfOne(), entity())
+    const recovery = executed.map(sqlText).find((t) => t.includes('attempts=attempts+1'))
+    expect(recovery).toBeDefined()
+    expect(recovery).toContain("status='error'")
+    expect(recovery).toContain('last_attempt_at=now()')
+    expect(recovery).toContain('UPDATE backfill_watermarks')
+  })
+
+  it('the recovery UPDATE runs on the outer db, not the rolled-back transaction', async () => {
+    const { db, raw } = fakeDb({ writeFails: writeFails() })
+    await processOnePage(db, pageOfOne(), entity())
+    expect(raw.execute).toHaveBeenCalled()
+  })
+
+  it('reports lease_lost when the fence is gone, without claiming an error it cannot record', async () => {
+    const { db } = fakeDb({ writeFails: writeFails(), fenceMatches: false })
+    await expect(processOnePage(db, pageOfOne(), entity())).resolves.toBe('lease_lost')
+  })
+
+  it('still surfaces a lost lease as lease_lost, not error', async () => {
+    const { db } = fakeDb({ fenceMatches: false })
+    await expect(processOnePage(db, pageOfOne(), entity())).resolves.toBe('lease_lost')
   })
 })

@@ -276,8 +276,11 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     await seed({ entity: ENTITY, status: 'pending' })
     const claimed = (await claimNextEntity(db))!
 
-    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).rejects.toThrow(
-      'injected watermark failure',
+    // The page no longer rethrows: a failed write is RECOVERED into 'error' so
+    // it burns an attempt and arms the claim cooldown. R2 atomicity is
+    // unchanged and is what the row/cursor assertions below still prove.
+    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).resolves.toBe(
+      'error',
     )
 
     const [{ n }] = await raw.unsafe(
@@ -285,18 +288,28 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     )
     expect(n).toBe(0)
     const [wm] = await raw.unsafe(
-      `SELECT oldest_cursor, rows_written FROM backfill_watermarks WHERE id = ${claimed.id}`,
+      `SELECT oldest_cursor, rows_written, status, attempts, last_error
+       FROM backfill_watermarks WHERE id = ${claimed.id}`,
     )
     expect(wm.oldest_cursor).toBeNull()
     expect(wm.rows_written).toBe(0)
+    // The recovery UPDATE committed even though the page transaction rolled
+    // back — it runs on the outer db, not the transaction handle.
+    expect(wm.status).toBe('error')
+    expect(wm.attempts).toBe(1)
+    expect(wm.last_error).toContain('injected watermark failure')
   })
 
   it('R2: the re-claimed page then lands exactly once, lowercase, cursor advanced', async () => {
     await seed({ entity: ENTITY, status: 'pending' })
     const claimed = (await claimNextEntity(db))!
-    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).rejects.toThrow()
+    await expect(processOnePage(watermarkThrowingDb(), historyProvider, claimed)).resolves.toBe(
+      'error',
+    )
 
-    // The crashed claim stays 'running' until its lease expires — expire it, re-claim, re-page.
+    // The failed claim is now 'error' with attempts=1, so it waits out
+    // LEAST(pow(2,1), 1800) = 2s rather than a full lease. Backdating past both
+    // bounds makes it claimable either way — re-claim and re-page.
     await raw.unsafe(
       `UPDATE backfill_watermarks SET last_attempt_at = now() - interval '600 seconds' WHERE id = ${claimed.id}`,
     )
