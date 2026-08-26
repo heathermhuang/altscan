@@ -1,5 +1,6 @@
-import { db, schema } from '@/lib/db'
-import { desc, sql } from 'drizzle-orm'
+import { schema } from '@/lib/db'
+import { fetchWhales, type WhalePeriod } from '@/lib/whales'
+import { desc } from 'drizzle-orm'
 import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
@@ -13,17 +14,6 @@ export const metadata: Metadata = {
   title: `Whale Tracker`,
   description: `Track large ${chainConfig.currency} transfers on ${chainConfig.name}. Monitor whale movements and high-value transactions on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/whales' },
-}
-
-type WhaleTx = {
-  hash: string
-  fromAddress: string
-  toAddress: string | null
-  value: string
-  blockNumber: number
-  timestamp: Date
-  transferType: 'native' | 'token'
-  tokenSymbol?: string
 }
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -57,16 +47,9 @@ export default async function WhalesPage({
   searchParams: Promise<{ period?: string }>
 }) {
   const { period: periodParam } = await searchParams
-  const period = ['1h', '24h', '7d', 'all'].includes(periodParam ?? '') ? (periodParam as string) : '24h'
-
-  const cutoff =
-    period === '1h'
-      ? sql`NOW() - INTERVAL '1 hour'`
-      : period === '24h'
-      ? sql`NOW() - INTERVAL '24 hours'`
-      : period === '7d'
-      ? sql`NOW() - INTERVAL '7 days'`
-      : sql`NOW() - INTERVAL '30 days'`  // "all" capped to 30d
+  const period = (['1h', '24h', '7d', 'all'].includes(periodParam ?? '')
+    ? periodParam
+    : '24h') as WhalePeriod
 
   // Minimum whale threshold in wei: 1 BNB / 0.5 ETH for native
   const minNativeWei = chainConfig.key === 'bnb' ? '1000000000000000000' : '500000000000000000'
@@ -89,64 +72,7 @@ export default async function WhalesPage({
     })),
   ]
 
-  let whales: WhaleTx[] = []
-
-  try {
-    // Query 1: Native value transfers
-    const nativePromise = db.execute(sql`
-      SELECT hash, from_address as "fromAddress", to_address as "toAddress",
-             value, block_number as "blockNumber", timestamp,
-             'native' as "transferType", ${chainConfig.currency} as "tokenSymbol"
-      FROM transactions
-      WHERE timestamp >= ${cutoff}
-        AND value > ${minNativeWei}
-      ORDER BY value DESC
-      LIMIT 25
-    `)
-
-    // Query 2: Large token transfers (WBNB/WETH + stablecoins)
-    const tokenAddresses = tokenFilters.map(t => t.address)
-    const tokenPromise = tokenAddresses.length > 0 ? db.execute(sql`
-      SELECT tt.tx_hash as hash, tt.from_address as "fromAddress", tt.to_address as "toAddress",
-             tt.value, tt.block_number as "blockNumber", tt.timestamp,
-             'token' as "transferType",
-             COALESCE(tk.symbol, 'TOKEN') as "tokenSymbol"
-      FROM token_transfers tt
-      LEFT JOIN tokens tk ON tk.address = tt.token_address
-      WHERE tt.timestamp >= ${cutoff}
-        AND tt.token_address = ANY(${tokenAddresses})
-        AND (
-          ${sql.join(
-            tokenFilters.map(t =>
-              sql`(tt.token_address = ${t.address} AND CAST(tt.value AS numeric) > ${t.minValue})`
-            ),
-            sql` OR `
-          )}
-        )
-      ORDER BY tt.timestamp DESC
-      LIMIT 25
-    `) : Promise.resolve([])
-
-    const [nativeResult, tokenResult] = await Promise.race([
-      Promise.all([nativePromise, tokenPromise]),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('whales query timeout (15s)')), 15000)),
-    ])
-
-    const nativeWhales = Array.from(nativeResult).map(parseRow)
-    const tokenWhales = Array.from(tokenResult).map(parseRow)
-
-    // Merge and sort by value descending (normalize to ETH/BNB equivalent)
-    whales = [...nativeWhales, ...tokenWhales]
-      .sort((a, b) => {
-        // Sort native and wrapped by value desc, stablecoins by value desc
-        const aVal = safeBigInt(a.value)
-        const bVal = safeBigInt(b.value)
-        return bVal > aVal ? 1 : bVal < aVal ? -1 : 0
-      })
-      .slice(0, 50)
-  } catch (err) {
-    console.error('[whales] query failed:', err instanceof Error ? err.message : err)
-  }
+  const { rows: whales, degraded } = await fetchWhales(period, minNativeWei, tokenFilters)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -181,6 +107,12 @@ export default async function WhalesPage({
         variant="compact"
         className="mb-6"
       />
+
+      {degraded && whales.length > 0 && (
+        <p className="mb-3 text-xs text-gray-500">
+          Showing partial results — one data source is unavailable.
+        </p>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -236,8 +168,15 @@ export default async function WhalesPage({
             })}
             {whales.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
-                  No large transfers found for this time period.
+                <td colSpan={5} className="px-4 py-8 text-center">
+                  {degraded ? (
+                    <>
+                      <p className="text-gray-500">Couldn&rsquo;t load whale transfers right now.</p>
+                      <p className="text-gray-400 text-xs mt-1">This is a problem on our side, not an empty market. Try again shortly.</p>
+                    </>
+                  ) : (
+                    <p className="text-gray-400">No large transfers found for this time period.</p>
+                  )}
                 </td>
               </tr>
             )}
@@ -246,20 +185,6 @@ export default async function WhalesPage({
       </div>
     </div>
   )
-}
-
-function parseRow(row: unknown): WhaleTx {
-  const r = row as Record<string, unknown>
-  return {
-    hash: String(r.hash),
-    fromAddress: String(r.fromAddress),
-    toAddress: r.toAddress ? String(r.toAddress) : null,
-    value: String(r.value),
-    blockNumber: Number(r.blockNumber),
-    timestamp: new Date(r.timestamp as string),
-    transferType: r.transferType === 'token' ? 'token' : 'native',
-    tokenSymbol: r.tokenSymbol ? String(r.tokenSymbol) : undefined,
-  }
 }
 
 function formatTokenAmount(value: string, decimals: number): string {
