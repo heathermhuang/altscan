@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { isTrainingBot, HEAVY_PATH_PREFIXES } from '@/lib/bot-policy'
+import { allowedOrigins, corsHeaders } from '@/lib/cors'
 
 /**
  * Minimal middleware — request-level bot throttling + abuse-source IP block.
@@ -170,6 +171,21 @@ export function middleware(request: NextRequest) {
         'X-Throttle-Reason': 'aggressive-crawler',
       },
     })
+  }
+
+  // Public API CORS. Must run before the markdown rewrite, which returns early.
+  if (pathname.startsWith('/api/v1/')) {
+    const headers = corsHeaders(request.headers.get('origin'), allowedOrigins())
+
+    // Answer preflight here. Most v1 route handlers export no OPTIONS, so
+    // without this a preflight gets a 405 and the real request never fires.
+    if (request.method === 'OPTIONS') {
+      return new NextResponse(null, { status: 204, headers })
+    }
+
+    const res = NextResponse.next()
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v)
+    return res
   }
 
   // Markdown content negotiation — rewrite (not redirect) so the URL stays
