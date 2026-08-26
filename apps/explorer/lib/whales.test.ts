@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries } from '@/lib/whales'
-import { safeBigInt } from '@/lib/format'
+import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, type WhaleTx } from '@/lib/whales'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -68,24 +67,34 @@ describe('settleWhaleQueries', () => {
     expect(result.native).toEqual([])
     expect(result.token).toEqual([])
   })
+})
 
-  it('sorts values that carry a numeric(78,18) decimal tail', async () => {
-    // The exact shape postgres-js returns for transactions.value.
-    const withScale = { hash: '0xa', fromAddress: '0xf', toAddress: '0xt',
-      value: '5000000000000000000.000000000000000000', blockNumber: 1,
-      timestamp: new Date().toISOString(), transferType: 'native' }
-    const plain = { ...withScale, hash: '0xb', value: '9000000000000000000' }
+describe('mergeWhaleRows', () => {
+  const row = (hash: string, value: string): WhaleTx => ({
+    hash, fromAddress: '0xf', toAddress: '0xt', value, blockNumber: 1,
+    timestamp: new Date(), transferType: 'native',
+  })
 
-    const result = await settleWhaleQueries(
-      Promise.resolve([withScale, plain]),
-      Promise.resolve([]),
-    )
-    expect(result.native).toHaveLength(2)
+  it('ranks values that carry a numeric(78,18) decimal tail', () => {
+    // The exact shape postgres-js returns for transactions.value. Raw BigInt()
+    // throws SyntaxError on this, so a broken comparator fails here rather than
+    // silently misordering.
+    const scaled = row('0xa', '5000000000000000000.000000000000000000')
+    const plain = row('0xb', '9000000000000000000')
 
-    const sorted = [...result.native!].sort((a, b) => {
-      const av = safeBigInt(a.value), bv = safeBigInt(b.value)
-      return bv > av ? 1 : bv < av ? -1 : 0
-    })
-    expect(sorted[0].hash).toBe('0xb')   // 9e18 outranks 5e18
+    const merged = mergeWhaleRows([scaled, plain], [])
+
+    expect(merged.map(r => r.hash)).toEqual(['0xb', '0xa'])
+  })
+
+  it('treats a null half as absent, not as an error', () => {
+    expect(mergeWhaleRows(null, [row('0xa', '1')]).map(r => r.hash)).toEqual(['0xa'])
+    expect(mergeWhaleRows([row('0xb', '1')], null).map(r => r.hash)).toEqual(['0xb'])
+    expect(mergeWhaleRows(null, null)).toEqual([])
+  })
+
+  it('caps the merged list at 50', () => {
+    const many = Array.from({ length: 60 }, (_, i) => row(`0x${i}`, String(i)))
+    expect(mergeWhaleRows(many, [])).toHaveLength(50)
   })
 })

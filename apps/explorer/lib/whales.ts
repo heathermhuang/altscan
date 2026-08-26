@@ -130,6 +130,30 @@ export type WhaleFetch = {
   degraded: boolean
 }
 
+/**
+ * Merge both halves, rank by value descending, cap the list.
+ *
+ * Pure and exported so tests exercise the REAL comparator. A test that
+ * re-implements this sort inline passes identically whether the comparator is
+ * correct or not, which is exactly how the numeric(78,18) crash slipped through.
+ */
+export function mergeWhaleRows(
+  native: WhaleTx[] | null,
+  token: WhaleTx[] | null,
+): WhaleTx[] {
+  return [...(native ?? []), ...(token ?? [])]
+    .sort((a, b) => {
+      // safeBigInt, NOT BigInt. `transactions.value` is numeric(78,18) and
+      // postgres-js returns the full scale — "5000…000.000000000000000000".
+      // Raw BigInt() throws SyntaxError on that, which would escape fetchWhales
+      // and 500 the page: strictly worse than the bug being fixed.
+      const av = safeBigInt(a.value)
+      const bv = safeBigInt(b.value)
+      return bv > av ? 1 : bv < av ? -1 : 0
+    })
+    .slice(0, 50)
+}
+
 export async function fetchWhales(
   period: WhalePeriod,
   minNativeWei: string,
@@ -142,17 +166,6 @@ export async function fetchWhales(
       : Promise.resolve([]),
   )
 
-  const rows = [...(result.native ?? []), ...(result.token ?? [])]
-    .sort((a, b) => {
-      // safeBigInt, NOT BigInt. `transactions.value` is numeric(78,18) and
-      // postgres-js returns the full scale — "5000…000.000000000000000000".
-      // Raw BigInt() throws SyntaxError on that, which would escape fetchWhales
-      // and 500 the page: strictly worse than the bug being fixed.
-      const av = safeBigInt(a.value)
-      const bv = safeBigInt(b.value)
-      return bv > av ? 1 : bv < av ? -1 : 0
-    })
-    .slice(0, 50)
-
+  const rows = mergeWhaleRows(result.native, result.token)
   return { rows, degraded: result.native === null || result.token === null }
 }
