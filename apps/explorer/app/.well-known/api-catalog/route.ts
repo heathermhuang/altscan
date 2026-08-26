@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
+import { API_SURFACE } from '@/lib/api-surface'
 
 // RFC 9727 API Catalog — advertises this site's public REST API so agents can
 // discover it without scraping. One linkset entry per public resource family.
@@ -11,33 +12,13 @@ export async function GET() {
   const status = `${BASE}/api/health`
 
   const linkset = {
-    linkset: [
-      {
-        anchor: `${BASE}/api/v1/stats`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-        status: [{ href: status, type: 'application/json' }],
-      },
-      {
-        anchor: `${BASE}/api/v1/blocks`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-      },
-      {
-        anchor: `${BASE}/api/v1/transactions`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-      },
-      {
-        anchor: `${BASE}/api/v1/addresses`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-      },
-      {
-        anchor: `${BASE}/api/v1/tokens`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-      },
-      {
-        anchor: `${BASE}/api/v1/contracts`,
-        'service-doc': [{ href: docs, type: 'text/html' }],
-      },
-    ],
+    linkset: API_SURFACE.filter(e => e.catalogAnchor).map(e => ({
+      anchor: `${BASE}${e.path}`,
+      'service-doc': [{ href: docs, type: 'text/html' }],
+      ...(e.path === '/api/v1/stats'
+        ? { status: [{ href: status, type: 'application/json' }] }
+        : {}),
+    })),
   }
 
   return NextResponse.json(linkset, {
