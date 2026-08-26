@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
+import { safeBigInt } from '@/lib/format'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
@@ -143,8 +144,12 @@ export async function fetchWhales(
 
   const rows = [...(result.native ?? []), ...(result.token ?? [])]
     .sort((a, b) => {
-      const av = BigInt(a.value || '0')
-      const bv = BigInt(b.value || '0')
+      // safeBigInt, NOT BigInt. `transactions.value` is numeric(78,18) and
+      // postgres-js returns the full scale — "5000…000.000000000000000000".
+      // Raw BigInt() throws SyntaxError on that, which would escape fetchWhales
+      // and 500 the page: strictly worse than the bug being fixed.
+      const av = safeBigInt(a.value)
+      const bv = safeBigInt(b.value)
       return bv > av ? 1 : bv < av ? -1 : 0
     })
     .slice(0, 50)

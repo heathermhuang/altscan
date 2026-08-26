@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery } from '@/lib/whales'
+import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries } from '@/lib/whales'
+import { safeBigInt } from '@/lib/format'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -35,8 +36,6 @@ describe('buildNativeWhaleQuery', () => {
   })
 })
 
-import { settleWhaleQueries } from '@/lib/whales'
-
 describe('settleWhaleQueries', () => {
   it('keeps the native rows when the token query fails', async () => {
     const nativeRow = { hash: '0xabc', fromAddress: '0xf', toAddress: '0xt',
@@ -68,5 +67,25 @@ describe('settleWhaleQueries', () => {
     const result = await settleWhaleQueries(Promise.resolve([]), Promise.resolve([]))
     expect(result.native).toEqual([])
     expect(result.token).toEqual([])
+  })
+
+  it('sorts values that carry a numeric(78,18) decimal tail', async () => {
+    // The exact shape postgres-js returns for transactions.value.
+    const withScale = { hash: '0xa', fromAddress: '0xf', toAddress: '0xt',
+      value: '5000000000000000000.000000000000000000', blockNumber: 1,
+      timestamp: new Date().toISOString(), transferType: 'native' }
+    const plain = { ...withScale, hash: '0xb', value: '9000000000000000000' }
+
+    const result = await settleWhaleQueries(
+      Promise.resolve([withScale, plain]),
+      Promise.resolve([]),
+    )
+    expect(result.native).toHaveLength(2)
+
+    const sorted = [...result.native!].sort((a, b) => {
+      const av = safeBigInt(a.value), bv = safeBigInt(b.value)
+      return bv > av ? 1 : bv < av ? -1 : 0
+    })
+    expect(sorted[0].hash).toBe('0xb')   // 9e18 outranks 5e18
   })
 })
