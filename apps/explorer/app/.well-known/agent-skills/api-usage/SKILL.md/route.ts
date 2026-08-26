@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
+import { API_SURFACE } from '@/lib/api-surface'
 
 // A single, human+agent-readable skill describing how to use the public REST API.
 // Served as plain markdown so agentskills.io-style crawlers can cat it directly.
 
 export const revalidate = 3600
+
+const endpointLines = API_SURFACE.map(e => `- \`GET ${e.path}\` — ${e.summary}`).join('\n')
 
 export function skillBody(): string {
   const c = chainConfig
@@ -24,15 +27,7 @@ All \`/api/v1/*\` endpoints are public and require no authentication. There is n
 
 ## Endpoints
 
-- \`GET /api/v1/stats\` — network stats (latest block, tx count, token count, avg gas price)
-- \`GET /api/v1/blocks?limit=N\` — recent blocks
-- \`GET /api/v1/blocks/:number\` — one block with txs
-- \`GET /api/v1/transactions?limit=N\` — recent transactions
-- \`GET /api/v1/transactions/:hash\` — one transaction with receipt
-- \`GET /api/v1/addresses/:address\` — address summary (balance, nonce, tx count)
-- \`GET /api/v1/tokens\` — token list
-- \`GET /api/v1/tokens/:contract\` — one token (metadata + holder count)
-- \`GET /api/v1/contracts/:address\` — verified-contract metadata
+${endpointLines}
 
 All responses are JSON. For human-friendly markdown representations, send \`Accept: text/markdown\` to any of:
 

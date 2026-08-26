@@ -73,11 +73,10 @@ const endpoints: Endpoint[] = [
   {
     method: 'GET',
     path: '/api/v1/transactions',
-    description: 'Returns a paginated list of transactions. Optionally filter by address.',
+    description: 'Returns a paginated list of recent transactions, ordered by block number and transaction index, descending.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1)' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 25, max: 100)' },
-      { name: 'address', type: 'string', required: false, description: 'Filter by from or to address (e.g. 0x...)' },
+      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
     ],
     exampleResponse: JSON.stringify(
       {
