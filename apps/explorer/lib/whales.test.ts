@@ -33,6 +33,15 @@ describe('buildNativeWhaleQuery', () => {
     expect(text).toContain('FROM transactions')
     expect(params).toContain('1000000000000000000')
   })
+
+  it.each([
+    ['1h', "INTERVAL '1 hour'"],
+    ['24h', "INTERVAL '24 hours'"],
+    ['7d', "INTERVAL '7 days'"],
+    ['all', "INTERVAL '30 days'"],   // 'all' is deliberately capped at 30d
+  ] as const)('maps period %s to %s', (period, interval) => {
+    expect(toQuery(buildNativeWhaleQuery(period, '1')).sql).toContain(interval)
+  })
 })
 
 describe('settleWhaleQueries', () => {
@@ -78,13 +87,14 @@ describe('mergeWhaleRows', () => {
   it('ranks values that carry a numeric(78,18) decimal tail', () => {
     // The exact shape postgres-js returns for transactions.value. Raw BigInt()
     // throws SyntaxError on this, so a broken comparator fails here rather than
-    // silently misordering.
-    const scaled = row('0xa', '5000000000000000000.000000000000000000')
-    const plain = row('0xb', '9000000000000000000')
+    // silently misordering. Digit counts deliberately differ (20 vs 19) so
+    // lexicographic and numeric ordering disagree.
+    const scaled = row('0xa', '10000000000000000000.000000000000000000')  // 1e19, 20 digits
+    const plain = row('0xb', '9000000000000000000')                       // 9e18, 19 digits
 
     const merged = mergeWhaleRows([scaled, plain], [])
 
-    expect(merged.map(r => r.hash)).toEqual(['0xb', '0xa'])
+    expect(merged.map(r => r.hash)).toEqual(['0xa', '0xb'])   // 1e19 outranks 9e18
   })
 
   it('treats a null half as absent, not as an error', () => {
@@ -93,8 +103,15 @@ describe('mergeWhaleRows', () => {
     expect(mergeWhaleRows(null, null)).toEqual([])
   })
 
-  it('caps the merged list at 50', () => {
+  it('ranks numerically before capping at 50', () => {
     const many = Array.from({ length: 60 }, (_, i) => row(`0x${i}`, String(i)))
-    expect(mergeWhaleRows(many, [])).toHaveLength(50)
+
+    const merged = mergeWhaleRows(many, [])
+
+    expect(merged).toHaveLength(50)
+    // Ranked before sliced: the top value must survive.
+    expect(merged[0].value).toBe('59')
+    // Numeric, not lexicographic: a lexicographic sort would rank '9' first.
+    expect(merged.map(r => r.value)).not.toContain('9')
   })
 })

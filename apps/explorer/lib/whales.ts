@@ -1,3 +1,24 @@
+/**
+ * Whale Tracker data access — the queries behind /whales, extracted from the
+ * page so they can be tested.
+ *
+ * They were extracted because the page was DEAD in production on both chains,
+ * for every time period, and nothing noticed. `AND tt.token_address =
+ * ANY(${tokenAddresses})` renders through drizzle as `ANY(($1, $2))` — a row
+ * constructor, not an array — which Postgres rejects with "op ANY/ALL (array)
+ * requires array on right side". The page caught that, logged it, and rendered
+ * the empty state, so an outage was indistinguishable from a quiet market.
+ *
+ * Two conventions here are load-bearing:
+ *   - `WhaleTx[] | null`: null means that half FAILED, [] means it succeeded
+ *     and found nothing. The page renders those differently, so they must not
+ *     collapse. `mergeWhaleRows` erases the distinction via `?? []`, which is
+ *     why `fetchWhales` computes `degraded` from the settle result and never
+ *     from the merged rows.
+ *   - Each half settles independently. A shared Promise.all previously let the
+ *     token query's rejection discard a native result that had already
+ *     succeeded.
+ */
 import { sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
@@ -55,6 +76,13 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
 }
 
 export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly TokenFilter[]): SQL {
+  // Redundant with the OR arms below, which already pin token_address to this
+  // same set — logically this IN clause filters no additional rows. Why it's
+  // here isn't documented: it was introduced in the same commit as the OR arms
+  // (950f422), with no rationale given there either, so this may be incidental
+  // rather than a deliberate planner hint — I couldn't confirm intent either
+  // way. Kept rather than deleted: verify with EXPLAIN before removing a
+  // redundant filter neither of us added.
   const addressList = sql.join(filters.map(f => sql`${f.address}`), sql`, `)
   const thresholds = sql.join(
     filters.map(f => sql`(tt.token_address = ${f.address} AND tt.value > ${f.minValue})`),
@@ -75,7 +103,7 @@ export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly Toke
   `
 }
 
-export function parseWhaleRow(row: unknown): WhaleTx {
+function parseWhaleRow(row: unknown): WhaleTx {
   const r = row as Record<string, unknown>
   return {
     hash: String(r.hash),
