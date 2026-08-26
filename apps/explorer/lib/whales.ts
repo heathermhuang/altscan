@@ -121,3 +121,33 @@ export async function settleWhaleQueries(
 
   return { native: unwrap(native, 'native'), token: unwrap(token, 'token') }
 }
+
+export type WhaleFetch = {
+  rows: WhaleTx[]
+  /** true when at least one half failed — the page must say so rather than
+   *  rendering the empty state and implying the market was quiet. */
+  degraded: boolean
+}
+
+export async function fetchWhales(
+  period: WhalePeriod,
+  minNativeWei: string,
+  filters: readonly TokenFilter[],
+): Promise<WhaleFetch> {
+  const result = await settleWhaleQueries(
+    db.execute(buildNativeWhaleQuery(period, minNativeWei)),
+    filters.length > 0
+      ? db.execute(buildTokenWhaleQuery(period, filters))
+      : Promise.resolve([]),
+  )
+
+  const rows = [...(result.native ?? []), ...(result.token ?? [])]
+    .sort((a, b) => {
+      const av = BigInt(a.value || '0')
+      const bv = BigInt(b.value || '0')
+      return bv > av ? 1 : bv < av ? -1 : 0
+    })
+    .slice(0, 50)
+
+  return { rows, degraded: result.native === null || result.token === null }
+}
