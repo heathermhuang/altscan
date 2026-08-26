@@ -34,3 +34,39 @@ describe('buildNativeWhaleQuery', () => {
     expect(params).toContain('1000000000000000000')
   })
 })
+
+import { settleWhaleQueries } from '@/lib/whales'
+
+describe('settleWhaleQueries', () => {
+  it('keeps the native rows when the token query fails', async () => {
+    const nativeRow = { hash: '0xabc', fromAddress: '0xf', toAddress: '0xt',
+      value: '1', blockNumber: 1, timestamp: new Date().toISOString(), transferType: 'native' }
+
+    const result = await settleWhaleQueries(
+      Promise.resolve([nativeRow]),
+      Promise.reject(new Error('boom')),
+    )
+
+    expect(result.native).toHaveLength(1)
+    expect(result.token).toBeNull()      // null = failed, distinct from []
+  })
+
+  it('keeps the token rows when the native query fails', async () => {
+    const tokenRow = { hash: '0xdef', fromAddress: '0xf', toAddress: '0xt',
+      value: '1', blockNumber: 1, timestamp: new Date().toISOString(), transferType: 'token' }
+
+    const result = await settleWhaleQueries(
+      Promise.reject(new Error('boom')),
+      Promise.resolve([tokenRow]),
+    )
+
+    expect(result.native).toBeNull()
+    expect(result.token).toHaveLength(1)
+  })
+
+  it('distinguishes an empty success from a failure', async () => {
+    const result = await settleWhaleQueries(Promise.resolve([]), Promise.resolve([]))
+    expect(result.native).toEqual([])
+    expect(result.token).toEqual([])
+  })
+})

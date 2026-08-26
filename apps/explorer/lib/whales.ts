@@ -87,3 +87,37 @@ export function parseWhaleRow(row: unknown): WhaleTx {
     tokenSymbol: r.tokenSymbol ? String(r.tokenSymbol) : undefined,
   }
 }
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
+    p.then(v => { clearTimeout(t); resolve(v) }, e => { clearTimeout(t); reject(e) })
+  })
+}
+
+/**
+ * Settle both halves independently. The previous Promise.all meant the token
+ * query's rejection also threw away a native result that had already succeeded,
+ * so one broken query emptied the whole page. Each half now times out and fails
+ * on its own; `null` records "this half failed" so the caller can say so.
+ */
+export async function settleWhaleQueries(
+  nativePromise: Promise<unknown>,
+  tokenPromise: Promise<unknown>,
+): Promise<WhaleResult> {
+  const [native, token] = await Promise.allSettled([
+    withTimeout(nativePromise, QUERY_TIMEOUT_MS, 'whales native'),
+    withTimeout(tokenPromise, QUERY_TIMEOUT_MS, 'whales token'),
+  ])
+
+  const unwrap = (r: PromiseSettledResult<unknown>, half: string): WhaleTx[] | null => {
+    if (r.status === 'rejected') {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+      console.error(`[whales] ${half} query failed: ${msg}`)
+      return null
+    }
+    return Array.from(r.value as Iterable<unknown>).map(parseWhaleRow)
+  }
+
+  return { native: unwrap(native, 'native'), token: unwrap(token, 'token') }
+}
