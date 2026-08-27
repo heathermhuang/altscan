@@ -1,12 +1,18 @@
 import { schema } from '@/lib/db'
-import { fetchBlockPage, parseBlock, parsePageParam, PER_PAGE, BLOCKS_REVALIDATE_SECONDS } from '@/lib/list-pages'
+import { fetchBlockPage, parseBlock, parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = BLOCKS_REVALIDATE_SECONDS
+// Next.js statically analyses route segment config and cannot resolve an
+// imported identifier here — `export const revalidate = BLOCKS_REVALIDATE_SECONDS`
+// fails the BUILD with "Unknown identifier at revalidate", which typecheck and
+// the test suite both pass because CI never builds the explorer. It must be a
+// literal. `revalidate-parity.test.ts` pins it to the cache TTL so the two
+// cannot drift.
+export const revalidate = 60
 
 export const metadata: Metadata = {
   title: `Recent Blocks`,

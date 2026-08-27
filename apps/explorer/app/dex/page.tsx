@@ -18,7 +18,13 @@ export const metadata: Metadata = {
   alternates: { canonical: '/dex' },
 }
 
-export const revalidate = DEX_REVALIDATE_SECONDS
+// Next.js statically analyses route segment config and cannot resolve an
+// imported identifier here — `export const revalidate = DEX_REVALIDATE_SECONDS`
+// fails the BUILD with "Unknown identifier at revalidate", which typecheck and
+// the test suite both pass because CI never builds the explorer. It must be a
+// literal. `revalidate-parity.test.ts` pins it to the cache TTL so the two
+// cannot drift.
+export const revalidate = 300
 
 export default async function DexPage({
   searchParams,
