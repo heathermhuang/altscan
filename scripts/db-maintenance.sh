@@ -56,8 +56,8 @@ done
 
 echo ""
 echo "=== Optimization ==="
-echo "Run: psql \$DATABASE_URL -f scripts/db-optimize.sql"
-echo "  - Creates composite indexes (from_address, timestamp) on transactions + token_transfers"
+echo "Indexes: managed automatically by the indexer (ensure-schema.ts) — nothing to run."
+echo "Retention catch-up: psql \$DATABASE_URL -f scripts/db-optimize.sql"
 echo "  - Prunes gas_history (>30d), logs (>60d), dex_trades (>60d)"
 echo "  - VACUUM ANALYZE on pruned tables"
 

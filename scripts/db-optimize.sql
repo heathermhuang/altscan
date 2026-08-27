@@ -2,41 +2,34 @@
 -- Run against each database: psql $DATABASE_URL -f scripts/db-optimize.sql
 --
 -- Safe to run multiple times (all statements are idempotent)
--- NOTE: CREATE INDEX CONCURRENTLY cannot run inside a transaction,
--- so this script must NOT be wrapped in BEGIN/COMMIT.
+-- Retention catch-up and VACUUM only — see the index note below.
 
 -----------------------------------------------------------------------
--- 1. Drop redundant single-column indexes
---    Composite indexes (address, timestamp) already cover single-address
---    lookups. Each redundant index wastes ~2-4GB on 40M+ row tables.
+-- Indexes are NOT managed here.
+--
+-- They used to be: sections 1 and 2 of this file dropped four redundant
+-- single-column indexes and created the composites, including
+--   tx_ts_value_idx  ON transactions (timestamp DESC, value DESC)
+--   tt_token_ts_idx  ON token_transfers (token_address, timestamp DESC)
+-- added "for whale tracker page" in da8e513 on 2026-04-08.
+--
+-- Nothing has ever executed this file. The only reference to it anywhere in
+-- the repo is an echo in db-maintenance.sh telling a human to run it, and on
+-- 2026-08-27 both production databases were checked directly: neither of those
+-- two indexes existed on either chain, four and a half months later. The
+-- Whale Tracker was seq-scanning `transactions` and `token_transfers` on every
+-- request and timing out against its own 15s budget.
+--
+-- The index DDL now lives in apps/indexer/src/ensure-schema.ts, which actually
+-- runs, on every indexer boot, on both chains. Do not re-add indexes here:
+-- a second place to declare them is what produced a 4-month outage that
+-- nobody could see, because the file looked like it had already fixed it.
+--
+-- (tt_token_ts_idx cannot be expressed in this file at all on BNB: its
+-- token_transfers is RANGE-partitioned, and CREATE INDEX CONCURRENTLY is
+-- rejected on a partitioned parent. That statement would have errored here
+-- even if someone had run it. ensure-schema builds it per-partition instead.)
 -----------------------------------------------------------------------
-
-DROP INDEX CONCURRENTLY IF EXISTS tx_from_idx;
-DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx;
-DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx;
-DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx;
-
------------------------------------------------------------------------
--- 2. Ensure composite indexes exist (idempotent)
------------------------------------------------------------------------
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_from_ts_idx
-  ON transactions (from_address, "timestamp" DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_to_ts_idx
-  ON transactions (to_address, "timestamp" DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx
-  ON token_transfers (from_address, "timestamp" DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_to_ts_idx
-  ON token_transfers (to_address, "timestamp" DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx
-  ON transactions ("timestamp" DESC, value DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_ts_idx
-  ON token_transfers (token_address, "timestamp" DESC);
 
 -----------------------------------------------------------------------
 -- 3. Data retention: keep 7 days of high-volume data
