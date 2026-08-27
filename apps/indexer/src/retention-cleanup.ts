@@ -8,13 +8,13 @@
  * Delete order respects FK: transactions → blocks (transactions.block_number
  * references blocks.number, so transactions must be deleted first).
  */
+import { indexerConfig } from './config-instance'
 import { getMaintenanceDb } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
-import { HOLDER_BALANCE_TRACKING_ENABLED } from './block-processor'
 import { buildRetentionPlan, parseCompactRetentionDays } from './retention-policy'
 
-const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS ?? '7', 10)
+const RETENTION_DAYS = indexerConfig.retention.days
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
 // Holder-count recompute scans token_balances and updates tokens — takes
@@ -22,18 +22,16 @@ const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
 // starves the block indexer and web queries. Every 15min is a reasonable
 // default (token-page holder counts are eventually consistent anyway).
 // Override with HOLDER_COUNT_INTERVAL_MIN env var if you want faster freshness.
-const HOLDER_COUNT_EVERY_MS =
-  parseInt(process.env.HOLDER_COUNT_INTERVAL_MIN ?? '15', 10) * 60 * 1000
+const HOLDER_COUNT_EVERY_MS = indexerConfig.holders.countIntervalMin * 60 * 1000
 // Disk size of the DB's attached volume in GB (from Render plan). Used to
 // compute disk-% usage in size reports so we catch "DB is 80% full but retention
 // found nothing to delete" situations before the disk-full alert fires.
 // 0 means unknown — size is still reported, percentage is not.
-const DB_DISK_GB     = parseInt(process.env.DB_DISK_GB ?? '0', 10)
+const DB_DISK_GB     = indexerConfig.retention.dbDiskGb
 // Skip expensive maintenance (holder-count recompute) when the indexer is
 // too far behind the tip. Prevents a 30-60s DB-hogging query from compounding
 // lag when we're already losing the race to catch up.
-const HOLDER_COUNT_LAG_THRESHOLD =
-  parseInt(process.env.HOLDER_COUNT_LAG_THRESHOLD ?? '1000', 10)
+const HOLDER_COUNT_LAG_THRESHOLD = indexerConfig.holders.countLagThreshold
 
 // ── Batched-maintenance tuning ──────────────────────────────────────
 // Every heavy DELETE and the holder-count recompute run in bounded chunks with a
@@ -42,11 +40,8 @@ const HOLDER_COUNT_LAG_THRESHOLD =
 // a 6-min monolithic recompute saturated the DB's disk I/O and crawled block
 // ingestion to ~0.06 blk/s for the whole maintenance window (root cause of the
 // periodic ~6-min stall). All are env-tunable.
-const RETENTION_DELETE_BATCH = parseInt(process.env.RETENTION_DELETE_BATCH ?? String(BATCH_SIZE), 10) || BATCH_SIZE
-const RETENTION_BATCH_SLEEP_MS = (() => {
-  const v = parseInt(process.env.RETENTION_BATCH_SLEEP_MS ?? '250', 10)
-  return Number.isFinite(v) && v >= 0 ? v : 250
-})()
+const RETENTION_DELETE_BATCH = indexerConfig.retention.deleteBatch
+const RETENTION_BATCH_SLEEP_MS = indexerConfig.retention.batchSleepMs
 // ── Yield-to-the-indexer tuning ─────────────────────────────────────
 // Lag (in blocks) above which retention pauses between batches. Measured on prod
 // 2026-08-18: a concurrent prune costs the transfer writer ~13% (65.9s vs 75.4s
@@ -56,10 +51,7 @@ const RETENTION_BATCH_SLEEP_MS = (() => {
 // when it competes and run at full speed otherwise. 0 disables (kill-switch).
 // Default 500 (~3.7min behind at 2.2215 blk/s) is well clear of routine blips:
 // the observed at-tip maximum on 08-18 was 21 blocks.
-const RETENTION_LAG_THRESHOLD = (() => {
-  const v = parseInt(process.env.RETENTION_LAG_THRESHOLD ?? '500', 10)
-  return Number.isFinite(v) && v >= 0 ? v : 500
-})()
+const RETENTION_LAG_THRESHOLD = indexerConfig.retention.lagThreshold
 // ⚠ HARD safety valve, not a nicety. Retention is the only thing between this DB
 // and a full disk; BNB already runs at the retention floor (RETENTION_DAYS=1 ==
 // EMERGENCY_RETENTION_MIN_DAYS) with disk at ~72%. A chronically-behind indexer
@@ -67,17 +59,11 @@ const RETENTION_LAG_THRESHOLD = (() => {
 // it proceeds regardless of lag. A slow writer is recoverable; a full disk is the
 // 2026-04-08 WAL-checkpoint crash loop. Budget is spent ONCE PER RUN across all
 // batch loops, not once per table.
-const RETENTION_MAX_YIELD_MS = (() => {
-  const v = parseInt(process.env.RETENTION_MAX_YIELD_MIN ?? '30', 10)
-  return (Number.isFinite(v) && v >= 0 ? v : 30) * 60_000
-})()
+const RETENTION_MAX_YIELD_MS = indexerConfig.retention.maxYieldMin * 60_000
 const RETENTION_YIELD_POLL_MS = 5_000
 
-const HOLDER_RECOMPUTE_CHUNK = parseInt(process.env.HOLDER_RECOMPUTE_CHUNK ?? '2000', 10) || 2000
-const HOLDER_RECOMPUTE_SLEEP_MS = (() => {
-  const v = parseInt(process.env.HOLDER_RECOMPUTE_SLEEP_MS ?? '100', 10)
-  return Number.isFinite(v) && v >= 0 ? v : 100
-})()
+const HOLDER_RECOMPUTE_CHUNK = indexerConfig.holders.recomputeChunk
+const HOLDER_RECOMPUTE_SLEEP_MS = indexerConfig.holders.recomputeSleepMs
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -561,33 +547,12 @@ export async function pruneTokenTransfersPartitioned(cutoffBlock: number): Promi
 // So: shout at 85 (early, harmless, actionable by a human), act at 93 (genuinely
 // close to full). At the measured +0.6-1.4 GB/day of organic growth, 93% of
 // 150GB still leaves ~7-17 days before the volume fills.
-/**
- * Strict percent parse. Deliberately NOT parseInt: parseInt('93.9') is 93 and
- * parseInt('8x') is 8, so a typo silently lowers a safety threshold instead of
- * being rejected — and an 8 here would clamp to the alarm line and restore
- * destructive cleanup at the normal 86% peak. Whole value or nothing.
- */
-function parsePercentEnv(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || !/^\s*\d+\s*$/.test(raw)) {
-    if (raw !== undefined) {
-      console.warn(`[retention] ignoring malformed disk-threshold value "${raw}" — using ${fallback}%`)
-    }
-    return fallback
-  }
-  const n = Number(raw.trim())
-  if (!Number.isInteger(n) || n <= 0 || n > 100) {
-    console.warn(`[retention] disk-threshold ${n} out of range (1-100) — using ${fallback}%`)
-    return fallback
-  }
-  return n
-}
-const EMERGENCY_DISK_ALARM_PCT = parsePercentEnv(process.env.EMERGENCY_DISK_ALARM_PCT, 85)
+// The percent parser that guards both thresholds now lives in config.ts, with
+// its semantics unchanged and finally under test.
+const EMERGENCY_DISK_ALARM_PCT = indexerConfig.retention.emergencyDiskAlarmPct
 // Acting below the alarm line would make the alarm band unreachable and restore
 // the hair-trigger, so ACT is clamped up to ALARM rather than trusted blindly.
-const EMERGENCY_DISK_ACT_PCT = Math.max(
-  parsePercentEnv(process.env.EMERGENCY_DISK_ACT_PCT, 93),
-  EMERGENCY_DISK_ALARM_PCT,
-)
+const EMERGENCY_DISK_ACT_PCT = indexerConfig.emergencyDiskActPct
 const EMERGENCY_RETENTION_MIN_DAYS = 1
 
 /**
@@ -1168,7 +1133,7 @@ async function runVacuumFull(): Promise<void> {
 /**
  * Recompute tokens.holder_count from current token_balances, in throttled chunks.
  *
- * Gated on HOLDER_BALANCE_TRACKING_ENABLED: while per-block balance writes are
+ * Gated on indexerConfig.holderBalanceTrackingEnabled: while per-block balance writes are
  * disabled, token_balances is static, so this has no new input and is skipped
  * entirely. The old monolithic single-statement version had grown to ~6 min and
  * saturated disk I/O, stalling block ingestion while updating zero rows.
@@ -1181,7 +1146,7 @@ async function runVacuumFull(): Promise<void> {
  */
 let holderCountDisabledLogged = false
 async function recomputeHolderCounts(): Promise<void> {
-  if (!HOLDER_BALANCE_TRACKING_ENABLED) {
+  if (!indexerConfig.holderBalanceTrackingEnabled) {
     // Static token_balances → nothing to recompute. Log the reason once, stay quiet after.
     if (!holderCountDisabledLogged) {
       console.log('[holder-count] recompute disabled — holder-balance tracking is off (token_balances static); skipping')
@@ -1287,7 +1252,7 @@ export async function startRetentionCleanup(): Promise<void> {
 
   // One-time VACUUM FULL to reclaim disk space after bulk deletes.
   // Set VACUUM_FULL=1 in env vars, then remove it after the indexer restarts.
-  if (process.env.VACUUM_FULL === '1') {
+  if (indexerConfig.retention.vacuumFull) {
     runVacuumFull().catch(err => console.error('[retention] VACUUM FULL error:', err))
   }
 

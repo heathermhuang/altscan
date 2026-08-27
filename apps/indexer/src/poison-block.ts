@@ -1,3 +1,4 @@
+import { DEFAULT_QUARANTINE_AFTER } from './config'
 /**
  * Stop ONE unindexable block from costing thousands.
  *
@@ -50,7 +51,7 @@
  * indexed. Not 50 either: every attempt costs a full failover sweep while the
  * cursor stays pinned and the ~35-minute budget drains.
  */
-export const DEFAULT_QUARANTINE_AFTER = 5
+export { DEFAULT_QUARANTINE_AFTER }
 
 /**
  * Prefix stamped into `index_gaps.reason` for a quarantined block.

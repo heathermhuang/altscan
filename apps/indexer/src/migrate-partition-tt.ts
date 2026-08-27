@@ -33,6 +33,7 @@
  *
  * Env knobs: PARTITION_BLOCKS (width, default 192000 ≈ 1 day BSC), PARTITION_AHEAD.
  */
+import { indexerConfig } from './config-instance'
 import 'dotenv/config'
 import { createMaintenanceConnection } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
@@ -41,7 +42,7 @@ import { sql } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
 
 const chain = getChainConfig()
-const CONFIRM = process.env.CONFIRM_PARTITION_MIGRATION === '1'
+const CONFIRM = indexerConfig.partitions.confirmMigration
 const TAG = `[migrate-partition][${chain.key}]`
 
 // Indexes the monolithic table carries that the partitioned parent also wants. On
@@ -105,8 +106,7 @@ async function main() {
   const maxRow = await getDb().execute(sql`SELECT COALESCE(MAX(block_number), 0)::bigint AS m FROM token_transfers`)
   const maxBlock = Number((Array.from(maxRow)[0] as Record<string, unknown>).m) || 0
   const S = maxBlock + 1
-  const width = Math.max(1, parseInt(process.env.PARTITION_BLOCKS ?? '192000', 10))
-  const ahead = Math.max(1, parseInt(process.env.PARTITION_AHEAD ?? '7', 10))
+  const { blocks: width, ahead } = indexerConfig.partitions
 
   console.log(`${TAG} plan: split S=${S} (max block ${maxBlock}), width=${width}, ahead=${ahead}`)
   console.log(`${TAG}   phase 1 (non-blocking): build ${TX_IDX_LEGACY}(tx_hash) CONCURRENTLY; add+VALIDATE CHECK(block_number < ${S})`)

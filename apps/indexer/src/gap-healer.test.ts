@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  healNextGap, positiveIntEnv, LAG_RECHECK_EVERY,
+  healNextGap, LAG_RECHECK_EVERY,
   DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG,
 } from './gap-healer'
 
@@ -253,18 +253,6 @@ describe('healNextGap — fail-closed properties', () => {
   })
 })
 
-describe('positiveIntEnv', () => {
-  it('falls back on the values that would fail open', () => {
-    for (const bad of ['0', '-1', 'nonsense', '', '  ', '1.5', 'NaN', undefined]) {
-      expect(positiveIntEnv(bad as string | undefined, 25)).toBe(25)
-    }
-  })
-
-  it('accepts a genuine positive integer', () => {
-    expect(positiveIntEnv('7', 25)).toBe(7)
-    expect(positiveIntEnv('1', 25)).toBe(1)
-  })
-})
 
 /**
  * healInflight is process-LOCAL, and Render rolling deploys overlap generations

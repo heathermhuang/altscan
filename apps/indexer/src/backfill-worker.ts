@@ -16,6 +16,7 @@
  *      seam-exclusion hashes are lowercase, and a mixed-case cached hash would
  *      break both the keyset ordering and the dedup compare.
  */
+import { indexerConfig } from './config-instance'
 import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
@@ -463,7 +464,12 @@ export async function reservePage(db: WorkerDb): Promise<boolean> {
 
 /** R5 — backfill is immortal and retention-exempt, so it must stop growing well
  *  before the 85% disk-emergency path would start sacrificing the LIVE index. */
-export async function backfillPressure(db: WorkerDb): Promise<string | null> {
+export async function backfillPressure(
+  db: WorkerDb,
+  /** Injected so this is testable without stubbing env. Defaults to the value
+   *  resolved once at boot — env cannot change mid-process on Render anyway. */
+  diskGb: number = indexerConfig.retention.dbDiskGb,
+): Promise<string | null> {
   const res = await db.execute(sql`
     SELECT
       COALESCE(pg_total_relation_size(to_regclass('backfill_address_txs')), 0)
@@ -474,7 +480,10 @@ export async function backfillPressure(db: WorkerDb): Promise<string | null> {
   const GB = 1024 ** 3
   const bfGb = Number(row.bf_bytes) / GB
   if (bfGb >= cfg.maxTotalGb) return `backfill ${bfGb.toFixed(2)}GB >= ${cfg.maxTotalGb}GB ceiling`
-  const diskGb = Number(process.env.DB_DISK_GB ?? 0)
+  // DB_DISK_GB was read here as `Number(process.env.DB_DISK_GB ?? 0)` and in
+  // retention-cleanup.ts as `parseInt(… ?? '0', 10)`. Those disagree on '' (0 vs
+  // NaN) and on '5x' (NaN vs 5), for the variable that gates a destructive disk
+  // threshold. One declaration now, in config.ts.
   if (diskGb > 0) {
     const pct = (Number(row.db_bytes) / GB / diskGb) * 100
     if (pct >= cfg.diskStopPct) return `disk ${pct.toFixed(1)}% >= ${cfg.diskStopPct}% stop`

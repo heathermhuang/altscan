@@ -3,6 +3,7 @@
  * Creates all tables and indexes using IF NOT EXISTS so it is safe
  * to call on every startup — either a fresh DB or an existing one.
  */
+import { indexerConfig } from './config-instance'
 import { getDb } from './db'
 import { sql } from 'drizzle-orm'
 import { getChainConfig } from '@altscan/chain-config'
@@ -921,8 +922,7 @@ export async function ensurePartitionedWhaleIndex(): Promise<void> {
 export async function ensureForwardPartitions(): Promise<void> {
   const db = getDb()
   if (!(await isPartitioned('token_transfers'))) return
-  const width = Math.max(1, parseInt(process.env.PARTITION_BLOCKS ?? '192000', 10))   // ~1 day BSC
-  const ahead = Math.max(1, parseInt(process.env.PARTITION_AHEAD ?? '7', 10))
+  const { blocks: width, ahead } = indexerConfig.partitions   // ~1 day BSC
 
   const parts = await listTokenTransferPartitions()
   if (parts.length === 0) return  // migration not run yet — nothing to extend
