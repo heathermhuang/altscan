@@ -19,13 +19,14 @@ export function BlockTable({ blocks, compact = false }: {
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
+        <caption className="sr-only">Recent blocks on {chainConfig.name}</caption>
         <thead className="bg-gray-50 border-b">
           <tr>
-            <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Block</th>
-            <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Age</th>
-            <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Txns</th>
-            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Miner</th>}
-            {!compact && <th className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Gas Used</th>}
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Block</th>
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Age</th>
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Txns</th>
+            {!compact && <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Miner</th>}
+            {!compact && <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Gas Used</th>}
           </tr>
         </thead>
         <tbody className="divide-y">

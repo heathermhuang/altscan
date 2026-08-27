@@ -101,15 +101,17 @@ export function HoldersLazy({
           ⚠️ Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.
         </div>
       )}
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
+        <caption className="sr-only">Top holders of {symbol}</caption>
         <thead className="bg-gray-50 border-b">
           <tr>
-            <th className="text-left px-4 py-2 text-gray-500 w-10">#</th>
-            <th className="text-left px-4 py-2 text-gray-500">Address</th>
-            <th className="text-left px-4 py-2 text-gray-500">
+            <th scope="col" className="text-left px-4 py-2 text-gray-500 w-10">#</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">Address</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">
               {data.source === 'moralis' ? 'Balance' : 'Approx. Balance'}
             </th>
-            <th className="text-left px-4 py-2 text-gray-500">% of Supply</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">% of Supply</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -154,6 +156,7 @@ export function HoldersLazy({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

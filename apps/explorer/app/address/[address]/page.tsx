@@ -468,12 +468,13 @@ async function TxnsTab({
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
+          <caption className="sr-only">{chainConfig.name} transactions for this address</caption>
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
-              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From / To</th>
-              <th className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
+              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
+              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From / To</th>
+              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -598,15 +599,17 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
   return (
     <div>
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
+          <caption className="sr-only">{chainConfig.name} token transfers for this address</caption>
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Block</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">From</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">To</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Amount</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Block</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">From</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">To</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Amount</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -673,6 +676,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       <Pagination
         page={page}
@@ -738,12 +742,14 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
+        <caption className="sr-only">{chainConfig.name} token holdings for this address</caption>
         <thead className="bg-gray-50 border-b">
           <tr>
-            <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-            <th className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
-            <th className="text-left px-4 py-2 font-medium text-gray-500">Approx. Balance</th>
+            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
+            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Approx. Balance</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -778,6 +784,7 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -913,14 +920,16 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
+        <caption className="sr-only">{chainConfig.name} NFT transfer activity for this address</caption>
         <thead className="bg-gray-50 border-b">
           <tr>
-            <th className="text-left px-4 py-2 text-gray-500">NFT</th>
-            <th className="text-left px-4 py-2 text-gray-500">Token ID</th>
-            <th className="text-left px-4 py-2 text-gray-500">Action</th>
-            <th className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
-            <th className="text-left px-4 py-2 text-gray-500">Block</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">NFT</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">Token ID</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">Action</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
+            <th scope="col" className="text-left px-4 py-2 text-gray-500">Block</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -950,6 +959,7 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

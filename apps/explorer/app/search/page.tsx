@@ -64,13 +64,15 @@ export default async function SearchPage({
               />
             )}
             <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Token search results for {query}</caption>
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="text-left px-4 py-2 text-gray-500">Name</th>
-                    <th className="text-left px-4 py-2 text-gray-500">Symbol</th>
-                    <th className="text-left px-4 py-2 text-gray-500">Type</th>
-                    <th className="text-left px-4 py-2 text-gray-500">Contract</th>
+                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Name</th>
+                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Symbol</th>
+                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Type</th>
+                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Contract</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -92,6 +94,7 @@ export default async function SearchPage({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
             <div className="mt-6">
               <Link href="/" className={`${chainConfig.theme.linkText} hover:underline font-medium`}>← Back to home</Link>
