@@ -1,4 +1,4 @@
-import { formatUnits, formatEther } from 'ethers'
+import { formatUnits } from 'ethers'
 
 /** Safely convert a numeric string (possibly with decimals) to BigInt */
 export function safeBigInt(value: string | number | bigint | null | undefined): bigint {
@@ -13,8 +13,43 @@ export function safeBigInt(value: string | number | bigint | null | undefined): 
   }
 }
 
-export function formatNativeToken(wei: bigint | string, decimals = 4): string {
-  return Number(formatEther(safeBigInt(wei))).toFixed(decimals)
+/**
+ * Adaptive-precision native-token amount: rounds to at most `maxDecimals` places
+ * and trims trailing zeros, so "1.5" doesn't render as "1.5000". A nonzero
+ * amount that rounds away to nothing at this precision renders as "<0.0001"
+ * (or "<0.000001" for maxDecimals=6, etc.) instead of an indistinguishable "0" —
+ * that's what fixes small transfers rendering identically to zero-value calls.
+ *
+ * Works entirely in BigInt, never Number: unlike formatGwei below, native-token
+ * amounts can exceed 2^53, where Number(formatEther(wei)) silently loses digits.
+ *
+ * Assumes 1 <= maxDecimals <= 18 (wei's own precision). Every call site passes
+ * either the default or 6, so this isn't guarded; maxDecimals=0 would throw
+ * from the '0'.repeat(maxDecimals - 1) below.
+ */
+export function formatNativeToken(wei: bigint | string, maxDecimals = 4): string {
+  const value = safeBigInt(wei)
+  if (value === 0n) return '0'
+
+  const scale = 10n ** BigInt(18 - maxDecimals)
+  const rounded = (value + scale / 2n) / scale // round-half-up, in units of 10^-maxDecimals
+
+  if (rounded === 0n) {
+    return `<0.${'0'.repeat(maxDecimals - 1)}1`
+  }
+
+  const divisor = 10n ** BigInt(maxDecimals)
+  const intPart = rounded / divisor
+  const fracRemainder = rounded % divisor
+  const combined =
+    fracRemainder === 0n
+      ? `${intPart}` // exact whole number — no fractional part to show at all
+      : `${intPart}.${fracRemainder.toString().padStart(maxDecimals, '0')}`
+  // Only trim when a decimal point is present. formatGwei's `/\.?0+$/` below is
+  // safe there only because toFixed(decimals>=1) always emits a dot; applied to
+  // a dot-less string (as `combined` is above, for a whole number) it would
+  // corrupt real digits, e.g. "1000" -> "1".
+  return combined.includes('.') ? combined.replace(/0+$/, '').replace(/\.$/, '') : combined
 }
 
 /** @deprecated Use formatNativeToken instead */
