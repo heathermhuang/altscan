@@ -21,7 +21,7 @@ export function TxTable({ txs, compact = false }: {
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <caption className="sr-only">Recent transactions on {chainConfig.name}</caption>
+        <caption className="sr-only">{chainConfig.name} transactions</caption>
         <thead className="bg-gray-50 border-b">
           <tr>
             <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
