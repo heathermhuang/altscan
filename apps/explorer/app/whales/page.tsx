@@ -16,11 +16,27 @@ export const metadata: Metadata = {
   alternates: { canonical: '/whales' },
 }
 
-const PERIOD_LABELS: Record<string, string> = {
+// '7d' is deliberately absent. Neither chain retains seven days of
+// `transactions` — measured 2026-08-27, BNB spans 2.23 days and ETH 4.05 — so
+// "Last 7d" and "All Time" were returning byte-identical results while both
+// claimed a window the data does not cover. One honest option replaces them.
+// '7d' is still accepted as a period (see WhalePeriod) so existing links and
+// any indexed URLs keep working; it just isn't offered.
+// Every accepted period, including the retired '7d', so a legacy URL still
+// captions correctly. Record<WhalePeriod, …> is exhaustive: adding a period
+// without a caption is a compile error, not an "undefined" in the table caption.
+const PERIOD_CAPTIONS: Record<WhalePeriod, string> = {
   '1h': 'Last 1h',
   '24h': 'Last 24h',
   '7d': 'Last 7d',
-  all: 'All Time',
+  all: 'Max',
+}
+
+// Only these are offered as buttons.
+const PERIOD_LABELS: Record<string, string> = {
+  '1h': PERIOD_CAPTIONS['1h'],
+  '24h': PERIOD_CAPTIONS['24h'],
+  all: PERIOD_CAPTIONS.all,
 }
 
 export default async function WhalesPage({
@@ -50,6 +66,11 @@ export default async function WhalesPage({
           Large transfers on {chainConfig.name} — native (≥{formatTokenAmount(nativeMinWei, 18)} {chainConfig.currency}), {wrapped.symbol}
           {stablecoins.length > 0 && <>, and stablecoins (≥${formatTokenAmount(stablecoins[0].minValue, stablecoins[0].decimals)})</>}
         </p>
+        {period === 'all' && (
+          <p className="text-gray-400 text-xs mt-1">
+            Max covers everything currently retained, which is a few days rather than the full chain history.
+          </p>
+        )}
       </div>
 
       {/* Period filter */}
@@ -86,7 +107,7 @@ export default async function WhalesPage({
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <caption className="sr-only">Large transfers on {chainConfig.name} — {PERIOD_LABELS[period]}</caption>
+          <caption className="sr-only">Large transfers on {chainConfig.name} — {PERIOD_CAPTIONS[period]}</caption>
           <thead className="bg-gray-50 border-b">
             <tr>
               <th scope="col" className="text-left px-4 py-2 text-gray-500">Age</th>

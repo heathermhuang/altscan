@@ -7,6 +7,9 @@ import {
   INVALID_INDEX_SWEEP_SQL,
 } from './ensure-schema'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
+import { getChainConfig, type ChainKey } from '@altscan/chain-config'
+
+const FLOOR = '1000000000000000000'
 
 describe('buildConcurrentIndexList', () => {
   // The two properties that actually matter for boot: CONCURRENTLY (never takes a
@@ -15,7 +18,7 @@ describe('buildConcurrentIndexList', () => {
   // makes a dex_trades replay dedupable — but nothing else may vary.
   it('emits only CONCURRENTLY + IF NOT EXISTS statements (idempotent, non-blocking boot)', () => {
     for (const ttPartitioned of [false, true]) {
-      const stmts = buildConcurrentIndexList(ttPartitioned)
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
       expect(stmts.length).toBeGreaterThan(0)
       for (const stmt of stmts) {
         expect(stmt).toMatch(/^CREATE (UNIQUE )?INDEX CONCURRENTLY IF NOT EXISTS /)
@@ -27,7 +30,7 @@ describe('buildConcurrentIndexList', () => {
   // its PARTIAL predicate is what keeps the boot path safe on a populated table.
   it('builds dex_tx_log_unique on the natural key, in both partition modes', () => {
     for (const ttPartitioned of [false, true]) {
-      const stmts = buildConcurrentIndexList(ttPartitioned)
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
         .filter(s => s.includes('dex_tx_log_unique'))
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       expect(stmts[0]).toMatch(/^CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS /)
@@ -39,8 +42,8 @@ describe('buildConcurrentIndexList', () => {
   })
 
   it('skips token_transfers index DDL when partitioned (migration owns those), all else unchanged', () => {
-    const mono = buildConcurrentIndexList(false)
-    const part = buildConcurrentIndexList(true)
+    const mono = buildConcurrentIndexList(false, FLOOR)
+    const part = buildConcurrentIndexList(true, FLOOR)
     expect(mono.some(s => s.includes('ON token_transfers('))).toBe(true)
     expect(part.some(s => s.includes('ON token_transfers('))).toBe(false)
     expect(part).toEqual(mono.filter(s => !s.includes('ON token_transfers(')))
@@ -59,7 +62,7 @@ describe('buildConcurrentIndexList', () => {
     )
     expect(inputOp).toBeDefined()
     for (const ttPartitioned of [false, true]) {
-      const stmts = buildConcurrentIndexList(ttPartitioned)
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
         .filter(s => s.includes('tx_body_unpruned_idx'))
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       const normalized = stmts[0].replace(/\s+/g, ' ').trim()
@@ -87,7 +90,7 @@ describe('whale tracker indexes', () => {
   // one is a plain entry in both modes.
   it('creates tx_ts_value_idx in both partition modes', () => {
     for (const ttPartitioned of [false, true]) {
-      const stmts = buildConcurrentIndexList(ttPartitioned)
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
         .filter(s => s.includes('tx_ts_value_idx'))
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       expect(stmts[0]).toContain('ON transactions(timestamp DESC, value DESC)')
@@ -101,11 +104,11 @@ describe('whale tracker indexes', () => {
   // an omission, so pin it by name rather than relying on the generic
   // "no ON token_transfers( when partitioned" assertion above.
   it('creates tt_token_ts_idx inline only when token_transfers is monolithic', () => {
-    const mono = buildConcurrentIndexList(false).filter(s => s.includes(TT_TOKEN_TS_IDX))
+    const mono = buildConcurrentIndexList(false, FLOOR).filter(s => s.includes(TT_TOKEN_TS_IDX))
     expect(mono).toHaveLength(1)
     expect(mono[0]).toContain(`ON token_transfers(${TT_TOKEN_TS_COLUMNS})`)
 
-    expect(buildConcurrentIndexList(true).filter(s => s.includes(TT_TOKEN_TS_IDX))).toHaveLength(0)
+    expect(buildConcurrentIndexList(true, FLOOR).filter(s => s.includes(TT_TOKEN_TS_IDX))).toHaveLength(0)
   })
 
   // ALTER INDEX ... ATTACH PARTITION only accepts a child whose definition
@@ -114,7 +117,7 @@ describe('whale tracker indexes', () => {
   // column list — a silent divergence would not fail until the ATTACH runs
   // against production data.
   it('builds the same column list on both the monolithic and partitioned paths', () => {
-    const mono = buildConcurrentIndexList(false).find(s => s.includes(TT_TOKEN_TS_IDX))!
+    const mono = buildConcurrentIndexList(false, FLOOR).find(s => s.includes(TT_TOKEN_TS_IDX))!
     expect(mono).toContain(`(${TT_TOKEN_TS_COLUMNS})`)
     expect(buildPartitionedWhaleIndexSql('token_transfers_p_1').parent)
       .toContain(`(${TT_TOKEN_TS_COLUMNS})`)
@@ -156,5 +159,50 @@ describe('INVALID_INDEX_SWEEP_SQL', () => {
     // 'I' is the partitioned-index relkind; matching it would reintroduce the bug.
     expect(INVALID_INDEX_SWEEP_SQL).not.toMatch(/relkind\s*=\s*'I'/)
     expect(INVALID_INDEX_SWEEP_SQL).not.toMatch(/relkind\s+IN/i)
+  })
+})
+
+describe('tx_whale_value_idx', () => {
+  const stmtFor = (floor: string) =>
+    buildConcurrentIndexList(false, floor).find(x => x.includes('tx_whale_value_idx'))
+
+  it('is emitted, partial, and leads on value so the scan can stop at 25', () => {
+    const stmt = stmtFor(FLOOR)!
+    expect(stmt).toBeDefined()
+    // Leading on `value` is the whole point: it supplies the ORDER BY so the
+    // walk stops at LIMIT, instead of reading every candidate row from the heap.
+    expect(stmt).toContain('ON transactions(value DESC, timestamp DESC)')
+    expect(stmt).toContain(`WHERE value > ${FLOOR}`)
+    expect(stmt).toContain('CONCURRENTLY')
+  })
+
+  it.each(['bnb', 'eth'] as const)(
+    'has a predicate matching %s config, which the query splices as a literal',
+    (key: ChainKey) => {
+      // Postgres only uses a partial index when it can prove the query implies
+      // the predicate. The explorer emits `AND value > <nativeIndexFloorWei>` as
+      // a raw literal for exactly that reason, so these two constants are one
+      // constant. If they drift, the index is built and silently never used.
+      const floor = getChainConfig(key).whales.nativeIndexFloorWei
+      expect(stmtFor(floor)).toContain(`WHERE value > ${floor}`)
+    },
+  )
+
+  it.each(['bnb', 'eth'] as const)(
+    'has a %s threshold at or above the index floor',
+    (key: ChainKey) => {
+      // Below the floor the query truncates at the floor instead of the
+      // configured threshold, silently returning fewer/larger rows than asked.
+      const { nativeMinWei, nativeIndexFloorWei } = getChainConfig(key).whales
+      expect(BigInt(nativeMinWei)).toBeGreaterThanOrEqual(BigInt(nativeIndexFloorWei))
+    },
+  )
+
+  it('refuses a floor that is not a bare integer', () => {
+    // It is spliced into DDL unescaped.
+    expect(() => buildConcurrentIndexList(false, "1'; DROP TABLE transactions --"))
+      .toThrow(/must be digits/)
+    expect(() => buildConcurrentIndexList(false, '1e18')).toThrow(/must be digits/)
+    expect(() => buildConcurrentIndexList(false, '')).toThrow(/must be digits/)
   })
 })

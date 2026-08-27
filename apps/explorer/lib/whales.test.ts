@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { getChainConfig } from '@altscan/chain-config'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, type WhaleTx } from '@/lib/whales'
+import { chainConfig } from '@/lib/chain'
+import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rawWeiLiteral, type WhaleTx } from '@/lib/whales'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -167,5 +168,40 @@ describe('mergeWhaleRows', () => {
     expect(merged[0].value).toBe('59')
     // Numeric, not lexicographic: a lexicographic sort would rank '9' first.
     expect(merged.map(r => r.value)).not.toContain('9')
+  })
+})
+
+describe('buildNativeWhaleQuery carries the partial-index floor as a literal', () => {
+  it('emits the floor inline, not as a bound parameter', () => {
+    const { sql: text, params } = toQuery(
+      buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei),
+    )
+    const floor = chainConfig.whales.nativeIndexFloorWei
+
+    // A parameter here defeats the partial index under a generic plan: Postgres
+    // cannot prove `$1 >= floor`, discards tx_whale_value_idx and seq-scans.
+    // Measured on PG16 with force_generic_plan: 52,744 buffers vs 27.
+    expect(text).toContain(`value > ${floor}`)
+    expect(params).not.toContain(floor)
+  })
+
+  it('still binds the configured threshold as a parameter', () => {
+    const { params } = toQuery(
+      buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei),
+    )
+    expect(params).toContain(chainConfig.whales.nativeMinWei)
+  })
+
+  it.each([
+    ["1'; DROP TABLE transactions --"],
+    ['1e18'],
+    [''],
+    ['1000000000000000000 '],
+  ])('refuses %j as a floor, because it is spliced in unescaped', (bad) => {
+    expect(() => rawWeiLiteral(bad)).toThrow(/must be digits/)
+  })
+
+  it('accepts the configured floor', () => {
+    expect(() => rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)).not.toThrow()
   })
 })

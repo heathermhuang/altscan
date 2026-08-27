@@ -62,6 +62,37 @@ function cutoffFor(period: WhalePeriod): SQL {
   }
 }
 
+/**
+ * The 25 largest native transfers in the window.
+ *
+ * The `value > <floor>` literal is NOT redundant, however much it looks it.
+ * It is what lets the planner match the partial index
+ * `tx_whale_value_idx ON transactions(value DESC, timestamp DESC)
+ *  WHERE value > <floor>`, which turns this from "read every candidate row from
+ * the heap, sort, discard all but 25" into an index walk that stops at 25.
+ *
+ * drizzle binds `minNativeWei` as a parameter and postgres-js prepares
+ * statements, so Postgres may plan this generically — and a generic plan cannot
+ * prove `$1 >= floor`, so it cannot use a partial index predicated on it.
+ * Verified on PG16 against a fixture built to prod selectivity, under
+ * `plan_cache_mode = force_generic_plan`:
+ *
+ *   parameter only     Parallel Seq Scan   52,744 buffers
+ *   parameter + literal Index Scan              27 buffers
+ *
+ * Deleting the literal does not fail a test or change a single row. It silently
+ * restores the outage. `nativeIndexFloorWei` must stay equal to the index
+ * predicate in ensure-schema.ts, and `nativeMinWei` must stay at or above it.
+ */
+export function rawWeiLiteral(wei: string): SQL {
+  // sql.raw is unavoidable here (a bound parameter defeats the partial index),
+  // so prove the value is a bare integer before splicing it into the statement.
+  if (!/^[0-9]+$/.test(wei)) {
+    throw new Error(`whales: index floor must be digits, got ${JSON.stringify(wei)}`)
+  }
+  return sql.raw(wei)
+}
+
 export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string): SQL {
   return sql`
       SELECT hash, from_address as "fromAddress", to_address as "toAddress",
@@ -69,6 +100,7 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
              'native' as "transferType", ${chainConfig.currency} as "tokenSymbol"
       FROM transactions
       WHERE timestamp >= ${cutoffFor(period)}
+        AND value > ${rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)}
         AND value > ${minNativeWei}
       ORDER BY value DESC
       LIMIT 25

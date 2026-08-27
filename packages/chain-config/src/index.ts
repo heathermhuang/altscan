@@ -89,6 +89,22 @@ export type WhaleToken = {
 
 /** Whale Tracker thresholds and tracked tokens. */
 export type WhaleConfig = {
+  /** Predicate of the partial index that serves the native query, in wei as a
+   *  decimal string.
+   *
+   *  Two things depend on this literal and must not drift from it:
+   *  the `WHERE value > …` of `tx_whale_value_idx` in ensure-schema.ts, and a
+   *  redundant literal of the same value in the query. The redundancy is
+   *  load-bearing: drizzle binds the threshold as a parameter, postgres-js
+   *  prepares statements, and a GENERIC plan cannot prove `$1 >= floor`, so
+   *  without a matching literal the planner discards the partial index and
+   *  falls back to a sequential scan. Verified on PG16 with
+   *  `plan_cache_mode = force_generic_plan`: parameter alone => Parallel Seq
+   *  Scan over 52,744 buffers; parameter plus literal => Index Scan, 27 buffers.
+   *
+   *  `nativeMinWei` must never fall below this, or the query silently truncates
+   *  at the floor instead of the configured threshold. Pinned by a test. */
+  nativeIndexFloorWei: string
   /** Minimum native transfer in wei, as a decimal string.
    *
    *  This is a PERFORMANCE floor, not an editorial one. The query is
@@ -247,7 +263,8 @@ export const BSC: ChainConfig = {
   minGasPriceWei: '100000000', // 0.1 Gwei
   lowGasBalanceWei: '10000000000000000', // 0.01 BNB
   whales: {
-    nativeMinWei: '1000000000000000000', // 1 BNB
+    nativeIndexFloorWei: '1000000000000000000', // 1 BNB
+    nativeMinWei: '20000000000000000000', // 20 BNB — see the floor note above
     wrapped: {
       address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
       symbol: 'WBNB',
@@ -330,7 +347,8 @@ export const ETH: ChainConfig = {
   minGasPriceWei: '0', // Ethereum enforces no minimum
   lowGasBalanceWei: '5000000000000000', // 0.005 ETH
   whales: {
-    nativeMinWei: '500000000000000000', // 0.5 ETH
+    nativeIndexFloorWei: '500000000000000000', // 0.5 ETH
+    nativeMinWei: '25000000000000000000', // 25 ETH — see the floor note above
     wrapped: {
       address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
       symbol: 'WETH',

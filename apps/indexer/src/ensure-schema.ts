@@ -5,6 +5,7 @@
  */
 import { getDb } from './db'
 import { sql } from 'drizzle-orm'
+import { getChainConfig } from '@altscan/chain-config'
 
 export async function ensureSchema(): Promise<void> {
   const db = getDb()
@@ -566,7 +567,7 @@ export async function ensureSchema(): Promise<void> {
     try { await db.execute(sql.raw(stmt)) } catch { /* already dropped */ }
   }
 
-  const indexes = buildConcurrentIndexList(ttPartitioned)
+  const indexes = buildConcurrentIndexList(ttPartitioned, getChainConfig().whales.nativeIndexFloorWei)
 
   // When partitioned, create forward partitions BEFORE the indexing loop starts
   // inserting (await, not fire-and-forget) so no insert ever hits a missing range.
@@ -670,7 +671,17 @@ export function buildPartitionedWhaleIndexSql(partition: string): {
  * skipped when partitioned — the partition migration owns those indexes, and
  * CONCURRENTLY isn't valid on a partitioned parent.
  */
-export function buildConcurrentIndexList(ttPartitioned: boolean): string[] {
+export function buildConcurrentIndexList(
+  ttPartitioned: boolean,
+  nativeWhaleFloorWei: string,
+): string[] {
+  // Spliced into DDL, so prove it is a bare integer rather than trusting config.
+  if (!/^[0-9]+$/.test(nativeWhaleFloorWei)) {
+    throw new Error(
+      `buildConcurrentIndexList: native whale floor must be digits, got ${JSON.stringify(nativeWhaleFloorWei)}`,
+    )
+  }
+
   const ttIndexes = ttPartitioned ? [] : [
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_token_idx            ON token_transfers(token_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_from_ts_idx          ON token_transfers(from_address, timestamp DESC)',
@@ -711,6 +722,29 @@ export function buildConcurrentIndexList(ttPartitioned: boolean): string[] {
     // `value DESC` ordering, so a top-N sort still runs. The win is dropping the
     // heap scan, not the sort.
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx         ON transactions(timestamp DESC, value DESC)',
+    // …but dropping the heap SCAN is not dropping the heap FETCHES. The index
+    // above still reads every candidate row from the heap to sort it, then
+    // throws all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
+    // 24.8-58.5s at every threshold we can safely set. Raising the threshold
+    // does not fix that — under retention-prune I/O the per-row cost swings
+    // 3.5-9.4ms, so the total is set by contention, not by the row count.
+    //
+    // Leading on `value` instead makes the index supply the ORDER BY, so the
+    // scan stops at 25 rows and `timestamp` is checked in-index (Index Cond,
+    // not Filter — no heap access for rows that fail it). Partial, so it holds
+    // only the ~190k rows per chain the page could ever return: 1.2 MB per
+    // 29.5k rows measured, ~7.5 MB at prod scale.
+    //
+    // Verified on PG16 against a fixture built to measured prod selectivity
+    // (1.47% of rows above the floor; 24h = 42% of those; 1h = 2%):
+    //   tx_ts_value_idx     13,340 rows  14,719 buffers  80.8 ms
+    //   tx_whale_value_idx      25 rows      27 buffers   0.16 ms
+    //
+    // The predicate MUST stay character-identical to
+    // `chainConfig.whales.nativeIndexFloorWei`, which the explorer splices into
+    // the query as a literal. Postgres only uses a partial index when it can
+    // prove the query implies the predicate, and a parameter cannot prove it.
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_whale_value_idx      ON transactions(value DESC, timestamp DESC) WHERE value > ${nativeWhaleFloorWei}`,
     ...ttIndexes,
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
