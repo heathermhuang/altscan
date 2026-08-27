@@ -8,7 +8,7 @@
  */
 import { desc, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
-import { cachedPageQuery } from '@/lib/page-cache'
+import { createPageCache } from '@/lib/page-cache'
 
 export const PER_PAGE = 25
 export const TXS_REVALIDATE_SECONDS = 45
@@ -38,8 +38,11 @@ function toIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : String(value)
 }
 
-export async function fetchTxPage(page: number): Promise<ListPage<CachedTx>> {
-  return cachedPageQuery('txs', [page], TXS_REVALIDATE_SECONDS, async () => {
+/** Created once at module scope; `page` is an ARGUMENT so Next keys on it. */
+export const fetchTxPage = createPageCache(
+  'txs',
+  TXS_REVALIDATE_SECONDS,
+  async (page: number): Promise<ListPage<CachedTx>> => {
     const [rows, totalResult] = await Promise.all([
       db.select().from(schema.transactions)
         .orderBy(desc(schema.transactions.timestamp))
@@ -51,11 +54,13 @@ export async function fetchTxPage(page: number): Promise<ListPage<CachedTx>> {
       rows: rows.map(r => ({ ...r, timestamp: toIso(r.timestamp) })),
       total: estimateFrom(totalResult),
     }
-  })
-}
+  },
+)
 
-export async function fetchBlockPage(page: number): Promise<ListPage<CachedBlock>> {
-  return cachedPageQuery('blocks', [page], BLOCKS_REVALIDATE_SECONDS, async () => {
+export const fetchBlockPage = createPageCache(
+  'blocks',
+  BLOCKS_REVALIDATE_SECONDS,
+  async (page: number): Promise<ListPage<CachedBlock>> => {
     const [rows, totalResult] = await Promise.all([
       db.select().from(schema.blocks)
         .orderBy(desc(schema.blocks.number))
@@ -67,8 +72,8 @@ export async function fetchBlockPage(page: number): Promise<ListPage<CachedBlock
       rows: rows.map(r => ({ ...r, timestamp: toIso(r.timestamp) })),
       total: estimateFrom(totalResult),
     }
-  })
-}
+  },
+)
 
 export function parseTx(row: CachedTx): typeof schema.transactions.$inferSelect {
   return { ...row, timestamp: new Date(row.timestamp) }

@@ -32,22 +32,39 @@ export function buildCacheKey(
 }
 
 /**
- * Run `query` through the data cache.
+ * Build a cached reader ONCE, at module scope.
  *
- * A rejection is NOT cached — Next only stores a resolved value — which is the
- * behaviour we want: caching a failed query would pin an outage in place for
- * the whole revalidate window and render it indistinguishable from an empty
- * chain. Callers must therefore let failures reach them rather than resolving
- * to `[]` inside the query.
+ * The shape here is load-bearing, and the previous version got it wrong. It did:
+ *
+ *     return unstable_cache(query, buildCacheKey(name, parts), opts)()
+ *
+ * — constructing the wrapper inside the request, around a fresh closure that
+ * captured the page number, and immediately invoking it. `unstable_cache`
+ * derives part of its cache id from the callback itself, so a new closure per
+ * request means a new id per request: every lookup missed, every request
+ * re-queried, and nothing anywhere errored.
+ *
+ * Measured in production after #117 shipped: /blocks has a 60s TTL and its top
+ * block advanced four times in ten seconds across two instances. Meanwhile /gas
+ * — a static ISR route on the same incremental cache — returned
+ * `x-nextjs-cache: HIT`, so the cache itself was healthy and only this was broken.
+ *
+ * The fix is the documented pattern: one stable function, created at module
+ * scope, with the varying inputs passed as ARGUMENTS. Next includes the
+ * arguments in the cache id, which is what makes per-page entries work without
+ * a per-request closure.
+ *
+ * A rejection is still not cached — Next only stores a resolved value — so
+ * callers must let failures propagate rather than resolving to `[]`, or an
+ * outage gets pinned in place for the whole revalidate window.
  */
-export function cachedPageQuery<T>(
+export function createPageCache<A extends unknown[], T>(
   name: string,
-  parts: readonly (string | number)[],
   revalidateSeconds: number,
-  query: () => Promise<T>,
-): Promise<T> {
-  return unstable_cache(query, buildCacheKey(name, parts), {
+  query: (...args: A) => Promise<T>,
+): (...args: A) => Promise<T> {
+  return unstable_cache(query, buildCacheKey(name, []), {
     revalidate: revalidateSeconds,
     tags: [`${name}:${chainConfig.key}`],
-  })()
+  }) as (...args: A) => Promise<T>
 }

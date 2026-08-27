@@ -20,7 +20,7 @@
  *     succeeded.
  */
 import { sql, type SQL } from 'drizzle-orm'
-import { cachedPageQuery } from '@/lib/page-cache'
+import { createPageCache } from '@/lib/page-cache'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { safeBigInt } from '@/lib/format'
@@ -283,22 +283,36 @@ export async function queryWhales(
  * Timestamps are ISO strings across the boundary: `Date` does not survive the
  * incremental cache, and the table needs a real `Date` back.
  */
+/** Cached by period. Constructed once; `period` is the argument Next keys on.
+ *
+ *  The threshold and token list come from chainConfig and are constant for the
+ *  process, so they are read inside rather than passed — keeping the cache id
+ *  small and stable.
+ *
+ *  `degraded` rides through the cache on purpose. Both halves settle rather than
+ *  reject, so without it a failure would be stored as an ordinary empty result
+ *  and the page would spend the whole window claiming the market was quiet —
+ *  the exact failure #110 fixed.
+ *
+ *  Timestamps cross as ISO strings: `Date` does not survive the incremental
+ *  cache, and the table needs a real `Date` back. */
+const fetchWhalesCached = createPageCache(
+  'whales',
+  WHALES_REVALIDATE_SECONDS,
+  async (period: WhalePeriod, minNativeWei: string, filters: readonly TokenFilter[]) => {
+    const { rows, degraded } = await queryWhales(period, minNativeWei, filters)
+    return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), degraded }
+  },
+)
+
 export async function fetchWhales(
   period: WhalePeriod,
   minNativeWei: string,
   filters: readonly TokenFilter[],
 ): Promise<WhaleFetch> {
-  const cached = await cachedPageQuery(
-    'whales',
-    [period],
-    WHALES_REVALIDATE_SECONDS,
-    async () => {
-      const { rows, degraded } = await queryWhales(period, minNativeWei, filters)
-      return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), degraded }
-    },
-  )
+  const cached = await fetchWhalesCached(period, minNativeWei, filters)
   return {
-    rows: cached.rows.map(r => ({ ...r, timestamp: new Date(r.timestamp) })),
+    rows: cached.rows.map((r) => ({ ...r, timestamp: new Date(r.timestamp) })),
     degraded: cached.degraded,
   }
 }
