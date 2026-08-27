@@ -11,6 +11,7 @@
  *   FORCE_START_BLOCK  — Override DB resume and start from this block regardless
  *   LOG_EVERY          — Log progress every N blocks (default: 50)
  */
+import { indexerConfig, logResolvedConfig } from './config-instance'
 import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
@@ -33,9 +34,9 @@ import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failo
 import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock } from './index-gaps'
 import {
-  PoisonBlockTracker, shouldQuarantine, DEFAULT_QUARANTINE_AFTER, poisonGapReason,
+  PoisonBlockTracker, shouldQuarantine, poisonGapReason,
 } from './poison-block'
-import { healNextGap, positiveIntEnv, DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './gap-healer'
+import { healNextGap } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
@@ -56,18 +57,16 @@ const TAG = `[${chain.brandName}-indexer]`
 // RPC-derived error redacts against the exact same endpoint list.
 const RPC_URLS = SHARED_RPC_URLS
 const POLL_MS     = chain.pollMs
-const BATCH_SIZE  = parseInt(process.env.INDEX_BATCH_SIZE ?? '40', 10)
-// BNB produces a block every 3s — needs higher concurrency to keep up.
-// ETH at 12s can run lower. Default = 8 for BNB, 4 for ETH.
-const DEFAULT_CONCURRENCY = chain.key === 'bnb' ? 8 : 4
-const CONCURRENCY = parseInt(process.env.INDEX_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10)
+const BATCH_SIZE  = indexerConfig.indexing.batchSize
+// Default = 8 for BNB (3s blocks), 4 for ETH (12s); resolved in config-instance.
+const CONCURRENCY = indexerConfig.indexing.concurrency
 // Bound at module scope, not inside the boot path: initTransferWriter has THREE
 // call sites (resume, fresh start, normal boot) and the produce/drain profile
 // needs the pool size before whichever one runs, or it cannot tell "all workers
 // parked" from "some parked" and silently reports an inconclusive window.
 setProfileWorkerCount(CONCURRENCY)
-const LOG_EVERY   = parseInt(process.env.LOG_EVERY ?? '50', 10)
-const RESUME_GAP_SCAN_BLOCKS = parseInt(process.env.RESUME_GAP_SCAN_BLOCKS ?? '20000', 10)
+const LOG_EVERY   = indexerConfig.indexing.logEvery
+const RESUME_GAP_SCAN_BLOCKS = indexerConfig.indexing.resumeGapScanBlocks
 
 /**
  * EVERY error that could have come from an RPC call goes through here before it
@@ -95,6 +94,13 @@ async function main() {
   // key carried in the path or query (not just basic-auth userinfo) is caught.
   const redactedRpcs = RPC_URLS.map(redactRpcUrl)
   console.log(`${TAG} Chain: ${chain.name} (${chain.key}), RPCs (${RPC_URLS.length}): ${redactedRpcs.join(', ')}`)
+
+  // Print what this process actually resolved, before it does anything with it.
+  // A config literal in the repo proves nothing: env overrides it per Render
+  // service, and a feature once ran live and metered for nine days while both
+  // the code and the docs said it was dark. This line is the answer to "what is
+  // it running with?" — grep the boot log, do not read the source.
+  logResolvedConfig()
 
   // Retry ensureSchema on DB connection errors (e.g. max_connections exceeded).
   // Retrying instead of crashing prevents Render restart loops from piling up
@@ -169,7 +175,7 @@ async function main() {
   // Measured on BNB after PR #91: ~85s of each stalled window went here while
   // in-block time stayed normal and the transfer queue sat empty. They now
   // rotate across the pool and time out. Reads are pure, so retrying is safe.
-  const RPC_READ_TIMEOUT_MS = parseInt(process.env.RPC_READ_TIMEOUT_MS ?? '10000', 10)
+  const RPC_READ_TIMEOUT_MS = indexerConfig.rpc.readTimeoutMs
   // Rotates the starting endpoint per call so a throttled one isn't re-tried
   // first every batch (which would pay the timeout before failing over).
   let readCursor = 0
@@ -200,7 +206,7 @@ async function main() {
   })
   // A full check can issue up to 2K+2 header reads, so it needs a far longer
   // budget than the single-read tip timeout.
-  const REORG_CHECK_TIMEOUT_MS = parseInt(process.env.RPC_REORG_TIMEOUT_MS ?? '45000', 10)
+  const REORG_CHECK_TIMEOUT_MS = indexerConfig.rpc.reorgTimeoutMs
   const db = getDb()
 
   // Retry getBlockNumber on startup
@@ -214,7 +220,7 @@ async function main() {
     }
   }
 
-  const forceStart = parseInt(process.env.FORCE_START_BLOCK ?? '0', 10)
+  const forceStart = indexerConfig.indexing.forceStartBlock
   let lastIndexed: number
   let resumeGapBackfillUntil: number | null = null
 
@@ -223,7 +229,7 @@ async function main() {
     if (ASYNC_TT_WRITER) initTransferWriter(forceStart - 1)
     console.log(`${TAG} FORCE_START_BLOCK=${forceStart} (tip: ${tip})`)
   } else {
-    const startBlock = parseInt(process.env.START_BLOCK ?? String(chain.defaultStartBlock), 10)
+    const startBlock = indexerConfig.indexing.startBlock
     const resume = await getResumeCursor(db, startBlock)
     lastIndexed = resume.lastIndexed
     resumeGapBackfillUntil = resume.backfillUntil
@@ -236,16 +242,16 @@ async function main() {
     setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', safeErr(err))), 60 * 60 * 1000)
   }
 
-  const MAX_LAG = parseInt(process.env.MAX_LAG_BLOCKS ?? '1000', 10)
+  const MAX_LAG = indexerConfig.indexing.maxLagBlocks
   // Consecutive PROVABLY-CLEAN failover failures before a block is stepped over.
   // Lives OUTSIDE the poll loop on purpose: a per-pass tracker would reset every
   // iteration and could never reach the threshold.
-  const QUARANTINE_AFTER = positiveIntEnv(process.env.POISON_BLOCK_QUARANTINE_AFTER, DEFAULT_QUARANTINE_AFTER)
-  const QUARANTINE_ENABLED = process.env.POISON_BLOCK_QUARANTINE !== '0'
+  const QUARANTINE_AFTER = indexerConfig.reorg.quarantineAfter
+  const QUARANTINE_ENABLED = indexerConfig.reorg.quarantineEnabled
   const poisonBlocks = new PoisonBlockTracker()
 
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
-  const REORG_CHECK = process.env.REORG_CHECK !== '0'
+  const REORG_CHECK = indexerConfig.reorg.checkEnabled
   const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
   // The healer's territory rule assumes a reorg can never reach a range the healer
   // owns: the healer only takes gaps older than RESUME_GAP_SCAN_BLOCKS from the tip,
@@ -264,7 +270,7 @@ async function main() {
   }
   // Throttle the idle (tip-mode) check — it costs 2 header calls; every poll would
   // double idle RPC load for a condition the next boundary check surfaces anyway.
-  const IDLE_REORG_CHECK_MS = parseInt(process.env.IDLE_REORG_CHECK_MS ?? '30000', 10)
+  const IDLE_REORG_CHECK_MS = indexerConfig.reorg.idleCheckMs
   let lastIdleReorgCheck = 0
   console.log(`${TAG} reorg tail-check ${REORG_CHECK ? `ON (K=${REORG_DEPTH})` : 'OFF'}`)
 
@@ -304,11 +310,11 @@ async function main() {
   // receipt-derived writes and the transfer drain, or once replay is fully
   // idempotent/transactional. Everything else on this branch is independent of
   // this flag.
-  const HEAL_ENABLED = process.env.GAP_HEAL_ENABLED === '1'
-  const HEAL_INTERVAL_MS = positiveIntEnv(process.env.GAP_HEAL_INTERVAL_MS, 30000)
-  const HEAL_BATCH = positiveIntEnv(process.env.GAP_HEAL_BATCH, DEFAULT_HEAL_BATCH)
-  const HEAL_MAX_LAG = positiveIntEnv(process.env.GAP_HEAL_MAX_LAG, DEFAULT_HEAL_MAX_LAG)
-  const HEAL_FLUSH_TIMEOUT_MS = positiveIntEnv(process.env.GAP_HEAL_FLUSH_TIMEOUT_MS, 60000)
+  const HEAL_ENABLED = indexerConfig.gapHeal.enabled
+  const HEAL_INTERVAL_MS = indexerConfig.gapHeal.intervalMs
+  const HEAL_BATCH = indexerConfig.gapHeal.batch
+  const HEAL_MAX_LAG = indexerConfig.gapHeal.maxLag
+  const HEAL_FLUSH_TIMEOUT_MS = indexerConfig.gapHeal.flushTimeoutMs
   // Refreshed every poll iteration AND re-read from the chain at each tick start.
   // The loop-updated value alone goes stale during a long batch or reorg walk, so
   // the healer could start historical work believing a tip that has since moved
@@ -318,7 +324,7 @@ async function main() {
   // Fencing identity for the healer's gap lease. healInflight is process-local,
   // and Render rolling deploys overlap generations for ~60-80s, so the claim has
   // to be distinguishable per PROCESS, not per service. (codex P1, round 7.)
-  const healOwner = `${process.env.RENDER_INSTANCE_ID ?? 'local'}:${process.pid}:${Date.now().toString(36)}`
+  const healOwner = `${indexerConfig.runtime.instanceId}:${process.pid}:${Date.now().toString(36)}`
   console.log(
     `${TAG} gap healer ${HEAL_ENABLED ? `ON (every ${HEAL_INTERVAL_MS}ms, ${HEAL_BATCH} blk/tick, max lag ${HEAL_MAX_LAG}, owner ${healOwner})` : 'OFF'}`,
   )

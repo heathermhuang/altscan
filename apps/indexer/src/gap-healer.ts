@@ -1,4 +1,7 @@
 import { sql } from 'drizzle-orm'
+// Declared in config.ts (which imports nothing) so config-instance can use them
+// as defaults without importing this module — that cycle crashed the boot.
+import { DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './config'
 
 /**
  * Heal the ranges `index_gaps` records.
@@ -92,10 +95,9 @@ export type HealOutcome =
   | { status: 'failed'; fromBlock: number; toBlock: number; repaired: number; error: string }
 
 /** Blocks re-indexed per tick. Small on purpose — this is background work. */
-export const DEFAULT_HEAL_BATCH = 25
+export { DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG }
 
 /** Max lag (blocks) that still counts as "at the tip". */
-export const DEFAULT_HEAL_MAX_LAG = 50
 
 /**
  * Positive-integer env parse that falls back instead of trusting the value.
@@ -111,12 +113,6 @@ export const DEFAULT_HEAL_MAX_LAG = 50
  * Same shape as the config fail-open that shipped a security hole before: a bad
  * value must never mean "skip the check".
  */
-export function positiveIntEnv(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw === null || raw.trim() === '') return fallback
-  const n = Number(raw)
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return fallback
-  return n
-}
 
 function toNum(v: unknown): number | null {
   if (v === null || v === undefined) return null

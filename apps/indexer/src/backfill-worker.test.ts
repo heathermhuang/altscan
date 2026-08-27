@@ -346,8 +346,7 @@ describe('backfillPressure (R5)', () => {
     }) as unknown as WorkerDb
 
   it('is quiet under both bounds', async () => {
-    vi.stubEnv('DB_DISK_GB', '150')
-    expect(await backfillPressure(dbReturning(1 * 1024 ** 3, 50 * 1024 ** 3))).toBeNull()
+    expect(await backfillPressure(dbReturning(1 * 1024 ** 3, 50 * 1024 ** 3), 150)).toBeNull()
   })
 
   it('stops at the backfill byte ceiling', async () => {
@@ -356,13 +355,12 @@ describe('backfillPressure (R5)', () => {
   })
 
   it('stops at the disk percentage bound when DB_DISK_GB is known', async () => {
-    vi.stubEnv('DB_DISK_GB', '100')
-    expect(await backfillPressure(dbReturning(0, 71 * 1024 ** 3))).toMatch(/disk/)
-    expect(await backfillPressure(dbReturning(0, 69 * 1024 ** 3))).toBeNull()
+    expect(await backfillPressure(dbReturning(0, 71 * 1024 ** 3), 100)).toMatch(/disk/)
+    expect(await backfillPressure(dbReturning(0, 69 * 1024 ** 3), 100)).toBeNull()
   })
 
   it('skips the disk bound when DB_DISK_GB is unset', async () => {
-    expect(await backfillPressure(dbReturning(0, 900 * 1024 ** 3))).toBeNull()
+    expect(await backfillPressure(dbReturning(0, 900 * 1024 ** 3), 0)).toBeNull()
   })
 })
 

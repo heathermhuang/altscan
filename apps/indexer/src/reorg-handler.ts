@@ -22,10 +22,10 @@
  * P1+P2 on PR #67; full rationale on rollbackTransferWriterTo).
  */
 
+import { indexerConfig } from './config-instance'
 import { getDb, schema } from './db'
 import { eq, gte, sql } from 'drizzle-orm'
 import { readWithFailover, markNotEndpointFault, withTimeout } from './rpc-failover'
-import { positiveIntEnv } from './gap-healer'
 
 /**
  * Bound on the reorg check's DB reads. Must stay comfortably BELOW the outer RPC
@@ -38,13 +38,13 @@ import { positiveIntEnv } from './gap-healer'
  * (codex P2, round 5.)
  */
 const STORED_HASH_TIMEOUT_MS = (() => {
-  const requested = Math.min(positiveIntEnv(process.env.STORED_HASH_TIMEOUT_MS, 10_000), 30_000)
+  const requested = Math.min(indexerConfig.rpc.storedHashTimeoutMs, 30_000)
   // RPC_REORG_TIMEOUT_MS is set independently, so it can legitimately be tuned
   // BELOW this one — at which point the outer timer fires first with an untagged
   // error and the whole point (tagging a DB hang so it is not blamed on, and
   // retried against, every endpoint) is silently lost. Stay strictly under it.
   // (codex P2, round 6.)
-  const outer = positiveIntEnv(process.env.RPC_REORG_TIMEOUT_MS, 45_000)
+  const outer = indexerConfig.rpc.reorgTimeoutMs
   return Math.max(1_000, Math.min(requested, Math.floor(outer / 2)))
 })()
 import type { EndpointHealth } from './endpoint-health'

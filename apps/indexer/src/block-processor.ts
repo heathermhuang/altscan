@@ -1,3 +1,4 @@
+import { indexerConfig } from './config-instance'
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
 import { getDb, getWriterDb, schema } from './db'
@@ -26,17 +27,12 @@ const SQL_BATCH_CHUNK = 500
 // indexer_cursor watermark). Default ON for BNB (0.45s blocks need it), OFF for
 // ETH (12s blocks are fine on the synchronous inline path). Override with
 // ASYNC_TT_WRITER=1/0. When OFF, behavior is byte-for-byte today's inline path.
-const ASYNC_TT_WRITER = (() => {
-  const v = process.env.ASYNC_TT_WRITER
-  if (v === '1' || v === 'true')  return true
-  if (v === '0' || v === 'false') return false
-  return (process.env.CHAIN ?? 'bnb') === 'bnb'
-})()
+const ASYNC_TT_WRITER = indexerConfig.transferWriter.async
 
 // ── Per-phase profiling (opt-in) ─────────────────────────────────────
 // Enable with PROFILE_BLOCKS=N (e.g. 30) — logs a phase breakdown every
 // N blocks to find the dominant cost center. Zero overhead when disabled.
-const PROFILE_BLOCKS = parseInt(process.env.PROFILE_BLOCKS ?? '0', 10)
+const PROFILE_BLOCKS = indexerConfig.indexing.profileBlocks
 
 // Ceiling on pure RPC acquisition per block.
 //
@@ -47,7 +43,7 @@ const PROFILE_BLOCKS = parseInt(process.env.PROFILE_BLOCKS ?? '0', 10)
 // over. At 90s that cost the batch ~90s; at 8s it costs ~8s. A false timeout on
 // a merely-slow endpoint is harmless — this bounds a PURE READ, so failover just
 // re-fetches elsewhere.
-const RPC_FETCH_TIMEOUT_MS = parseInt(process.env.RPC_FETCH_TIMEOUT_MS ?? '8000', 10)
+const RPC_FETCH_TIMEOUT_MS = indexerConfig.rpc.fetchTimeoutMs
 const PROFILE_ENABLED = PROFILE_BLOCKS > 0
 
 type PhaseTimings = {
@@ -784,14 +780,11 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
 // Single-worker drainer for balance UPSERTs. Blocks previously awaited
 // this inline, which was the dominant per-block cost (~38% / ~2.5s).
 // Serializing through one worker removes cross-worker row-lock contention.
-const HOLDER_QUEUE_WARN_DEPTH = parseInt(process.env.HOLDER_QUEUE_WARN_DEPTH ?? '500', 10)
-const SKIP_HOLDER_BALANCES = true
-// Single source of truth for whether per-block holder-balance tracking is live.
-// While OFF, token_balances receives no per-block writes, so the periodic
-// holder_count recompute (retention-cleanup.ts) has no new input and is skipped —
-// it would otherwise full-scan a frozen token_balances for minutes and stall block
-// ingestion via disk-I/O contention while updating zero rows.
-export const HOLDER_BALANCE_TRACKING_ENABLED = !SKIP_HOLDER_BALANCES
+const HOLDER_QUEUE_WARN_DEPTH = indexerConfig.holders.queueWarnDepth
+const SKIP_HOLDER_BALANCES = !indexerConfig.holderBalanceTrackingEnabled
+// The flag itself moved to config.ts. retention-cleanup.ts reads it, and it was
+// importing this 1,833-line module — and running its module side effects,
+// including the console.warn below — to get one boolean.
 console.warn('[holder-queue] HARDCODED SKIP — token_balances writes DISABLED to save DB from write storm')
 const holderQueue: TokenTransferRow[][] = []
 let holderWorkerRunning = false
@@ -926,11 +919,7 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
 // loops below break on `rows <= bound`, and `x <= NaN` is always false, so a NaN bound
 // would throttle forever even on an empty queue (codex P2). Was a bare parseInt with a
 // `?? '50000'` that only defaulted on unset, leaving empty/garbage env → NaN.
-const parsedTtQueueHighWaterRows = parseInt(process.env.TT_QUEUE_HIGH_WATER_ROWS ?? '', 10)
-const TT_QUEUE_HIGH_WATER_ROWS =
-  Number.isFinite(parsedTtQueueHighWaterRows) && parsedTtQueueHighWaterRows > 0
-    ? parsedTtQueueHighWaterRows
-    : 50000
+const TT_QUEUE_HIGH_WATER_ROWS = indexerConfig.transferWriter.queueHighWaterRows
 // Parallel backpressure bound on the pending BLOCK COUNT (transferPending.size), not
 // just rows. The rows bound above never engages for an all-transfer-less block range
 // with a stalled writer — rows stays ~0 while the pending Map grows unbounded (codex
@@ -939,11 +928,7 @@ const TT_QUEUE_HIGH_WATER_ROWS =
 // unset/NaN/zero/negative → default 2000. Backpressure only — the high-water ALERT
 // (TT_QUEUE_ALERT_ROWS) stays rows-only; a genuinely stuck writer is already caught by
 // the consecutive-write-failure alert, which is failure-count- not row-driven.
-const parsedTtQueueHighWaterBlocks = parseInt(process.env.TT_QUEUE_HIGH_WATER_BLOCKS ?? '', 10)
-const TT_QUEUE_HIGH_WATER_BLOCKS =
-  Number.isFinite(parsedTtQueueHighWaterBlocks) && parsedTtQueueHighWaterBlocks > 0
-    ? parsedTtQueueHighWaterBlocks
-    : 2000
+const TT_QUEUE_HIGH_WATER_BLOCKS = indexerConfig.transferWriter.queueHighWaterBlocks
 // Pending-rows threshold for the high-water ALERT, decoupled from the backpressure
 // bound above. PR #43 reused TT_QUEUE_HIGH_WATER_ROWS for both, so the WARN tripped on
 // every momentary ride along the backpressure ceiling (13 benign fires the first day,
@@ -953,18 +938,12 @@ const TT_QUEUE_HIGH_WATER_BLOCKS =
 // so a misconfigured override can never make the alert noisier than PR #43 was. Pairs
 // with the lower recovery edge in evaluateTransferQueueHighWater() to form a hysteresis
 // band that can't flap.
-const parsedTtQueueAlertRows = parseInt(process.env.TT_QUEUE_ALERT_ROWS ?? '', 10)
-const TT_QUEUE_ALERT_ROWS = Math.max(
-  TT_QUEUE_HIGH_WATER_ROWS,
-  Number.isFinite(parsedTtQueueAlertRows) && parsedTtQueueAlertRows > 0
-    ? parsedTtQueueAlertRows
-    : TT_QUEUE_HIGH_WATER_ROWS * 2,
-)
+const TT_QUEUE_ALERT_ROWS = indexerConfig.ttQueueAlertRows
 // Consecutive failed drains before the writer escalates from a per-attempt warn to a
 // loud error alert (and again every Nth failure after). Mirrors webhook-notifier's
 // "deactivate after 5 consecutive failures" pattern — here we never give up (transfers
 // are primary data), we just get loud so log-based monitoring fires.
-const TT_WRITER_FAILURE_ALERT_THRESHOLD = parseInt(process.env.TT_WRITER_FAILURE_ALERT_THRESHOLD ?? '5', 10)
+const TT_WRITER_FAILURE_ALERT_THRESHOLD = indexerConfig.transferWriter.failureAlertThreshold
 /**
  * A queued write for one block.
  *
@@ -1027,8 +1006,8 @@ let ttWriterDrainCount = 0
 //
 // Diagnostic only: nothing here changes behaviour, and it is off unless
 // TT_WRITER_PROFILE=1 so the default path pays only a boolean test.
-const TT_WRITER_PROFILE = process.env.TT_WRITER_PROFILE === '1'
-const TT_PROFILE_WINDOW_MS = parseInt(process.env.TT_PROFILE_WINDOW_MS ?? '30000', 10) || 30000
+const TT_WRITER_PROFILE = indexerConfig.transferWriter.profile
+const TT_PROFILE_WINDOW_MS = indexerConfig.transferWriter.profileWindowMs
 /** Block workers currently parked in the backpressure poll loop (index.ts). */
 let parkedWorkers = 0
 /**
@@ -1261,8 +1240,8 @@ export function initTransferWriter(seedDurableBlock: number): void {
   // The A/B arm. Printed unconditionally and from the RESOLVED env value, so a
   // run can never be attributed to the wrong arm after the fact.
   console.log(
-    process.env.TT_WRITER_DEDICATED_POOL === '1'
-      ? `[tt-writer] dedicated writer pool ON (TT_WRITER_POOL_SIZE=${process.env.TT_WRITER_POOL_SIZE ?? '2'}) — not competing with block workers for slots`
+    indexerConfig.transferWriter.dedicatedPool
+      ? `[tt-writer] dedicated writer pool ON (TT_WRITER_POOL_SIZE=${indexerConfig.transferWriter.poolSize}) — not competing with block workers for slots`
       : `[tt-writer] dedicated writer pool OFF — sharing the ingestion pool with block workers`,
   )
   if (TT_WRITER_PROFILE) startLoopLagProbe()
