@@ -62,8 +62,13 @@ function EthLogo() {
   )
 }
 
+const LOGOS = { bnb: BnbLogo, eth: EthLogo }
+
 function Logo() {
-  return chainConfig.key === 'eth' ? <EthLogo /> : <BnbLogo />
+  // Keyed by ChainKey, so adding a chain is a compile error here rather than a
+  // silent fall-through to BNB's mark.
+  const ChainLogo = LOGOS[chainConfig.key]
+  return <ChainLogo />
 }
 
 export function Header() {

@@ -7,8 +7,7 @@ export const contentType = 'image/png'
 
 export default function OGImage() {
   const letter = chainConfig.brandName.charAt(0)
-  const isEth = chainConfig.key === 'eth'
-  const bgColor = isEth ? '#0f172a' : '#1a1a2e'
+  const bgColor = chainConfig.theme.ogBackground
   const accentColor = chainConfig.theme.primaryHex
 
   return new ImageResponse(
@@ -34,7 +33,7 @@ export default function OGImage() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: isEth ? 'white' : 'black',
+          color: chainConfig.theme.ogForeground,
           fontWeight: '800',
           fontSize: 56,
           marginBottom: 32,

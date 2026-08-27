@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     defaults: {
       links: { quickLinks: DEFAULT_QUICK_LINKS },
       footer: { tagline: chainConfig.tagline, notAffiliatedWith: chainConfig.notAffiliatedWith },
-      ads: { binanceRefCode: chainConfig.key === 'eth' ? 'ETHSCAN' : 'BNBSCAN', placements: {} },
+      ads: { binanceRefCode: chainConfig.binanceRefCode, placements: {} },
       rpc: { webRpcHost: rpcFallbackHost(), rpcTimeoutMs: resolveRpc(null, chainConfig, process.env).timeoutMs },
     },
     ...(warning ? { warning } : {}),

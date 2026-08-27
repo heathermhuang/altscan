@@ -48,8 +48,8 @@ const jsonLd = {
 }
 
 async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
-  const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
-  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+  const binanceSymbol = chainConfig.market.binanceSymbol
+  const ccSymbol = chainConfig.market.cryptoCompareSymbol
 
   // Try multiple Binance endpoints (binance.us for US-based servers like Render)
   for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
@@ -99,7 +99,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
   } catch { /* try next */ }
 
   // Fallback: CoinCap
-  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  const coincapId = chainConfig.market.coincapId
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,
@@ -143,7 +143,7 @@ async function fetchTxCount24h(latestBlock: { timestamp: Date } | undefined): Pr
 /** Fetch market cap and 24h change for the native currency from the free price
  * APIs, tried in order. Returns null only if ALL sources fail/rate-limit. */
 async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number } | null> {
-  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+  const ccSymbol = chainConfig.market.cryptoCompareSymbol
 
   // Try CryptoCompare (has MKTCAP + CHANGEPCT24HOUR in RAW data)
   try {
@@ -172,7 +172,7 @@ async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number
   } catch { /* try next */ }
 
   // Try CoinCap
-  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  const coincapId = chainConfig.market.coincapId
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,

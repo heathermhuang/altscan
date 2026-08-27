@@ -34,8 +34,8 @@ export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
 }
 
 async function fetchNativePrice(): Promise<number | null> {
-  const binanceSymbol = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
-  const ccSymbol = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+  const binanceSymbol = chainConfig.market.binanceSymbol
+  const ccSymbol = chainConfig.market.cryptoCompareSymbol
 
   // Try multiple Binance endpoints (binance.us for US-based servers like Render)
   for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
@@ -77,7 +77,7 @@ async function fetchNativePrice(): Promise<number | null> {
   } catch { /* try next */ }
 
   // Fallback: CoinCap
-  const coincapId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+  const coincapId = chainConfig.market.coincapId
   try {
     const res = await fetch(
       `https://api.coincap.io/v2/assets/${coincapId}`,

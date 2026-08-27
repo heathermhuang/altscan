@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
+import { formatGwei } from '@/lib/format'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 export const revalidate = 300
@@ -121,9 +122,9 @@ export default async function ChartsPage() {
               label="Gwei"
               formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
             />
-          ) : chainConfig.key === 'bnb' ? (
+          ) : BigInt(chainConfig.minGasPriceWei) > 0n ? (
             <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
-              BNB Chain has a low minimum gas price of 0.1 Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
+              {chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
             </div>
           ) : null}
         </ChartCard>

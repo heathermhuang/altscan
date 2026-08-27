@@ -64,7 +64,7 @@ const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | nu
       totalSupply: totalSupply.toString(),
       holderCount: 0,
       address: addr,
-      type: chainConfig.key === 'bnb' ? 'BEP-20' : 'ERC-20',
+      type: chainConfig.tokenStandard,
     }
   } catch {
     return null
