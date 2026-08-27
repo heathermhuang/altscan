@@ -23,24 +23,6 @@ const PERIOD_LABELS: Record<string, string> = {
   all: 'All Time',
 }
 
-// WBNB and WETH contract addresses
-const WRAPPED_TOKENS: Record<string, { address: string; symbol: string; decimals: number }> = {
-  bnb: { address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', symbol: 'WBNB', decimals: 18 },
-  eth: { address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH', decimals: 18 },
-}
-
-// Well-known stablecoins to track large moves (6 decimals for USDT/USDC)
-const STABLECOINS: Record<string, Array<{ address: string; symbol: string; decimals: number }>> = {
-  bnb: [
-    { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18 },
-    { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18 },
-  ],
-  eth: [
-    { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6 },
-    { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6 },
-  ],
-}
-
 export default async function WhalesPage({
   searchParams,
 }: {
@@ -51,28 +33,13 @@ export default async function WhalesPage({
     ? periodParam
     : '24h') as WhalePeriod
 
-  // Minimum whale threshold in wei: 1 BNB / 0.5 ETH for native
-  const minNativeWei = chainConfig.key === 'bnb' ? '1000000000000000000' : '500000000000000000'
+  // Thresholds and tracked tokens are per-chain config. They used to be two
+  // `Record<string, …>` maps indexed by `chainConfig.key` with no guard, so a
+  // third chain read `undefined` and the next line 500'd the page.
+  const { nativeMinWei, wrapped, stablecoins } = chainConfig.whales
+  const tokenFilters = [wrapped, ...stablecoins]
 
-  // Wrapped token config
-  const wrapped = WRAPPED_TOKENS[chainConfig.key]
-  const stables = STABLECOINS[chainConfig.key] ?? []
-
-  // Build token addresses and thresholds for token_transfers query
-  // WBNB/WETH: same threshold as native (1 BNB / 0.5 ETH in 18-decimal wei)
-  // Stablecoins: $1,000 minimum
-  const tokenFilters = [
-    { address: wrapped.address, minValue: minNativeWei, symbol: wrapped.symbol, decimals: wrapped.decimals },
-    ...stables.map(s => ({
-      address: s.address,
-      // $1,000 threshold
-      minValue: (1000n * (10n ** BigInt(s.decimals))).toString(),
-      symbol: s.symbol,
-      decimals: s.decimals,
-    })),
-  ]
-
-  const { rows: whales, degraded } = await fetchWhales(period, minNativeWei, tokenFilters)
+  const { rows: whales, degraded } = await fetchWhales(period, nativeMinWei, tokenFilters)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -80,7 +47,8 @@ export default async function WhalesPage({
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">Whale Tracker</h1>
         <p className="text-gray-500 text-sm">
-          Large transfers on {chainConfig.name} — native ({chainConfig.key === 'bnb' ? '≥1 BNB' : '≥0.5 ETH'}), {chainConfig.key === 'bnb' ? 'WBNB' : 'WETH'}, and stablecoins (≥$1,000)
+          Large transfers on {chainConfig.name} — native (≥{formatTokenAmount(nativeMinWei, 18)} {chainConfig.currency}), {wrapped.symbol}
+          {stablecoins.length > 0 && <>, and stablecoins (≥${formatTokenAmount(stablecoins[0].minValue, stablecoins[0].decimals)})</>}
         </p>
       </div>
 
@@ -130,10 +98,10 @@ export default async function WhalesPage({
           </thead>
           <tbody className="divide-y">
             {whales.map((w) => {
-              const isStable = w.tokenSymbol === 'USDT' || w.tokenSymbol === 'USDC'
-              const decimals = isStable
-                ? (stables.find(s => s.symbol === w.tokenSymbol)?.decimals ?? 18)
-                : 18
+              // Native and wrapped are 18-decimal; stablecoins differ per chain
+              // (6 on Ethereum, 18 on BNB Chain), so resolve from config.
+              const decimals =
+                stablecoins.find(s => s.symbol === w.tokenSymbol)?.decimals ?? 18
               const displayAmount = formatTokenAmount(w.value, decimals)
               const symbol = w.tokenSymbol ?? chainConfig.currency
 
