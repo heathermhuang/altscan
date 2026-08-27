@@ -20,6 +20,7 @@
  *     succeeded.
  */
 import { sql, type SQL } from 'drizzle-orm'
+import { cachedPageQuery } from '@/lib/page-cache'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { safeBigInt } from '@/lib/format'
@@ -246,7 +247,15 @@ export function mergeWhaleRows(
     .slice(0, 50)
 }
 
-export async function fetchWhales(
+export const WHALES_REVALIDATE_SECONDS = 300
+
+/**
+ * Uncached query for both halves.
+ *
+ * Kept separate from `fetchWhales` so the cache wrapper has something to call
+ * and tests have something to call without one.
+ */
+export async function queryWhales(
   period: WhalePeriod,
   minNativeWei: string,
   filters: readonly TokenFilter[],
@@ -260,4 +269,36 @@ export async function fetchWhales(
 
   const rows = mergeWhaleRows(result.native, result.token)
   return { rows, degraded: result.native === null || result.token === null }
+}
+
+/**
+ * Cached by period.
+ *
+ * `degraded` is part of the cached value on purpose. Both halves already settle
+ * independently and resolve rather than reject, so a failure would otherwise be
+ * cached as an ordinary empty result and the page would say "no large transfers"
+ * for the whole revalidate window — which is the exact failure #110 fixed. The
+ * flag rides along so the page keeps saying so.
+ *
+ * Timestamps are ISO strings across the boundary: `Date` does not survive the
+ * incremental cache, and the table needs a real `Date` back.
+ */
+export async function fetchWhales(
+  period: WhalePeriod,
+  minNativeWei: string,
+  filters: readonly TokenFilter[],
+): Promise<WhaleFetch> {
+  const cached = await cachedPageQuery(
+    'whales',
+    [period],
+    WHALES_REVALIDATE_SECONDS,
+    async () => {
+      const { rows, degraded } = await queryWhales(period, minNativeWei, filters)
+      return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), degraded }
+    },
+  )
+  return {
+    rows: cached.rows.map(r => ({ ...r, timestamp: new Date(r.timestamp) })),
+    degraded: cached.degraded,
+  }
 }
