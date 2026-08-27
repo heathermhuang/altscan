@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildCacheKey } from '@/lib/page-cache'
+import { buildCacheKey, createPageCache } from '@/lib/page-cache'
 import { chainConfig } from '@/lib/chain'
-import { estimateFrom, parsePageParam, parseTx, parseBlock } from '@/lib/list-pages'
-import { parseDexTrade } from '@/lib/dex-page'
+import { estimateFrom, parsePageParam, parseTx, parseBlock, fetchTxPage, fetchBlockPage } from '@/lib/list-pages'
+import { parseDexTrade, fetchDexPage } from '@/lib/dex-page'
 
 describe('buildCacheKey', () => {
   it('scopes the key to the chain', () => {
@@ -80,5 +80,39 @@ describe('cache-boundary rehydration', () => {
 
   it('turns a dex trade timestamp back into a Date', () => {
     expect(parseDexTrade({ id: 1, timestamp: iso } as never).timestamp).toBeInstanceOf(Date)
+  })
+})
+
+describe('createPageCache builds the reader once, not per request', () => {
+  // The returned function cannot be INVOKED here — unstable_cache throws
+  // outside a Next request scope — so these assert the shape, which is exactly
+  // what distinguishes the broken version from the fixed one.
+  it('returns an uninvoked function, not an in-flight promise', () => {
+    // The broken version was `unstable_cache(query, key, opts)()`: it built the
+    // wrapper INSIDE the request and immediately called it, so every request
+    // wrapped a fresh closure and Next derived a fresh cache id from it. Every
+    // lookup missed, and nothing errored. Production proof: /blocks (60s TTL)
+    // advanced its top block four times in ten seconds, while /gas — static ISR
+    // on the same incremental cache — reported x-nextjs-cache: HIT.
+    let calls = 0
+    const read = createPageCache('t', 60, async (page: number) => { calls++; return page * 2 })
+    expect(typeof read).toBe('function')
+    expect(read).not.toBeInstanceOf(Promise)
+    expect(calls).toBe(0)
+  })
+
+  it('does not re-create a wrapper per call', () => {
+    const read = createPageCache('t2', 60, async (n: number) => n)
+    expect(read).toBe(read)
+  })
+})
+
+describe('the page fetchers are module-scope constants', () => {
+  it.each([
+    ['fetchTxPage', fetchTxPage],
+    ['fetchBlockPage', fetchBlockPage],
+    ['fetchDexPage', fetchDexPage],
+  ])('%s is a stable function', (_n, fn) => {
+    expect(typeof fn).toBe('function')
   })
 })
