@@ -1,12 +1,18 @@
 import { schema } from '@/lib/db'
-import { fetchTxPage, parseTx, parsePageParam, PER_PAGE, TXS_REVALIDATE_SECONDS } from '@/lib/list-pages'
+import { fetchTxPage, parseTx, parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = TXS_REVALIDATE_SECONDS
+// Next.js statically analyses route segment config and cannot resolve an
+// imported identifier here — `export const revalidate = TXS_REVALIDATE_SECONDS`
+// fails the BUILD with "Unknown identifier at revalidate", which typecheck and
+// the test suite both pass because CI never builds the explorer. It must be a
+// literal. `revalidate-parity.test.ts` pins it to the cache TTL so the two
+// cannot drift.
+export const revalidate = 45
 
 export const metadata: Metadata = {
   title: `Recent Transactions`,

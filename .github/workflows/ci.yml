@@ -79,6 +79,18 @@ jobs:
           BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/seam_test
         run: npx vitest run apps/explorer/lib/backfill-serve.pg.test.ts
 
+      # Nothing else here builds the explorer — only Render does — so a class of
+      # failure reaches production having passed every gate. Twice now: a stale
+      # `transpilePackages` entry (#118) and `export const revalidate =
+      # <imported identifier>`, which Next's static route-config analysis rejects
+      # at BUILD time while typecheck and every test pass (#117 -> #120).
+      # A dummy DATABASE_URL is enough: the pages catch their own DB errors, and
+      # what is being gated is compilation and segment config, not data.
+      - name: Build explorer (segment config + transpilePackages gate)
+        env:
+          DATABASE_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: pnpm --filter @altscan/explorer build
+
       # apps/altscan-site ships its own tsx harness (excluded from the root
       # vitest run); run it here so its chain-payload tests still gate PRs.
       - name: Run altscan-site tests
