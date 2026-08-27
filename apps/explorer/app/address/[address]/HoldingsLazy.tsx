@@ -63,13 +63,15 @@ export function HoldingsLazy({ addr }: { addr: string }) {
         <span>Showing current token holdings from Moralis.</span>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
+          <caption className="sr-only">{chainConfig.name} token holdings for this address</caption>
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">Balance</th>
-              <th className="text-left px-4 py-2 font-medium text-gray-500">USD Value</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Balance</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">USD Value</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -99,6 +101,7 @@ export function HoldingsLazy({ addr }: { addr: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

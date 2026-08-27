@@ -406,6 +406,7 @@ export default async function TxDetailPage({
       )}
 
       <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <tbody className="divide-y">
             <Row label="Transaction Hash" value={tx.hash} mono copy />
@@ -499,6 +500,7 @@ export default async function TxDetailPage({
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Input Data */}

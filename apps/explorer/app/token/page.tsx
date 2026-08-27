@@ -119,14 +119,16 @@ export default async function TokenListPage({
         </form>
       </div>
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
+          <caption className="sr-only">{typeLabels[tokenType]} sorted by holder count</caption>
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-2 text-gray-500">#</th>
-              <th className="text-left px-4 py-2 text-gray-500">Token</th>
-              <th className="text-left px-4 py-2 text-gray-500">Symbol</th>
-              <th className="text-left px-4 py-2 text-gray-500">Holders</th>
-              <th className="text-left px-4 py-2 text-gray-500">Total Supply</th>
+              <th scope="col" className="text-left px-4 py-2 text-gray-500">#</th>
+              <th scope="col" className="text-left px-4 py-2 text-gray-500">Token</th>
+              <th scope="col" className="text-left px-4 py-2 text-gray-500">Symbol</th>
+              <th scope="col" className="text-left px-4 py-2 text-gray-500">Holders</th>
+              <th scope="col" className="text-left px-4 py-2 text-gray-500">Total Supply</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -150,6 +152,7 @@ export default async function TokenListPage({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

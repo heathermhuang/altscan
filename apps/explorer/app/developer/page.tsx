@@ -247,11 +247,13 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
 
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-sm mb-3 text-gray-700">Supported Entities &amp; Filters</h3>
+              <div className="overflow-x-auto">
               <table className="w-full text-xs border border-gray-200 rounded overflow-hidden">
+                <caption className="sr-only">Supported query entities and their available filters</caption>
                 <thead className="bg-gray-100">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium text-gray-600">Entity</th>
-                    <th className="text-left px-3 py-2 font-medium text-gray-600">Available Filters</th>
+                    <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600">Entity</th>
+                    <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600">Available Filters</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -277,6 +279,7 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">

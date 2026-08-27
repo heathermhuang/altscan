@@ -375,13 +375,15 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
             <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
               Parameters
             </h3>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+              <caption className="sr-only">Parameters for {endpoint.method} {endpoint.path}</caption>
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Name</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Type</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Required</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Description</th>
+                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Name</th>
+                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Type</th>
+                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Required</th>
+                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Description</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -401,6 +403,7 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
