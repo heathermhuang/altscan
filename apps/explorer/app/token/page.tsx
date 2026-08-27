@@ -7,8 +7,8 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: `${chainConfig.key === 'eth' ? 'ERC-20' : 'BEP-20'} Tokens`,
-  description: `Explore ${chainConfig.key === 'eth' ? 'ERC-20' : 'BEP-20'} tokens on ${chainConfig.name}. View token supply, holder count, and contract details on ${chainConfig.brandDomain}.`,
+  title: `${chainConfig.tokenStandard} Tokens`,
+  description: `Explore ${chainConfig.tokenStandard} tokens on ${chainConfig.name}. View token supply, holder count, and contract details on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/token' },
 }
 
@@ -57,14 +57,16 @@ export default async function TokenListPage({
     }
   } catch { /* DB not connected */ }
 
-  // Use ERC standard names on Ethereum, BEP on BNB Chain
-  const isEth = chainConfig.key === 'eth'
-  const typeLabels = isEth
-    ? { BEP20: 'ERC-20 Tokens', BEP721: 'ERC-721 NFTs', BEP1155: 'ERC-1155 Multi-Tokens' }
-    : { BEP20: 'BEP-20 Tokens', BEP721: 'BEP-721 NFTs', BEP1155: 'BEP-1155 Multi-Tokens' }
-  const tabLabels = isEth
-    ? { BEP20: 'ERC-20', BEP721: 'ERC-721', BEP1155: 'ERC-1155' }
-    : { BEP20: 'BEP20', BEP721: 'BEP721', BEP1155: 'BEP1155' }
+  // 'ERC' on Ethereum, 'BEP' on BNB Chain — derived from the configured token
+  // standard so a new chain gets its own prefix instead of silently inheriting
+  // BNB's. (This also hyphenates the BNB tab labels, matching the headings.)
+  const std = chainConfig.tokenStandard.split('-')[0]
+  const typeLabels = {
+    BEP20: `${std}-20 Tokens`, BEP721: `${std}-721 NFTs`, BEP1155: `${std}-1155 Multi-Tokens`,
+  }
+  const tabLabels = {
+    BEP20: `${std}-20`, BEP721: `${std}-721`, BEP1155: `${std}-1155`,
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -75,15 +77,15 @@ export default async function TokenListPage({
           '@context': 'https://schema.org',
           '@type': 'FAQPage',
           mainEntity: [
-            { '@type': 'Question', name: `What are ${isEth ? 'ERC-20' : 'BEP-20'} tokens?`, acceptedAnswer: { '@type': 'Answer', text: `${isEth ? 'ERC-20' : 'BEP-20'} is the standard token interface on ${chainConfig.name}. These fungible tokens can represent anything — currencies, utility points, governance votes, or real-world assets. Each token is a smart contract that tracks balances and allows transfers between addresses.` } },
+            { '@type': 'Question', name: `What are ${chainConfig.tokenStandard} tokens?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.tokenStandard} is the standard token interface on ${chainConfig.name}. These fungible tokens can represent anything — currencies, utility points, governance votes, or real-world assets. Each token is a smart contract that tracks balances and allows transfers between addresses.` } },
             { '@type': 'Question', name: `How do I check token holders on ${chainConfig.brandDomain}?`, acceptedAnswer: { '@type': 'Answer', text: `Click on any token in the list to see its detail page, which shows the total supply, holder count, recent transfers, and top holders. You can also search by token name, symbol, or contract address.` } },
-            { '@type': 'Question', name: `What is the difference between ${isEth ? 'ERC-20, ERC-721, and ERC-1155' : 'BEP-20, BEP-721, and BEP-1155'}?`, acceptedAnswer: { '@type': 'Answer', text: `${isEth ? 'ERC-20' : 'BEP-20'} tokens are fungible (interchangeable, like currencies). ${isEth ? 'ERC-721' : 'BEP-721'} tokens are non-fungible (unique, like NFTs). ${isEth ? 'ERC-1155' : 'BEP-1155'} is a multi-token standard that supports both fungible and non-fungible tokens in a single contract.` } },
+            { '@type': 'Question', name: `What is the difference between ${std}-20, ${std}-721, and ${std}-1155?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.tokenStandard} tokens are fungible (interchangeable, like currencies). ${std}-721 tokens are non-fungible (unique, like NFTs). ${std}-1155 is a multi-token standard that supports both fungible and non-fungible tokens in a single contract.` } },
           ],
         }) }}
       />
       <h1 className="text-2xl font-bold mb-2">{typeLabels[tokenType]}</h1>
       <p className="text-gray-500 text-sm mb-4">
-        Browse all indexed {isEth ? 'ERC-20' : 'BEP-20'} tokens on {chainConfig.name}, ranked by holder count. {isEth ? 'ERC-20' : 'BEP-20'} is the standard fungible token interface — each token listed here is a smart contract that tracks balances across all holders.
+        Browse all indexed {chainConfig.tokenStandard} tokens on {chainConfig.name}, ranked by holder count. {chainConfig.tokenStandard} is the standard fungible token interface — each token listed here is a smart contract that tracks balances across all holders.
       </p>
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex gap-2">

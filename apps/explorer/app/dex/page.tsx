@@ -91,14 +91,14 @@ export default async function DexPage({
           '@context': 'https://schema.org',
           '@type': 'FAQPage',
           mainEntity: [
-            { '@type': 'Question', name: `What are DEX trades on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `DEX (Decentralized Exchange) trades are token swaps executed directly on ${chainConfig.name} through automated market maker (AMM) protocols like ${chainConfig.key === 'bnb' ? 'PancakeSwap' : 'Uniswap'}. Unlike centralized exchanges, DEX trades happen on-chain — every swap is a blockchain transaction that anyone can verify.` } },
-            { '@type': 'Question', name: `Which DEXes does ${chainConfig.brandDomain} track?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.brandDomain} indexes swap events from all major ${chainConfig.name} DEXes including ${chainConfig.key === 'bnb' ? 'PancakeSwap, BiSwap, and other BNB Chain AMMs' : 'Uniswap V2/V3, SushiSwap, and other Ethereum AMMs'}. Trades are detected by monitoring Swap event logs emitted by pair contracts.` } },
+            { '@type': 'Question', name: `What are DEX trades on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `DEX (Decentralized Exchange) trades are token swaps executed directly on ${chainConfig.name} through automated market maker (AMM) protocols like ${chainConfig.dex.primary}. Unlike centralized exchanges, DEX trades happen on-chain — every swap is a blockchain transaction that anyone can verify.` } },
+            { '@type': 'Question', name: `Which DEXes does ${chainConfig.brandDomain} track?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.brandDomain} indexes swap events from all major ${chainConfig.name} DEXes including ${chainConfig.dex.others}. Trades are detected by monitoring Swap event logs emitted by pair contracts.` } },
           ],
         }) }}
       />
       <h1 className="text-2xl font-bold mb-2">DEX Trades</h1>
       <p className="text-gray-500 text-sm mb-6">
-        Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.key === 'bnb' ? 'PancakeSwap' : 'Uniswap'} and other AMMs is indexed in real-time as on-chain Swap events.
+        Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.dex.primary} and other AMMs is indexed in real-time as on-chain Swap events.
       </p>
 
       {/* Stats row */}
@@ -219,7 +219,7 @@ export default async function DexPage({
               )
             })}
             {trades.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-16 text-center"><p className="text-gray-400 text-lg mb-1">No DEX trades found</p><p className="text-gray-300 text-sm">Trades from {chainConfig.key === 'bnb' ? 'PancakeSwap' : 'Uniswap'} and other DEXes will appear here as they are indexed.</p></td></tr>
+              <tr><td colSpan={7} className="px-4 py-16 text-center"><p className="text-gray-400 text-lg mb-1">No DEX trades found</p><p className="text-gray-300 text-sm">Trades from {chainConfig.dex.primary} and other DEXes will appear here as they are indexed.</p></td></tr>
             )}
           </tbody>
         </table>

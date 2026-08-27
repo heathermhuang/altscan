@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, type WhaleTx } from '@/lib/whales'
+import { getChainConfig } from '@altscan/chain-config'
+import { chainConfig } from '@/lib/chain'
+import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rawWeiLiteral, type WhaleTx } from '@/lib/whales'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -11,19 +13,72 @@ const FILTERS = [
 ]
 
 describe('buildTokenWhaleQuery', () => {
-  it('expands the token list as an IN list, never a row constructor', () => {
+  it('never renders a row constructor, which is what broke the page', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
     // The shipped bug: `= ANY(${array})` renders as `ANY(($1, $2))`, a ROW,
     // which Postgres rejects with "op ANY/ALL (array) requires array on right side".
     expect(text).not.toMatch(/ANY\s*\(\s*\(/)
-    expect(text).toContain('IN ($1, $2)')
   })
 
-  it('binds one parameter per token address', () => {
+  it('emits one UNION ALL arm per token, each independently limited', () => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+
+    // The whole latency fix rests on this shape: one early-stopping index walk
+    // per token instead of a single OR-ed scan that has to sort every candidate.
+    // Two tokens => one UNION ALL, and a LIMIT inside each arm plus the outer one.
+    expect(text.match(/UNION ALL/g)).toHaveLength(FILTERS.length - 1)
+    expect(text.match(/LIMIT 25/g)).toHaveLength(FILTERS.length + 1)
+    expect(text.match(/FROM token_transfers/g)).toHaveLength(FILTERS.length)
+  })
+
+  it('binds an address and a threshold per token, in order', () => {
     const { params } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
-    expect(params).toContain(FILTERS[0].address)
-    expect(params).toContain(FILTERS[1].address)
+    expect(params).toEqual([
+      FILTERS[0].address, FILTERS[0].minValue,
+      FILTERS[1].address, FILTERS[1].minValue,
+    ])
+  })
+
+  it('sorts every arm and the merge by the same deterministic key', () => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+
+    // Per-arm LIMIT 25 only yields a correct global top-25 if the arms and the
+    // merge agree on the ordering. Timestamp alone is not deterministic — a
+    // timestamp is a block, and a hot token moves many times per block.
+    const orders = text.match(/ORDER BY [^\n]+/g) ?? []
+    expect(orders).toHaveLength(FILTERS.length + 2) // one per arm, merge, outer
+    for (const o of orders) {
+      expect(o).toMatch(/timestamp DESC, [\w.]*tx_hash DESC, [\w.]*log_index DESC/)
+    }
+  })
+
+  it('refuses an empty filter list rather than emitting a dangling UNION ALL', () => {
+    expect(() => buildTokenWhaleQuery('24h', [])).toThrow(/at least one token filter/)
+  })
+
+  it('joins the token symbol after the limit, not before it', () => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+    // Joining first made the lookup run against every candidate row.
+    expect(text.indexOf('LEFT JOIN tokens')).toBeGreaterThan(text.lastIndexOf('LIMIT 25'))
+  })
+})
+
+describe('whale thresholds stay below the measured display floor', () => {
+  // Raising nativeMinWei is invisible ONLY while it stays under the smallest
+  // 25th-largest transfer seen in any single hour. Measured on prod 2026-08-27
+  // across every complete hour the chains retain (BNB 53h, ETH 97h), with no
+  // hour holding fewer than 25 qualifying transfers.
+  const FLOOR_WEI: Record<string, bigint> = {
+    bnb: 41_064_787_000_000_000_000n, // 41.06 BNB
+    eth: 61_563_203_000_000_000_000n, // 61.56 ETH
+  }
+
+  it.each(['bnb', 'eth'] as const)('%s', (key) => {
+    const cfg = getChainConfig(key)
+    const min = BigInt(cfg.whales.nativeMinWei)
+    expect(min).toBeGreaterThan(0n)
+    expect(min).toBeLessThan(FLOOR_WEI[key])
   })
 })
 
@@ -113,5 +168,40 @@ describe('mergeWhaleRows', () => {
     expect(merged[0].value).toBe('59')
     // Numeric, not lexicographic: a lexicographic sort would rank '9' first.
     expect(merged.map(r => r.value)).not.toContain('9')
+  })
+})
+
+describe('buildNativeWhaleQuery carries the partial-index floor as a literal', () => {
+  it('emits the floor inline, not as a bound parameter', () => {
+    const { sql: text, params } = toQuery(
+      buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei),
+    )
+    const floor = chainConfig.whales.nativeIndexFloorWei
+
+    // A parameter here defeats the partial index under a generic plan: Postgres
+    // cannot prove `$1 >= floor`, discards tx_whale_value_idx and seq-scans.
+    // Measured on PG16 with force_generic_plan: 52,744 buffers vs 27.
+    expect(text).toContain(`value > ${floor}`)
+    expect(params).not.toContain(floor)
+  })
+
+  it('still binds the configured threshold as a parameter', () => {
+    const { params } = toQuery(
+      buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei),
+    )
+    expect(params).toContain(chainConfig.whales.nativeMinWei)
+  })
+
+  it.each([
+    ["1'; DROP TABLE transactions --"],
+    ['1e18'],
+    [''],
+    ['1000000000000000000 '],
+  ])('refuses %j as a floor, because it is spliced in unescaped', (bad) => {
+    expect(() => rawWeiLiteral(bad)).toThrow(/must be digits/)
+  })
+
+  it('accepts the configured floor', () => {
+    expect(() => rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)).not.toThrow()
   })
 })

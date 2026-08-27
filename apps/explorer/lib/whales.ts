@@ -62,6 +62,37 @@ function cutoffFor(period: WhalePeriod): SQL {
   }
 }
 
+/**
+ * The 25 largest native transfers in the window.
+ *
+ * The `value > <floor>` literal is NOT redundant, however much it looks it.
+ * It is what lets the planner match the partial index
+ * `tx_whale_value_idx ON transactions(value DESC, timestamp DESC)
+ *  WHERE value > <floor>`, which turns this from "read every candidate row from
+ * the heap, sort, discard all but 25" into an index walk that stops at 25.
+ *
+ * drizzle binds `minNativeWei` as a parameter and postgres-js prepares
+ * statements, so Postgres may plan this generically — and a generic plan cannot
+ * prove `$1 >= floor`, so it cannot use a partial index predicated on it.
+ * Verified on PG16 against a fixture built to prod selectivity, under
+ * `plan_cache_mode = force_generic_plan`:
+ *
+ *   parameter only     Parallel Seq Scan   52,744 buffers
+ *   parameter + literal Index Scan              27 buffers
+ *
+ * Deleting the literal does not fail a test or change a single row. It silently
+ * restores the outage. `nativeIndexFloorWei` must stay equal to the index
+ * predicate in ensure-schema.ts, and `nativeMinWei` must stay at or above it.
+ */
+export function rawWeiLiteral(wei: string): SQL {
+  // sql.raw is unavoidable here (a bound parameter defeats the partial index),
+  // so prove the value is a bare integer before splicing it into the statement.
+  if (!/^[0-9]+$/.test(wei)) {
+    throw new Error(`whales: index floor must be digits, got ${JSON.stringify(wei)}`)
+  }
+  return sql.raw(wei)
+}
+
 export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string): SQL {
   return sql`
       SELECT hash, from_address as "fromAddress", to_address as "toAddress",
@@ -69,37 +100,70 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
              'native' as "transferType", ${chainConfig.currency} as "tokenSymbol"
       FROM transactions
       WHERE timestamp >= ${cutoffFor(period)}
+        AND value > ${rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)}
         AND value > ${minNativeWei}
       ORDER BY value DESC
       LIMIT 25
   `
 }
 
+/**
+ * The 25 most recent tracked-token transfers above each token's threshold.
+ *
+ * One arm per token, `UNION ALL`ed, rather than a single scan with
+ * `token_address IN (…) AND (per-token OR arms)`. The OR form cannot use
+ * `tt_token_ts_idx (token_address, timestamp DESC)` to stop early: Postgres has
+ * to gather every tracked-token transfer in the window and sort it. Each arm
+ * here is instead an index walk that stops at 25 rows.
+ *
+ * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold):
+ *   24h   6,110 ms  ->    6.7 ms
+ *    7d  28,916 ms  ->    0.3 ms
+ *
+ * A per-token `LIMIT 25` is enough for a global top-25: the global result can
+ * contain at most 25 rows from any one token, so each arm's own top 25 is a
+ * superset of that token's contribution.
+ *
+ * The `LEFT JOIN tokens` is applied AFTER the limit — joining before it made the
+ * lookup run against every candidate row instead of the 25 that survive.
+ *
+ * `(timestamp, tx_hash, log_index)` is the sort key, not `timestamp` alone. A
+ * timestamp is a block, and a hot token moves many times per block, so ordering
+ * by timestamp alone leaves the cut inside a tie group and the page reshuffles
+ * between ISR regenerations. The inner and outer ORDER BYs must stay identical
+ * or the merge argument above stops holding.
+ */
 export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly TokenFilter[]): SQL {
-  // Redundant with the OR arms below, which already pin token_address to this
-  // same set — logically this IN clause filters no additional rows. Why it's
-  // here isn't documented: it was introduced in the same commit as the OR arms
-  // (950f422), with no rationale given there either, so this may be incidental
-  // rather than a deliberate planner hint — I couldn't confirm intent either
-  // way. Kept rather than deleted: verify with EXPLAIN before removing a
-  // redundant filter neither of us added.
-  const addressList = sql.join(filters.map(f => sql`${f.address}`), sql`, `)
-  const thresholds = sql.join(
-    filters.map(f => sql`(tt.token_address = ${f.address} AND tt.value > ${f.minValue})`),
-    sql` OR `,
-  )
+  if (filters.length === 0) {
+    // sql.join([]) yields an empty fragment, i.e. `UNION ALL` with no arms —
+    // invalid SQL that would only fail at the database. fetchWhales skips the
+    // token half entirely in this case; anything else calling in is a bug.
+    throw new Error('buildTokenWhaleQuery: at least one token filter is required')
+  }
+
+  const arms = filters.map(f => sql`(
+        SELECT tx_hash, from_address, to_address, value, block_number, timestamp,
+               log_index, token_address
+        FROM token_transfers
+        WHERE token_address = ${f.address}
+          AND timestamp >= ${cutoffFor(period)}
+          AND value > ${f.minValue}
+        ORDER BY timestamp DESC, tx_hash DESC, log_index DESC
+        LIMIT 25
+      )`)
+
   return sql`
-      SELECT tt.tx_hash as hash, tt.from_address as "fromAddress", tt.to_address as "toAddress",
-             tt.value, tt.block_number as "blockNumber", tt.timestamp,
+      SELECT u.tx_hash as hash, u.from_address as "fromAddress", u.to_address as "toAddress",
+             u.value, u.block_number as "blockNumber", u.timestamp,
              'token' as "transferType",
              COALESCE(tk.symbol, 'TOKEN') as "tokenSymbol"
-      FROM token_transfers tt
-      LEFT JOIN tokens tk ON tk.address = tt.token_address
-      WHERE tt.timestamp >= ${cutoffFor(period)}
-        AND tt.token_address IN (${addressList})
-        AND (${thresholds})
-      ORDER BY tt.timestamp DESC
-      LIMIT 25
+      FROM (
+        SELECT * FROM (${sql.join(arms, sql` UNION ALL `)}) m
+        ORDER BY m.timestamp DESC, m.tx_hash DESC, m.log_index DESC
+        LIMIT 25
+      ) u
+      LEFT JOIN tokens tk ON tk.address = u.token_address
+      ORDER BY u.timestamp DESC, u.tx_hash DESC, u.log_index DESC
   `
 }
 

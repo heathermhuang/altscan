@@ -162,8 +162,8 @@ export default async function AddressPage({
     resolveName(addr),
     getAddressRisk(addr),
     (async () => {
-      const sym = chainConfig.key === 'bnb' ? 'BNBUSDT' : 'ETHUSDT'
-      const ccSym = chainConfig.key === 'bnb' ? 'BNB' : 'ETH'
+      const sym = chainConfig.market.binanceSymbol
+      const ccSym = chainConfig.market.cryptoCompareSymbol
       // Try Binance US first (Render servers are US-based), then Binance global
       for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
         try {
@@ -182,7 +182,7 @@ export default async function AddressPage({
         if (r.ok) { const d = await r.json(); return d[chainConfig.coingeckoId]?.usd ?? null }
       } catch { /* try next */ }
       // Fallback: CoinCap
-      const ccId = chainConfig.key === 'bnb' ? 'binance-coin' : 'ethereum'
+      const ccId = chainConfig.market.coincapId
       try {
         const r = await fetch(`https://api.coincap.io/v2/assets/${ccId}`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
         if (r.ok) { const d = await r.json(); const p = parseFloat(d?.data?.priceUsd); if (p > 0) return p }
@@ -212,9 +212,7 @@ export default async function AddressPage({
     : null
 
   const activeTab = tab ?? 'txns'
-  const lowGasBalanceWei = chainConfig.key === 'bnb'
-    ? 10_000_000_000_000_000n
-    : 5_000_000_000_000_000n
+  const lowGasBalanceWei = BigInt(chainConfig.lowGasBalanceWei)
   // Only pitch gas top-ups on a balance we actually read. An unknown balance is
   // not a zero balance, and pitching on a failed lookup is a wrong ad.
   const gasReferralContext = !balanceKnown

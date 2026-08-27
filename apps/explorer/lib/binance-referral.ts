@@ -1,4 +1,4 @@
-import type { ChainConfig } from '@altscan/chain-config'
+import { getChainConfig, type ChainConfig } from '@altscan/chain-config'
 import { AD_PLACEMENTS } from '@altscan/settings-schema'
 
 export type BinanceReferralContext =
@@ -62,7 +62,7 @@ export function isBinanceRestrictedCountry(country: string | null | undefined): 
 }
 
 export function getBinanceReferralUrl(chainKey: string, refCode?: string | null): string {
-  const ref = refCode || (chainKey === 'eth' ? 'ETHSCAN' : 'BNBSCAN')
+  const ref = refCode || getChainConfig(chainKey).binanceRefCode
   return `https://www.binance.com/register?ref=${encodeURIComponent(ref)}`
 }
 

@@ -22,9 +22,10 @@ export default async function GasPage() {
   } catch {
     // RPC down — show zeros, page still renders
   }
-  // BNB Chain lowered its network minimum gas price to 0.1 Gwei (100,000,000 wei).
-  // Ethereum typically has much higher gas prices, so the minimum is effectively 0.
-  const MIN_GAS_PRICE = chainConfig.key === 'bnb' ? 100_000_000n : 0n
+  // Per-chain network floor. '0' means the chain enforces none.
+  const MIN_GAS_PRICE = BigInt(chainConfig.minGasPriceWei)
+  const hasGasFloor = MIN_GAS_PRICE > 0n
+  const floorGwei = formatGwei(MIN_GAS_PRICE)
   const effectiveGasPrice = baseFee > MIN_GAS_PRICE ? baseFee : (MIN_GAS_PRICE > 0n ? MIN_GAS_PRICE : baseFee)
 
   const slow     = effectiveGasPrice
@@ -41,7 +42,7 @@ export default async function GasPage() {
           '@type': 'FAQPage',
           mainEntity: [
             { '@type': 'Question', name: `What is gas on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `Gas is the unit that measures the computational effort required to execute transactions on ${chainConfig.name}. Every transaction — from a simple transfer to a complex smart contract call — requires gas. Gas prices are denominated in Gwei (1 Gwei = 0.000000001 ${chainConfig.currency}).` } },
-            { '@type': 'Question', name: `How are ${chainConfig.name} gas fees calculated?`, acceptedAnswer: { '@type': 'Answer', text: `Gas fees = Gas Used × Gas Price (in Gwei). The base fee is set by the network based on demand. During high-traffic periods, gas prices increase. ${chainConfig.key === 'bnb' ? 'BNB Chain has a low network minimum gas price of 0.1 Gwei.' : 'Ethereum uses EIP-1559 with a base fee that adjusts dynamically plus an optional priority fee (tip) to validators.'}` } },
+            { '@type': 'Question', name: `How are ${chainConfig.name} gas fees calculated?`, acceptedAnswer: { '@type': 'Answer', text: `Gas fees = Gas Used × Gas Price (in Gwei). The base fee is set by the network based on demand. During high-traffic periods, gas prices increase. ${hasGasFloor ? `${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei.` : ''}${chainConfig.features.hasEip1559 ? ` ${chainConfig.name} uses EIP-1559 with a base fee that adjusts dynamically plus an optional priority fee (tip) to validators.` : ''}` } },
             { '@type': 'Question', name: 'What is the difference between slow, standard, and fast gas?', acceptedAnswer: { '@type': 'Answer', text: 'Slow gas uses the base fee and may take longer to confirm. Standard gas adds a small buffer (10%) for reliable confirmation within a few blocks. Fast gas adds a 30% buffer for near-instant confirmation. Higher gas prices incentivize validators to include your transaction sooner.' } },
           ],
         }) }}
@@ -49,10 +50,8 @@ export default async function GasPage() {
       <h1 className="text-2xl font-bold mb-2">Gas Tracker</h1>
       <p className="text-gray-500 text-sm mb-8">
         Live {chainConfig.name} gas prices updated every block. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
-        {chainConfig.key === 'bnb'
-          ? ' BNB Chain maintains a low minimum gas price of 0.1 Gwei with typical confirmation in 1-3 seconds.'
-          : ' Ethereum gas fluctuates with network demand, using EIP-1559 base fee mechanics.'
-        }
+        {hasGasFloor && ` ${chainConfig.name} maintains a low minimum gas price of ${floorGwei} Gwei with typical confirmation in 1-3 seconds.`}
+        {chainConfig.features.hasEip1559 && ` ${chainConfig.name} gas fluctuates with network demand, using EIP-1559 base fee mechanics.`}
       </p>
 
       <AdSlot
@@ -73,9 +72,9 @@ export default async function GasPage() {
           {formatGwei(baseFee)}
           <span className="text-xl font-normal text-gray-500 ml-2">Gwei</span>
         </p>
-        {chainConfig.key === 'bnb' && baseFee < MIN_GAS_PRICE && baseFee > 0n && (
+        {hasGasFloor && baseFee < MIN_GAS_PRICE && baseFee > 0n && (
           <p className="text-xs text-gray-400 mt-1">
-            Base fee is below the 0.1 Gwei minimum. Effective gas price = max(base fee, 0.1 Gwei).
+            Base fee is below the {floorGwei} Gwei minimum. Effective gas price = max(base fee, {floorGwei} Gwei).
           </p>
         )}
       </div>
@@ -83,8 +82,8 @@ export default async function GasPage() {
       <div className="bg-white rounded-xl border shadow-sm p-4">
         <p className="text-sm text-gray-500">
           Gas prices fetched live from {chainConfig.name} RPC.
-          {chainConfig.key === 'bnb'
-            ? ' BNB Chain has a low network minimum gas price of 0.1 Gwei — validators will not include transactions below this threshold even if the base fee is lower. Transactions are typically confirmed within 1-3 blocks (~1-3 seconds).'
+          {hasGasFloor
+            ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the base fee is lower. Transactions are typically confirmed within 1-3 blocks (~${chainConfig.blockTime}-${chainConfig.blockTime * 3} seconds).`
             : ` Transactions are typically confirmed within 1-3 blocks (~${chainConfig.blockTime}-${chainConfig.blockTime * 3} seconds).`
           }
         </p>

@@ -1,3 +1,8 @@
+/** The chains this codebase ships. Declared here rather than as
+ *  `keyof typeof CHAINS` so `ChainConfig.key` can be typed with it — deriving it
+ *  from CHAINS, whose values are annotated `ChainConfig`, is circular. */
+export type ChainKey = 'bnb' | 'eth'
+
 export type ChainTheme = {
   /** Tailwind bg class for header/buttons, e.g. "bg-yellow-400" */
   headerBg: string
@@ -15,6 +20,10 @@ export type ChainTheme = {
   activeNav: string
   /** Hex color for favicon/og images */
   primaryHex: string
+  /** Solid background for the generated OpenGraph image. */
+  ogBackground: string
+  /** Foreground that reads against `ogBackground`. */
+  ogForeground: string
   /** Button bg (search, submit), e.g. "bg-black" */
   buttonBg: string
   /** Button text color, e.g. "text-yellow-400" */
@@ -67,9 +76,57 @@ export type DataProviderConfig = {
   backfill?: { enabled: boolean }
 }
 
+/** One token the Whale Tracker watches. */
+export type WhaleToken = {
+  /** Contract address, lowercase — `token_transfers.token_address` is stored lowercase. */
+  address: string
+  symbol: string
+  decimals: number
+  /** Minimum transfer size in the token's base units, as a decimal string.
+   *  A string, not a bigint, because ChainConfig is JSON-serialised in places. */
+  minValue: string
+}
+
+/** Whale Tracker thresholds and tracked tokens. */
+export type WhaleConfig = {
+  /** Predicate of the partial index that serves the native query, in wei as a
+   *  decimal string.
+   *
+   *  Two things depend on this literal and must not drift from it:
+   *  the `WHERE value > …` of `tx_whale_value_idx` in ensure-schema.ts, and a
+   *  redundant literal of the same value in the query. The redundancy is
+   *  load-bearing: drizzle binds the threshold as a parameter, postgres-js
+   *  prepares statements, and a GENERIC plan cannot prove `$1 >= floor`, so
+   *  without a matching literal the planner discards the partial index and
+   *  falls back to a sequential scan. Verified on PG16 with
+   *  `plan_cache_mode = force_generic_plan`: parameter alone => Parallel Seq
+   *  Scan over 52,744 buffers; parameter plus literal => Index Scan, 27 buffers.
+   *
+   *  `nativeMinWei` must never fall below this, or the query silently truncates
+   *  at the floor instead of the configured threshold. Pinned by a test. */
+  nativeIndexFloorWei: string
+  /** Minimum native transfer in wei, as a decimal string.
+   *
+   *  This is a PERFORMANCE floor, not an editorial one. The query is
+   *  `ORDER BY value DESC LIMIT 25`, so raising it is invisible to users as long
+   *  as it stays below the 25th-largest transfer in the narrowest window the UI
+   *  offers (1 hour). Measured on prod 2026-08-27 over every complete hour the
+   *  chains retain (BNB 53h, ETH 97h), the lowest 25th-largest was 41.06 BNB and
+   *  61.56 ETH, and no hour held fewer than 25 qualifying transfers. The values
+   *  below sit ~2x under those floors.
+   *
+   *  Raise this only against a fresh measurement — a value above the floor starts
+   *  silently truncating the 1h view. */
+  nativeMinWei: string
+  /** The wrapped native token (WBNB/WETH), tracked at the native threshold. */
+  wrapped: WhaleToken
+  /** Stablecoins tracked alongside it. */
+  stablecoins: WhaleToken[]
+}
+
 export type ChainConfig = {
   /** Chain key for env var resolution */
-  key: string
+  key: ChainKey
   /** EVM chain ID */
   chainId: number
   /** Full chain name, e.g. "BNB Chain" */
@@ -127,6 +184,38 @@ export type ChainConfig = {
   coingeckoPlatform: string
   /** DexScreener chainId filter for the /tokens endpoint, e.g. "bsc" */
   dexscreenerChain: string
+  /** Native-coin identifiers at the three market-data sources. These existed only
+   *  as `key === 'bnb' ? … : …` ternaries repeated across three pages, so any chain
+   *  that was not 'bnb' silently got Ethereum's prices. */
+  market: {
+    /** Binance spot symbol, e.g. "BNBUSDT". */
+    binanceSymbol: string
+    /** CryptoCompare ticker, e.g. "BNB". */
+    cryptoCompareSymbol: string
+    /** CoinCap asset id, e.g. "binance-coin". */
+    coincapId: string
+  }
+  /** Fungible-token standard label, e.g. "BEP-20". The bare prefix ("BEP"/"ERC")
+   *  is derived from this, so there is no second field to keep in sync. */
+  tokenStandard: string
+  /** Default Binance referral code when no override is configured. Was duplicated
+   *  as a key ternary in both lib/binance-referral.ts and the admin settings route. */
+  binanceRefCode: string
+  /** DEX names used in page copy and FAQ structured data. */
+  dex: {
+    /** Best-known AMM, named on its own, e.g. "PancakeSwap". */
+    primary: string
+    /** How the wider AMM set is described alongside `primary`. */
+    others: string
+  }
+  /** Network-enforced minimum gas price in wei, as a decimal string; '0' = none.
+   *  BNB Chain enforces 0.1 Gwei; Ethereum has no floor. */
+  minGasPriceWei: string
+  /** Native balance below which the page offers a gas top-up, in wei as a
+   *  decimal string. Chain-specific because it is priced in native units. */
+  lowGasBalanceWei: string
+  /** Whale Tracker thresholds and tracked tokens. */
+  whales: WhaleConfig
   /** Visual theme tokens */
   theme: ChainTheme
   /** Feature flags */
@@ -160,6 +249,33 @@ export const BSC: ChainConfig = {
   provider: { kind: 'moralis', moralisChain: '0x38', backfill: { enabled: false } },
   coingeckoPlatform: 'binance-smart-chain',
   dexscreenerChain: 'bsc',
+  market: {
+    binanceSymbol: 'BNBUSDT',
+    cryptoCompareSymbol: 'BNB',
+    coincapId: 'binance-coin',
+  },
+  tokenStandard: 'BEP-20',
+  binanceRefCode: 'BNBSCAN',
+  dex: {
+    primary: 'PancakeSwap',
+    others: 'PancakeSwap, BiSwap, and other BNB Chain AMMs',
+  },
+  minGasPriceWei: '100000000', // 0.1 Gwei
+  lowGasBalanceWei: '10000000000000000', // 0.01 BNB
+  whales: {
+    nativeIndexFloorWei: '1000000000000000000', // 1 BNB
+    nativeMinWei: '20000000000000000000', // 20 BNB — see the floor note above
+    wrapped: {
+      address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
+      symbol: 'WBNB',
+      decimals: 18,
+      minValue: '1000000000000000000', // 1 WBNB
+    },
+    stablecoins: [
+      { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18, minValue: '1000000000000000000000' },
+      { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18, minValue: '1000000000000000000000' },
+    ],
+  },
   theme: {
     headerBg: 'bg-yellow-400',
     headerText: 'text-black',
@@ -169,6 +285,8 @@ export const BSC: ChainConfig = {
     focusRing: 'focus:ring-yellow-500',
     activeNav: 'bg-black/15',
     primaryHex: '#FACC15',
+    ogBackground: '#1a1a2e',
+    ogForeground: 'black',
     buttonBg: 'bg-black',
     buttonText: 'text-yellow-400',
     searchBorder: 'border-yellow-200',
@@ -215,6 +333,33 @@ export const ETH: ChainConfig = {
   provider: { kind: 'moralis', moralisChain: '0x1', backfill: { enabled: false } },
   coingeckoPlatform: 'ethereum',
   dexscreenerChain: 'ethereum',
+  market: {
+    binanceSymbol: 'ETHUSDT',
+    cryptoCompareSymbol: 'ETH',
+    coincapId: 'ethereum',
+  },
+  tokenStandard: 'ERC-20',
+  binanceRefCode: 'ETHSCAN',
+  dex: {
+    primary: 'Uniswap',
+    others: 'Uniswap V2/V3, SushiSwap, and other Ethereum AMMs',
+  },
+  minGasPriceWei: '0', // Ethereum enforces no minimum
+  lowGasBalanceWei: '5000000000000000', // 0.005 ETH
+  whales: {
+    nativeIndexFloorWei: '500000000000000000', // 0.5 ETH
+    nativeMinWei: '25000000000000000000', // 25 ETH — see the floor note above
+    wrapped: {
+      address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+      symbol: 'WETH',
+      decimals: 18,
+      minValue: '500000000000000000', // 0.5 WETH
+    },
+    stablecoins: [
+      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6, minValue: '1000000000' },
+      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6, minValue: '1000000000' },
+    ],
+  },
   theme: {
     headerBg: 'bg-blue-900',
     headerText: 'text-white',
@@ -224,6 +369,8 @@ export const ETH: ChainConfig = {
     focusRing: 'focus:ring-blue-500',
     activeNav: 'bg-white/20',
     primaryHex: '#1E3A8A',
+    ogBackground: '#0f172a',
+    ogForeground: 'white',
     buttonBg: 'bg-blue-700',
     buttonText: 'text-white',
     searchBorder: 'border-blue-200',
@@ -245,7 +392,7 @@ export const ETH: ChainConfig = {
 
 /** All supported chains */
 export const CHAINS = { bnb: BSC, eth: ETH } as const
-export type ChainKey = keyof typeof CHAINS
+
 
 /** Get chain config by key */
 export function getChainConfig(key?: string): ChainConfig {
