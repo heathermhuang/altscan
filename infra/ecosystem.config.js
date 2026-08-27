@@ -57,10 +57,16 @@ module.exports = {
     },
     {
       name: 'eth-indexer',
-      script: 'apps/eth-indexer/dist/index.js',
+      // Both chains run the SAME build; CHAIN selects the config and, through
+      // it, the database env var. This pointed at apps/eth-indexer/dist, which
+      // has now been deleted — and had no CHAIN either, so had that path ever
+      // existed the process would have indexed BNB. Render's own eth-indexer
+      // service has always used rootDir apps/indexer for this reason.
+      script: 'apps/indexer/dist/index.js',
       cwd: '/opt/bnbscan',
       env: {
         NODE_ENV: 'production',
+        CHAIN: 'eth',
       },
       restart_delay: 5000,
       max_restarts: 10,
