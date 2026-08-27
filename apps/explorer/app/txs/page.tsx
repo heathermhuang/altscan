@@ -1,12 +1,12 @@
-import { db, schema } from '@/lib/db'
-import { desc, sql } from 'drizzle-orm'
+import { schema } from '@/lib/db'
+import { fetchTxPage, parseTx, parsePageParam, PER_PAGE, TXS_REVALIDATE_SECONDS } from '@/lib/list-pages'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
-export const revalidate = 45
+export const revalidate = TXS_REVALIDATE_SECONDS
 
 export const metadata: Metadata = {
   title: `Recent Transactions`,
@@ -14,32 +14,24 @@ export const metadata: Metadata = {
   alternates: { canonical: '/txs' },
 }
 
-const PER_PAGE = 25
-
 export default async function TransactionsPage({
   searchParams,
 }: {
   searchParams: Promise<{ page?: string }>
 }) {
   const params = await searchParams
-  const page = Math.max(1, Number(params.page ?? 1))
-  const offset = (page - 1) * PER_PAGE
+  const page = parsePageParam(params.page)
 
   let txs: typeof schema.transactions.$inferSelect[] = []
   let total = 0
   try {
-    const [txsResult, totalResult] = await Promise.all([
-      db.select().from(schema.transactions)
-        .orderBy(desc(schema.transactions.timestamp))
-        .limit(PER_PAGE)
-        .offset(offset),
-      db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'transactions'`),
-    ])
-    txs = txsResult
-    const n = Number((Array.from(totalResult)[0] as Record<string, unknown>)?.estimate ?? 0)
-    total = n < 0 ? 0 : n
-  } catch {
-    // DB not connected — show empty state
+    const data = await fetchTxPage(page)
+    txs = data.rows.map(parseTx)
+    total = data.total
+  } catch (err) {
+    // Tagged, not swallowed: an unlogged catch here is how the Whale Tracker
+    // stayed dead for months looking like a quiet chain.
+    console.error('[txs] page query failed:', err instanceof Error ? err.message : err)
   }
 
   return (

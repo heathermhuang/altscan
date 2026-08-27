@@ -1,5 +1,8 @@
-import { db, schema } from '@/lib/db'
-import { desc, sql } from 'drizzle-orm'
+import { schema } from '@/lib/db'
+import {
+  fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, DEX_REVALIDATE_SECONDS, type TopPair,
+} from '@/lib/dex-page'
+import { parsePageParam } from '@/lib/list-pages'
 import { timeAgo, safeBigInt } from '@/lib/format'
 import { formatUnits } from 'ethers'
 import { Pagination } from '@/components/ui/Pagination'
@@ -15,20 +18,14 @@ export const metadata: Metadata = {
   alternates: { canonical: '/dex' },
 }
 
-export const revalidate = 300
-
-const PAGE_SIZE = 25
-
-type TopPair = { pair_address: string; dex: string; trade_count: number }
+export const revalidate = DEX_REVALIDATE_SECONDS
 
 export default async function DexPage({
   searchParams,
 }: {
   searchParams: Promise<{ page?: string }>
 }) {
-  const { page: pageStr } = await searchParams
-  const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
-  const offset = (page - 1) * PAGE_SIZE
+  const page = parsePageParam((await searchParams).page)
 
   let trades: typeof schema.dexTrades.$inferSelect[] = []
   let totalTrades = 0
@@ -38,49 +35,18 @@ export default async function DexPage({
   const tokenSymbolMap = new Map<string, string>()
 
   try {
-    // Run sequentially to avoid concurrent full-table scans.
-    // Replaced COUNT(DISTINCT maker) with reltuples estimate — full scan was causing OOM.
-    const tradesResult = await db.select().from(schema.dexTrades)
-      .orderBy(desc(schema.dexTrades.blockNumber))
-      .limit(PAGE_SIZE)
-      .offset(offset)
-    const tradeCountResult = await db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'dex_trades'`)
-    // Use reltuples as proxy for unique makers — exact COUNT(DISTINCT) is too expensive
-    const makerCountResult = await db.execute(sql`SELECT GREATEST(1, (reltuples / 10)::bigint) AS value FROM pg_class WHERE relname = 'dex_trades'`)
-    const topPairsResult = await db.execute(sql`
-      SELECT pair_address, dex, COUNT(*)::int as trade_count
-      FROM dex_trades
-      GROUP BY pair_address, dex
-      ORDER BY trade_count DESC
-      LIMIT 5
-    `)
-
-    trades = tradesResult
-    // Fetch token decimals + symbols for all tokens in these trades
-    const tokenAddrs = new Set<string>()
-    for (const t of tradesResult) {
-      if (t.tokenIn) tokenAddrs.add(t.tokenIn.toLowerCase())
-      if (t.tokenOut) tokenAddrs.add(t.tokenOut.toLowerCase())
+    const data = await fetchDexPage(page)
+    trades = data.trades.map(parseDexTrade)
+    totalTrades = data.totalTrades
+    uniqueMakers = data.uniqueMakers
+    topPairs = data.topPairs
+    for (const t of data.tokens) {
+      tokenDecimalsMap.set(t.address, t.decimals)
+      tokenSymbolMap.set(t.address, t.symbol)
     }
-    if (tokenAddrs.size > 0) {
-      try {
-        const tokens = await db.select({ address: schema.tokens.address, decimals: schema.tokens.decimals, symbol: schema.tokens.symbol })
-          .from(schema.tokens)
-          .where(sql`${schema.tokens.address} IN (${sql.join([...tokenAddrs].map(a => sql`${a}`), sql`, `)})`)
-        for (const tok of tokens) {
-          tokenDecimalsMap.set(tok.address.toLowerCase(), tok.decimals)
-          tokenSymbolMap.set(tok.address.toLowerCase(), tok.symbol)
-        }
-      } catch { /* token lookup failed — will use defaults */ }
-    }
-    totalTrades = Math.max(0, Number((Array.from(tradeCountResult)[0] as Record<string, unknown>)?.estimate ?? 0))
-    uniqueMakers = Math.max(0, Number((Array.from(makerCountResult)[0] as Record<string, unknown>)?.value ?? 0))
-    topPairs = (Array.from(topPairsResult) as Record<string, unknown>[]).map(r => ({
-      pair_address: String(r.pair_address),
-      dex: String(r.dex),
-      trade_count: Number(r.trade_count),
-    }))
-  } catch { /* DB not connected */ }
+  } catch (err) {
+    console.error('[dex] page query failed:', err instanceof Error ? err.message : err)
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -228,7 +194,7 @@ export default async function DexPage({
       <Pagination
         page={page}
         total={totalTrades}
-        perPage={PAGE_SIZE}
+        perPage={DEX_PAGE_SIZE}
         baseUrl="/dex"
       />
     </div>
