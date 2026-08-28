@@ -66,16 +66,23 @@ describe('parsePageParam', () => {
 describe('cache-boundary rehydration', () => {
   // unstable_cache round-trips its value, so a Date arrives back as a string.
   // TxTable and BlockTable both declare `timestamp: Date` and call timeAgo().
+  //
+  // The gas fields are in these fixtures because `parse*` rehydrates them too —
+  // they cross the cache as decimal strings, since JSON.stringify throws on a
+  // bigint and would void the whole cache write. `parse*` reads them
+  // unconditionally on purpose: a cached row missing one is a bug, and
+  // defaulting it to 0 would render a wrong gas figure instead of failing.
   const iso = '2026-08-27T08:44:35.000Z'
 
   it('turns a transaction timestamp back into a Date', () => {
-    const row = parseTx({ hash: '0x1', timestamp: iso } as never)
+    const row = parseTx({ hash: '0x1', timestamp: iso, gas: '21000', gasUsed: '21000' } as never)
     expect(row.timestamp).toBeInstanceOf(Date)
     expect(row.timestamp.toISOString()).toBe(iso)
   })
 
   it('turns a block timestamp back into a Date', () => {
-    expect(parseBlock({ number: 1, timestamp: iso } as never).timestamp).toBeInstanceOf(Date)
+    const row = parseBlock({ number: 1, timestamp: iso, gasUsed: '1', gasLimit: '2' } as never)
+    expect(row.timestamp).toBeInstanceOf(Date)
   })
 
   it('turns a dex trade timestamp back into a Date', () => {
