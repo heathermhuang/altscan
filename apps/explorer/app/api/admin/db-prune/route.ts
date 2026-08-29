@@ -92,9 +92,10 @@ export async function POST(request: NextRequest) {
     const safeDelete = async (name: string, query: string) => {
       try {
         const result = await db.execute(sql.raw(query))
-        const count = (result as any).count ?? (result as any).rowCount ?? 0
-        deleted[name] = count
-        console.log(`[db-prune] ${name}: deleted ${count} rows`)
+        const { count, rowCount } = result as unknown as { count?: number; rowCount?: number }
+        const affected = count ?? rowCount ?? 0
+        deleted[name] = affected
+        console.log(`[db-prune] ${name}: deleted ${affected} rows`)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         deleted[name] = `error: ${msg.slice(0, 100)}`

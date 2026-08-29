@@ -79,6 +79,14 @@ jobs:
           BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/seam_test
         run: npx vitest run apps/explorer/lib/backfill-serve.pg.test.ts
 
+      # `pnpm lint` was dead for the life of the repo: apps/explorer's script was
+      # `next lint` with no ESLint config anywhere, so it dropped into an
+      # interactive setup prompt and exited 1, and CI never ran it. ESLint is now
+      # a real dependency with a flat config, and this step keeps it that way.
+      # Warnings do not fail the build; errors do.
+      - name: Lint
+        run: pnpm lint
+
       # Nothing else here builds the explorer — only Render does — so a class of
       # failure reaches production having passed every gate. Twice now: a stale
       # `transpilePackages` entry (#118) and `export const revalidate =

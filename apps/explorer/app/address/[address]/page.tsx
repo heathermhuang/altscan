@@ -798,8 +798,8 @@ async function AnalyticsTab({
 }) {
   let totalSentNative = '0'
   let totalReceivedNative = '0'
-  let firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
-  let lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
+  const firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
+  const lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
 
   try {
     // Use a capped sample (last 1000 txs) instead of full-table SUM scans.

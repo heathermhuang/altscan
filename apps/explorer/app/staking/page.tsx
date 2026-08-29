@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { getWebProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
@@ -119,12 +120,12 @@ export default async function StakingPage() {
         <h2 className="font-semibold mb-3">ETH2 Deposit Contract</h2>
         <div className="flex items-center gap-2 font-mono text-sm text-gray-700">
           <span>0x00000000219ab540356cbb839cbe05303d7705fa</span>
-          <a
+          <Link
             href="/address/0x00000000219ab540356cbb839cbe05303d7705fa"
             className={`${chainConfig.theme.linkText} hover:underline text-xs ml-2`}
           >
             View →
-          </a>
+          </Link>
         </div>
         <p className="text-xs text-gray-500 mt-1">
           The canonical one-way deposit contract deployed on the Ethereum mainnet.

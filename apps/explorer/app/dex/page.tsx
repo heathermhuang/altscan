@@ -1,6 +1,6 @@
 import { schema } from '@/lib/db'
 import {
-  fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, DEX_REVALIDATE_SECONDS, type TopPair,
+  fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
 import { timeAgo, safeBigInt } from '@/lib/format'

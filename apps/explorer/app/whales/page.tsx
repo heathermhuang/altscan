@@ -1,6 +1,4 @@
-import { schema } from '@/lib/db'
 import { fetchWhales, type WhalePeriod } from '@/lib/whales'
-import { desc } from 'drizzle-orm'
 import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
