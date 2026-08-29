@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { triggerSourcifyVerification } from '@/lib/verifier'
 import { chainConfig } from '@/lib/chain'
