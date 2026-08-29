@@ -74,13 +74,27 @@ services:
     # module .../@altscan/providers/dist/index.js".
     # ORDER MATTERS: chain-config first (providers type-imports it), then
     # explorer-core (providers value-imports it), then providers.
+    # The trailing assertions are the point, and match render.yaml and
+    # docker/Dockerfile.indexer: apps/indexer's build was once `tsc || true` with
+    # noEmitOnError:false, so a build could report SUCCESS while emitting nothing.
+    # This asserts the artifact exists, parses, and that every workspace package
+    # the runtime require()s actually resolves — and the require.resolve check
+    # fails the build if chain-config's entry is ever a non-.js file again, which
+    # would only load via Node type-stripping and is pinned by nothing.
     buildCommand: >-
       cd ../.. && pnpm install --no-frozen-lockfile &&
       pnpm --filter @altscan/chain-config build &&
       pnpm --filter @altscan/explorer-core build &&
       pnpm --filter @altscan/providers build &&
       pnpm --filter @altscan/db build &&
-      pnpm --filter @altscan/indexer build
+      pnpm --filter @altscan/indexer build &&
+      test -s apps/indexer/dist/index.js &&
+      node --check apps/indexer/dist/index.js &&
+      test -s packages/chain-config/dist/index.js &&
+      test -s packages/explorer-core/dist/index.js &&
+      test -s packages/providers/dist/index.js &&
+      cd apps/indexer &&
+      node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     autoDeploy: true
     envVars:
