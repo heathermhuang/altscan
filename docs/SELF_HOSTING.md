@@ -139,9 +139,6 @@ There is no migration step. The indexer creates and updates its own schema on bo
 [`ensure-schema.ts`](../apps/indexer/src/ensure-schema.ts), including the partitioned
 `token_transfers` table. Point it at an empty database and it will do the rest.
 
-> The root `schema.sql` is a stale hand-maintained snapshot predating several tables and
-> is **not** the bootstrap path. Don't apply it to a fresh database.
-
 ```bash
 docker compose exec postgres psql -U altscan -d altscan
 ```
