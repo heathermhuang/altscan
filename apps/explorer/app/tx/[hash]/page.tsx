@@ -12,6 +12,8 @@ import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
+import { toChecksumAddress } from '@/lib/address-display'
+import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
@@ -372,7 +374,7 @@ export default async function TxDetailPage({
       {fromRpc && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
           <span>⚡</span>
-          <span>Fetched live from {chainConfig.name} — this transaction predates our index.</span>
+          <span>Fetched live from {chainConfig.name} — this transaction is outside our local retention window.</span>
         </div>
       )}
 
@@ -430,7 +432,7 @@ export default async function TxDetailPage({
             />
             <Row
               label="From"
-              value={tx.fromAddress}
+              value={toChecksumAddress(tx.fromAddress)}
               mono copy
               link={`/address/${tx.fromAddress}`}
               addressLabel={getAddressLabel(tx.fromAddress)}
@@ -438,7 +440,7 @@ export default async function TxDetailPage({
             />
             <Row
               label="To"
-              value={tx.toAddress ?? 'Contract Creation'}
+              value={tx.toAddress ? toChecksumAddress(tx.toAddress) : 'Contract Creation'}
               mono
               copy={!!tx.toAddress}
               link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
@@ -455,7 +457,7 @@ export default async function TxDetailPage({
             <tr>
               <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Transaction Fee</td>
               <td className="px-6 py-3">
-                {formatNativeToken(fee)} {chainConfig.currency}
+                {formatNativeToken(fee, 8)} {chainConfig.currency}
                 {feeUsd && <span className="text-gray-400 ml-1">({feeUsd})</span>}
               </td>
             </tr>
@@ -542,13 +544,9 @@ export default async function TxDetailPage({
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-gray-500">From</span>
-                  <Link href={`/address/${t.fromAddress}`} className={`${chainConfig.theme.linkText} font-mono text-xs hover:underline`}>
-                    {t.fromAddress.slice(0, 12)}...
-                  </Link>
+                  <AddressLink address={t.fromAddress} className="text-xs" />
                   <span className="text-gray-500">To</span>
-                  <Link href={`/address/${t.toAddress}`} className={`${chainConfig.theme.linkText} font-mono text-xs hover:underline`}>
-                    {t.toAddress.slice(0, 12)}...
-                  </Link>
+                  <AddressLink address={t.toAddress} className="text-xs" />
                   <span className="text-gray-500">For</span>
                   <span className="font-medium">
                     {formattedAmount ?? t.value}
@@ -574,9 +572,7 @@ export default async function TxDetailPage({
                 <div key={i} className="bg-gray-50 rounded p-3 text-xs overflow-auto">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-gray-400 font-mono">#{i}</span>
-                    <Link href={`/address/${log.address}`} className={`${chainConfig.theme.linkText} hover:underline font-mono`}>
-                      {log.address}
-                    </Link>
+                    <AddressLink address={log.address} short={false} />
                     {decoded && (
                       <span className="bg-yellow-100 text-yellow-700 rounded px-1.5 py-0.5 font-semibold text-xs">
                         {decoded.name}

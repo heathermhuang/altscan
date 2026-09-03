@@ -26,13 +26,13 @@
     },
     {
       "name": "Explorer BNB (Next.js)",
-      "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["pnpm", "--filter", "@altscan/explorer", "exec", "next", "dev", "-p", "3002"],
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@altscan/explorer", "exec", "next", "dev", "-p", "3002"],
       "port": 3002,
       "env": {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
         "CHAIN": "bnb",
-        "NEXT_PUBLIC_CHAIN": "bnb"
+        "NEXT_PUBLIC_CHAIN": "bnb",
+        "BNB_RPC_URL": "https://bsc-dataseed.bnbchain.org"
       }
     },
     {
@@ -42,7 +42,8 @@
       "port": 3003,
       "env": {
         "CHAIN": "eth",
-        "NEXT_PUBLIC_CHAIN": "eth"
+        "NEXT_PUBLIC_CHAIN": "eth",
+        "ETH_RPC_URL": "https://ethereum-rpc.publicnode.com"
       }
     },
     {

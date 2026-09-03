@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 const STORAGE_KEY = 'bnbscan_watchlist'
 
@@ -52,9 +52,7 @@ export default function WatchlistPage() {
                 {addresses.map(addr => (
                   <tr key={addr} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs">
-                      <Link href={`/address/${addr}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                        {addr}
-                      </Link>
+                      <AddressLink address={addr} short={false} />
                     </td>
                     <td className="px-4 py-3">
                       <button

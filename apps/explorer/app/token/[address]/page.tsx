@@ -2,7 +2,7 @@ import { db, schema } from '@/lib/db'
 import { eq, desc, count } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatAddress, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
+import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -18,6 +18,7 @@ import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -458,20 +459,10 @@ export default async function TokenDetailPage({
                   </td>
                   <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/address/${t.fromAddress}`}
-                      className={`${chainConfig.theme.linkText} hover:underline`}
-                    >
-                      {formatAddress(t.fromAddress)}
-                    </Link>
+                    <AddressLink address={t.fromAddress} />
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/address/${t.toAddress}`}
-                      className={`${chainConfig.theme.linkText} hover:underline`}
-                    >
-                      {formatAddress(t.toAddress)}
-                    </Link>
+                    <AddressLink address={t.toAddress} />
                   </td>
                   <td className="px-4 py-2">
                     {amount} {token.symbol}

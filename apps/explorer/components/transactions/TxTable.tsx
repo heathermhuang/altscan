@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { formatNativeToken, formatAddress, timeAgo, safeBigInt } from '@/lib/format'
+import { AddressLink } from '@/components/ui/AddressLink'
 import { Badge } from '@/components/ui/Badge'
 import { chainConfig } from '@/lib/chain'
 
@@ -42,16 +43,12 @@ export function TxTable({ txs, compact = false }: {
               </td>
               <td className="px-3 sm:px-4 py-2 text-gray-500 hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>
               <td className="px-3 sm:px-4 py-2 font-mono text-xs">
-                <Link href={`/address/${tx.fromAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                  {formatAddress(tx.fromAddress)}
-                </Link>
+                <AddressLink address={tx.fromAddress} />
               </td>
               {!compact && (
                 <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
                   {tx.toAddress ? (
-                    <Link href={`/address/${tx.toAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {formatAddress(tx.toAddress)}
-                    </Link>
+                    <AddressLink address={tx.toAddress} />
                   ) : (
                     <span className="text-gray-400">Contract Creation</span>
                   )}

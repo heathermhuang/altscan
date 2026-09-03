@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { TokenTransferRow } from '@/lib/providers'
 import { timeAgo, formatAddress } from '@/lib/format'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 type TransfersResponse = {
   // TokenTransferRow, not ProviderTokenTransfer: the route serves a reduced
@@ -105,20 +106,10 @@ export function TransfersLazy({ addr }: { addr: string }) {
                     {timeAgo(new Date(t.blockTimestamp))}
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
-                    <Link
-                      href={`/address/${t.fromAddress}`}
-                      className={t.fromAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
-                    >
-                      {formatAddress(t.fromAddress)}
-                    </Link>
+                    <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
-                    <Link
-                      href={`/address/${t.toAddress}`}
-                      className={t.toAddress.toLowerCase() === addr ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`}
-                    >
-                      {formatAddress(t.toAddress)}
-                    </Link>
+                    <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
                   </td>
                   <td className="px-3 sm:px-4 py-2 text-xs">
                     <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>

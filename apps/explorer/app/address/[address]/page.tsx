@@ -10,6 +10,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
+import { toChecksumAddress } from '@/lib/address-display'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/providers'
@@ -25,6 +26,7 @@ import { classifyCode, resolveContractStatusFromClass, resolveNativeBalance, typ
 import { codeClassCache } from '@/lib/code-cache'
 import { AbiReader } from '@/components/contracts/AbiReader'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 export const revalidate = 300
 
@@ -122,6 +124,10 @@ export default async function AddressPage({
   const offset = (page - 1) * PAGE_SIZE
 
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) notFound()
+
+  // `addr` stays lowercase for every DB lookup and href; only display
+  // and the copy button use the checksummed form.
+  const checksummedAddr = toChecksumAddress(addr)
 
   // Always fetch address info and contract info.
   // txCount and firstSeen come from the addresses table (instant PK lookup)
@@ -267,13 +273,13 @@ export default async function AddressPage({
       {/* Address + stats */}
       <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
         <div className="font-mono text-sm break-all text-gray-800">
-          {addr}
-          <CopyButton text={addr} referralPlacement="address_copy" />
+          {checksummedAddr}
+          <CopyButton text={checksummedAddr} referralPlacement="address_copy" />
         </div>
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <StatItem
             label={`${chainConfig.currency} Balance`}
-            value={balanceKnown ? `${formatNativeToken(displayBalance)} ${chainConfig.currency}` : 'Unavailable'}
+            value={balanceKnown ? `${formatNativeToken(displayBalance, 8)} ${chainConfig.currency}` : 'Unavailable'}
             subValue={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
           />
           <StatItem
@@ -620,28 +626,10 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                 </td>
                 <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
                 <td className="px-4 py-2 font-mono text-xs">
-                  <Link
-                    href={`/address/${t.fromAddress}`}
-                    className={
-                      t.fromAddress.toLowerCase() === addr
-                        ? 'text-gray-800 font-semibold'
-                        : `${chainConfig.theme.linkText} hover:underline`
-                    }
-                  >
-                    {formatAddress(t.fromAddress)}
-                  </Link>
+                  <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
                 </td>
                 <td className="px-4 py-2 font-mono text-xs">
-                  <Link
-                    href={`/address/${t.toAddress}`}
-                    className={
-                      t.toAddress.toLowerCase() === addr
-                        ? 'text-gray-800 font-semibold'
-                        : `${chainConfig.theme.linkText} hover:underline`
-                    }
-                  >
-                    {formatAddress(t.toAddress)}
-                  </Link>
+                  <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
                 </td>
                 <td className="px-4 py-2 text-xs">
                   <Link

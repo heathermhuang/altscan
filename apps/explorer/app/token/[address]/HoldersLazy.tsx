@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { chainConfig } from '@/lib/chain-client'
 import { formatNumber } from '@/lib/format'
 import type { HoldersResult } from '@/lib/holders'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 /**
  * Client-side holders enhancement. SSR renders the labeled local net-flow estimate (0 Moralis
@@ -140,12 +139,7 @@ export function HoldersLazy({
               <tr key={holder.addr} className="hover:bg-gray-50">
                 <td className="px-4 py-2 text-gray-400">{i + 1}</td>
                 <td className="px-4 py-2 font-mono text-xs">
-                  <Link
-                    href={`/address/${holder.addr}`}
-                    className={`${chainConfig.theme.linkText} hover:underline`}
-                  >
-                    {holder.addr}
-                  </Link>
+                  <AddressLink address={holder.addr} short={false} />
                 </td>
                 <td className="px-4 py-2">
                   {holderAmount} {symbol}
