@@ -34,6 +34,44 @@ function addressFromTopic(topic: string | null): string | null {
   return `0x${topic.slice(26).toLowerCase()}`
 }
 
+export type DecodedNftTransfer = {
+  tokenAddress: string
+  fromAddress: string
+  toAddress: string
+  /** The indexed tokenId, as a decimal string. */
+  tokenId: string
+}
+
+/**
+ * ERC-721 transfers from the same logs.
+ *
+ * These share topic0 with ERC-20 but index `tokenId` as a 4th topic, so
+ * decodeTransferLogs deliberately skips them — rendering one as fungible would
+ * print a tokenId where an amount belongs. Skipping them entirely made NFT
+ * movement invisible on the RPC path, so they are decoded separately here.
+ */
+export function decodeNftTransferLogs(logs: TransferLogLike[]): DecodedNftTransfer[] {
+  const out: DecodedNftTransfer[] = []
+  for (const log of logs) {
+    if (log.topic0?.toLowerCase() !== TRANSFER_TOPIC0) continue
+    if (!log.topic3) continue   // 3 topics = fungible, handled above
+
+    const fromAddress = addressFromTopic(log.topic1)
+    const toAddress = addressFromTopic(log.topic2)
+    if (!fromAddress || !toAddress) continue
+    if (!/^0x[0-9a-fA-F]{64}$/.test(log.topic3)) continue
+
+    let tokenId: string
+    try {
+      tokenId = BigInt(log.topic3).toString()
+    } catch {
+      continue
+    }
+    out.push({ tokenAddress: log.address.toLowerCase(), fromAddress, toAddress, tokenId })
+  }
+  return out
+}
+
 export function decodeTransferLogs(logs: TransferLogLike[]): DecodedTransfer[] {
   const out: DecodedTransfer[] = []
   for (const log of logs) {

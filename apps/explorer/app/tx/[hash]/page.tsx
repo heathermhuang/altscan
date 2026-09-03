@@ -14,11 +14,13 @@ import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
-import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
+import { getWebProvider } from '@/lib/rpc'
+import { computeGasBreakdown } from '@/lib/gas-breakdown'
 import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
-import { decodeTransferLogs } from '@/lib/erc20-transfers'
+import { decodeTransferLogs, decodeNftTransferLogs } from '@/lib/erc20-transfers'
 import { fetchTokenMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed } from '@/lib/observability'
@@ -98,11 +100,26 @@ async function fetchNativePrice(): Promise<number | null> {
   return null
 }
 
+/**
+ * Confirmation depth is a property of the CHAIN, not of our index. Reading
+ * MAX(blocks.number) published our own indexer lag as if it were chain state —
+ * this page under-reported confirmations by however far behind we happened to
+ * be. Ask the node; fall back to the local high-water mark only if RPC is
+ * unreachable, so the figure degrades rather than disappearing.
+ */
 async function fetchChainTip(): Promise<number | null> {
+  try {
+    const provider = await getWebProvider()
+    const tip = await provider.getBlockNumber()
+    if (tip > 0) return tip
+  } catch (e) {
+    swallow('tx/chain-tip', e)
+  }
   try {
     const [row] = await db.select({ max: sql<number>`MAX(number)` }).from(schema.blocks)
     return row?.max ?? null
-  } catch {
+  } catch (e) {
+    swallow('tx/chain-tip-fallback', e)
     return null
   }
 }
@@ -284,6 +301,24 @@ export default async function TxDetailPage({
     : dbLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
+
+  // Base fee lives on the block, not the transaction. For an indexed tx it is
+  // one PK lookup; on the RPC path fetchBlockFromRpc already carries it.
+  let baseFeePerGas: string | null = null
+  try {
+    const [b] = await db.select({ baseFee: schema.blocks.baseFeePerGas })
+      .from(schema.blocks).where(eq(schema.blocks.number, tx.blockNumber)).limit(1)
+    baseFeePerGas = b?.baseFee ?? null
+  } catch (e) { swallow('tx/base-fee', e) }
+  if (baseFeePerGas == null) {
+    const rpcBlock = await fetchBlockFromRpc(tx.blockNumber)
+    baseFeePerGas = rpcBlock?.baseFeePerGas ?? null
+  }
+  const gasBreakdown = computeGasBreakdown(tx.gasUsed ?? 0n, tx.gasPrice ?? 0n, baseFeePerGas)
+
+  // ERC-721 transfers share topic0 with ERC-20 but index tokenId as a 4th
+  // topic, so they are decoded separately rather than dropped.
+  const nftTransfers = decodeNftTransferLogs(txLogs)
   const hasInput = effectiveInput && effectiveInput !== '0x'
   const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(effectiveInput) : null
   const bodyUnavailable = usesBody && !body   // RPC refetch failed → degrade
@@ -499,6 +534,23 @@ export default async function TxDetailPage({
               label="Gas Price"
               value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
             />
+            {gasBreakdown && (
+              <>
+                <Row
+                  label="Base / Priority Fee"
+                  value={`${formatGwei(gasBreakdown.baseFeePerGas)} Gwei base · ${formatGwei(gasBreakdown.effectiveGasPrice - gasBreakdown.baseFeePerGas)} Gwei tip`}
+                />
+                <tr>
+                  <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Burnt Fees</td>
+                  <td className="px-6 py-3">
+                    🔥 {formatNativeToken(gasBreakdown.burnt, 8)} {chainConfig.currency}
+                    <span className="text-gray-400 ml-2 text-xs">
+                      validator received {formatNativeToken(gasBreakdown.priorityTip, 8)} {chainConfig.currency}
+                    </span>
+                  </td>
+                </tr>
+              </>
+            )}
             <tr>
               <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Gas Used / Limit</td>
               <td className="px-6 py-3">
@@ -564,6 +616,29 @@ export default async function TxDetailPage({
               )}
             </div>
           </details>
+        </div>
+      )}
+
+      {nftTransfers.length > 0 && (
+        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
+          <h2 className="font-semibold mb-3">NFT Transfers ({nftTransfers.length})</h2>
+          <div className="space-y-2">
+            {nftTransfers.map((n, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-500">From</span>
+                <AddressLink address={n.fromAddress} className="text-xs" />
+                <span className="text-gray-500">To</span>
+                <AddressLink address={n.toAddress} className="text-xs" />
+                <span className="text-gray-500">For</span>
+                <span className="font-medium">
+                  <Link href={`/token/${n.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+                    {getAddressLabel(n.tokenAddress) ?? `${n.tokenAddress.slice(0, 10)}…`}
+                  </Link>
+                  <span className="ml-1 text-gray-500">#{n.tokenId}</span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
