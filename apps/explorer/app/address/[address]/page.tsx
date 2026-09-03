@@ -27,6 +27,7 @@ import { codeClassCache } from '@/lib/code-cache'
 import { AbiReader } from '@/components/contracts/AbiReader'
 import { AdSlot } from '@/components/ads/AdSlot'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { swallow } from '@/lib/observability'
 
 export const revalidate = 300
 
@@ -44,7 +45,7 @@ const getAddressChainState = cache(async (addr: string) => {
   try {
     const [row] = await db.select().from(schema.contracts).where(eq(schema.contracts.address, addr)).limit(1)
     contract = row ?? null
-  } catch { /* DB error — registry signal unavailable, getCode still decides */ }
+  } catch (e) { swallow('addr/contract-registry', e) }  // DB error — registry signal unavailable, getCode still decides
 
   // Contract-ness is near-immutable, so its verdict is cached ACROSS requests;
   // balance and nonce are not. This page reads searchParams and headers(), so it
@@ -69,7 +70,7 @@ const getAddressChainState = cache(async (addr: string) => {
       // verdict for the whole TTL.
       if (cls !== 'malformed') codeClassCache.set(addr, cls)
     }
-  } catch { /* provider unavailable — every field stays null and resolves to unknown */ }
+  } catch (e) { swallow('addr/chain-state', e) }  // provider unavailable — every field stays null and resolves to unknown
 
   return {
     contract,
@@ -85,7 +86,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   try {
     const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
     info = row ?? null
-  } catch { /* DB error */ }
+  } catch (e) { swallow('addr/metadata', e) }  // DB error
   const { status, balance } = await getAddressChainState(address.toLowerCase())
   // Only claim "Contract" when we actually know. An unknown address keeps the
   // neutral wording rather than being mislabelled an EOA.
@@ -146,7 +147,8 @@ export default async function AddressPage({
         .limit(1)
         .then((r) => r[0] ?? null),
     ])
-  } catch {
+  } catch (e) {
+    swallow('addr/info', e)
     // DB not connected
   }
 
@@ -192,7 +194,7 @@ export default async function AddressPage({
       try {
         const r = await fetch(`https://api.coincap.io/v2/assets/${ccId}`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
         if (r.ok) { const d = await r.json(); const p = parseFloat(d?.data?.priceUsd); if (p > 0) return p }
-      } catch { /* all failed */ }
+      } catch (e) { swallow('addr/price-all-failed', e) }
       return null
     })(),
   ])
@@ -420,7 +422,8 @@ async function TxnsTab({
       .orderBy(desc(schema.transactions.timestamp))
       .limit(PAGE_SIZE)
       .offset(offset)
-  } catch {
+  } catch (e) {
+    swallow('addr/txns', e)
     // DB error
   }
 
@@ -558,7 +561,8 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
     transfers = rows.slice(0, PAGE_SIZE)
     // Estimate total for pagination: if we got more than PAGE_SIZE, there are more pages
     total = rows.length > PAGE_SIZE ? offset + PAGE_SIZE + 1 : offset + rows.length
-  } catch {
+  } catch (e) {
+    swallow('addr/transfers', e)
     // DB error
   }
 
@@ -597,7 +601,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
       for (const tok of tokenRows) {
         tokenInfoMap.set(tok.address, { name: tok.name, symbol: tok.symbol, decimals: tok.decimals })
       }
-    } catch { /* token lookup error */ }
+    } catch (e) { swallow('addr/token-lookup', e) }  // token lookup error
   }
 
   return (
@@ -715,7 +719,8 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
         decimals: tok?.decimals ?? null,
       }
     })
-  } catch {
+  } catch (e) {
+    swallow('addr/holdings', e)
     // DB error
   }
 
@@ -813,7 +818,8 @@ async function AnalyticsTab({
     // first_seen/last_seen are pre-computed by the indexer in the addresses table.
     // All 1.9M+ addresses have these fields populated, so no fallback needed.
     // The previous fallback queried the 36M-row transactions table and took 30+ minutes.
-  } catch {
+  } catch (e) {
+    swallow('addr/analytics', e)
     // DB error
   }
 
@@ -894,7 +900,7 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
         symbol: r.symbol ? String(r.symbol) : undefined,
       }
     })
-  } catch { /* DB error */ }
+  } catch (e) { swallow('addr/nfts', e) }  // DB error
 
   // Augment with Moralis NFT holdings when DB has no data — lazy on client so bots don't trigger it
   if (nftTransfers.length === 0) {

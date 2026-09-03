@@ -5,6 +5,7 @@ import { formatNumber, safeBigInt } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
+import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: `${chainConfig.tokenStandard} Tokens`,
@@ -23,7 +24,8 @@ function formatSupply(raw: string, decimals: number): string {
     if (n >= 1e9)  return `${(n / 1e9).toFixed(2)}B`
     if (n >= 1e6)  return `${(n / 1e6).toFixed(2)}M`
     return whole.toLocaleString()
-  } catch {
+  } catch (e) {
+    swallow('tokens/list', e)
     return raw.slice(0, 12) + (raw.length > 12 ? '…' : '')
   }
 }
@@ -55,7 +57,7 @@ export default async function TokenListPage({
         .orderBy(desc(schema.tokens.holderCount))
         .limit(50)
     }
-  } catch { /* DB not connected */ }
+  } catch (e) { swallow('tokens/count', e) }  // DB not connected
 
   // 'ERC' on Ethereum, 'BEP' on BNB Chain — derived from the configured token
   // standard so a new chain gets its own prefix instead of silently inheriting

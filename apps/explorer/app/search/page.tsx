@@ -6,6 +6,7 @@ import { chainConfig } from '@/lib/chain'
 import { AdSlot } from '@/components/ads/AdSlot'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
+import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: 'Search',
@@ -102,7 +103,7 @@ export default async function SearchPage({
           </div>
         )
       }
-    } catch { /* DB error */ }
+    } catch (e) { swallow('search/query', e) }  // DB error
   }
 
   return (

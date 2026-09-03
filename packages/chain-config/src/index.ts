@@ -321,7 +321,11 @@ export const ETH: ChainConfig = {
   nativeCirculatingSupply: 120_700_000, // ~ETH circulating; self-refines at runtime
   rpcEnvVar: 'ETH_RPC_URL',
   dbEnvVar: 'ETH_DATABASE_URL',
-  defaultRpcUrl: 'https://eth.llamarpc.com',
+  // eth.llamarpc.com returned HTTP 521 on every request (verified 2026-09-03,
+  // including plain eth_blockNumber). publicnode answers eth_getBlockReceipts
+  // at depth -- probed at a historical block, not at the tip, because an
+  // endpoint can serve the tip and still lack receipts (see AGENTS.md).
+  defaultRpcUrl: 'https://ethereum-rpc.publicnode.com',
   defaultStartBlock: 0,
   pollMs: 12_000,
   gaTrackingId: 'G-DRSRLLSRMC',

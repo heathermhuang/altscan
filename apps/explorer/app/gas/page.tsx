@@ -4,6 +4,7 @@ import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
+import { swallow } from '@/lib/observability'
 
 export const revalidate = 45
 
@@ -19,7 +20,8 @@ export default async function GasPage() {
   try {
     const feeData = await provider.getFeeData()
     baseFee = feeData.gasPrice ?? 0n
-  } catch {
+  } catch (e) {
+    swallow('gas/query', e)
     // RPC down — show zeros, page still renders
   }
   // Per-chain network floor. '0' means the chain enforces none.

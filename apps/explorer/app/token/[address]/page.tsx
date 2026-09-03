@@ -19,6 +19,7 @@ import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { swallow } from '@/lib/observability'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -67,7 +68,8 @@ const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | nu
       address: addr,
       type: chainConfig.tokenStandard,
     }
-  } catch {
+  } catch (e) {
+    swallow('token/lookup', e)
     return null
   }
 })
@@ -113,7 +115,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   try {
     const [row] = await db.select().from(schema.tokens).where(eq(schema.tokens.address, address.toLowerCase())).limit(1)
     token = row ?? null
-  } catch { /* DB error */ }
+  } catch (e) { swallow('token/meta', e) }  // DB error
   if (!token) {
     const rpcToken = await fetchTokenFromRpc(address.toLowerCase())
     if (rpcToken) return {
@@ -161,7 +163,7 @@ export default async function TokenDetailPage({
       .from(schema.tokens)
       .where(eq(schema.tokens.address, addr))
     token = row ?? null
-  } catch { /* DB error */ }
+  } catch (e) { swallow('token/stats', e) }  // DB error
 
   // If not in DB, fetch live from RPC (free — no Moralis CU cost)
   let isLive = false
@@ -239,7 +241,8 @@ export default async function TokenDetailPage({
       const divisor = 10n ** BigInt(token.decimals)
       const whole = BigInt(token.totalSupply ?? '0') / divisor
       return whole.toLocaleString()
-    } catch {
+    } catch (e) {
+      swallow('token/transfers', e)
       return (token.totalSupply ?? '0').slice(0, 20)
     }
   })()
@@ -443,7 +446,8 @@ export default async function TokenDetailPage({
                   return fracStr
                     ? `${whole.toLocaleString()}.${fracStr}`
                     : whole.toLocaleString()
-                } catch {
+                } catch (e) {
+                  swallow('token/holder-fmt', e)
                   return (t.value ?? '0').slice(0, 10)
                 }
               })()

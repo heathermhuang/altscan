@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
+import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
@@ -37,7 +38,8 @@ async function fetchBeaconStats(): Promise<{
       totalStaked: totalStakedETH,
       apy: null, // Requires external API call
     }
-  } catch {
+  } catch (e) {
+    swallow('staking/query', e)
     return null
   }
 }
