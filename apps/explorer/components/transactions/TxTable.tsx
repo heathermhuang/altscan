@@ -9,14 +9,21 @@ interface TxRow {
   fromAddress: string
   toAddress: string | null
   value: string | null
-  status: boolean
-  gasUsed: bigint | string | null
+  /**
+   * null when the source cannot know it. A block fetched from RPC carries the
+   * transaction bodies but not their receipts, so status is genuinely unknown
+   * there — rendering "Success" for every row would be a fabrication.
+   */
+  status?: boolean | null
+  gasUsed?: bigint | string | null
   timestamp: Date
 }
 
-export function TxTable({ txs, compact = false }: {
+export function TxTable({ txs, compact = false, showStatus = true }: {
   txs: TxRow[]
   compact?: boolean
+  /** Hide the Status column entirely when no row can supply a real value. */
+  showStatus?: boolean
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -30,7 +37,7 @@ export function TxTable({ txs, compact = false }: {
             <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From</th>
             {!compact && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>}
             <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Status</th>
+            {showStatus && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Status</th>}
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -55,11 +62,17 @@ export function TxTable({ txs, compact = false }: {
                 </td>
               )}
               <td className="px-3 sm:px-4 py-2">{formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}</td>
-              <td className="px-3 sm:px-4 py-2 hidden sm:table-cell">
-                <Badge variant={tx.status ? 'success' : 'fail'}>
-                  {tx.status ? 'Success' : 'Failed'}
-                </Badge>
-              </td>
+              {showStatus && (
+                <td className="px-3 sm:px-4 py-2 hidden sm:table-cell">
+                  {tx.status == null ? (
+                    <span className="text-gray-400">—</span>
+                  ) : (
+                    <Badge variant={tx.status ? 'success' : 'fail'}>
+                      {tx.status ? 'Success' : 'Failed'}
+                    </Badge>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

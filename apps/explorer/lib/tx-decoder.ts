@@ -2,7 +2,7 @@
 // Turns raw tx data into human-readable descriptions
 
 import { getAddressLabel } from './known-addresses'
-import { safeBigInt } from './format'
+import { safeBigInt, formatTokenAmount } from './format'
 
 export interface DecodedTx {
   summary: string
@@ -86,20 +86,34 @@ export function decodeTx(tx: {
     return { summary: `Approved ${spenderLabel} to spend tokens`, type: 'approval', emoji: '✅' }
   }
 
-  // Swap detection — check transfers
-  if (transfers.length >= 2 || (methodType && methodType.toLowerCase().includes('swap'))) {
+  // Swap detection.
+  //
+  // A swap means ONE party both gives and receives: the initiator sends token A
+  // and gets token B back. The old rule was "2 or more transfers means a swap",
+  // described by its FIRST and LAST leg — which labelled a Coinbase batch
+  // disbursement of 18 tokens to 18 different recipients as
+  // "Swapped 4280.00 USDC for 92801.40 TRAC on a DEX". Pinned by
+  // tx-decoder.test.ts. An invented summary is worse than a vague one.
+  const actor = tx.fromAddress.toLowerCase()
+  const sent = transfers.filter((t) => t.fromAddress.toLowerCase() === actor)
+  const received = transfers.filter((t) => t.toAddress.toLowerCase() === actor)
+  const isSwapShape =
+    sent.length > 0 &&
+    received.length > 0 &&
+    sent[0].tokenAddress.toLowerCase() !== received[0].tokenAddress.toLowerCase()
+  // A swap routed in native currency has only one token leg, so the method name
+  // stays authoritative where the transfer shape cannot see it.
+  const isSwapMethod = !!(methodType && methodType.toLowerCase().includes('swap'))
+
+  if (isSwapShape || isSwapMethod) {
     const dexLabel = toLabel ?? 'a DEX'
-    if (transfers.length >= 2) {
-      const firstToken = transfers[0]
-      const lastToken = transfers[transfers.length - 1]
-      const inSym = firstToken.tokenSymbol ?? firstToken.tokenAddress.slice(0, 8)
-      const outSym = lastToken.tokenSymbol ?? lastToken.tokenAddress.slice(0, 8)
-      const inAmt = firstToken.tokenDecimals
-        ? (Number(BigInt(firstToken.value ?? '0')) / Math.pow(10, firstToken.tokenDecimals)).toFixed(2)
-        : '?'
-      const outAmt = lastToken.tokenDecimals
-        ? (Number(BigInt(lastToken.value ?? '0')) / Math.pow(10, lastToken.tokenDecimals)).toFixed(2)
-        : '?'
+    if (isSwapShape) {
+      const inLeg = sent[0]
+      const outLeg = received[0]
+      const inSym = inLeg.tokenSymbol ?? inLeg.tokenAddress.slice(0, 8)
+      const outSym = outLeg.tokenSymbol ?? outLeg.tokenAddress.slice(0, 8)
+      const inAmt = inLeg.tokenDecimals != null ? formatTokenAmount(inLeg.value ?? '0', inLeg.tokenDecimals) : '?'
+      const outAmt = outLeg.tokenDecimals != null ? formatTokenAmount(outLeg.value ?? '0', outLeg.tokenDecimals) : '?'
       return {
         summary: `Swapped ${inAmt} ${inSym} for ${outAmt} ${outSym} on ${dexLabel}`,
         type: 'swap',
@@ -107,6 +121,19 @@ export function decodeTx(tx: {
       }
     }
     return { summary: `Swapped tokens on ${dexLabel}`, type: 'swap', emoji: '🔄' }
+  }
+
+  // Many transfers that are not a swap: state what is actually observable
+  // rather than guessing at intent.
+  if (transfers.length > 1) {
+    const recipients = new Set(transfers.map((t) => t.toAddress.toLowerCase())).size
+    const symbols = new Set(transfers.map((t) => t.tokenSymbol).filter(Boolean))
+    const what = symbols.size === 1 ? ` of ${[...symbols][0]}` : ''
+    return {
+      summary: `${transfers.length} token transfers${what} to ${recipients} recipient${recipients === 1 ? '' : 's'}`,
+      type: 'transfer',
+      emoji: '💱',
+    }
   }
 
   // Single token transfer

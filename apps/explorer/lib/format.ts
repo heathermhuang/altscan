@@ -135,3 +135,26 @@ import { sanitizeSymbol as _sanitizeSymbol } from '@altscan/explorer-core/format
 export function sanitizeSymbolOr(raw: string | null | undefined, fallback: string): string {
   return (raw ? _sanitizeSymbol(raw) : '') || fallback
 }
+
+/**
+ * Exact token amount from a raw base-unit string.
+ *
+ * The previous inline version was `Number(BigInt(value)) / 10 ** decimals`
+ * capped at 4 fraction digits, which is lossy twice over: Number() cannot hold
+ * a large token balance exactly, and the cap silently truncated real digits —
+ * 232,619.50962301 AMP rendered as "232,619.5096". ethers' formatUnits is
+ * string-based and exact, so the integer part is grouped and the fraction is
+ * kept in full, with only trailing zeros trimmed.
+ */
+export function formatTokenAmount(value: string | bigint, decimals: number): string {
+  let raw: string
+  try {
+    raw = formatUnits(safeBigInt(value), decimals)
+  } catch {
+    return String(value)
+  }
+  const [intPart, fracPart = ''] = raw.split('.')
+  const grouped = BigInt(intPart).toLocaleString('en-US')
+  const frac = fracPart.replace(/0+$/, '')
+  return frac ? `${grouped}.${frac}` : grouped
+}
