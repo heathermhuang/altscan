@@ -2,7 +2,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt } from '@/lib/format'
+import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt, formatTokenAmount } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -18,6 +18,8 @@ import { fetchTxFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
+import { decodeTransferLogs } from '@/lib/erc20-transfers'
+import { fetchTokenMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
@@ -112,11 +114,15 @@ const getTx = cache(async (hash: string) => {
     const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash)).limit(1)
     dbTx = row ?? null
   } catch { /* DB error — fall through to RPC */ }
-  const kind = resolveTxViewKind(dbTx, null)   // 'local' | 'pruned' | 'missing' (rpc decided next)
   const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
-  // A compact row whose heavy body was pruned → refetch input+logs on demand
-  // (cached). null on RPC failure → the page degrades to compact + a note.
-  const body = kind === 'pruned' ? await getTxBody(hash) : null
+  const kind = resolveTxViewKind(dbTx, rpcTx)   // 'local' | 'pruned' | 'rpc' | 'missing'
+  // Refetch input+logs on demand (cached) for BOTH bodyless views:
+  //  - 'pruned': a compact row whose heavy body retention removed in place;
+  //  - 'rpc'   : no row at all, so there are no local logs or token_transfers.
+  // The 'rpc' case used to skip this, which is why a transaction that moved 18
+  // token balances rendered with no transfers and no logs at all.
+  // null on RPC failure → the page degrades to compact + a note.
+  const body = kind === 'pruned' || kind === 'rpc' ? await getTxBody(hash) : null
   return { dbTx, rpcTx, body }
 })
 
@@ -259,19 +265,22 @@ export default async function TxDetailPage({
     fetchChainTip(),
   ])
 
-  // Effective input: the refetched body wins for a pruned tx (DB input is '0x').
-  const effectiveInput = bodyPruned && body ? body.input : tx.input
-  // Effective logs: refetched body logs for a pruned tx, else local DB logs. Both
+  // Both bodyless views read the refetched body; a local tx reads the DB.
+  const usesBody = bodyPruned || fromRpc
+  // Effective input: the refetched body wins (DB input is '0x' when pruned, and
+  // absent entirely on the RPC path).
+  const effectiveInput = usesBody && body ? body.input : tx.input
+  // Effective logs: refetched body logs when bodyless, else local DB logs. Both
   // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
-  const bodyLogs: CachedLog[] = bodyPruned && body ? body.logs : []
-  const txLogs = bodyPruned
+  const bodyLogs: CachedLog[] = usesBody && body ? body.logs : []
+  const txLogs = usesBody
     ? bodyLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
     : dbLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
   const hasInput = effectiveInput && effectiveInput !== '0x'
   const decodedUtf8 = hasInput ? tryDecodeInputAsUtf8(effectiveInput) : null
-  const bodyUnavailable = bodyPruned && !body   // RPC refetch failed → degrade
+  const bodyUnavailable = usesBody && !body   // RPC refetch failed → degrade
 
   // Gas usage percentage
   const gasUsed = BigInt(tx.gasUsed ?? 0)
@@ -294,8 +303,15 @@ export default async function TxDetailPage({
   const nonce = tx.nonce ?? (fromRpc ? (rpcTx as RpcTx).nonce : null)
   const txType = tx.txType ?? (fromRpc ? (rpcTx as RpcTx).txType : null)
 
+  // On the RPC path there are no token_transfers rows, so the transfers are
+  // decoded out of the receipt logs we just refetched. `transfers` (DB) wins
+  // when present — it is authoritative and already normalised.
+  const effectiveTransfers = transfers.length > 0
+    ? transfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
+    : decodeTransferLogs(txLogs)
+
   // Batch token lookups into single query (was N+1: one query per transfer)
-  const uniqueTokenAddrs = [...new Set(transfers.map(t => t.tokenAddress))]
+  const uniqueTokenAddrs = [...new Set(effectiveTransfers.map(t => t.tokenAddress))]
   const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
   if (uniqueTokenAddrs.length > 0) {
     try {
@@ -305,14 +321,26 @@ export default async function TxDetailPage({
       for (const tok of tokens) tokenLookup.set(tok.address, tok)
     } catch { /* ignore */ }
   }
-  const transferInfos = transfers.map((t) => {
+  // Anything the local `tokens` table could not name is resolved on-chain, so a
+  // transfer never has to render as a raw base-unit integer ("4280000000"
+  // where the answer is "4,280 USDC"). Cached; failures degrade, never throw.
+  const unnamed = uniqueTokenAddrs.filter((a) => !tokenLookup.has(a))
+  if (unnamed.length > 0) {
+    for (const [addr, meta] of await fetchTokenMetadata(unnamed)) {
+      if (meta.symbol != null || meta.decimals != null) {
+        tokenLookup.set(addr, { symbol: meta.symbol ?? '', decimals: meta.decimals ?? 18 })
+      }
+    }
+  }
+
+  const transferInfos = effectiveTransfers.map((t) => {
     const tok = tokenLookup.get(t.tokenAddress)
     return {
       tokenAddress: t.tokenAddress,
       fromAddress: t.fromAddress,
       toAddress: t.toAddress,
       value: t.value ?? '0',
-      tokenSymbol: tok?.symbol,
+      tokenSymbol: tok?.symbol || undefined,
       tokenDecimals: tok?.decimals,
     }
   })
@@ -539,7 +567,7 @@ export default async function TxDetailPage({
           <div className="space-y-2">
             {transferInfos.map((t, i) => {
               const formattedAmount = t.tokenDecimals != null
-                ? (Number(BigInt(t.value)) / Math.pow(10, t.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
+                ? formatTokenAmount(t.value, t.tokenDecimals)
                 : null
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 text-sm">

@@ -7,6 +7,7 @@ import {
   formatUsdPrice,
   formatCompactUsd,
   formatPercent,
+  formatTokenAmount,
 } from './format'
 
 describe('formatNativeToken', () => {
@@ -94,5 +95,33 @@ describe('market formatters', () => {
   it('formatPercent signs', () => {
     expect(formatPercent(3.2)).toBe('+3.20%')
     expect(formatPercent(-1.5)).toBe('-1.50%')
+  })
+})
+
+describe('formatTokenAmount', () => {
+  it('keeps every real digit instead of truncating at 4dp', () => {
+    // Etherscan renders this transfer as 232,619.50962301 AMP. The old inline
+    // `Number(...)/10**d` with maximumFractionDigits:4 produced 232,619.5096.
+    expect(formatTokenAmount('232619509623010000000000', 18)).toBe('232,619.50962301')
+  })
+
+  it('matches the USDC amounts from a real receipt', () => {
+    expect(formatTokenAmount('4280000000', 6)).toBe('4,280')
+    expect(formatTokenAmount('196114295', 6)).toBe('196.114295')
+  })
+
+  it('is exact for values beyond Number.MAX_SAFE_INTEGER', () => {
+    // 9007199254740993 base units at 0 decimals — 2^53+1, which Number() cannot
+    // represent, so the old path rendered 9007199254740992.
+    expect(formatTokenAmount('9007199254740993', 0)).toBe('9,007,199,254,740,993')
+  })
+
+  it('handles zero and zero-decimal tokens', () => {
+    expect(formatTokenAmount('0', 18)).toBe('0')
+    expect(formatTokenAmount('5', 0)).toBe('5')
+  })
+
+  it('returns the raw value rather than throwing on bad decimals', () => {
+    expect(formatTokenAmount('100', -1 as unknown as number)).toBe('100')
   })
 })

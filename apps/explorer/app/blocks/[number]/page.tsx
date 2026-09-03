@@ -5,7 +5,6 @@ import { notFound } from 'next/navigation'
 import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
-import Link from 'next/link'
 import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
@@ -152,28 +151,12 @@ export default async function BlockDetailPage({
       <h2 className="text-lg font-semibold mb-4">
         Transactions ({fromRpc ? (rpcBlock?.txHashes.length ?? 0) : txs.length}{!fromRpc && txs.length === 50 ? '+' : ''})
       </h2>
-      {fromRpc && rpcBlock && rpcBlock.txHashes.length > 0 ? (
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Transaction hashes in block #{formatNumber(block.number)}</caption>
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th scope="col" className="text-left px-4 py-2 text-gray-500">Transaction Hash</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rpcBlock.txHashes.slice(0, 50).map(h => (
-                <tr key={h} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/tx/${h}`} className={`${chainConfig.theme.linkText} hover:underline`}>{h}</Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
+      {fromRpc && rpcBlock && rpcBlock.txs.length > 0 ? (
+        // Same table as the indexed path. The bodies arrive with the block, so
+        // From / To / Value are all available; only Status is genuinely unknown
+        // here (it lives in the receipts), so that column is hidden rather than
+        // filled with a guess.
+        <TxTable txs={rpcBlock.txs.slice(0, 50)} showStatus={false} />
       ) : txs.length > 0 ? (
         <TxTable txs={txs} />
       ) : (

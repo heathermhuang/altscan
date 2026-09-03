@@ -40,7 +40,30 @@ export type RpcBlock = {
   txCount: number
   size: number
   txHashes: string[]  // hashes only — txs may not be in DB yet
+  /**
+   * Full transaction bodies from the SAME eth_getBlockByNumber call. The call
+   * used to pass prefetch=false and keep only the hashes, so a block outside
+   * our retention window rendered as a bare list of hashes with no From, To,
+   * Value or Method — data the node had already been asked for.
+   *
+   * `status` is absent by design: it lives in the receipts, not the block, and
+   * inventing "Success" for every row would be a lie. The page omits the column
+   * on this path instead.
+   */
+  txs: RpcBlockTx[]
   _fromRpc: true
+}
+
+export type RpcBlockTx = {
+  hash: string
+  fromAddress: string
+  toAddress: string | null
+  value: string
+  gas: bigint
+  gasPrice: string
+  methodId: string | null
+  txIndex: number
+  timestamp: Date
 }
 
 // Negative cache — prevents hammering RPC for entities that don't exist
@@ -118,7 +141,8 @@ export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock |
 
   try {
     const provider = await getWebProvider()
-    const block = await provider.getBlock(blockNumber, false)
+    // prefetch=true: same RPC round trip, but the transaction bodies come back.
+    const block = await provider.getBlock(blockNumber, true)
     if (!block) { setNullCache(cacheKey); return null }
     return {
       number: block.number,
@@ -132,6 +156,17 @@ export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock |
       txCount: block.transactions.length,
       size: 0,
       txHashes: block.transactions as string[],
+      txs: block.prefetchedTransactions.map((t) => ({
+        hash: t.hash,
+        fromAddress: t.from.toLowerCase(),
+        toAddress: t.to?.toLowerCase() ?? null,
+        value: t.value.toString(),
+        gas: t.gasLimit,
+        gasPrice: (t.gasPrice ?? t.maxFeePerGas ?? 0n).toString(),
+        methodId: t.data.length >= 10 ? t.data.slice(0, 10) : null,
+        txIndex: t.index ?? 0,
+        timestamp: new Date(block.timestamp * 1000),
+      })),
       _fromRpc: true,
     }
   } catch {
