@@ -1,10 +1,11 @@
 import { fetchWhales, type WhalePeriod } from '@/lib/whales'
-import { timeAgo, formatAddress, safeBigInt } from '@/lib/format'
+import { timeAgo, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 export const revalidate = 300
 
@@ -135,15 +136,11 @@ export default async function WhalesPage({
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${w.fromAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {formatAddress(w.fromAddress)}
-                    </Link>
+                    <AddressLink address={w.fromAddress} />
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
                     {w.toAddress ? (
-                      <Link href={`/address/${w.toAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                        {formatAddress(w.toAddress)}
-                      </Link>
+                      <AddressLink address={w.toAddress} />
                     ) : (
                       <span className="text-gray-400 italic">Contract Create</span>
                     )}

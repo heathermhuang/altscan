@@ -19,7 +19,12 @@
  * publishes for that address. Do not add an entry from memory — an address you
  * cannot verify must stay unlabelled.
  */
-import { chainConfig } from './chain'
+// chain-client, not chain: this module is reached from client components via
+// AddressLink, and '@/lib/chain' reads process.env.CHAIN, which is undefined in
+// the browser and silently resolves to 'bnb' — putting the BSC table back in
+// front of ethscan.io users. NEXT_PUBLIC_CHAIN is set alongside CHAIN on every
+// web service (render.yaml), so this resolves identically on the server.
+import { chainConfig } from './chain-client'
 
 export type AddressCategory = 'exchange' | 'defi' | 'token' | 'bridge' | 'system'
 export type AddressLabel = { label: string; category: AddressCategory }

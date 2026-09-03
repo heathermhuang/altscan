@@ -11,6 +11,7 @@ import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 export const metadata: Metadata = {
   title: `DEX Trades`,
@@ -118,9 +119,7 @@ export default async function DexPage({
                 <tr key={pair.pair_address} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-gray-400">{i + 1}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${pair.pair_address}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {pair.pair_address.slice(0, 14)}…
-                    </Link>
+                    <AddressLink address={pair.pair_address} />
                   </td>
                   <td className="px-4 py-2 text-gray-700">{pair.dex}</td>
                   <td className="px-4 py-2 font-semibold">{pair.trade_count.toLocaleString()}</td>
@@ -169,9 +168,7 @@ export default async function DexPage({
                   </td>
                   <td className="px-4 py-2 text-gray-700">{t.dex}</td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.pairAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {t.pairAddress.slice(0, 12)}…
-                    </Link>
+                    <AddressLink address={t.pairAddress} />
                   </td>
                   <td className="px-4 py-2 text-gray-700">
                     {amtIn > 1e6 ? `${(amtIn / 1e6).toFixed(2)}M` : amtIn > 1000 ? `${(amtIn / 1000).toFixed(2)}K` : amtIn.toFixed(4)}
@@ -182,9 +179,7 @@ export default async function DexPage({
                     {outSymbol && <span className="text-gray-400 ml-1 text-xs">{outSymbol}</span>}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/address/${t.maker}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {t.maker.slice(0, 12)}…
-                    </Link>
+                    <AddressLink address={t.maker} />
                   </td>
                   <td className="px-4 py-2 text-gray-500">{timeAgo(t.timestamp)}</td>
                 </tr>

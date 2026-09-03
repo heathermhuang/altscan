@@ -10,6 +10,7 @@ import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { toChecksumAddress } from '@/lib/address-display'
 
 // 60s (not 300): with ISR a transient miss — a fresh block during indexer
 // lag — caches its 404 for everyone until the next revalidate. Block content
@@ -122,7 +123,7 @@ export default async function BlockDetailPage({
               value={`${timeAgo(new Date(block.timestamp))} (${new Date(block.timestamp).toUTCString()})`}
             />
             <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
-            <DetailRow label="Validator" value={block.miner} mono copy />
+            <DetailRow label="Validator" value={toChecksumAddress(block.miner)} mono copy />
             <DetailRow label="Block Hash" value={block.hash} mono copy />
             <DetailRow label="Parent Hash" value={block.parentHash} mono copy />
             <DetailRow
@@ -144,7 +145,7 @@ export default async function BlockDetailPage({
       {fromRpc && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 flex items-center gap-2 text-sm text-amber-800">
           <span>⚡</span>
-          <span>Block fetched live from {chainConfig.name} — predates our index. Click any transaction hash below to view details.</span>
+          <span>Block fetched live from {chainConfig.name} — it is outside our local retention window.</span>
         </div>
       )}
 

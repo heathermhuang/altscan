@@ -37,10 +37,16 @@ describe('toChecksumAddress', () => {
   })
 
   it('rejects a wrong-checksum address by re-deriving rather than trusting it', () => {
-    // Same hex, deliberately wrong case. We must return the CORRECT checksum,
-    // never echo the caller's bad casing.
-    const wrong = '0x5AAEB6053F3E94C9B9A09F33669435E7EF1BEAED'
-    expect(toChecksumAddress(wrong)).toBe('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed')
+    const correct = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+    // MIXED case with a deliberately wrong checksum (final d -> D). This is the
+    // only input shape that pins the re-derivation: ethers treats an all-upper
+    // or all-lower address as "no checksum supplied" and computes one anyway,
+    // so those cases pass even if we hand the caller's casing straight through.
+    // Mutation-tested: dropping the .toLowerCase() must fail THIS assertion.
+    expect(toChecksumAddress('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD')).toBe(correct)
+    // All-caps and all-lower must still resolve, for completeness.
+    expect(toChecksumAddress('0x5AAEB6053F3E94C9B9A09F33669435E7EF1BEAED')).toBe(correct)
+    expect(toChecksumAddress('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toBe(correct)
   })
 })
 
