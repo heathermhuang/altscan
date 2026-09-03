@@ -7,6 +7,7 @@ import { TxTable } from '@/components/transactions/TxTable'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { swallow, swallowed } from '@/lib/observability'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
@@ -111,7 +112,7 @@ async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | 
       const change = parseFloat(data?.data?.changePercent24Hr)
       if (price > 0) return { usd: price, change24h: change || 0 }
     }
-  } catch { /* all failed */ }
+  } catch (e) { swallow('home/price-all-failed', e) }
 
   return null
 }
@@ -184,7 +185,7 @@ async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number
       const change = parseFloat(data?.data?.changePercent24Hr)
       if (mktcap > 0) return { value: mktcap, change24h: change || 0 }
     }
-  } catch { /* all failed */ }
+  } catch (e) { swallow('home/supply-all-failed', e) }
 
   return null
 }
@@ -241,8 +242,8 @@ export default async function HomePage() {
   }
 
   const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
-    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(() => []), []),
-    dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(() => []), []),
+    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(swallowed('home/blocks', [])), []),
+    dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(swallowed('home/txs', [])), []),
     fetchNativePrice(),
     fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
   ])

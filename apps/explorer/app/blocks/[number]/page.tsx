@@ -10,6 +10,7 @@ import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { toChecksumAddress } from '@/lib/address-display'
+import { swallow } from '@/lib/observability'
 
 // 60s (not 300): with ISR a transient miss — a fresh block during indexer
 // lag — caches its 404 for everyone until the next revalidate. Block content
@@ -33,7 +34,7 @@ const getBlock = cache(async (blockNumber: number) => {
   try {
     const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber)).limit(1)
     dbBlock = row ?? null
-  } catch { /* DB error — fall through to RPC */ }
+  } catch (e) { swallow('block/db-lookup', e) }  // DB error — fall through to RPC
   const rpcBlock: RpcBlock | null = !dbBlock ? await fetchBlockFromRpc(blockNumber) : null
   return { dbBlock, rpcBlock }
 })

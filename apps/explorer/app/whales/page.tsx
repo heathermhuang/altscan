@@ -6,6 +6,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { swallow } from '@/lib/observability'
 
 export const revalidate = 300
 
@@ -182,7 +183,8 @@ function formatTokenAmount(value: string, decimals: number): string {
     const frac = raw % divisor
     const fracStr = frac.toString().padStart(decimals, '0').slice(0, 2).replace(/0+$/, '')
     return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
-  } catch {
+  } catch (e) {
+    swallow('whales/query', e)
     return '—'
   }
 }

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
+import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: `Validators`,
@@ -23,7 +24,7 @@ export default async function ValidatorsPage() {
     validators = await db.select().from(schema.validators)
       .orderBy(desc(schema.validators.votingPower))
       .limit(100)
-  } catch { /* DB not connected */ }
+  } catch (e) { swallow('validators/query', e) }  // DB not connected
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 import { formatGwei } from '@/lib/format'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { swallow } from '@/lib/observability'
 
 export const revalidate = 300
 
@@ -43,7 +44,8 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
     }))
-  } catch {
+  } catch (e) {
+    swallow('charts/query', e)
     return []
   }
 }
@@ -67,7 +69,7 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       value: Number((row as Record<string, unknown>).value),
     }))
     if (data.length >= 3) return data
-  } catch { /* fall through */ }
+  } catch (e) { swallow('charts/fallback', e) }  // fall through
 
   return []
 }
@@ -89,7 +91,8 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
       date: String((row as Record<string, unknown>).date).slice(0, 10),
       value: Number((row as Record<string, unknown>).value),
     }))
-  } catch {
+  } catch (e) {
+    swallow('charts/series', e)
     return []
   }
 }

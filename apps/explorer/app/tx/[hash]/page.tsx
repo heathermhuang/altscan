@@ -21,6 +21,7 @@ import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs } from '@/lib/erc20-transfers'
 import { fetchTokenMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { swallow, swallowed } from '@/lib/observability'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
 // RPC/indexer lag — caches its 404 for everyone until the next revalidate.
@@ -92,7 +93,7 @@ async function fetchNativePrice(): Promise<number | null> {
       const price = parseFloat(data?.data?.priceUsd)
       if (price > 0) return price
     }
-  } catch { /* all failed */ }
+  } catch (e) { swallow('tx/price-all-failed', e) }
 
   return null
 }
@@ -113,7 +114,12 @@ const getTx = cache(async (hash: string) => {
   try {
     const [row] = await db.select().from(schema.transactions).where(eq(schema.transactions.hash, hash)).limit(1)
     dbTx = row ?? null
-  } catch { /* DB error — fall through to RPC */ }
+  } catch (e) {
+    // Falling through to RPC is correct, but a DB outage here silently turns
+    // every indexed transaction into an RPC-served one — slower, and with the
+    // "outside our retention window" banner shown to everyone.
+    swallow('tx/db-lookup', e)
+  }
   const rpcTx: RpcTx | null = !dbTx ? await fetchTxFromRpc(hash) : null
   const kind = resolveTxViewKind(dbTx, rpcTx)   // 'local' | 'pruned' | 'rpc' | 'missing'
   // Refetch input+logs on demand (cached) for BOTH bodyless views:
@@ -254,10 +260,10 @@ export default async function TxDetailPage({
   const [dbLogs, transfers, methodName, nativePrice, chainTip] = await Promise.all([
     (fromRpc || bodyPruned)
       ? Promise.resolve([])
-      : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(() => []),
+      : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
     fromRpc
       ? Promise.resolve([])
-      : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25).catch(() => []),
+      : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25).catch(swallowed('tx/transfers', [])),
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
@@ -319,7 +325,7 @@ export default async function TxDetailPage({
         .from(schema.tokens)
         .where(inArray(schema.tokens.address, uniqueTokenAddrs))
       for (const tok of tokens) tokenLookup.set(tok.address, tok)
-    } catch { /* ignore */ }
+    } catch (e) { swallow('tx/token-lookup', e) }
   }
   // Anything the local `tokens` table could not name is resolved on-chain, so a
   // transfer never has to render as a raw base-unit integer ("4280000000"
