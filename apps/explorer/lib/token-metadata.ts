@@ -86,3 +86,28 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
 
   return out
 }
+
+/**
+ * What the indexer persists when ITS OWN metadata fetch failed, rather than
+ * leaving the row out — see the identical guard on the token detail page.
+ */
+export const PLACEHOLDER_SYMBOL = '???'
+
+/**
+ * Addresses that still need an on-chain metadata lookup.
+ *
+ * A row carrying the placeholder is a MISS, not an answer. Treating mere
+ * presence as "named" meant a transfer whose token the indexer had failed to
+ * identify rendered as `???` forever, with the default 18 decimals applied to
+ * the amount — the on-chain resolution that exists to fix exactly that was
+ * never reached, because the address looked already-resolved.
+ */
+export function addrsNeedingMetadata(
+  addrs: readonly string[],
+  known: ReadonlyMap<string, { symbol: string }>,
+): string[] {
+  return addrs.filter((a) => {
+    const tok = known.get(a)
+    return !tok || tok.symbol === PLACEHOLDER_SYMBOL
+  })
+}

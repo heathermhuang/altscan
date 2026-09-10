@@ -21,7 +21,7 @@ import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs } from '@/lib/erc20-transfers'
-import { fetchTokenMetadata } from '@/lib/token-metadata'
+import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed } from '@/lib/observability'
 
@@ -397,7 +397,7 @@ export default async function TxDetailPage({
   // Anything the local `tokens` table could not name is resolved on-chain, so a
   // transfer never has to render as a raw base-unit integer ("4280000000"
   // where the answer is "4,280 USDC"). Cached; failures degrade, never throw.
-  const unnamed = uniqueTokenAddrs.filter((a) => !tokenLookup.has(a))
+  const unnamed = addrsNeedingMetadata(uniqueTokenAddrs, tokenLookup)
   if (unnamed.length > 0) {
     for (const [addr, meta] of await fetchTokenMetadata(unnamed)) {
       if (meta.symbol != null || meta.decimals != null) {
