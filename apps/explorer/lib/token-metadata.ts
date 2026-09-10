@@ -12,6 +12,7 @@
  * pin "unknown" for the whole TTL.
  */
 import { Contract } from 'ethers'
+import { swallow } from './observability'
 import { getWebProvider } from './rpc'
 import { registerCache } from './cache-registry'
 
@@ -58,20 +59,29 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
   let provider
   try {
     provider = await getWebProvider()
-  } catch {
+  } catch (e) {
+    swallow('token/metadata', e)
     return out
   }
 
   await Promise.all(misses.map(async (addr) => {
+    // Keep the first transport error. Both calls are caught individually so one
+    // missing method still yields the other, but that also discarded the reason
+    // a token failed to resolve — leaving a placeholder symbol on the page with
+    // nothing in the logs to explain it.
+    let firstErr: unknown = null
     try {
       const c = new Contract(addr, ERC20_ABI, provider)
       const [symbol, decimals] = await Promise.all([
-        c.symbol().catch(() => null),
-        c.decimals().catch(() => null),
+        c.symbol().catch((e: unknown) => { firstErr ??= e; return null }),
+        c.decimals().catch((e: unknown) => { firstErr ??= e; return null }),
       ])
       // A contract that answers neither call is not a token we can describe;
       // don't cache that as a settled answer.
-      if (symbol == null && decimals == null) return
+      if (symbol == null && decimals == null) {
+        swallow('token/metadata', firstErr ?? new Error(`${addr}: no symbol() or decimals()`))
+        return
+      }
       const meta: TokenMeta = {
         symbol: typeof symbol === 'string' && symbol.length > 0 && symbol.length <= 32 ? symbol : null,
         decimals: decimals == null ? null : Number(decimals),
@@ -81,7 +91,7 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
       }
       writeCache(addr, meta)
       out.set(addr, meta)
-    } catch { /* unresolvable — caller degrades to the raw amount */ }
+    } catch (e) { swallow('token/metadata', e) }  // caller degrades to the raw amount
   }))
 
   return out
