@@ -7,6 +7,7 @@ import {
   resolveFooterText,
   resolveLinks,
   resolveRpc,
+  rpcHosts,
 } from './settings-defaults'
 
 const bnb = getChainConfig('bnb')
@@ -46,11 +47,11 @@ describe('settings-defaults', () => {
 
     it('falls back to env then chain default when there is no override', () => {
       expect(resolveRpc(null, bnb, envWith({ [bnb.rpcEnvVar]: 'https://env.test' }))).toEqual({
-        url: 'https://env.test',
+        urls: ['https://env.test'],
         timeoutMs: 8000,
       })
       expect(resolveRpc(null, bnb, envWith({}))).toEqual({
-        url: bnb.defaultRpcUrl,
+        urls: [bnb.defaultRpcUrl],
         timeoutMs: 8000,
       })
     })
@@ -58,7 +59,7 @@ describe('settings-defaults', () => {
     it('lets the override win over env for both url and timeout', () => {
       const env = envWith({ [bnb.rpcEnvVar]: 'https://env.test', RPC_TIMEOUT_MS: '5000' })
       expect(resolveRpc({ webRpcUrl: 'https://override.test', rpcTimeoutMs: 12000 }, bnb, env)).toEqual({
-        url: 'https://override.test',
+        urls: ['https://override.test'],
         timeoutMs: 12000,
       })
     })
@@ -66,20 +67,56 @@ describe('settings-defaults', () => {
     it('resolves each field independently — a url-only override keeps the env timeout', () => {
       const env = envWith({ [bnb.rpcEnvVar]: 'https://env.test', RPC_TIMEOUT_MS: '5000' })
       expect(resolveRpc({ webRpcUrl: 'https://override.test' }, bnb, env)).toEqual({
-        url: 'https://override.test',
+        urls: ['https://override.test'],
         timeoutMs: 5000,
       })
       expect(resolveRpc({ rpcTimeoutMs: 3000 }, bnb, env)).toEqual({
-        url: 'https://env.test',
+        urls: ['https://env.test'],
         timeoutMs: 3000,
       })
-      expect(resolveRpc({}, bnb, env)).toEqual({ url: 'https://env.test', timeoutMs: 5000 })
+      expect(resolveRpc({}, bnb, env)).toEqual({ urls: ['https://env.test'], timeoutMs: 5000 })
     })
 
     it('ignores an unparseable or non-positive RPC_TIMEOUT_MS (matches the pre-override build)', () => {
       for (const RPC_TIMEOUT_MS of ['abc', '', '0', '-1']) {
         expect(resolveRpc(null, bnb, envWith({ RPC_TIMEOUT_MS })).timeoutMs).toBe(8000)
       }
+    })
+
+    // The indexer has always split this env var on commas; the web tier did not,
+    // so pasting the indexer's list here produced ONE malformed url and broke
+    // every RPC call on the service. Same value, same meaning, both tiers.
+    it('splits a comma-separated value into an ordered url list', () => {
+      const env = envWith({ [bnb.rpcEnvVar]: 'https://a.test, https://b.test ,, https://c.test' })
+      expect(resolveRpc(null, bnb, env).urls).toEqual([
+        'https://a.test', 'https://b.test', 'https://c.test',
+      ])
+    })
+
+    it('falls back to the chain default when the value is only separators', () => {
+      expect(resolveRpc(null, bnb, envWith({ [bnb.rpcEnvVar]: ' , , ' })).urls).toEqual([bnb.defaultRpcUrl])
+    })
+
+    // The admin settings payload is readable by every console member including
+    // viewers, and a keyed endpoint (Chainstack et al) carries its API key in
+    // the PATH — so this must never render anything but the host.
+    it('renders hosts only, never the key-bearing path', () => {
+      expect(rpcHosts(['https://eth-mainnet.example.com/deadbeefkey'])).toBe('eth-mainnet.example.com')
+    })
+
+    it('lists every configured host', () => {
+      expect(rpcHosts(['https://a.test/k1', 'https://b.test/k2'])).toBe('a.test, b.test')
+    })
+
+    it('degrades to unknown for an unparseable entry without leaking it', () => {
+      expect(rpcHosts(['not a url'])).toBe('unknown')
+    })
+
+    it('splits an override list too', () => {
+      const env = envWith({ [bnb.rpcEnvVar]: 'https://env.test' })
+      expect(resolveRpc({ webRpcUrl: 'https://o1.test,https://o2.test' }, bnb, env).urls).toEqual([
+        'https://o1.test', 'https://o2.test',
+      ])
     })
   })
 })

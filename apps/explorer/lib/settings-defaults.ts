@@ -42,14 +42,35 @@ export function resolveFooterText(
  * override row exists. The override reaches here only after Zod validation
  * (write-side AND read-side), so a malformed URL can never build a provider.
  */
+/**
+ * Hosts of the resolved RPC endpoints, for display.
+ *
+ * HOST ONLY, deliberately: a keyed endpoint (Chainstack et al) carries its API
+ * key in the PATH, and the admin settings payload that renders this is readable
+ * by every console member including viewers. An unparseable entry degrades to
+ * 'unknown' rather than being echoed back.
+ */
+export function rpcHosts(urls: readonly string[]): string {
+  return urls
+    .map((u) => { try { return new URL(u).host } catch { return 'unknown' } })
+    .join(', ')
+}
+
 export function resolveRpc(
   override: RpcSettings | null,
   chain: ChainConfig,
   env: NodeJS.ProcessEnv,
-): { url: string; timeoutMs: number } {
+): { urls: string[]; timeoutMs: number } {
   const envTimeout = parseInt(env.RPC_TIMEOUT_MS ?? '8000', 10)
+  // Comma-separated, exactly like the indexer's RPC_URLS. This used to be read
+  // as ONE url, so pasting the indexer's list into a web service produced a
+  // single malformed endpoint and broke every RPC call on it. A list that
+  // trims to nothing falls back to the chain default rather than to zero
+  // endpoints, which would fail at call time instead of here.
+  const raw = override?.webRpcUrl ?? env[chain.rpcEnvVar] ?? chain.defaultRpcUrl
+  const urls = raw.split(',').map((s) => s.trim()).filter(Boolean)
   return {
-    url: override?.webRpcUrl ?? env[chain.rpcEnvVar] ?? chain.defaultRpcUrl,
+    urls: urls.length > 0 ? urls : [chain.defaultRpcUrl],
     timeoutMs: override?.rpcTimeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 8000),
   }
 }

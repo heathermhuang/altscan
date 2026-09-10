@@ -22,18 +22,34 @@ const fakes = vi.hoisted(() => {
       for (const h of this.handlers) h()
     }
   }
-  return { FakeFetchRequest, FakeJsonRpcProvider }
+  class FakeFallbackProvider {
+    handlers: Array<() => void> = []
+    constructor(
+      public configs: Array<{ provider: FakeJsonRpcProvider; priority: number; weight: number }>,
+      public network: unknown,
+      public options: { quorum?: number },
+    ) {}
+    on(_event: string, fn: () => void) {
+      this.handlers.push(fn)
+      return this
+    }
+    emitError() { for (const h of this.handlers) h() }
+  }
+  return { FakeFetchRequest, FakeJsonRpcProvider, FakeFallbackProvider }
 })
 type FakeJsonRpcProvider = InstanceType<typeof fakes.FakeJsonRpcProvider>
+type FakeFallbackProvider = InstanceType<typeof fakes.FakeFallbackProvider>
 
 vi.mock('ethers', () => ({
   JsonRpcProvider: fakes.FakeJsonRpcProvider,
+  FallbackProvider: fakes.FakeFallbackProvider,
   FetchRequest: fakes.FakeFetchRequest,
 }))
 vi.mock('./settings', () => ({ getSetting: vi.fn(async () => null) }))
 
 const g = globalThis as typeof globalThis & { __explorer_provider?: unknown }
 const asFake = (p: unknown) => p as unknown as FakeJsonRpcProvider
+const asFallback = (p: unknown) => p as unknown as FakeFallbackProvider
 
 beforeEach(() => {
   g.__explorer_provider = null
@@ -116,5 +132,39 @@ describe('getWebProvider', () => {
 
     expect(g.__explorer_provider).not.toBeNull()
     expect(await getWebProvider()).toBe(fresh)
+  })
+
+  it('keeps a single url on a plain provider — no failover wrapper', async () => {
+    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://solo.test' } as never)
+    const p = await getWebProvider()
+    expect(asFake(p).req.url).toBe('https://solo.test')
+  })
+
+  it('builds a failover provider across several urls, in order, first-success wins', async () => {
+    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
+    const p = await getWebProvider()
+
+    expect(asFallback(p).configs.map((c) => c.provider.req.url)).toEqual([
+      'https://a.test', 'https://b.test',
+    ])
+    // quorum 1 = take the first endpoint that answers. The ethers default would
+    // issue every call to two endpoints and wait for agreement, doubling load
+    // on public RPCs to buy a consensus the explorer does not need.
+    expect(asFallback(p).options.quorum).toBe(1)
+  })
+
+  it('applies the resolved timeout to every endpoint in the list', async () => {
+    vi.mocked(getSetting).mockResolvedValue(
+      { webRpcUrl: 'https://a.test,https://b.test', rpcTimeoutMs: 4500 } as never)
+    const p = await getWebProvider()
+    expect(asFallback(p).configs.map((c) => c.provider.req.timeout)).toEqual([4500, 4500])
+  })
+
+  it('rebuilds when the url LIST changes, not just the first entry', async () => {
+    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test' } as never)
+    const first = await getWebProvider()
+    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
+    const second = await getWebProvider()
+    expect(second).not.toBe(first)
   })
 })
