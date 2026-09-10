@@ -20,7 +20,7 @@ import { computeGasBreakdown } from '@/lib/gas-breakdown'
 import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
-import { decodeTransferLogs, decodeNftTransferLogs } from '@/lib/erc20-transfers'
+import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs } from '@/lib/erc20-transfers'
 import { fetchTokenMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed } from '@/lib/observability'
@@ -370,7 +370,21 @@ export default async function TxDetailPage({
     : decodeTransferLogs(txLogs)
 
   // Batch token lookups into single query (was N+1: one query per transfer)
-  const uniqueTokenAddrs = [...new Set(effectiveTransfers.map(t => t.tokenAddress))]
+  const { valid: uniqueTokenAddrs, invalid: badTokenAddrs } =
+    splitTokenAddrs([...new Set(effectiveTransfers.map(t => t.tokenAddress))])
+  if (badTokenAddrs.length > 0) {
+    // The producer of a non-string tokenAddress is NOT yet identified: the DB
+    // column is notNull and the log decoder only ever emits a lowercased
+    // string, so both candidate paths should be incapable of this. Report the
+    // value and the branch that produced it, or the next occurrence is as
+    // opaque as the last. JSON.stringify renders undefined as null inside an
+    // array, so the two are distinguished by hand here.
+    swallow('tx/token-addr-invalid', new Error(
+      `hash=${hash} fromRpc=${fromRpc} bodyPruned=${bodyPruned} `
+      + `dbTransfers=${transfers.length} effective=${effectiveTransfers.length} `
+      + `invalid=[${badTokenAddrs.map(v => v === undefined ? 'undefined' : JSON.stringify(v)).join(', ')}]`,
+    ))
+  }
   const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
   if (uniqueTokenAddrs.length > 0) {
     try {

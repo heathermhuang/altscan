@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeTransferLogs, decodeNftTransferLogs, TRANSFER_TOPIC0 } from './erc20-transfers'
+import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, TRANSFER_TOPIC0 } from './erc20-transfers'
 
 // Real logs from Ethereum tx 0x0efa479c…e4c4 (block 25736759), fetched from a
 // node. Etherscan reports this tx as 20 logs / 18 ERC-20 transfers; the first
@@ -111,5 +111,16 @@ describe('decodeNftTransferLogs', () => {
   it('skips malformed NFT logs rather than throwing', () => {
     expect(decodeNftTransferLogs([{ ...nftLog, topic3: '0xnope' }])).toEqual([])
     expect(decodeNftTransferLogs([{ ...nftLog, topic1: null }])).toEqual([])
+  })
+})
+
+describe('splitTokenAddrs', () => {
+  it('keeps usable addresses and reports the rest', () => {
+    const out = splitTokenAddrs(['0xaaa', undefined, '0xbbb', null, ''])
+    expect(out.valid).toEqual(['0xaaa', '0xbbb'])
+    expect(out.invalid).toEqual([undefined, null, ''])
+  })
+  it('reports nothing when every address is usable', () => {
+    expect(splitTokenAddrs(['0xaaa']).invalid).toEqual([])
   })
 })
