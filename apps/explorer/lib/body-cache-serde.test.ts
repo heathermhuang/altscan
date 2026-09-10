@@ -19,4 +19,18 @@ describe('body-cache serde', () => {
     expect(parseTxBody('{"input":123}')).toBeNull()          // wrong type
     expect(parseTxBody('{"logs":[]}')).toBeNull()            // missing input
   })
+
+  // A cached body is external data: it is written by an older deploy, can be
+  // hand-edited in Redis, and is trusted straight into `l.address` by the tx
+  // page. Validating only `Array.isArray(logs)` let a null element through and
+  // surfaced as "Cannot read properties of undefined (reading 'address')".
+  it('returns null when a log element is not an object', () => {
+    expect(parseTxBody('{"input":"0x","logs":[null]}')).toBeNull()
+  })
+  it('returns null when a log element has no address', () => {
+    expect(parseTxBody('{"input":"0x","logs":[{"topic0":"0xddf2","data":"0x"}]}')).toBeNull()
+  })
+  it('keeps a body whose logs are all well-formed', () => {
+    expect(parseTxBody(serializeTxBody(sample))).toEqual(sample)
+  })
 })

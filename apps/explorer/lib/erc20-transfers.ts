@@ -101,3 +101,23 @@ export function decodeTransferLogs(logs: TransferLogLike[]): DecodedTransfer[] {
   }
   return out
 }
+
+/**
+ * Split token addresses into the ones a lookup can use and the ones it cannot.
+ *
+ * `inArray()` forwards a value verbatim as a bound parameter, so a single
+ * `undefined` in the list makes postgres reject the whole statement with
+ * "UNDEFINED_VALUE: Undefined values are not allowed" and the tx page loses
+ * every symbol on the transaction, not just the bad one. The `invalid` half is
+ * returned rather than quietly dropped so the caller can report the offending
+ * value — the producer of a non-string tokenAddress is still unidentified.
+ */
+export function splitTokenAddrs(addrs: readonly unknown[]): { valid: string[]; invalid: unknown[] } {
+  const valid: string[] = []
+  const invalid: unknown[] = []
+  for (const a of addrs) {
+    if (typeof a === 'string' && a.length > 0) valid.push(a)
+    else invalid.push(a)
+  }
+  return { valid, invalid }
+}
