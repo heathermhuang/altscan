@@ -71,6 +71,21 @@ export type RetentionPlan = {
  * Resolve the concrete prune actions for a given env + partition state. Pure — no
  * DB. This is exactly what the guardrail asserts against, and what the job iterates.
  */
+/**
+ * Is the in-place body prune redundant for this pass?
+ *
+ * runCleanup rewrites every row below the BODY cutoff (input -> '0x'), then the
+ * compact bridge deletes every row below the COMPACT cutoff. When compact <= body
+ * the second set contains the first, so the rewrite only manufactures dead tuples
+ * and WAL for rows deleted minutes later. On BNB that rewrite WAS the problem:
+ * 13.3M rows at ~190 rows/s, a 19.6h UPDATE that held the indexer in its degraded
+ * state and ended in ABANDONING skips. Immortal (non-finite) compact retention
+ * never deletes, so the body prune is never redundant there.
+ */
+export function bodyPruneIsRedundant(bodyDays: number, compactDays: number): boolean {
+  return Number.isFinite(compactDays) && compactDays <= bodyDays
+}
+
 export function buildRetentionPlan(opts: { env?: NodeJS.ProcessEnv; ttPartitioned: boolean }): RetentionPlan {
   const env = opts.env ?? process.env
   const bodyDeleteTables = BODY_PRUNE_OPS.filter(o => o.kind === 'delete-rows').map(o => o.table)
