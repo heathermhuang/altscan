@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   COMPACT_TABLES, BODY_PRUNE_OPS, COMPACT_PRUNE_TABLES, PROTECTED_COLUMNS,
-  resolveCompactPruneTables, buildRetentionPlan,
+  resolveCompactPruneTables, buildRetentionPlan, bodyPruneIsRedundant,
 } from './retention-policy'
 
 describe('retention guardrail — compact indexes are immortal on the default path', () => {
@@ -220,5 +220,27 @@ describe('A4b invariant 1 — backfill tables are retention-exempt by constructi
     const block = src.match(/const ALLOWED_TABLES = \[([\s\S]*?)\] as const/)
     expect(block, 'ALLOWED_TABLES array not found — did it get renamed?').toBeTruthy()
     expect(block![1]).not.toMatch(/backfill/)
+  })
+})
+
+// The in-place body prune rewrites every row below the BODY cutoff, and the
+// compact bridge that runs after it in the same pass deletes every row below the
+// COMPACT cutoff. When compact <= body those sets coincide, so the rewrite is
+// pure waste — on BNB it was a 20h UPDATE of rows deleted minutes later.
+describe('bodyPruneIsRedundant', () => {
+  it('is redundant when compact retention equals body retention', () => {
+    expect(bodyPruneIsRedundant(2, 2)).toBe(true)
+  })
+  it('is redundant when an emergency tightens compact below body', () => {
+    expect(bodyPruneIsRedundant(2, 1)).toBe(true)
+  })
+  it('is needed when compact outlives body (BNB before this change: 1d body, 2d compact)', () => {
+    expect(bodyPruneIsRedundant(1, 2)).toBe(false)
+  })
+  it('is needed on ETH (3d body, 4d compact)', () => {
+    expect(bodyPruneIsRedundant(3, 4)).toBe(false)
+  })
+  it('is needed when the compact tables are immortal', () => {
+    expect(bodyPruneIsRedundant(1, Infinity)).toBe(false)
   })
 })

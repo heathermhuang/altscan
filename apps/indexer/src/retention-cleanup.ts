@@ -12,7 +12,7 @@ import { indexerConfig } from './config-instance'
 import { getMaintenanceDb } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listPartitions, ensureForwardPartitions, ensureInternalTxPartitions, type PartitionedParent } from './ensure-schema'
-import { buildRetentionPlan, parseCompactRetentionDays } from './retention-policy'
+import { buildRetentionPlan, parseCompactRetentionDays, bodyPruneIsRedundant } from './retention-policy'
 
 const RETENTION_DAYS = indexerConfig.retention.days
 const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
@@ -892,7 +892,12 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     // In-place body prune: null transactions.input on old rows, keep the compact row.
     // Tied to the manifest (if the op is removed, this stops) but prunes explicitly —
     // no dynamic identifier SQL, matching the file's whitelist-only identifier policy.
-    if (plan.nullColumnOps.some(o => o.table === 'transactions' && o.column === 'input')) {
+    if (bodyPruneIsRedundant(days, compactDays)) {
+      // compact <= body: the compact bridge below deletes every row this would
+      // rewrite, in this same pass. If that bridge fails, the rows simply keep
+      // their bodies until the next run — disk, never data (see bodyPruneIsRedundant).
+      console.log(`[retention] Skipping transactions.input body prune — compact retention (${compactDays}d) <= body retention (${days}d), so the compact prune deletes these rows this run`)
+    } else if (plan.nullColumnOps.some(o => o.table === 'transactions' && o.column === 'input')) {
       try {
         console.log(`[retention] Pruning transactions.input in place (block_number < ${cutoffBlock})...`)
         const pruned = await pruneTransactionBodies(cutoffBlock)
