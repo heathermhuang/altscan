@@ -5,6 +5,7 @@
  * Negative cache: null results are cached for NULL_TTL_MS to prevent repeated
  * RPC calls for the same missing entity within a short window.
  */
+import { swallow } from './observability'
 import { getWebProvider } from './rpc'
 import { registerCache } from './cache-registry'
 
@@ -130,8 +131,14 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
       timestamp: blockTs,
       _fromRpc: true,
     }
-  } catch {
-    return null
+  } catch (e) {
+    // A failed call is NOT an absence. Returning null here made the tx page
+    // render its noindex "not found" for a transaction that exists, and ISR
+    // cached that render. Rethrow so the render fails instead of producing a
+    // cacheable "missing" page; only a node answering null means missing (and
+    // only that is negative-cached, above). Logged first so it stays greppable.
+    swallow('rpc/tx', e)
+    throw e
   }
 }
 
@@ -169,7 +176,11 @@ export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock |
       })),
       _fromRpc: true,
     }
-  } catch {
-    return null
+  } catch (e) {
+    // Same contract as fetchTxFromRpc: a failed call is not an absence — the
+    // block page emits noindex for null. Callers that only want optional data
+    // from this (the tx page's base fee) must catch.
+    swallow('rpc/block', e)
+    throw e
   }
 }

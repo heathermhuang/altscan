@@ -329,8 +329,13 @@ export default async function TxDetailPage({
     baseFeePerGas = b?.baseFee ?? null
   } catch (e) { swallow('tx/base-fee', e) }
   if (baseFeePerGas == null) {
-    const rpcBlock = await fetchBlockFromRpc(tx.blockNumber)
-    baseFeePerGas = rpcBlock?.baseFeePerGas ?? null
+    // Optional detail: fetchBlockFromRpc now throws on transport failure (a
+    // failed call is not an absent block), so degrade here rather than failing
+    // a tx page that otherwise rendered fine.
+    try {
+      const rpcBlock = await fetchBlockFromRpc(tx.blockNumber)
+      baseFeePerGas = rpcBlock?.baseFeePerGas ?? null
+    } catch (e) { swallow('tx/base-fee-rpc', e) }
   }
   const gasBreakdown = computeGasBreakdown(tx.gasUsed ?? 0n, tx.gasPrice ?? 0n, baseFeePerGas)
 
