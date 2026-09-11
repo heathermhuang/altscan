@@ -33,7 +33,14 @@ function buildProvider({ urls, timeoutMs }: { urls: string[]; timeoutMs: number 
   const endpoints = urls.map((url) => {
     const req = new FetchRequest(url)
     req.timeout = timeoutMs
-    return new JsonRpcProvider(req)
+    // batchMaxCount 1: every call goes out as its own request. ethers' default
+    // (100) coalesces concurrent calls into one JSON-RPC batch, and because this
+    // provider is a process-wide singleton, calls from concurrent page renders
+    // batch TOGETHER — the batch grows with traffic. drpc's free plan rejects any
+    // batch over 3 with a 500 for the whole batch, which failed chain-tip on
+    // most ETH tx pages and, via the fallback's catch, rendered real txs as
+    // "not found". Every endpoint accepts single requests.
+    return new JsonRpcProvider(req, undefined, { batchMaxCount: 1 })
   })
 
   // One endpoint stays a plain JsonRpcProvider — identical to the behaviour

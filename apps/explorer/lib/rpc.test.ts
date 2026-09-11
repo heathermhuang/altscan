@@ -12,7 +12,11 @@ const fakes = vi.hoisted(() => {
   }
   class FakeJsonRpcProvider {
     handlers: Array<() => void> = []
-    constructor(public req: FakeFetchRequest) {}
+    constructor(
+      public req: FakeFetchRequest,
+      public network?: unknown,
+      public options?: { batchMaxCount?: number },
+    ) {}
     on(_event: string, fn: () => void) {
       this.handlers.push(fn)
       return this
@@ -166,5 +170,19 @@ describe('getWebProvider', () => {
     vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
     const second = await getWebProvider()
     expect(second).not.toBe(first)
+  })
+
+  // drpc's free plan rejects any JSON-RPC batch over 3 with a 500 for the WHOLE
+  // batch. This provider is a process-wide singleton, so calls from concurrent
+  // page renders coalesce into one batch whose size grows with traffic.
+  it('never batches: every call goes out as its own request', async () => {
+    const p = await getWebProvider()
+    expect(asFake(p).options?.batchMaxCount).toBe(1)
+  })
+
+  it('never batches on any endpoint of a failover list either', async () => {
+    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
+    const p = await getWebProvider()
+    expect(asFallback(p).configs.map((c) => c.provider.options?.batchMaxCount)).toEqual([1, 1])
   })
 })
