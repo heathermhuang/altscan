@@ -121,3 +121,14 @@ export function splitTokenAddrs(addrs: readonly unknown[]): { valid: string[]; i
   }
   return { valid, invalid }
 }
+
+/**
+ * How many token transfers a tx page lists. The page reads one row more than
+ * this, only to learn whether the transaction has more than the list shows —
+ * it used to stop at 25 without saying so.
+ */
+export const TX_TRANSFERS_SHOWN = 25
+
+export function capTransfers<T>(rows: readonly T[]): { shown: T[]; truncated: boolean } {
+  return { shown: rows.slice(0, TX_TRANSFERS_SHOWN), truncated: rows.length > TX_TRANSFERS_SHOWN }
+}
