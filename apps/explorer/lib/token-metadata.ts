@@ -8,8 +8,9 @@
  * raw base-unit integer — "4280000000" where the answer is "4,280 USDC".
  *
  * Token symbol and decimals are immutable in practice, so verdicts are cached
- * across requests. Failures are never cached: a transient RPC outage must not
- * pin "unknown" for the whole TTL.
+ * across requests — including a revert, which is the contract's answer rather
+ * than a failure to get one. Transport failures are never cached: a transient
+ * RPC outage must not pin "unknown" for the whole TTL.
  */
 import { Contract } from 'ethers'
 import { swallow } from './observability'
@@ -41,6 +42,15 @@ function writeCache(addr: string, meta: TokenMeta): void {
 }
 
 /**
+ * A call that REVERTED is settled: the contract reverts the same way every time.
+ * ethers reports that as CALL_EXCEPTION; a timeout, rate limit or 5xx carries
+ * another code and must be asked again.
+ */
+function isRevert(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'CALL_EXCEPTION'
+}
+
+/**
  * Resolve metadata for several tokens at once. Never throws and never rejects:
  * a token it cannot resolve is simply absent from the returned map, and the
  * caller falls back to showing the raw amount.
@@ -51,8 +61,10 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
 
   for (const raw of new Set(addresses.map((a) => a.toLowerCase()))) {
     const hit = readCache(raw)
-    if (hit) out.set(raw, hit)
-    else misses.push(raw)
+    if (!hit) misses.push(raw)
+    // A cached "reverts on both" stays absent, like any token this cannot
+    // resolve; it is just not asked again.
+    else if (hit.symbol != null || hit.decimals != null) out.set(raw, hit)
   }
   if (misses.length === 0) return out
 
@@ -65,21 +77,30 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
   }
 
   await Promise.all(misses.map(async (addr) => {
-    // Keep the first transport error. Both calls are caught individually so one
-    // missing method still yields the other, but that also discarded the reason
-    // a token failed to resolve — leaving a placeholder symbol on the page with
-    // nothing in the logs to explain it.
+    // Keep the first error. Both calls are caught individually so one missing
+    // method still yields the other, but that also discarded the reason a token
+    // failed to resolve — leaving a placeholder symbol on the page with nothing
+    // in the logs to explain it.
     let firstErr: unknown = null
+    // Any failure that is not a revert leaves this attempt unsettled, so nothing
+    // from it is cached — not even the half that did answer.
+    let transportFailed = false
+    const failed = (e: unknown) => {
+      firstErr ??= e
+      if (!isRevert(e)) transportFailed = true
+      return null
+    }
     try {
       const c = new Contract(addr, ERC20_ABI, provider)
       const [symbol, decimals] = await Promise.all([
-        c.symbol().catch((e: unknown) => { firstErr ??= e; return null }),
-        c.decimals().catch((e: unknown) => { firstErr ??= e; return null }),
+        c.symbol().catch(failed),
+        c.decimals().catch(failed),
       ])
-      // A contract that answers neither call is not a token we can describe;
-      // don't cache that as a settled answer.
       if (symbol == null && decimals == null) {
         swallow('token/metadata', firstErr ?? new Error(`${addr}: no symbol() or decimals()`))
+        // Both reverted: this contract has no metadata to give, on this visit or
+        // any later one. Cache that, or every visit re-asks and re-logs it.
+        if (!transportFailed) writeCache(addr, { symbol: null, decimals: null })
         return
       }
       const meta: TokenMeta = {
@@ -89,7 +110,7 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
       if (meta.decimals != null && (!Number.isInteger(meta.decimals) || meta.decimals < 0 || meta.decimals > 36)) {
         meta.decimals = null
       }
-      writeCache(addr, meta)
+      if (!transportFailed) writeCache(addr, meta)
       out.set(addr, meta)
     } catch (e) { swallow('token/metadata', e) }  // caller degrades to the raw amount
   }))
