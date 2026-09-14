@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { swallow, swallowed, resetSwallowThrottle } from './observability'
+import { swallow, swallowed, resetSwallowThrottle, arrayShape } from './observability'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -60,5 +60,21 @@ describe('swallowed', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(await Promise.reject(new Error('x')).catch(swallowed('t', null))).toBeNull()
     expect(await Promise.reject(new Error('x')).catch(swallowed('t', 0))).toBe(0)
+  })
+})
+
+describe('arrayShape', () => {
+  // A result corrupted by the postgres.js row-counter bug has leading holes: its
+  // length counts them, iterating it yields undefined, and .map() skips them.
+  it('reports length/populated, which differ only when the array has holes', () => {
+    expect(arrayShape(['a', 'b'])).toBe('2/2')
+    const holes: string[] = []
+    holes[3] = 'a'
+    holes[4] = 'b'
+    expect(arrayShape(holes)).toBe('5/2')
+  })
+
+  it('names a query that never produced a result', () => {
+    expect(arrayShape(undefined)).toBe('none')
   })
 })

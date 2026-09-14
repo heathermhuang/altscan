@@ -7,6 +7,11 @@ settings:
 overrides:
   ioredis: 5.9.3
 
+patchedDependencies:
+  postgres@3.4.8:
+    hash: 9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f
+    path: patches/postgres@3.4.8.patch
+
 importers:
 
   .:
@@ -43,7 +48,7 @@ importers:
         version: 5.18.2(@types/node@24.13.1)(ioredis@5.9.3)(jiti@1.21.7)(rollup@4.60.0)(tsx@4.21.0)(typescript@5.9.3)
       drizzle-orm:
         specifier: ^0.31.0
-        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
+        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))(react@19.2.4)
       jose:
         specifier: ^5.9.0
         version: 5.10.0
@@ -120,7 +125,7 @@ importers:
         version: 1.18.1
       drizzle-orm:
         specifier: ^0.31.0
-        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
+        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))(react@19.2.4)
       ethers:
         specifier: ^6.11.0
         version: 6.16.0
@@ -187,7 +192,7 @@ importers:
         version: 16.6.1
       drizzle-orm:
         specifier: ^0.31.0
-        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
+        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))(react@19.2.4)
       ethers:
         specifier: ^6.11.0
         version: 6.16.0
@@ -231,10 +236,10 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: ^0.31.0
-        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
+        version: 0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))(react@19.2.4)
       postgres:
         specifier: ^3.4.0
-        version: 3.4.8
+        version: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
     devDependencies:
       drizzle-kit:
         specifier: ^0.22.0
@@ -7502,11 +7507,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4):
+  drizzle-orm@0.31.4(@cloudflare/workers-types@5.20260729.1)(@types/react@19.2.14)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))(react@19.2.4):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260729.1
       '@types/react': 19.2.14
-      postgres: 3.4.8
+      postgres: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
       react: 19.2.4
 
   dset@3.1.4: {}
@@ -9318,7 +9323,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postgres@3.4.8: {}
+  postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f): {}
 
   prelude-ls@1.2.1: {}
 

@@ -45,6 +45,16 @@ export function swallow(tag: string, err: unknown): void {
 }
 
 /**
+ * `length/populated` for a query result, e.g. `5/2`. The two differ only when
+ * the array has holes — the signature of a result corrupted by the postgres.js
+ * row-counter bug (patches/postgres@3.4.8.patch), where for-of yields
+ * `undefined` for every hole. `none` when there is no result at all.
+ */
+export function arrayShape(rows: ArrayLike<unknown> | undefined): string {
+  return rows === undefined ? 'none' : `${rows.length}/${Object.keys(rows).length}`
+}
+
+/**
  * Drop-in for `.catch(() => fallback)` that logs first.
  *
  *   db.select()...            .catch(() => [])

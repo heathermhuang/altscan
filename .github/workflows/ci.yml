@@ -79,6 +79,14 @@ jobs:
           BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/seam_test
         run: npx vitest run apps/explorer/lib/backfill-serve.pg.test.ts
 
+      # getDb() itself: a query that fails after rows have streamed must not leave
+      # holes in the next result on that connection (postgres.js row-counter bug,
+      # patches/postgres@3.4.8.patch). Its table is TEMP, so it shares worker_test.
+      - name: PG-gated db client suite (postgres.js row-counter patch)
+        env:
+          DB_CLIENT_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run packages/db/client.pg.test.ts
+
       # `pnpm lint` was dead for the life of the repo: apps/explorer's script was
       # `next lint` with no ESLint config anywhere, so it dropped into an
       # interactive setup prompt and exited 1, and CI never ran it. ESLint is now

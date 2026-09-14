@@ -18,6 +18,9 @@
   "pnpm": {
     "overrides": {
       "ioredis": "5.9.3"
+    },
+    "patchedDependencies": {
+      "postgres@3.4.8": "patches/postgres@3.4.8.patch"
     }
   }
 }

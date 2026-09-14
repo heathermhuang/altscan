@@ -23,7 +23,7 @@ import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs } from '@/lib/erc20-transfers'
 import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { swallow, swallowed } from '@/lib/observability'
+import { swallow, swallowed, arrayShape } from '@/lib/observability'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
 // RPC/indexer lag — caches its 404 for everyone until the next revalidate.
@@ -378,26 +378,34 @@ export default async function TxDetailPage({
   const { valid: uniqueTokenAddrs, invalid: badTokenAddrs } =
     splitTokenAddrs([...new Set(effectiveTransfers.map(t => t.tokenAddress))])
   if (badTokenAddrs.length > 0) {
-    // The producer of a non-string tokenAddress is NOT yet identified: the DB
-    // column is notNull and the log decoder only ever emits a lowercased
-    // string, so both candidate paths should be incapable of this. Report the
-    // value and the branch that produced it, or the next occurrence is as
-    // opaque as the last. JSON.stringify renders undefined as null inside an
-    // array, so the two are distinguished by hand here.
+    // The column is notNull and the log decoder only emits strings, so an
+    // undefined here has come from a HOLE in the query result: postgres.js
+    // 3.4.8 left its row counter set after a query failed mid-result, and the
+    // next query on that connection started at index k (patched in
+    // patches/postgres@3.4.8.patch). dbTransfers is length/populated, so a
+    // recurrence shows whether holes are still the cause. JSON.stringify
+    // renders undefined as null inside an array, so the two are distinguished
+    // by hand here.
     swallow('tx/token-addr-invalid', new Error(
       `hash=${hash} fromRpc=${fromRpc} bodyPruned=${bodyPruned} `
-      + `dbTransfers=${transfers.length} effective=${effectiveTransfers.length} `
+      + `dbTransfers=${arrayShape(transfers)} effective=${effectiveTransfers.length} `
       + `invalid=[${badTokenAddrs.map(v => v === undefined ? 'undefined' : JSON.stringify(v)).join(', ')}]`,
     ))
   }
   const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
   if (uniqueTokenAddrs.length > 0) {
+    let tokens: { address: string; symbol: string; decimals: number }[] | undefined
     try {
-      const tokens = await db.select({ address: schema.tokens.address, symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
+      tokens = await db.select({ address: schema.tokens.address, symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
         .from(schema.tokens)
         .where(inArray(schema.tokens.address, uniqueTokenAddrs))
       for (const tok of tokens) tokenLookup.set(tok.address, tok)
-    } catch (e) { swallow('tx/token-lookup', e) }
+    } catch (e) {
+      // The bare TypeError named no transaction, so it could not be reproduced.
+      // rows= separates a result with holes (e.g. 5/2) from a failed query (none).
+      swallow('tx/token-lookup', `hash=${hash} addrs=${uniqueTokenAddrs.length} rows=${arrayShape(tokens)} `
+        + (e instanceof Error ? e.stack ?? e.message : String(e)))
+    }
   }
   // Anything the local `tokens` table could not name is resolved on-chain, so a
   // transfer never has to render as a raw base-unit integer ("4280000000"
