@@ -20,7 +20,7 @@ import { computeGasBreakdown } from '@/lib/gas-breakdown'
 import { resolveTxViewKind } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
-import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs } from '@/lib/erc20-transfers'
+import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
 import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
@@ -293,7 +293,7 @@ export default async function TxDetailPage({
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
     fromRpc
       ? Promise.resolve([])
-      : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(25).catch(swallowed('tx/transfers', [])),
+      : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(TX_TRANSFERS_SHOWN + 1).catch(swallowed('tx/transfers', [])),
     // Local only: there is no RPC fallback for traces on the web tier. A tx
     // indexed before the feature (or while the indexer was behind) has none.
     fromRpc
@@ -370,8 +370,9 @@ export default async function TxDetailPage({
   // On the RPC path there are no token_transfers rows, so the transfers are
   // decoded out of the receipt logs we just refetched. `transfers` (DB) wins
   // when present — it is authoritative and already normalised.
-  const effectiveTransfers = transfers.length > 0
-    ? transfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
+  const { shown: shownTransfers, truncated: transfersTruncated } = capTransfers(transfers)
+  const effectiveTransfers = shownTransfers.length > 0
+    ? shownTransfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
     : decodeTransferLogs(txLogs)
 
   // Batch token lookups into single query (was N+1: one query per transfer)
@@ -713,7 +714,7 @@ export default async function TxDetailPage({
 
       {transferInfos.length > 0 && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Token Transfers ({transferInfos.length})</h2>
+          <h2 className="font-semibold mb-3">Token Transfers ({transferInfos.length}{transfersTruncated ? '+' : ''})</h2>
           <div className="space-y-2">
             {transferInfos.map((t, i) => {
               const formattedAmount = t.tokenDecimals != null
@@ -737,6 +738,19 @@ export default async function TxDetailPage({
               )
             })}
           </div>
+          {transfersTruncated && (
+            <p className="mt-3 text-xs text-gray-500">
+              Showing the first {TX_TRANSFERS_SHOWN} token transfers — this transaction has more.{' '}
+              <a
+                href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${chainConfig.theme.linkText} hover:underline`}
+              >
+                View all on {chainConfig.externalExplorer} ↗
+              </a>
+            </p>
+          )}
         </div>
       )}
 

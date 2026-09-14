@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, TRANSFER_TOPIC0 } from './erc20-transfers'
+import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN, TRANSFER_TOPIC0 } from './erc20-transfers'
 
 // Real logs from Ethereum tx 0x0efa479c…e4c4 (block 25736759), fetched from a
 // node. Etherscan reports this tx as 20 logs / 18 ERC-20 transfers; the first
@@ -122,5 +122,20 @@ describe('splitTokenAddrs', () => {
   })
   it('reports nothing when every address is usable', () => {
     expect(splitTokenAddrs(['0xaaa']).invalid).toEqual([])
+  })
+})
+
+describe('capTransfers', () => {
+  // The tx page reads one row past what it lists, only to learn whether the
+  // transaction has more transfers than the list shows.
+  it('keeps the first TX_TRANSFERS_SHOWN and flags the list as cut off when the extra row came back', () => {
+    const rows = Array.from({ length: TX_TRANSFERS_SHOWN + 1 }, (_, i) => i)
+    expect(capTransfers(rows)).toEqual({ shown: rows.slice(0, TX_TRANSFERS_SHOWN), truncated: true })
+  })
+
+  it('does not flag a list that fits', () => {
+    const rows = Array.from({ length: TX_TRANSFERS_SHOWN }, (_, i) => i)
+    expect(capTransfers(rows)).toEqual({ shown: rows, truncated: false })
+    expect(capTransfers([])).toEqual({ shown: [], truncated: false })
   })
 })
