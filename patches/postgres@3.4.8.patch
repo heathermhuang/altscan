@@ -1,0 +1,30 @@
+diff --git a/cjs/src/connection.js b/cjs/src/connection.js
+index 07f6716702ac888215c86ad6e0071aaf55ae519c..c994942617a1769bf2273406eca29163199bb9e2 100644
+--- a/cjs/src/connection.js
++++ b/cjs/src/connection.js
+@@ -549,6 +549,10 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+ 
+     query = results = errorResponse = null
+     result = new Result()
++    // altscan patch: only CommandComplete reset `rows`, so a query that failed
++    // after k DataRows left it at k and the NEXT query's rows started at index
++    // k — a sparse result. Every query starts at 0 after ReadyForQuery.
++    rows = 0
+     connectTimer.cancel()
+ 
+     if (initial) {
+diff --git a/src/connection.js b/src/connection.js
+index 1b1cccde43b4570d5d071d6ffaab2669b3c2065a..9a90c5d9cb959fef17329b0371f0f01a29108f82 100644
+--- a/src/connection.js
++++ b/src/connection.js
+@@ -549,6 +549,10 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+ 
+     query = results = errorResponse = null
+     result = new Result()
++    // altscan patch: only CommandComplete reset `rows`, so a query that failed
++    // after k DataRows left it at k and the NEXT query's rows started at index
++    // k — a sparse result. Every query starts at 0 after ReadyForQuery.
++    rows = 0
+     connectTimer.cancel()
+ 
+     if (initial) {
