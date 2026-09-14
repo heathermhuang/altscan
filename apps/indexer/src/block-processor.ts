@@ -1,3 +1,5 @@
+import { getChainConfig } from '@altscan/chain-config'
+import { decodeV2Swap, SWAP_V2_TOPIC } from './dex-swap'
 import { indexerConfig } from './config-instance'
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
@@ -11,7 +13,10 @@ import { fetchBlockTraces, decodeCallTracerBlock, type RawTraceTx } from './inte
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
 const TRANSFER_SINGLE_TOPIC = keccak256id('TransferSingle(address,address,address,uint256,uint256)')
-const SWAP_V2_TOPIC = keccak256id('Swap(address,uint256,uint256,uint256,uint256,address)')
+// Every V2-shaped swap is recorded under the chain's best-known AMM: "PancakeSwap
+// V2" on BNB, "Uniswap V2" on Ethereum. It was hard-coded to PancakeSwap, which
+// would have labelled every Ethereum trade as a BNB Chain DEX.
+const DEX_V2_LABEL = `${getChainConfig().dex.primary} V2`
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const abi = AbiCoder.defaultAbiCoder()
@@ -663,38 +668,18 @@ async function processReceiptsBatch(
         // log_index is the natural key now, so an unusable one is not cosmetic.
         if (!isUsableLogIndex(log.index)) continue
         const pairAddress = log.address.toLowerCase()
-        const isV2 = log.topics.length === 3 && log.data.length >= 514
-        if (!isV2) continue
-
         const tokens = pairCache.get(pairAddress)
         if (!tokens) continue
 
-        const [token0, token1] = tokens
-        const [a0In, a1In, a0Out, a1Out] = abi.decode(
-          ['uint256', 'uint256', 'uint256', 'uint256'], log.data
-        ) as bigint[]
-
-        let tokenIn: string, tokenOut: string, amountIn: bigint, amountOut: bigint
-        if (a0In > 0n) {
-          tokenIn = token0; tokenOut = token1
-          amountIn = a0In; amountOut = a1Out
-        } else {
-          tokenIn = token1; tokenOut = token0
-          amountIn = a1In; amountOut = a0Out
-        }
-
-        const maker = ('0x' + log.topics[2].slice(26)).toLowerCase()
+        const swap = decodeV2Swap(log, tokens)
+        if (!swap) continue
 
         dexRows.push({
           txHash,
           logIndex: log.index,
-          dex: 'PancakeSwap V2',
+          dex: DEX_V2_LABEL,
           pairAddress,
-          tokenIn,
-          tokenOut,
-          amountIn: amountIn.toString(),
-          amountOut: amountOut.toString(),
-          maker,
+          ...swap,
           blockNumber,
           timestamp,
         })

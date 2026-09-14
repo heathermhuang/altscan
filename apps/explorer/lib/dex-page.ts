@@ -2,9 +2,9 @@
  * Cached data access for `/dex`.
  *
  * This is the page the data cache matters most for: alongside the paginated
- * select it runs a `GROUP BY pair_address, dex` over the whole of `dex_trades`
- * for the top-pairs panel, and it ran that on every request because reading
- * `searchParams` made the route dynamic and its `revalidate = 300` never applied.
+ * select it runs a `GROUP BY pair_address, dex` for the top-pairs panel, and it
+ * ran that on every request because reading `searchParams` made the route
+ * dynamic and its `revalidate = 300` never applied.
  */
 import { desc, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
@@ -12,6 +12,14 @@ import { createPageCache } from '@/lib/page-cache'
 
 export const DEX_PAGE_SIZE = 25
 export const DEX_REVALIDATE_SECONDS = 300
+/**
+ * Top pairs are ranked over this many most-recent trades, not the whole table.
+ * BNB records ~2.3M V2 swaps a day, so two days of retention is ~4.6M rows, and
+ * a GROUP BY over all of them reads the entire heap (191k pages, ~1.5 GB, on a
+ * 4.6M-row local copy) on every revalidation. The window reads ~6k pages,
+ * newest first, off dex_block_idx.
+ */
+export const TOP_PAIRS_WINDOW = 50_000
 
 export type TopPair = { pair_address: string; dex: string; trade_count: number }
 
@@ -50,9 +58,15 @@ export const fetchDexPage = createPageCache(
     // reltuples/10 stands in for COUNT(DISTINCT maker), which is too expensive.
     const makerCount = await db.execute(
     sql`SELECT GREATEST(1, (reltuples / 10)::bigint) AS value FROM pg_class WHERE relname = 'dex_trades'`)
+    // The window size is inlined, not bound: a generic plan cannot see a bound
+    // LIMIT and would cost the scan as if it read a tenth of the table.
     const topPairsResult = await db.execute(sql`
     SELECT pair_address, dex, COUNT(*)::int as trade_count
-    FROM dex_trades
+    FROM (
+      SELECT pair_address, dex FROM dex_trades
+      ORDER BY block_number DESC
+      LIMIT ${sql.raw(String(TOP_PAIRS_WINDOW))}
+    ) recent
     GROUP BY pair_address, dex
     ORDER BY trade_count DESC
     LIMIT 5
