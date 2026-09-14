@@ -1,6 +1,6 @@
 import { schema } from '@/lib/db'
 import {
-  fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, type TopPair,
+  fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
 import { timeAgo, safeBigInt } from '@/lib/format'
@@ -101,11 +101,11 @@ export default async function DexPage({
       {topPairs.length > 0 && (
         <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
           <div className="px-4 py-3 border-b">
-            <h2 className="font-semibold">Top Pairs by Trade Count</h2>
+            <h2 className="font-semibold">Top Pairs by Trade Count <span className="text-xs font-normal text-gray-400">(last {TOP_PAIRS_WINDOW.toLocaleString()} trades)</span></h2>
           </div>
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">Top trading pairs by trade count on {chainConfig.name}</caption>
+            <caption className="sr-only">Top trading pairs by trade count over the last {TOP_PAIRS_WINDOW.toLocaleString()} trades on {chainConfig.name}</caption>
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th scope="col" className="text-left px-4 py-2 text-gray-500">#</th>
