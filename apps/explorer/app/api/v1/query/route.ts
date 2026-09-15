@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq, and, gte, lte, or, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, desc } from 'drizzle-orm'
 import { authRequest } from '@/lib/api-auth'
+import { selectByAddress } from '@/lib/address-query'
+import { swallow } from '@/lib/observability'
 // apiJson (not NextResponse.json) for data rows: blocks/transactions carry
 // Drizzle bigint columns (gas_used, gas, gas_limit) that JSON.stringify throws
 // on — that throw is what made those two entities 500. apiJson stringifies
@@ -72,19 +74,17 @@ export async function POST(request: Request) {
     switch (entity) {
       case 'transactions': {
         const conditions = []
-        if (filter.address) {
-          const a = filter.address.toLowerCase()
-          conditions.push(or(
-            eq(schema.transactions.fromAddress, a),
-            eq(schema.transactions.toAddress, a),
-          )!)
-        }
         if (filter.from) conditions.push(eq(schema.transactions.fromAddress, filter.from.toLowerCase()))
         if (filter.to) conditions.push(eq(schema.transactions.toAddress, filter.to.toLowerCase()))
         if (filter.blockNumber) conditions.push(eq(schema.transactions.blockNumber, filter.blockNumber))
         if (filter.blockFrom) conditions.push(gte(schema.transactions.blockNumber, filter.blockFrom))
         if (filter.blockTo) conditions.push(lte(schema.transactions.blockNumber, filter.blockTo))
 
+        if (filter.address) {
+          const rows = await selectByAddress(db, schema.transactions, filter.address.toLowerCase(), conditions,
+            { order: orderBy, limit: safeLimit, offset: safeOffset })
+          return apiJson({ entity, count: rows.length, data: rows })
+        }
         const q = db.select().from(schema.transactions)
           .orderBy(orderBy === 'asc' ? schema.transactions.blockNumber : desc(schema.transactions.blockNumber))
           .limit(safeLimit).offset(safeOffset)
@@ -113,19 +113,17 @@ export async function POST(request: Request) {
 
       case 'token_transfers': {
         const conditions = []
-        if (filter.address) {
-          const a = filter.address.toLowerCase()
-          conditions.push(or(
-            eq(schema.tokenTransfers.fromAddress, a),
-            eq(schema.tokenTransfers.toAddress, a),
-          )!)
-        }
         if (filter.from) conditions.push(eq(schema.tokenTransfers.fromAddress, filter.from.toLowerCase()))
         if (filter.to) conditions.push(eq(schema.tokenTransfers.toAddress, filter.to.toLowerCase()))
         if (filter.tokenAddress) conditions.push(eq(schema.tokenTransfers.tokenAddress, filter.tokenAddress.toLowerCase()))
         if (filter.blockFrom) conditions.push(gte(schema.tokenTransfers.blockNumber, filter.blockFrom))
         if (filter.blockTo) conditions.push(lte(schema.tokenTransfers.blockNumber, filter.blockTo))
 
+        if (filter.address) {
+          const rows = await selectByAddress(db, schema.tokenTransfers, filter.address.toLowerCase(), conditions,
+            { order: orderBy, limit: safeLimit, offset: safeOffset })
+          return apiJson({ entity, count: rows.length, data: rows })
+        }
         const q = db.select().from(schema.tokenTransfers)
           .orderBy(orderBy === 'asc' ? schema.tokenTransfers.blockNumber : desc(schema.tokenTransfers.blockNumber))
           .limit(safeLimit).offset(safeOffset)
@@ -150,8 +148,10 @@ export async function POST(request: Request) {
       default:
         return NextResponse.json({ error: 'Invalid entity. Use: transactions, blocks, tokens, token_transfers, dex_trades' }, { status: 400 })
     }
-  } catch {
-    // Do not leak DB error details to callers
+  } catch (e) {
+    // Do not leak DB error details to callers — but log them: a bare catch here
+    // hid ~95 statement timeouts an hour from the address filter.
+    swallow('api/v1/query', e)
     return NextResponse.json({ error: 'Query failed' }, { status: 500 })
   }
 }

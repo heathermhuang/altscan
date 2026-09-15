@@ -87,6 +87,15 @@ jobs:
           DB_CLIENT_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run packages/db/client.pg.test.ts
 
+      # POST /api/v1/query's filter.address: an OR across from/to ordered by
+      # block_number walked the whole table and hit the web statement_timeout
+      # ~95x/hour on BNB. Asserts rows read, not wall time. Its tables are TEMP,
+      # so it shares worker_test.
+      - name: PG-gated explorer suite (api/v1/query address filter)
+        env:
+          ADDRESS_QUERY_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/explorer/lib/address-query.pg.test.ts
+
       # `pnpm lint` was dead for the life of the repo: apps/explorer's script was
       # `next lint` with no ESLint config anywhere, so it dropped into an
       # interactive setup prompt and exited 1, and CI never ran it. ESLint is now
