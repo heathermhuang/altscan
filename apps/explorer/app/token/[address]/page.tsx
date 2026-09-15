@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db'
-import { eq, desc, count } from 'drizzle-orm'
+import { selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from '@/lib/token-transfers-query'
+import { eq, count } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
@@ -153,7 +154,8 @@ export default async function TokenDetailPage({
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
-  const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
+  // The list stops at TOKEN_TRANSFERS_MAX_ROWS, so a deeper ?page= gets its last page.
+  const page = Math.min(TOKEN_TRANSFERS_MAX_ROWS / PAGE_SIZE, Math.max(1, parseInt(pageStr ?? '1', 10) || 1))
   const offset = (page - 1) * PAGE_SIZE
 
   let token: typeof schema.tokens.$inferSelect | null = null
@@ -199,15 +201,8 @@ export default async function TokenDetailPage({
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
-        // Top-N by indexed (token_address, block_number) — fast even for big tokens.
         withTimeout(
-          db
-            .select()
-            .from(schema.tokenTransfers)
-            .where(eq(schema.tokenTransfers.tokenAddress, addr))
-            .orderBy(desc(schema.tokenTransfers.blockNumber))
-            .limit(PAGE_SIZE)
-            .offset(offset)
+          selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset })
             .catch(() => TRANSFERS_FALLBACK),
           6000,
           TRANSFERS_FALLBACK,
@@ -232,9 +227,9 @@ export default async function TokenDetailPage({
   const totalTransfers = countKnown ? totalTransfersRaw : 0
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
-  const paginationTotal = countKnown
+  const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
     ? totalTransfers
-    : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0)
+    : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0))
 
   const displaySupply = (() => {
     try {
