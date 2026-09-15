@@ -497,7 +497,7 @@ async function main() {
     // almost certainly by an `aborted-dirty` failover. Stepping over it is the
     // invisible-bad-data case. Retrying it is the right move and now actually
     // converges: PR #96 made processBlock replay-safe (dedupable dex_trades via the
-    // partial unique on (tx_hash, log_index), set-verified receipt coverage,
+    // partial unique on (block_number, log_index), set-verified receipt coverage,
     // once-only webhooks), so a replay repairs the missing derived rows rather than
     // duplicating the ones already there.
     poisonBlocks.forget(blocker)

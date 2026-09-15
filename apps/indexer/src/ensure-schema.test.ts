@@ -6,6 +6,7 @@ import {
   TT_TOKEN_TS_IDX,
   INVALID_INDEX_SWEEP_SQL,
   partitionRangesToCreate,
+  retireOldDexKeySql,
 } from './ensure-schema'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
 import { getChainConfig, type ChainKey } from '@altscan/chain-config'
@@ -15,8 +16,8 @@ const FLOOR = '1000000000000000000'
 describe('buildConcurrentIndexList', () => {
   // The two properties that actually matter for boot: CONCURRENTLY (never takes a
   // blocking lock behind the outgoing instance's writes) and IF NOT EXISTS
-  // (idempotent across restarts). UNIQUE is permitted — dex_tx_log_unique is what
-  // makes a dex_trades replay dedupable — but nothing else may vary.
+  // (idempotent across restarts). UNIQUE is permitted — dex_block_log_unique is
+  // what makes a dex_trades replay dedupable — but nothing else may vary.
   it('emits only CONCURRENTLY + IF NOT EXISTS statements (idempotent, non-blocking boot)', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
@@ -29,16 +30,30 @@ describe('buildConcurrentIndexList', () => {
 
   // The unique index is the one statement here that could FAIL on real data, so
   // its PARTIAL predicate is what keeps the boot path safe on a populated table.
-  it('builds dex_tx_log_unique on the natural key, in both partition modes', () => {
+  //
+  // Keyed on (block_number, log_index): a log index is block-scoped, so this is
+  // the same natural key as (tx_hash, log_index), but it grows in order instead of
+  // landing on a random page of a 398 MB index on every BNB insert.
+  it('builds dex_block_log_unique on the natural key, in both partition modes', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
-        .filter(s => s.includes('dex_tx_log_unique'))
+        .filter(s => s.includes('dex_block_log_unique'))
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       expect(stmts[0]).toMatch(/^CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS /)
-      expect(stmts[0]).toContain('ON dex_trades(tx_hash, log_index)')
+      expect(stmts[0]).toContain('ON dex_trades(block_number, log_index)')
       // PARTIAL is load-bearing: it excludes rows predating the column, so the
       // build cannot fail on legacy data and no migration has to precede it.
       expect(stmts[0]).toContain('WHERE log_index IS NOT NULL')
+    }
+  })
+
+  // dex_pair_idx had 0 scans on BNB after 3.3M inserts; the old key is retired by
+  // retireOldDexKeySql once its replacement is valid, never rebuilt at boot.
+  it('no longer builds the tx-hash key or the unused pair index', () => {
+    for (const ttPartitioned of [false, true]) {
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
+      expect(stmts.filter(s => s.includes('dex_tx_log_unique'))).toEqual([])
+      expect(stmts.filter(s => s.includes('dex_pair_idx'))).toEqual([])
     }
   })
 
@@ -74,6 +89,20 @@ describe('buildConcurrentIndexList', () => {
 })
 
 // ---------------------------------------------------------------------------
+describe('retireOldDexKeySql', () => {
+  // Deploy generations overlap and both write dex_trades for the same blocks, so
+  // SOME natural-key unique index must exist at every moment. Dropping the old one
+  // before the new one is valid would open a window where overlapping inserts
+  // duplicate trades.
+  it('retires nothing until the replacement key is valid', () => {
+    expect(retireOldDexKeySql(false)).toEqual([])
+  })
+
+  it('then drops the old tx-hash key without blocking writes', () => {
+    expect(retireOldDexKeySql(true)).toEqual(['DROP INDEX CONCURRENTLY IF EXISTS dex_tx_log_unique'])
+  })
+})
+
 // Whale Tracker composite indexes.
 //
 // Both were written into scripts/db-optimize.sql in da8e513 (2026-04-08) with
