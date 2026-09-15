@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db'
-import { selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from '@/lib/token-transfers-query'
-import { eq, count } from 'drizzle-orm'
+import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from '@/lib/token-transfers-query'
+import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
@@ -207,13 +207,10 @@ export default async function TokenDetailPage({
           6000,
           TRANSFERS_FALLBACK,
         ),
-        // COUNT(*) scans every matching row — slow for mega-tokens. -1 = "unknown"
-        // (timed out / errored) so we never render a misleading "0 total".
+        // Counts at most one row past the list. -1 = "unknown" (timed out /
+        // errored) so we never render a misleading "0 total".
         withTimeout(
-          db
-            .select({ value: count() })
-            .from(schema.tokenTransfers)
-            .where(eq(schema.tokenTransfers.tokenAddress, addr))
+          countTokenTransfers(db, addr)
             .then(([r]) => r?.value ?? 0)
             .catch(() => -1),
           5000,
@@ -225,6 +222,10 @@ export default async function TokenDetailPage({
   const marketData = await marketDataPromise
   const countKnown = totalTransfersRaw >= 0
   const totalTransfers = countKnown ? totalTransfersRaw : 0
+  // More than the list serves reads as "10,000+".
+  const totalLabel = totalTransfers > TOKEN_TRANSFERS_MAX_ROWS
+    ? `${formatNumber(TOKEN_TRANSFERS_MAX_ROWS)}+`
+    : formatNumber(totalTransfers)
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
   const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
@@ -409,7 +410,7 @@ export default async function TokenDetailPage({
         <h2 className="font-semibold">
           Token Transfers{' '}
           <span className="text-gray-400 font-normal text-sm">
-            {countKnown ? `(${formatNumber(totalTransfers)} total)` : '(showing latest)'}
+            {countKnown ? `(${totalLabel} total)` : '(showing latest)'}
           </span>
         </h2>
       </div>

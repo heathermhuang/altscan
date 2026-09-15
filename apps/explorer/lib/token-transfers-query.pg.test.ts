@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
-import { selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from './token-transfers-query'
+import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from './token-transfers-query'
 
 /**
- * The token page's transfer list against a REAL Postgres.
+ * The token page's transfer list and transfer count against a REAL Postgres.
  *
  * `token_address = $1 ORDER BY block_number DESC LIMIT 25` has no index that
  * serves both the filter and the order, so the planner walks the block_number
@@ -28,6 +28,7 @@ const PG_URL = process.env[ENV]
 const MEGA = '0x' + 'a1'.repeat(20)     // four transfers in every block
 const QUIET = '0x' + 'a2'.repeat(20)    // two a block in the OLDEST partition, none since
 const SPREAD = '0x' + 'a3'.repeat(20)   // one a block, in pairs of blocks that share a second
+const NONE = '0x' + 'a4'.repeat(20)     // none
 
 // 10,000 blocks of 0.75s, truncated to whole seconds as on BNB, so consecutive
 // blocks share a timestamp. Partitioned, that is 4 partitions of 2,500 blocks.
@@ -157,6 +158,17 @@ describe.skipIf(!PG_URL)('token page transfers — against a real Postgres', () 
             .toEqual((await byBlock(MEGA, limit, offset)).map(r => r.blockNumber))
         }
       }
+    })
+
+    it.each([
+      ['more transfers than the list serves', MEGA, TOKEN_TRANSFERS_MAX_ROWS + 1],
+      ['fewer', QUIET, 5000],
+      ['none', NONE, 0],
+    ])('counts a token with %s up to one row past the list, not every row', async (_, token, expected) => {
+      const q = countTokenTransfers(db, token)
+      expect((await q)[0].value).toBe(expected)
+      // Merge Append reads a row ahead in each partition, hence the list's slack.
+      expect(await rowsReadBy(q)).toBeLessThan(TOKEN_TRANSFERS_MAX_ROWS + 1 + 50)
     })
   })
 })

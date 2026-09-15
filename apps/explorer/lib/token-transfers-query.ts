@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { count, desc, eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 
 /**
@@ -33,4 +33,28 @@ export function selectTokenTransfers(db: Db, token: string, page: { limit: numbe
     .orderBy(desc(schema.tokenTransfers.timestamp), desc(schema.tokenTransfers.blockNumber))
     .limit(page.limit)
     .offset(page.offset)
+}
+
+/**
+ * A token's transfer count, counted no further than one row past the list.
+ *
+ * COUNT(*) visits every matching row whichever index it uses, so it is as slow
+ * as the token is busy: on BNB it hit the statement_timeout 11 times in the
+ * same window. Past TOKEN_TRANSFERS_MAX_ROWS the page only needs to know there
+ * are more.
+ *
+ * The ORDER BY is what makes the LIMIT a bound: it walks the list's index.
+ * Without it the planner may read the heap in physical order until enough rows
+ * match, and a busy token's rows can sit anywhere in it — on the test's plain
+ * (ETH-shaped) table that read 110,001 rows to count 10,001.
+ */
+export function countTokenTransfers(db: Db, token: string) {
+  const served = db
+    .select({ one: sql<number>`1`.as('one') })
+    .from(schema.tokenTransfers)
+    .where(eq(schema.tokenTransfers.tokenAddress, token))
+    .orderBy(desc(schema.tokenTransfers.timestamp))
+    .limit(TOKEN_TRANSFERS_MAX_ROWS + 1)
+    .as('served')
+  return db.select({ value: count() }).from(served)
 }
