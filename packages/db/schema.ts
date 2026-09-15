@@ -175,7 +175,7 @@ export const contracts = pgTable('contracts', {
 export const dexTrades = pgTable('dex_trades', {
   id:           serial('id').primaryKey(),
   txHash:       varchar('tx_hash', { length: 66 }).notNull(),
-  // Position of the Swap log in the block. With tx_hash this is the event's
+  // Position of the Swap log in the block. With block_number this is the event's
   // natural key. Before it existed the only key was the serial `id`, so every
   // insert was unique by construction, onConflictDoNothing() could never match,
   // and replaying a block duplicated all of its trades — the hazard
@@ -208,18 +208,21 @@ export const dexTrades = pgTable('dex_trades', {
   timestamp:    timestamp('timestamp', { withTimezone: true }).notNull(),
 }, (t) => ({
   makerIdx:     index('dex_maker_idx').on(t.maker),
-  pairIdx:      index('dex_pair_idx').on(t.pairAddress),
   blockIdx:     index('dex_block_idx').on(t.blockNumber),
   // What makes replay safe. dex_trades is a PLAIN table (unlike token_transfers,
   // which is range-partitioned and therefore cannot carry a unique that omits the
   // partition key), so the natural key can be enforced here directly.
   //
+  // Keyed on (block_number, log_index), not (tx_hash, log_index): a log index is
+  // block-scoped, so both name the same event, but this key grows in order. The
+  // tx-hash version put every BNB insert on a random page of a 398 MB index.
+  //
   // PARTIAL, over rows that actually carry the key. Legacy NULL rows are excluded
   // outright rather than relied on to be "distinct enough", so the build cannot
   // fail on pre-existing data and needs no migration to precede it.
   // ensure-schema.ts is the runtime DDL authority and builds it CONCURRENTLY.
-  txLogUnique:  uniqueIndex('dex_tx_log_unique')
-                  .on(t.txHash, t.logIndex)
+  blockLogUnique: uniqueIndex('dex_block_log_unique')
+                  .on(t.blockNumber, t.logIndex)
                   .where(sql`log_index IS NOT NULL`),
 }))
 

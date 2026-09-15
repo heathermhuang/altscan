@@ -22,7 +22,7 @@ import {
  *      derived rows: the exact shape every completeness check calls healthy.
  *
  * These tests pin (2) and (3). (1) is enforced by the PARTIAL unique index
- * dex_tx_log_unique ... WHERE log_index IS NOT NULL, whose shape is pinned in
+ * dex_block_log_unique ... WHERE log_index IS NOT NULL, whose shape is pinned in
  * ensure-schema.test.ts. log_index is nullable with NO default on purpose: a
  * sentinel default would collide across a deploy overlap (the outgoing binary
  * does not write the column) and the constraint would then silently DROP a real
@@ -117,7 +117,7 @@ describe('isUsableLogIndex', () => {
   })
 
   it('rejects NaN — the value parseInt returns on a malformed logIndex', () => {
-    // A NaN log_index cannot participate in dex_tx_log_unique (every NaN
+    // A NaN log_index cannot participate in dex_block_log_unique (every NaN
     // compares unequal), which would silently restore duplicate-on-replay.
     expect(isUsableLogIndex(parseInt('0xzz', 16))).toBe(false)
     expect(isUsableLogIndex(NaN)).toBe(false)

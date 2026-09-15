@@ -180,7 +180,7 @@ type TokenTransferRow = {
 type DexTradeRow = {
   txHash: string
   /**
-   * Position of the Swap log within the block. Together with txHash this is the
+   * Position of the Swap log within the block. Together with blockNumber this is the
    * event's natural key — the thing that makes a dex_trade re-insertable.
    *
    * Without it the table had only `id serial PRIMARY KEY`, so every row was

@@ -593,6 +593,9 @@ export async function ensureSchema(): Promise<void> {
     'DROP INDEX CONCURRENTLY IF EXISTS tx_to_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_from_idx',
     'DROP INDEX CONCURRENTLY IF EXISTS tt_to_idx',
+    // 0 scans on BNB after 3.3M inserts (2026-09-15), and a random-key index is
+    // exactly the per-insert maintenance BNB cannot spare during retention.
+    'DROP INDEX CONCURRENTLY IF EXISTS dex_pair_idx',
     // tt_tx_idx is redundant ONLY while the unique (tx_hash, log_index) exists, i.e.
     // on the monolithic table. Post-partition there is no unique → it's the tx-lookup
     // index and must NOT be dropped.
@@ -624,6 +627,14 @@ export async function ensureSchema(): Promise<void> {
       }
     }
     if (ttPartitioned) await ensurePartitionedWhaleIndex()
+    try {
+      for (const stmt of retireOldDexKeySql(await plainIndexIsValid(DEX_NATURAL_KEY_IDX))) {
+        await db.execute(sql.raw(stmt))
+        console.log(`[indexer] Retired the tx-hash dex key: ${stmt}`)
+      }
+    } catch (err) {
+      console.warn('[indexer] Could not retire dex_tx_log_unique:', err instanceof Error ? err.message : err)
+    }
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
 }
@@ -658,6 +669,23 @@ export const INVALID_INDEX_SWEEP_SQL = `
       JOIN pg_class c ON c.oid = i.indexrelid
       WHERE NOT i.indisvalid AND c.relkind = 'i'
     `
+
+/**
+ * The dex_trades natural key moved from (tx_hash, log_index) to
+ * (block_number, log_index). A log index is block-scoped, so both name the same
+ * event, but the new key grows in order instead of landing every insert on a
+ * random page of a large index (398 MB on BNB, probed on every insert).
+ *
+ * The old index may only go once the new one is VALID. Render overlaps deploy
+ * generations and both write dex_trades for the same blocks, so some natural-key
+ * unique index has to exist at every moment; an unfinished or failed build keeps
+ * the old one in place.
+ */
+export const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
+
+export function retireOldDexKeySql(replacementValid: boolean): string[] {
+  return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS dex_tx_log_unique'] : []
+}
 
 export const TT_TOKEN_TS_IDX = 'tt_token_ts_idx'
 export const TT_TOKEN_TS_COLUMNS = 'token_address, timestamp DESC'
@@ -784,14 +812,14 @@ export function buildConcurrentIndexList(
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_address_topic0_idx ON logs(address, topic0)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS logs_tx_idx             ON logs(tx_hash)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_maker_idx           ON dex_trades(maker)',
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_pair_idx            ON dex_trades(pair_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS dex_block_idx           ON dex_trades(block_number)',
-    // Replay safety: what finally lets onConflictDoNothing() dedupe a dex_trade.
+    // Replay safety: what finally lets onConflictDoNothing() dedupe a dex_trade,
+    // keyed on (block_number, log_index) — see DEX_NATURAL_KEY_IDX.
     // PARTIAL over rows that carry the key, so rows predating log_index are
     // excluded rather than depended on to be distinct — the build cannot fail on
     // legacy data, so no migration has to run first and there is no state where a
     // failed build wedges the next boot.
-    'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS dex_tx_log_unique ON dex_trades(tx_hash, log_index) WHERE log_index IS NOT NULL',
+    `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS ${DEX_NATURAL_KEY_IDX} ON dex_trades(block_number, log_index) WHERE log_index IS NOT NULL`,
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
     // Top-N tokens by holders (explorer sitemap top-5000, token directory)
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
@@ -878,6 +906,19 @@ export async function listPartitions(
     out.push({ name: String(row.name), schema: String(row.schema), lo: Number(m[1]), hi: Number(m[2]) })
   }
   return out.sort((a, b) => a.lo - b.lo)
+}
+
+/** True if an ordinary (non-partitioned) index exists and is valid. */
+async function plainIndexIsValid(name: string): Promise<boolean> {
+  const db = getDb()
+  const res = await db.execute(sql`
+    SELECT i.indisvalid FROM pg_class c
+    JOIN pg_index i ON i.indexrelid = c.oid
+    WHERE c.relname = ${name} AND c.relkind = 'i'
+    LIMIT 1
+  `)
+  const row = Array.from(res)[0] as Record<string, unknown> | undefined
+  return row?.indisvalid === true
 }
 
 /** True if a PARTITIONED index exists and every partition is attached. */
