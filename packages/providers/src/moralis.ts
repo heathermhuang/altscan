@@ -447,6 +447,47 @@ const memCounters: Record<MoralisBucket, MemCounter> = {
 /** Per-process monthly CU tally, used when Redis is absent (EthScan). */
 let memCu: { month: string; used: number } = { month: monthKey(), used: 0 }
 
+/**
+ * True while the Redis ledger is refusing the CU debit.
+ *
+ * 2026-09-15: both Render key-value instances are 256MB `starter` plans with
+ * maxmemory-policy=noeviction, and the explorer's `body:tx:*` cache filled
+ * them (172,133 of 172,218 keys on ETH). `noeviction` does not evict — it
+ * REFUSES writes — so ADMIT_LUA aborted on its INCRBY with "OOM command not
+ * allowed when used memory > 'maxmemory'", the catch in isRateLimited swallowed
+ * it, and the fail-closed guard denied the call.
+ *
+ * Denying is right. Denying in SILENCE is what cost a month of overage: the
+ * ledger froze at 262,375 on 2026-09-08 18:00 UTC and /api/health went on
+ * reporting `used: 262375, max: 1500000, limited: false, source: 'redis'` — a
+ * comfortable 17% — for a week while every Moralis call on both chains was
+ * refused and the vendor billed ~2,000,000 CU. A ceiling whose counter cannot
+ * be written is not a ceiling, and nothing in the readout said so.
+ *
+ * Cleared only when the script actually COMMITS (returns 0). A denial code
+ * (1/2/3) returns before the INCRBY, so it proves nothing about writability
+ * and must not clear this.
+ */
+let ledgerUnwritable = false
+
+/** Log on the TRANSITION only — this path runs on every admission, and the
+ *  failure mode is a week long, so per-call logging would be a log flood. Same
+ *  one-shot idiom as redis-client's `[redis] unavailable` / `reconnected`. */
+function noteLedgerWriteFailed(err: unknown): void {
+  if (ledgerUnwritable) return
+  ledgerUnwritable = true
+  console.error(
+    '[moralis] CU ledger write REFUSED — the monthly ceiling can no longer record spend ' +
+      `or bind, and every call is being denied: ${err instanceof Error ? err.message : String(err)}`,
+  )
+}
+
+function noteLedgerWriteOk(): void {
+  if (!ledgerUnwritable) return
+  ledgerUnwritable = false
+  console.log('[moralis] CU ledger writable again — monthly accounting resumed')
+}
+
 /** Roll expired windows for one bucket. Split out so the health readout can
  *  report in-memory counters without also mutating spend. */
 function rollMemWindows(bucket: MoralisBucket): MemCounter {
@@ -573,9 +614,14 @@ async function isRateLimited(bucket: MoralisBucket, cuCost: number): Promise<boo
         String(HOURLY_WINDOW),
         String(DAILY_WINDOW),
       )
-      return Number(res) !== 0
-    } catch {
+      const denied = Number(res) !== 0
+      if (!denied) noteLedgerWriteOk() // a 0 return means the INCRBY committed
+      return denied
+    } catch (err) {
       // Fall through to the fail-closed check below — NOT to the memory ledger.
+      // But record it first: this is the ONLY place that learns the ledger is
+      // unwritable, and an unrecorded failure here is invisible everywhere else.
+      noteLedgerWriteFailed(err)
     }
   }
 
@@ -677,7 +723,10 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
       cuSource = 'redis'
     } catch { /* keep the in-memory figure AND the honest 'memory' label */ }
   }
-  const cuLimited = cuUsed >= cuMax
+  // An unwritable ledger IS limited: in that state isRateLimited denies every
+  // call. Reporting the frozen tally alone — 262,375 of 1,500,000, limited:false
+  // — is the reading that let the 2026-09 overage run for a week unnoticed.
+  const cuLimited = cuUsed >= cuMax || ledgerUnwritable
   if (cuLimited) anyLimited = true
 
   return {
@@ -705,6 +754,14 @@ export async function getMoralisHealthState(): Promise<Record<string, unknown>> 
       pctUsed: cuMax > 0 ? Math.round((cuUsed / cuMax) * 1000) / 10 : null,
       limited: cuLimited,
       source: cuSource,
+      /**
+       * Whether the last admission could COMMIT to the ledger. False means
+       * `used` above is a frozen number, not a live tally — spend is happening
+       * (or being refused) without being counted. Read this BEFORE trusting
+       * `used`/`pctUsed`: a full noeviction Redis refuses the INCRBY while
+       * still answering the GET, so the tally looks healthy and is stale.
+       */
+      writable: !ledgerUnwritable,
       /**
        * ⚠ SCOPE: this ceiling is PER LEDGER, not per Moralis account.
        *
