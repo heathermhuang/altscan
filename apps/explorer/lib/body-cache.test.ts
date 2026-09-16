@@ -120,6 +120,6 @@ describe('getTxBody TTL bound', () => {
 
     const ttlMs = vi.mocked(freshCore.kvSet).mock.calls.at(-1)?.[2]
     expect(ttlMs).toBeGreaterThan(0)
-    expect(ttlMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000)
+    expect(ttlMs).toBeLessThanOrEqual(3 * 60 * 60 * 1000)
   })
 })
