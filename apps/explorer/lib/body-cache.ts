@@ -13,7 +13,25 @@ import { bodyCacheKey, serializeTxBody, parseTxBody, type TxBody, type CachedLog
 
 export type { TxBody, CachedLog } from './body-cache-serde'
 
-const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(7 * 24 * 60 * 60 * 1000), 10)
+/**
+ * ⚠ SIZED TO FIT THE REDIS, NOT TO MAXIMISE HIT RATE. Was 7 days.
+ *
+ * There is no bound on how MANY bodies this caches, so the TTL alone sets the
+ * steady-state population. At 7 days it reached 172,133 keys (~435MB of demand)
+ * on a 256MB ethscan-redis and 87,704 on bnbscan-redis — in both cases ~100% of
+ * the keyspace. Those instances are maxmemory-policy=noeviction, so a full one
+ * REFUSES writes rather than evicting, which silently took down two things that
+ * share it: the Moralis response cache, and the Moralis monthly CU ledger — the
+ * only control that can bound a metered bill. See the ledgerUnwritable note in
+ * packages/providers/src/moralis.ts.
+ *
+ * A miss costs one getTransaction + getTransactionReceipt on the next view of a
+ * retention-pruned tx, and the page refetches transparently. That is the cheap
+ * side of this trade; starving the spend ceiling is the expensive side.
+ * BODY_CACHE_TTL_MS still overrides — but raise it only after the instance has
+ * the headroom to absorb it.
+ */
+const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(24 * 60 * 60 * 1000), 10)
 
 /** Fetch input calldata + receipt logs from the node. Null on any failure. */
 export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
