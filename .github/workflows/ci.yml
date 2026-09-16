@@ -30,6 +30,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # Throwaway Redis for the budget suite. That suite runs the REAL admission
+      # Lua against a REAL server — a JS re-implementation would only test the
+      # re-implementation — and without this it reports "12 tests | 12 skipped"
+      # in CI, which is how the Moralis CU ceiling reached production with no
+      # coverage of the one failure that actually took it down.
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -95,6 +108,14 @@ jobs:
         env:
           ADDRESS_QUERY_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/explorer/lib/address-query.pg.test.ts
+
+      # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
+      # on the server to reproduce a full noeviction instance, so it needs the
+      # throwaway service and must never be pointed at a shared Redis.
+      - name: Redis-gated provider suite (Moralis CU admission + ledger)
+        env:
+          MORALIS_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: npx vitest run packages/providers/src/moralis-cu-budget.redis.test.ts
 
       # `pnpm lint` was dead for the life of the repo: apps/explorer's script was
       # `next lint` with no ESLint config anywhere, so it dropped into an
