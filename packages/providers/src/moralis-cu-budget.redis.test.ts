@@ -263,4 +263,129 @@ d('Moralis budget — real Redis', () => {
     expect((h.buckets as Record<string, Record<string, unknown>>).history.source).toBe('redis')
     expect(h.source).toBe('redis')
   })
+
+  /**
+   * THE 2026-09-15 MORALIS OVERAGE. Both Render key-value instances are 256MB
+   * `starter` plans with maxmemory-policy=noeviction, and the explorer's
+   * `body:tx:*` cache (7-day TTL, unbounded key count) filled them: 172,133 of
+   * 172,218 keys on ETH, 87,704 of 87,705 on BNB. `noeviction` does not evict —
+   * it REFUSES every write — so ADMIT_LUA aborted at line 38, the INCRBY, with
+   *   OOM command not allowed when used memory > 'maxmemory'
+   * `isRateLimited`'s bare catch swallowed that and the fail-closed guard
+   * returned "limited". Measured on the deployed eth-indexer with a warm,
+   * `ready` client: getAddressHistory -> rate_limited in 3ms, ledger DELTA 0.
+   *
+   * Denying is the right call. Denying SILENTLY is not: /api/health went on
+   * reporting `used: 262375, max: 1500000, limited: false, source: 'redis'` —
+   * a comfortable 17% — while the ledger had been frozen since 2026-09-08
+   * 18:00 UTC and every Moralis call on both chains was being refused. The
+   * ceiling cannot bind when its counter cannot be written, and nothing said so.
+   *
+   * This pins the readout, not the denial: a ledger that cannot record spend
+   * must not render as a healthy tally.
+   */
+  it('reports the ledger as UNWRITABLE when Redis refuses the debit, not as a healthy tally', async () => {
+    vi.stubEnv('MORALIS_MONTHLY_CU_MAX', '1000000')
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '150')
+    const { createMoralisAdapter, getMoralisHealthState, monthKey } = await load()
+    vi.stubGlobal('fetch', fetchOk())
+    const a = createMoralisAdapter(CFG)
+    const cuK = `moralis:cu:v1:${monthKey()}`
+
+    // A normal admission first, so the ledger holds a plausible-looking figure
+    // — exactly the 262,375 an operator read and trusted.
+    expect((await a.getAddressHistory('0xoom-warm')).ok).toBe(true)
+    expect(await client.get(cuK)).toBe('150')
+    expect(((await getMoralisHealthState()).monthlyCu as Record<string, unknown>).writable).toBe(true)
+
+    // Reproduce production: full instance, noeviction. Reads still work, every
+    // write is refused. Restored in `finally` — this is the one place the suite
+    // touches server config, and leaking it would break every later test.
+    const origMax = (await client.config('GET', 'maxmemory')) as [string, string]
+    const origPolicy = (await client.config('GET', 'maxmemory-policy')) as [string, string]
+    const errs = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await client.config('SET', 'maxmemory-policy', 'noeviction')
+      await client.config('SET', 'maxmemory', '1')
+
+      expect(await a.getAddressHistory('0xoom-1')).toEqual({ ok: false, reason: 'rate_limited' })
+      expect(await a.getAddressHistory('0xoom-2')).toEqual({ ok: false, reason: 'rate_limited' })
+
+      // Nothing was committed — no partial debit for a call that never happened.
+      expect(await client.get(cuK)).toBe('150')
+
+      // The alarm fires, and it names the cause. Asserting the text matters:
+      // the whole defect was that this failure produced no signal at all, and a
+      // guardrail only ever seen passing may be unable to fire.
+      const ledgerErrs = errs.mock.calls.map(String).filter((m) => m.includes('CU ledger write REFUSED'))
+      expect(ledgerErrs).toHaveLength(1) // TRANSITION only — not once per call
+      expect(ledgerErrs[0]).toMatch(/OOM command not allowed/)
+
+      const cu = (await getMoralisHealthState()).monthlyCu as Record<string, unknown>
+      expect(cu.writable).toBe(false)
+      // `used` is a READ, so it still answers — and still says 150/1000000.
+      // Without `limited`, that reads as "plenty of budget left" while every
+      // call is in fact being refused.
+      expect(cu.limited).toBe(true)
+    } finally {
+      await client.config('SET', 'maxmemory', origMax[1])
+      await client.config('SET', 'maxmemory-policy', origPolicy[1])
+      errs.mockRestore()
+    }
+
+    // And it recovers: once writes are accepted again the ledger resumes.
+    expect((await a.getAddressHistory('0xoom-3')).ok).toBe(true)
+    expect(await client.get(cuK)).toBe('300')
+    expect(((await getMoralisHealthState()).monthlyCu as Record<string, unknown>).writable).toBe(true)
+  })
+
+  /**
+   * The companion invariant to the test above, and the one a plausible
+   * simplification gets wrong: clearing the unwritable flag on ANY reply from
+   * the script rather than only on a COMMIT.
+   *
+   * The admission script checks all three caps BEFORE it writes anything, so a
+   * cap denial (return 1/2/3) never reaches the INCRBY and therefore learns
+   * NOTHING about whether the ledger can be written. A full Redis that also
+   * happens to be over its hourly cap would then answer that denial cleanly,
+   * clear the flag, and put /api/health back to `writable: true` over a ledger
+   * that is still frozen — reinstating the exact lie this pins down.
+   */
+  it('a cap denial does not clear the unwritable flag — it never reaches the write', async () => {
+    vi.stubEnv('MORALIS_MONTHLY_CU_MAX', '1000000')
+    vi.stubEnv('MORALIS_CU_ADDRESS_HISTORY', '150')
+    vi.stubEnv('MORALIS_HISTORY_HOURLY_MAX', '5')
+    const { createMoralisAdapter, getMoralisHealthState } = await load()
+    vi.stubGlobal('fetch', fetchOk())
+    const a = createMoralisAdapter(CFG)
+    const writable = async () =>
+      ((await getMoralisHealthState()).monthlyCu as Record<string, unknown>).writable
+
+    const origMax = (await client.config('GET', 'maxmemory')) as [string, string]
+    const origPolicy = (await client.config('GET', 'maxmemory-policy')) as [string, string]
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await client.config('SET', 'maxmemory-policy', 'noeviction')
+
+      // 1. Full instance: the call clears every cap, reaches INCRBY, and OOMs.
+      await client.config('SET', 'maxmemory', '1')
+      expect(await a.getAddressHistory('0xcap-1')).toEqual({ ok: false, reason: 'rate_limited' })
+      expect(await writable()).toBe(false)
+
+      // 2. Push the hourly counter over its cap (needs writes, so briefly
+      //    restore headroom), then make the instance full again.
+      await client.config('SET', 'maxmemory', origMax[1])
+      await client.set('moralis:rl:v7:history:hourly', '99')
+      await client.config('SET', 'maxmemory', '1')
+
+      // 3. Now the script returns 2 at the hourly check — a clean reply that
+      //    performed no write at all. The ledger is still unwritable.
+      expect(await a.getAddressHistory('0xcap-2')).toEqual({ ok: false, reason: 'rate_limited' })
+      expect(await writable()).toBe(false)
+    } finally {
+      await client.config('SET', 'maxmemory', origMax[1])
+      await client.config('SET', 'maxmemory-policy', origPolicy[1])
+      vi.restoreAllMocks()
+    }
+  })
 })

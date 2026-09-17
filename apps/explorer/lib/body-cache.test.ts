@@ -87,3 +87,39 @@ describe('getTxBody caching', () => {
     expect(kvSet).not.toHaveBeenCalled()
   })
 })
+
+describe('getTxBody TTL bound', () => {
+  /**
+   * The default was 7 days with no bound on key COUNT, and on 2026-09-08 that
+   * filled ethscan-redis (172,133 of 172,218 keys were `body:tx:*`, ~435MB of
+   * demand against a 256MB instance); bnbscan-redis had been pinned for longer
+   * still. Those instances are maxmemory-policy=noeviction, so a full instance
+   * REFUSES writes rather than evicting — which took down the Moralis CU ledger
+   * (`INCRBY` inside the admission script returned OOM, so the monthly ceiling
+   * could no longer record spend or bind) and the Moralis response cache with it.
+   *
+   * This cache is a convenience over immutable RPC data for retention-pruned
+   * txs; the page refetches transparently on a miss. It must never be able to
+   * consume the instance that the spend ceiling depends on, so the default is
+   * sized to fit rather than to maximise hit rate. Overridable via
+   * BODY_CACHE_TTL_MS, but raising it past a day needs a bigger Redis first.
+   */
+  it('defaults to a TTL the shared Redis can hold, not 7 days', async () => {
+    vi.resetModules()
+    delete process.env.BODY_CACHE_TTL_MS
+    const fresh = await import('./body-cache')
+    const freshCore = await import('@altscan/explorer-core')
+    const freshRpc = await import('./rpc')
+    vi.mocked(freshCore.kvGet).mockResolvedValue(null)
+    vi.mocked(freshRpc.getWebProvider).mockResolvedValue({
+      getTransaction: vi.fn(async () => ({ data: '0xdeadbeef' })),
+      getTransactionReceipt: vi.fn(async () => ({ logs: [] })),
+    } as never)
+
+    await fresh.getTxBody(HASH)
+
+    const ttlMs = vi.mocked(freshCore.kvSet).mock.calls.at(-1)?.[2]
+    expect(ttlMs).toBeGreaterThan(0)
+    expect(ttlMs).toBeLessThanOrEqual(3 * 60 * 60 * 1000)
+  })
+})
