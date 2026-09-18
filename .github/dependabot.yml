@@ -18,6 +18,9 @@ updates:
         # error-matching tests and held the whole group red (#158). Drizzle gets
         # its own PR, to land as a migration.
         exclude-patterns: ['drizzle-orm', 'drizzle-kit']
+      # The ORM and its migration tooling move together, in one PR.
+      drizzle:
+        patterns: ['drizzle-orm', 'drizzle-kit']
     ignore:
       # Majors need a human: they are migrations, not bumps.
       - dependency-name: '*'
