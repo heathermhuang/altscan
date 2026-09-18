@@ -13,6 +13,14 @@ updates:
       # One PR a week instead of one per package.
       minor-and-patch:
         update-types: [minor, patch]
+        # Pre-1.0, a "minor" bump is a breaking one: drizzle 0.31 -> 0.45 wraps
+        # every DB error as "Failed query: ...", which broke the timeout and
+        # error-matching tests and held the whole group red (#158). Drizzle gets
+        # its own PR, to land as a migration.
+        exclude-patterns: ['drizzle-orm', 'drizzle-kit']
+      # The ORM and its migration tooling move together, in one PR.
+      drizzle:
+        patterns: ['drizzle-orm', 'drizzle-kit']
     ignore:
       # Majors need a human: they are migrations, not bumps.
       - dependency-name: '*'
