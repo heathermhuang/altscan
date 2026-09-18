@@ -18,6 +18,7 @@
  * broken endpoint costs a single wasted round trip, not the batch.
  */
 
+import { unwrapDbError } from './db'
 import type { EndpointHealth } from './endpoint-health'
 
 /**
@@ -366,6 +367,8 @@ export function redactRpcSecrets(message: string, rawUrls: readonly string[]): s
  * is the endpoint we must not log.
  */
 export function formatRedactedError(err: unknown, rawUrls: readonly string[]): string {
-  const raw = err instanceof Error ? err.stack ?? err.message : String(err)
+  // A failed query logs what the database said, not drizzle's SQL-and-params wrapper.
+  const e = unwrapDbError(err)
+  const raw = e instanceof Error ? e.stack ?? e.message : String(e)
   return redactRpcSecrets(raw, rawUrls)
 }

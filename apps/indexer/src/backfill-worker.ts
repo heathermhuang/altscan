@@ -51,7 +51,7 @@ async function loadProviders(): Promise<ProvidersModule> {
   return providersModule
 }
 import { cfg } from './backfill-budget'
-import { getMaintenanceDb } from './db'
+import { getMaintenanceDb, dbErrorMessage } from './db'
 
 /** The two db shapes the worker needs — structurally satisfied by drizzle's
  *  Db and its transaction handle, and cheap to fake in unit tests. */
@@ -452,7 +452,7 @@ export async function processOnePage(
     // from has already rolled back.
     console.warn(
       `[backfill] write failed for ${entity.entity_type} ${entity.entity_id}:`,
-      err instanceof Error ? err.message : err,
+      dbErrorMessage(err),
     )
     const moved = await fencedUpdate(
       db,
@@ -659,7 +659,7 @@ export async function startBackfillWorker(): Promise<void> {
       await processOnePage(db, provider, entity)
       await sleep(cfg.pageSleepMs) // pacing between provider calls
     } catch (err) {
-      console.warn('[backfill] loop error:', err instanceof Error ? err.message : err)
+      console.warn('[backfill] loop error:', dbErrorMessage(err))
       await sleep(cfg.pollMs)
     }
   }

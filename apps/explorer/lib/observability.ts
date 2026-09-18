@@ -15,6 +15,8 @@
  * be found with a single `?text=` query against the Render logs.
  */
 
+import { unwrapDbError } from '@altscan/db'
+
 /**
  * First occurrence per tag is always emitted; repeats are suppressed for this
  * long. A DB outage fails every request on every page, and an unthrottled log
@@ -38,7 +40,9 @@ export function swallow(tag: string, err: unknown): void {
     // Bound the map: tags are static strings in source, so this cannot grow
     // unbounded in practice, but a defensive cap costs nothing.
     if (lastLoggedAt.size > 500) lastLoggedAt.clear()
-    console.error(`[${tag}]`, err instanceof Error ? err.stack ?? err.message : err)
+    // A failed query logs what the database said, not drizzle's SQL-and-params wrapper.
+    const e = unwrapDbError(err)
+    console.error(`[${tag}]`, e instanceof Error ? e.stack ?? e.message : e)
   } catch {
     // Logging must never be able to break the page it is reporting on.
   }

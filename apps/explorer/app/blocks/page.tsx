@@ -1,3 +1,4 @@
+import { dbErrorMessage } from '@altscan/db'
 import { schema } from '@/lib/db'
 import { fetchBlockPage, parseBlock, parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { BlockTable } from '@/components/blocks/BlockTable'
@@ -35,7 +36,7 @@ export default async function BlocksPage({
     blocks = data.rows.map(parseBlock)
     total = data.total
   } catch (err) {
-    console.error('[blocks] page query failed:', err instanceof Error ? err.message : err)
+    console.error('[blocks] page query failed:', dbErrorMessage(err))
   }
 
   return (

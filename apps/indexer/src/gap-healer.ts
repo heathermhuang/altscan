@@ -1,3 +1,4 @@
+import { dbErrorMessage } from './db'
 import { sql } from 'drizzle-orm'
 // Declared in config.ts (which imports nothing) so config-instance can use them
 // as defaults without importing this module — that cycle crashed the boot.
@@ -485,7 +486,7 @@ export async function healNextGap(
       await reindexBlock(blockNumber)
       repaired++
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
+      const error = dbErrorMessage(err)
       // Deliberately NO cleanup delete here. Removing the partial row looked like
       // a rollback but was neither safe nor reliable: once transactions exist the
       // non-cascading FK rejects it, and between this tick's absence check and
@@ -507,7 +508,7 @@ export async function healNextGap(
     await flushTransfers?.()
   } catch (err) {
     log(`[gap-healer] ⚠ transfer flush failed, NOT advancing ${fromBlock}..${toBlock}: ${
-      err instanceof Error ? err.message : String(err)}`)
+      dbErrorMessage(err)}`)
     return { status: 'progressed', fromBlock, toBlock, repaired }
   }
 

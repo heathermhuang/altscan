@@ -1,3 +1,4 @@
+import { unwrapDbError } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
@@ -402,10 +403,11 @@ export default async function TxDetailPage({
         .where(inArray(schema.tokens.address, uniqueTokenAddrs))
       for (const tok of tokens) tokenLookup.set(tok.address, tok)
     } catch (e) {
+      const err = unwrapDbError(e)
       // The bare TypeError named no transaction, so it could not be reproduced.
       // rows= separates a result with holes (e.g. 5/2) from a failed query (none).
       swallow('tx/token-lookup', `hash=${hash} addrs=${uniqueTokenAddrs.length} rows=${arrayShape(tokens)} `
-        + (e instanceof Error ? e.stack ?? e.message : String(e)))
+        + (err instanceof Error ? err.stack ?? err.message : String(err)))
     }
   }
   // Anything the local `tokens` table could not name is resolved on-chain, so a

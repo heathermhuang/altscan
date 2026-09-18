@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { DrizzleQueryError } from 'drizzle-orm'
 import { swallow, swallowed, resetSwallowThrottle, arrayShape } from './observability'
 
 afterEach(() => {
@@ -13,6 +14,17 @@ describe('swallow', () => {
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0]).toBe('[tx/logs]')
     expect(String(spy.mock.calls[0][1])).toContain('connection refused')
+  })
+
+  // drizzle-orm >= 0.44 rethrows every driver error as a DrizzleQueryError whose
+  // message is the SQL and its params; the reason is only on its cause.
+  it('logs what the database said about a failed query, not the statement', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cause = Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })
+    swallow('tx/logs', new DrizzleQueryError('select "address" from "logs" where "tx_hash" = $1', ['0xabc'], cause))
+    const logged = String(spy.mock.calls[0][1])
+    expect(logged).toContain('statement timeout')
+    expect(logged).not.toContain('select "address"')
   })
 
   it('never throws, whatever it is handed', () => {

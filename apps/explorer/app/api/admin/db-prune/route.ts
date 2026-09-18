@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest) {
         deleted[name] = affected
         console.log(`[db-prune] ${name}: deleted ${affected} rows`)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = dbErrorMessage(err)
         deleted[name] = `error: ${msg.slice(0, 100)}`
         errors.push(`${name}: ${msg.slice(0, 100)}`)
         console.error(`[db-prune] ${name} failed:`, msg)
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
         await db.execute(sql.raw(`${vacuumCmd} ${t}`))
         console.log(`[db-prune] ${vacuumCmd} ${t} done`)
       } catch (err) {
-        console.warn(`[db-prune] ${vacuumCmd} ${t} failed:`, err instanceof Error ? err.message : err)
+        console.warn(`[db-prune] ${vacuumCmd} ${t} failed:`, dbErrorMessage(err))
       }
     }
     results.vacuumed = vacuumMode
@@ -157,7 +158,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(results)
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'unknown' },
+      { error: err instanceof Error ? dbErrorMessage(err) : 'unknown' },
       { status: 500 },
     )
   }
