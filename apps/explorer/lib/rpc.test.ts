@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getWebProvider } from './rpc'
 import { getSetting } from './settings'
 
-// ethers is mocked so constructing a provider never touches the network; the
-// fakes keep just enough shape for the identity/keying assertions below.
-// vi.hoisted because vi.mock factories are hoisted above module-level consts.
+// JsonRpcProvider and FetchRequest are faked so constructing a provider never
+// touches the network; the fakes keep just enough shape for the identity/keying
+// assertions below. The rest of ethers stays real (FailoverProvider extends
+// AbstractProvider). Failover itself is tested with real ethers in
+// rpc.failover.test.ts. vi.hoisted because vi.mock factories are hoisted above
+// module-level consts.
 const fakes = vi.hoisted(() => {
   class FakeFetchRequest {
     timeout = 0
@@ -26,34 +29,19 @@ const fakes = vi.hoisted(() => {
       for (const h of this.handlers) h()
     }
   }
-  class FakeFallbackProvider {
-    handlers: Array<() => void> = []
-    constructor(
-      public configs: Array<{ provider: FakeJsonRpcProvider; priority: number; weight: number }>,
-      public network: unknown,
-      public options: { quorum?: number },
-    ) {}
-    on(_event: string, fn: () => void) {
-      this.handlers.push(fn)
-      return this
-    }
-    emitError() { for (const h of this.handlers) h() }
-  }
-  return { FakeFetchRequest, FakeJsonRpcProvider, FakeFallbackProvider }
+  return { FakeFetchRequest, FakeJsonRpcProvider }
 })
 type FakeJsonRpcProvider = InstanceType<typeof fakes.FakeJsonRpcProvider>
-type FakeFallbackProvider = InstanceType<typeof fakes.FakeFallbackProvider>
 
-vi.mock('ethers', () => ({
+vi.mock('ethers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('ethers')>()),
   JsonRpcProvider: fakes.FakeJsonRpcProvider,
-  FallbackProvider: fakes.FakeFallbackProvider,
   FetchRequest: fakes.FakeFetchRequest,
 }))
 vi.mock('./settings', () => ({ getSetting: vi.fn(async () => null) }))
 
 const g = globalThis as typeof globalThis & { __explorer_provider?: unknown }
 const asFake = (p: unknown) => p as unknown as FakeJsonRpcProvider
-const asFallback = (p: unknown) => p as unknown as FakeFallbackProvider
 
 beforeEach(() => {
   g.__explorer_provider = null
@@ -144,26 +132,6 @@ describe('getWebProvider', () => {
     expect(asFake(p).req.url).toBe('https://solo.test')
   })
 
-  it('builds a failover provider across several urls, in order, first-success wins', async () => {
-    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
-    const p = await getWebProvider()
-
-    expect(asFallback(p).configs.map((c) => c.provider.req.url)).toEqual([
-      'https://a.test', 'https://b.test',
-    ])
-    // quorum 1 = take the first endpoint that answers. The ethers default would
-    // issue every call to two endpoints and wait for agreement, doubling load
-    // on public RPCs to buy a consensus the explorer does not need.
-    expect(asFallback(p).options.quorum).toBe(1)
-  })
-
-  it('applies the resolved timeout to every endpoint in the list', async () => {
-    vi.mocked(getSetting).mockResolvedValue(
-      { webRpcUrl: 'https://a.test,https://b.test', rpcTimeoutMs: 4500 } as never)
-    const p = await getWebProvider()
-    expect(asFallback(p).configs.map((c) => c.provider.req.timeout)).toEqual([4500, 4500])
-  })
-
   it('rebuilds when the url LIST changes, not just the first entry', async () => {
     vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test' } as never)
     const first = await getWebProvider()
@@ -178,11 +146,5 @@ describe('getWebProvider', () => {
   it('never batches: every call goes out as its own request', async () => {
     const p = await getWebProvider()
     expect(asFake(p).options?.batchMaxCount).toBe(1)
-  })
-
-  it('never batches on any endpoint of a failover list either', async () => {
-    vi.mocked(getSetting).mockResolvedValue({ webRpcUrl: 'https://a.test,https://b.test' } as never)
-    const p = await getWebProvider()
-    expect(asFallback(p).configs.map((c) => c.provider.options?.batchMaxCount)).toEqual([1, 1])
   })
 })
