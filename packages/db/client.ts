@@ -1,3 +1,4 @@
+import { DrizzleQueryError } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
@@ -174,6 +175,23 @@ export function getWriterDb(envVarName = 'DATABASE_URL') {
   const db = drizzle(sql, { schema })
   g.__writer_instances.set(envVarName, db)
   return db
+}
+
+/**
+ * The error the driver threw for a failed query. drizzle-orm >= 0.44 rethrows it
+ * as a DrizzleQueryError whose message is the SQL and its params, so what
+ * Postgres said ("deadlock detected", "canceling statement due to statement
+ * timeout") and its code are only on `.cause`. Anything else comes back as is.
+ * Read this, not the wrapper, to classify a DB error or to log one.
+ */
+export function unwrapDbError(err: unknown): unknown {
+  return err instanceof DrizzleQueryError && err.cause !== undefined ? err.cause : err
+}
+
+/** What the database said about a failed query, as a string. */
+export function dbErrorMessage(err: unknown): string {
+  const e = unwrapDbError(err)
+  return e instanceof Error ? e.message : String(e)
 }
 
 export { schema }

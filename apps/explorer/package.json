@@ -16,7 +16,7 @@
     "@altscan/settings-schema": "workspace:*",
     "@altscan/types": "workspace:*",
     "axios": "^1.18.1",
-    "drizzle-orm": "^0.31.0",
+    "drizzle-orm": "^0.45.2",
     "ethers": "^6.11.0",
     "next": "^15.5.25",
     "react": "^19.1.0",

@@ -2,7 +2,7 @@
  * Chain-aware DB singleton for the indexer.
  * All indexer modules should import getDb from here, not from @altscan/db directly.
  */
-import { getDb as _getDb, getMaintenanceDb as _getMaintenanceDb, getWriterDb as _getWriterDb, schema } from '@altscan/db'
+import { getDb as _getDb, getMaintenanceDb as _getMaintenanceDb, getWriterDb as _getWriterDb, schema, dbErrorMessage, unwrapDbError } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
 
 const chain = getChainConfig()
@@ -25,4 +25,4 @@ export function getMaintenanceDb() {
   return _getMaintenanceDb(chain.dbEnvVar)
 }
 
-export { schema }
+export { schema, dbErrorMessage, unwrapDbError }

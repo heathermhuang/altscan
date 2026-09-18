@@ -3,7 +3,7 @@ import { decodeV2Swap, SWAP_V2_TOPIC } from './dex-swap'
 import { indexerConfig } from './config-instance'
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
-import { getDb, getWriterDb, schema } from './db'
+import { getDb, getWriterDb, schema, dbErrorMessage } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
@@ -757,6 +757,15 @@ function kickAddressFlush(): void {
     })
 }
 
+/**
+ * Postgres aborted this statement to break a deadlock. The three batched upserts
+ * below retry it: lock ordering removes same-statement cycles, but a concurrent
+ * writer on another path can still collide.
+ */
+export function isDeadlock(err: unknown): boolean {
+  return dbErrorMessage(err).includes('deadlock')
+}
+
 async function flushAddresses(pending: Map<string, AddressPending>): Promise<void> {
   const db = getDb()
   // Sort by address → consistent lock order, minimizes deadlocks across flushes.
@@ -780,8 +789,7 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
         `)
         break
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('deadlock') && attempt < 3) {
+        if (isDeadlock(err) && attempt < 3) {
           await new Promise(r => setTimeout(r, 50 * attempt))
           continue
         }
@@ -914,8 +922,7 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
         `)
         break
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('deadlock') && attempt < 3) {
+        if (isDeadlock(err) && attempt < 3) {
           await new Promise(r => setTimeout(r, 50 * attempt))
           continue
         }
@@ -1745,8 +1752,7 @@ async function ensureTokensBatch(
           await db.insert(schema.tokens).values(chunk).onConflictDoNothing()
           break
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          if (msg.includes('deadlock') && attempt < 3) {
+          if (isDeadlock(err) && attempt < 3) {
             await new Promise(r => setTimeout(r, 50 * attempt))
             continue
           }

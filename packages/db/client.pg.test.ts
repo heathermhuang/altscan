@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { inArray, sql } from 'drizzle-orm'
 import { pgTable, varchar } from 'drizzle-orm/pg-core'
-import { getDb } from './client'
+import { dbErrorMessage, getDb } from './client'
 
 /**
  * getDb() against a REAL Postgres: a query that fails AFTER rows have streamed
@@ -53,7 +53,9 @@ describe.skipIf(!PG_URL)('getDb() — a query that fails mid-result must not cor
     ['a runtime error', sql`SELECT g, g / (CASE WHEN g <= 3 THEN 1 ELSE 0 END) FROM generate_series(1, 10) g`, /division by zero/],
     ['a statement_timeout', sql`SELECT g, pg_sleep(CASE WHEN g <= 3 THEN 0 ELSE 5 END) FROM generate_series(1, 10) g`, /statement timeout/],
   ])('after %s that arrives once rows have streamed', async (_label, failing, message) => {
-    await expect(db.execute(failing)).rejects.toThrow(message)
+    // drizzle wraps the driver error; what Postgres said is on its cause.
+    const err = await db.execute(failing).then(() => undefined, (e: unknown) => e)
+    expect(dbErrorMessage(err)).toMatch(message)
 
     const rows = await db.select({ address: probe.address, symbol: probe.symbol })
       .from(probe)
