@@ -1,0 +1,40 @@
+name: CLA
+
+# Altscan is dual licensed, which only works if every contributor has granted
+# the relicensing right in CLA.md. Acceptance is a line in CONTRIBUTORS.md;
+# this check makes a missing line visible before merge instead of after.
+#
+# Runs on `pull_request`, not `pull_request_target`: a fork's PR gets a
+# read-only token and no secrets, and nothing from the PR is executed — the
+# step only reads CONTRIBUTORS.md from the merge commit.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cla:
+    name: CLA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: PR author is listed in CONTRIBUTORS.md
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          case "$AUTHOR" in
+            'dependabot[bot]'|'github-actions[bot]')
+              echo "$AUTHOR is a bot account; no CLA needed."
+              exit 0 ;;
+          esac
+          if grep -qiF "<$AUTHOR>" CONTRIBUTORS.md; then
+            echo "$AUTHOR is listed in CONTRIBUTORS.md: CLA accepted."
+          else
+            echo "::error file=CONTRIBUTORS.md::@$AUTHOR has not accepted the CLA yet. Add this line to CONTRIBUTORS.md in this pull request (see CLA.md): - Your Name <$AUTHOR>"
+            exit 1
+          fi
