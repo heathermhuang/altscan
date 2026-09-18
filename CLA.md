@@ -103,7 +103,7 @@ Contributions you submit to the Project, past and future.
 If you are contributing on behalf of an employer or other legal entity, an individual
 authorised to bind that entity should note the entity's name alongside yours.
 
-Questions: open a discussion or email the address in [SECURITY.md](SECURITY.md).
+Questions: open an issue or email the address in [SECURITY.md](SECURITY.md).
 
 ---
 

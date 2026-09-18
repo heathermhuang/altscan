@@ -16,11 +16,8 @@ dist/
 .design-review/
 .DS_Store
 
-# claude-mem auto-generated context dump — regenerated locally, never committed
-AGENTS.md
-
 # Internal working docs — kept local, never published to the open-source repo
-CLAUDE.md
+AGENTS.local.md
 HANDOFFS.md
 TODOS.md
 QA-*.md
