@@ -8,10 +8,46 @@
  * Next.js hot-module reloads and is shared across server-side renders in the
  * same process. Resets on connection error so the next call gets a fresh provider.
  */
-import { JsonRpcProvider, FallbackProvider, FetchRequest, type AbstractProvider } from 'ethers'
+import { AbstractProvider, JsonRpcProvider, FetchRequest, Network, type PerformActionRequest } from 'ethers'
 import { chainConfig } from './chain'
 import { getSetting } from './settings'
 import { resolveRpc } from './settings-defaults'
+
+/**
+ * Tries each endpoint in order and returns the first answer; if every endpoint
+ * fails, throws the first one's error. A null result is an answer, not a failure.
+ *
+ * ethers' own FallbackProvider cannot do this. At quorum 1 an error meets quorum
+ * as readily as a result, so the first endpoint's 408 is thrown without the next
+ * being asked, and when a stall does start the next one, its answer loses the tie
+ * to the first endpoint's later error (rpc.failover.test.ts).
+ */
+class FailoverProvider extends AbstractProvider {
+  readonly #network: Network
+  readonly #endpoints: JsonRpcProvider[]
+
+  constructor(endpoints: JsonRpcProvider[], network: Network) {
+    super(network)
+    this.#network = network
+    this.#endpoints = endpoints
+  }
+
+  async _detectNetwork(): Promise<Network> {
+    return this.#network
+  }
+
+  async _perform<T = unknown>(req: PerformActionRequest): Promise<T> {
+    let firstError: unknown
+    for (const endpoint of this.#endpoints) {
+      try {
+        return await endpoint._perform(req)
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+    throw firstError
+  }
+}
 
 type ProviderEntry = { key: string; timeoutMs: number; provider: AbstractProvider }
 
@@ -30,6 +66,10 @@ const providerKey = (urls: string[]) => urls.join(',')
 
 /** Construct + register the singleton for a resolved config. */
 function buildProvider({ urls, timeoutMs }: { urls: string[]; timeoutMs: number }): AbstractProvider {
+  // staticNetwork pins the chain id. Without it ethers sends eth_chainId before
+  // every call (concurrent calls share one), so a rate-limited public RPC sees
+  // up to twice our real traffic.
+  const network = Network.from(chainConfig.chainId)
   const endpoints = urls.map((url) => {
     const req = new FetchRequest(url)
     req.timeout = timeoutMs
@@ -40,22 +80,14 @@ function buildProvider({ urls, timeoutMs }: { urls: string[]; timeoutMs: number 
     // batch over 3 with a 500 for the whole batch, which failed chain-tip on
     // most ETH tx pages and, via the fallback's catch, rendered real txs as
     // "not found". Every endpoint accepts single requests.
-    return new JsonRpcProvider(req, undefined, { batchMaxCount: 1 })
+    return new JsonRpcProvider(req, network, { staticNetwork: network, batchMaxCount: 1 })
   })
 
-  // One endpoint stays a plain JsonRpcProvider — identical to the behaviour
-  // this module has always had, and the shape both chains run in production.
-  // Two or more get failover with quorum 1: take the first endpoint that
-  // answers. The ethers default quorum would issue every call to two endpoints
-  // and wait for them to agree, doubling load on public RPCs to buy a
-  // consensus an explorer read does not need. `priority` is the try order.
+  // One endpoint stays a plain JsonRpcProvider — the shape both chains run in
+  // production. Two or more are tried in order, one at a time.
   const provider: AbstractProvider = endpoints.length === 1
     ? endpoints[0]
-    : new FallbackProvider(
-        endpoints.map((p, i) => ({ provider: p, priority: i + 1, weight: 1 })),
-        undefined,
-        { quorum: 1 },
-      )
+    : new FailoverProvider(endpoints, network)
 
   // Identity guard: a stale provider's late error must not wipe a provider that
   // has since been rebuilt for a new URL.
