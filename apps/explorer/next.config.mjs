@@ -21,6 +21,12 @@ const nextConfig = {
   htmlLimitedBots: /./,
   // Skip ESLint during build — reduces memory and time on Render
   eslint: { ignoreDuringBuilds: true },
+  // Nothing renders through next/image (HouseAd uses a plain <img> on purpose),
+  // yet /_next/image was live and fetching + decoding whatever `url` it was
+  // given — the attack surface of an unauthenticated RCE fixed in 15.5.24.
+  // With `unoptimized`, next-server answers that path with a 404 before it
+  // validates params or reaches the optimizer (or sharp).
+  images: { unoptimized: true },
   transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/settings-schema'],
   async headers() {
     return [
