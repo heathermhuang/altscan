@@ -57,17 +57,21 @@ pnpm test    # vitest run (root config, all workspaces)
 - **Each chain reads a DIFFERENT database env var** — `config.dbEnvVar` is `DATABASE_URL`
   for BNB and `ETH_DATABASE_URL` for ETH. A bare `getDb()` defaults to `DATABASE_URL`,
   which is unset on ETH services, and swallowed catches have made whole features silently
-  inert on ETH while BNB worked by luck. Always pass the chain through.
+  inert on ETH while BNB worked by luck. Always pass it through: `getDb(config.dbEnvVar)`.
 - The indexer is a **direct polling loop with no job queue**.
 - One Render service per chain per app, all built from the same source. The Render service
   named `eth-indexer` has `rootDir: apps/indexer`, **not** `apps/eth-indexer`.
 - Import `@altscan/explorer-core/format`, **not** the barrel, in code that must stay light.
 - New provider cache keys use the `moralis:v2:<chain>:<currency>` prefix.
 
-### processBlock is NOT idempotent
-Never replay a block that already exists. `dex_trades` has a serial PK so replays
-duplicate rows, webhooks re-fire, and transfers are DELETE+INSERT — so an RPC endpoint
-that returns an **empty** receipt array (rather than an error) silently WIPES transfers.
+### processBlock is replay-safe — keep it that way
+Replaying a block that already exists repairs its missing derived rows instead of
+duplicating them (#96, #149): `dex_trades` dedupes on the partial unique index over
+`(block_number, log_index)`, webhooks fire once, and `assertReceiptCoverage` refuses a
+receipt set that doesn't match the block's transactions — including the **empty** array a
+bad RPC returns — *before* the first write. The indexer relies on this: it retries a
+partially persisted block instead of skipping it (`tryQuarantine` in
+`apps/indexer/src/index.ts`). Every new block-scoped write must stay safe to replay.
 
 ### Probe RPC endpoints at depth, not at `latest`
 An endpoint that answers `eth_getBlockByNumber` at the tip may lack `eth_getBlockReceipts`

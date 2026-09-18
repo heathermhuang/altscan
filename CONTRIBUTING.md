@@ -30,7 +30,8 @@ The BNB explorer runs at `http://localhost:3000`. `pnpm dev` starts every app at
 One codebase serves every chain. A single `CHAIN` environment variable (`bnb` or `eth`) selects which chain a deployment serves or indexes — same frontend, same indexer, same schema. Chain-specific differences (currency, theme, RPC, feature flags) live in [`packages/chain-config`](packages/chain-config). Client components must read chain config from the client helper (`@/lib/chain-client`), never from server-only config — it reads `NEXT_PUBLIC_CHAIN`, which Next inlines at build time, so set it to the same value as `CHAIN`.
 
 Each chain reads its own database variable: `DATABASE_URL` for BNB and `ETH_DATABASE_URL`
-for Ethereum. Pass the chain through to `getDb()` rather than relying on its default.
+for Ethereum. `getDb()` takes the variable's *name*, so pass it explicitly —
+`getDb(config.dbEnvVar)` — rather than relying on its `DATABASE_URL` default.
 
 Run a single chain/app:
 
@@ -38,6 +39,14 @@ Run a single chain/app:
 CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev         # BNB explorer
 CHAIN=eth NEXT_PUBLIC_CHAIN=eth pnpm --filter @altscan/explorer dev -p 3001 # ETH explorer
 CHAIN=bnb pnpm --filter @altscan/indexer dev                                # BNB indexer
+```
+
+The explorer compiles the workspace packages from source. The indexer loads their built
+`dist/` output instead, which is not committed, so build them before its first run and
+after changing them:
+
+```bash
+pnpm --filter @altscan/db build && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build
 ```
 
 ## Before you open a pull request

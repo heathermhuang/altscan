@@ -175,7 +175,8 @@ CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev
 # Ethereum explorer only
 CHAIN=eth NEXT_PUBLIC_CHAIN=eth pnpm --filter @altscan/explorer dev -p 3001
 
-# BNB indexer only
+# BNB indexer only — build the packages it imports first (see below)
+pnpm --filter @altscan/db build && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build
 CHAIN=bnb pnpm --filter @altscan/indexer dev
 
 # Status page only
@@ -183,7 +184,9 @@ npx tsx apps/status/src/server.ts
 ```
 
 `CHAIN` drives the server; `NEXT_PUBLIC_CHAIN` is inlined into the client bundle, so set
-both to the same chain.
+both to the same chain. The explorer compiles the workspace packages from source, but the
+indexer loads their built `dist/` output, which is not committed — build them once after
+cloning and again after changing them.
 
 ## Environment Variables
 
@@ -214,8 +217,8 @@ You can get started without paid RPC providers:
 Both serve `eth_getBlockReceipts` for historical blocks, which the indexer depends on
 (checked September 2026). Check any other endpoint the same way — ask it for the receipts
 of a block a few thousand deep — before you rely on it. Some public RPCs answer at the
-chain tip but lack that method, and some return an empty list instead of an error, which
-silently drops a block's token transfers.
+chain tip but lack that method, and some return an empty list for it; the indexer rejects
+a block whose receipts don't cover its transactions, so it cannot make progress on either.
 
 For production, use a paid RPC provider: free endpoints rate-limit under indexer load.
 
