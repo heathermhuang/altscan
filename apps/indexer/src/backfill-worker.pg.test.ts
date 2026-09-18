@@ -454,6 +454,32 @@ describe.skipIf(!PG_URL)('backfill claim — real Postgres', () => {
     expect(wm.rows_written).toBe(2)
   })
 
+  // drizzle >= 0.44 rethrows the driver error as "Failed query: <sql> params: …",
+  // so last_error has to be built from its cause or it records the statement.
+  it('a page write Postgres rejects records the reason in last_error, not the statement', async () => {
+    const provider = {
+      kind: 'fake',
+      getAddressTokenTransfers: async () => ({
+        ok: true as const,
+        data: { transfers: [transfer(`0x${'a'.repeat(70)}`, '1', 120)], cursor: null }, // tx_hash is VARCHAR(66)
+      }),
+    } as unknown as ProviderAdapter
+
+    await raw.unsafe(`
+      INSERT INTO backfill_watermarks (entity_type, entity_id, status)
+      VALUES ('token_transfers', '${ENTITY}', 'pending')`)
+    const claimed = (await claimNextEntity(db))!
+    expect(await processOnePage(db, provider, claimed)).toBe('error')
+
+    const [wm] = await raw.unsafe(
+      `SELECT status, attempts, last_error FROM backfill_watermarks WHERE id = ${claimed.id}`,
+    )
+    expect(wm.status).toBe('error')
+    expect(wm.attempts).toBe(1)
+    expect(wm.last_error).toContain('value too long for type character varying(66)')
+    expect(wm.last_error).not.toContain('Failed query')
+  })
+
   it('O1 all-or-skip: a page with an unusable log_index caps the entity, writes nothing, keeps the cursor', async () => {
     // Advancing past a skipped row would punch a permanent hole in the cached
     // tail (serve resumes from oldest_cursor, or stops at complete). Capping
