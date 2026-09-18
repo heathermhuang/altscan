@@ -4,9 +4,12 @@ name: CLA
 # the relicensing right in CLA.md. Acceptance is a line in CONTRIBUTORS.md;
 # this check makes a missing line visible before merge instead of after.
 #
+# It checks everyone whose work is in the PR, not just who opened it: the
+# opener, every commit author, and every co-author GitHub can resolve.
+#
 # Runs on `pull_request`, not `pull_request_target`: a fork's PR gets a
 # read-only token and no secrets, and nothing from the PR is executed — the
-# step only reads CONTRIBUTORS.md from the merge commit.
+# step reads CONTRIBUTORS.md from the merge commit and the PR's commit list.
 on:
   pull_request:
 
@@ -17,24 +20,56 @@ jobs:
   cla:
     name: CLA
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # list the PR's commits
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: PR author is listed in CONTRIBUTORS.md
+      - name: Everyone in this PR is listed in CONTRIBUTORS.md
         env:
-          AUTHOR: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          OPENER: ${{ github.event.pull_request.user.login }}
         run: |
-          case "$AUTHOR" in
-            'dependabot[bot]'|'github-actions[bot]')
-              echo "$AUTHOR is a bot account; no CLA needed."
-              exit 0 ;;
-          esac
-          if grep -qiF "<$AUTHOR>" CONTRIBUTORS.md; then
-            echo "$AUTHOR is listed in CONTRIBUTORS.md: CLA accepted."
-          else
-            echo "::error file=CONTRIBUTORS.md::@$AUTHOR has not accepted the CLA yet. Add this line to CONTRIBUTORS.md in this pull request (see CLA.md): - Your Name <$AUTHOR>"
+          # Accounts that act for a listed person rather than contribute on
+          # their own: GitHub Apps, and Claude (noreply@anthropic.com resolves
+          # to the `claude` account). The human who opened the PR is checked.
+          exempt_login() { case "$1" in *'[bot]'|claude) return 0 ;; esac; return 1; }
+          exempt_email() { case "$1" in noreply@anthropic.com|*'[bot]@users.noreply.github.com') return 0 ;; esac; return 1; }
+
+          missing=""
+          check() {
+            exempt_login "$1" && return 0
+            grep -qiF "<$1>" CONTRIBUTORS.md || missing="$missing @$1"
+          }
+          commits() { gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq "$1"; }
+
+          check "$OPENER"
+          for login in $(commits '.[] | .author.login // empty' | sort -u); do
+            check "$login"
+          done
+
+          # A commit whose email GitHub cannot resolve to an account can't be verified.
+          for email in $(commits '.[] | select(.author == null) | .commit.author.email' | tr 'A-Z' 'a-z' | sort -u); do
+            exempt_email "$email" || missing="$missing $email(commit-email-not-linked-to-a-GitHub-account)"
+          done
+
+          # Co-authors: a GitHub noreply address names the account; anything else can only be flagged.
+          for email in $(commits '.[].commit.message' | grep -i '^co-authored-by:' | sed -E 's/.*<([^>]+)>.*/\1/' | tr 'A-Z' 'a-z' | sort -u); do
+            exempt_email "$email" && continue
+            case "$email" in
+              *@users.noreply.github.com) login=${email%@users.noreply.github.com}; check "${login#*+}" ;;
+              *) echo "::warning::Co-author <$email> is not a GitHub noreply address; confirm they are listed in CONTRIBUTORS.md." ;;
+            esac
+          done
+
+          if [ -n "$missing" ]; then
+            echo "::error file=CONTRIBUTORS.md::Not yet listed in CONTRIBUTORS.md:$missing. Each person adds a line in this pull request (see CLA.md): - Your Name <github-username>"
             exit 1
           fi
+          echo "Everyone in this PR is listed in CONTRIBUTORS.md: CLA accepted."
