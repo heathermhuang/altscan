@@ -1,0 +1,33 @@
+# Version updates. Security updates are separate: they arrive as soon as an
+# advisory lands, once "Dependabot security updates" is on in the repo settings.
+version: 2
+updates:
+  - package-ecosystem: npm # covers the whole pnpm workspace
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      # One PR a week instead of one per package.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Majors need a human: they are migrations, not bumps.
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+      # patches/postgres@3.4.8.patch only applies to that exact version.
+      - dependency-name: postgres
+      # Pinned through pnpm.overrides in the root package.json.
+      - dependency-name: ioredis
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
