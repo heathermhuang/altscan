@@ -40,7 +40,12 @@ export function selectByAddress(
     .limit(page.offset + page.limit)
   return unionAll(
     arm(eq(table.fromAddress, address)),
-    arm(and(eq(table.toAddress, address), ne(table.fromAddress, address))),
+    // Both arms read the same `table`, so their shapes match by construction.
+    // drizzle >= 0.44 checks the right arm's shape against the left's, and with
+    // `table` typed as a union it compares every pairing, including a
+    // transactions arm against a token_transfers arm, which cannot occur. The
+    // result type still comes from the left arm.
+    arm(and(eq(table.toAddress, address), ne(table.fromAddress, address))) as never,
   )
     .orderBy(dir(table.timestamp), dir(table.blockNumber))
     .limit(page.limit)

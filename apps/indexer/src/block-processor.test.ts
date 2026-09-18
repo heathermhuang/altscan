@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
+import { DrizzleQueryError } from 'drizzle-orm'
 import {
   fetchBlockReceipts, enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth,
-  orderByAddress,
+  orderByAddress, isDeadlock,
 } from './block-processor'
 
 // Simulate the real failure mode observed on 2026-04-16: three consecutive
@@ -177,5 +178,26 @@ describe('orderByAddress (tokens insert lock ordering)', () => {
   it('is stable on an empty set and a single row', () => {
     expect(orderByAddress([])).toEqual([])
     expect(orderByAddress([{ address: '0x01' }]).map(r => r.address)).toEqual(['0x01'])
+  })
+})
+
+// The retry at the three batched upserts. drizzle-orm >= 0.44 rethrows every
+// driver error as a DrizzleQueryError whose message is the SQL and its params,
+// so "deadlock detected" survives only on the wrapper's cause.
+describe('isDeadlock (batched upsert retry)', () => {
+  const deadlock = Object.assign(new Error('deadlock detected'), { code: '40P01' })
+
+  it('recognises the deadlock the driver reports', () => {
+    expect(isDeadlock(deadlock)).toBe(true)
+  })
+
+  it('recognises it through the wrapper drizzle rethrows', () => {
+    const wrapped = new DrizzleQueryError('insert into "tokens" ("address") values ($1) on conflict do nothing', ['0x01'], deadlock)
+    expect(isDeadlock(wrapped)).toBe(true)
+  })
+
+  it('does not retry any other failure', () => {
+    const timeout = Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })
+    expect(isDeadlock(new DrizzleQueryError('insert into "tokens" ("address") values ($1)', ['0x01'], timeout))).toBe(false)
   })
 })

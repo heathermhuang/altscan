@@ -43,7 +43,7 @@ import { syncValidators } from './validator-syncer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
 import { ensureSchema, ensureInternalTxPartitions } from './ensure-schema'
-import { getDb, schema } from './db'
+import { getDb, schema, dbErrorMessage } from './db'
 import { desc, sql } from 'drizzle-orm'
 
 const chain = getChainConfig()
@@ -110,7 +110,7 @@ async function main() {
       await ensureSchema()
       break
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = dbErrorMessage(err)
       const isConnErr = msg.includes('53300') || msg.includes('connection') || msg.includes('ECONNREFUSED')
       if (isConnErr && attempt <= 20) {
         const wait = Math.min(30000, 5000 * attempt)

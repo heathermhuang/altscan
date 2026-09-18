@@ -3,7 +3,7 @@
  * Queries active webhooks from DB and delivers HMAC-signed payloads.
  * Called by block-processor after each block is indexed.
  */
-import { getDb, schema } from './db'
+import { getDb, schema, unwrapDbError } from './db'
 import { eq, or, and, inArray, isNull, sql } from 'drizzle-orm'
 import crypto from 'crypto'
 import dns from 'node:dns/promises'
@@ -140,7 +140,7 @@ export async function notifyWebhooks(
       )
     )
   } catch (err) {
-    console.error('[webhook-notifier] DB query error:', err)
+    console.error('[webhook-notifier] DB query error:', unwrapDbError(err))
     return
   }
 
@@ -213,7 +213,7 @@ export async function notifyWebhooks(
       // same POST, which is precisely the failure being prevented. A missed
       // notification is recoverable by the consumer; an unbounded duplicate that
       // credits a balance twice is not.
-      console.error(`[webhook-notifier] delivery-ledger claim failed for webhook ${webhook.id} block ${blockNumber} — SKIPPING delivery:`, err)
+      console.error(`[webhook-notifier] delivery-ledger claim failed for webhook ${webhook.id} block ${blockNumber} — SKIPPING delivery:`, unwrapDbError(err))
       continue
     }
     if (!claimed) continue

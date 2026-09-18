@@ -7,7 +7,7 @@
  * the user pages past the head, the deep tail is already local (zero provider
  * CU, and resilient if the provider is down later).
  */
-import { getDb, schema } from '@altscan/db'
+import { getDb, schema, dbErrorMessage } from '@altscan/db'
 import { isBackfillEnabled } from '@altscan/chain-config'
 import { chainConfig } from './chain'
 
@@ -75,6 +75,6 @@ function warnEnqueueFailure(err: unknown): void {
   suppressed = 0
   console.warn(
     `[backfill] enqueue FAILED for chain=${chainConfig.key} db=${chainConfig.dbEnvVar}${also}: ` +
-    (err instanceof Error ? err.message : String(err)),
+    dbErrorMessage(err),
   )
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { getCacheSizes, getTotalCacheEntries } from '@/lib/cache-registry'
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
       // reason, so `completeness.status != "ok"` is a usable alert rule.
       completeness = {
         status: 'unknown',
-        reason: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+        reason: dbErrorMessage(err).slice(0, 160),
       }
     }
 
@@ -171,7 +172,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response)
   } catch (err) {
     return NextResponse.json(
-      { status: 'error', message: err instanceof Error ? err.message : 'unknown' },
+      { status: 'error', message: err instanceof Error ? dbErrorMessage(err) : 'unknown' },
       { status: 503 },
     )
   }

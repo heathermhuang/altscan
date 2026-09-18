@@ -1,3 +1,4 @@
+import { dbErrorMessage } from '@altscan/db'
 import { schema } from '@/lib/db'
 import { fetchTxPage, parseTx, parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { TxTable } from '@/components/transactions/TxTable'
@@ -37,7 +38,7 @@ export default async function TransactionsPage({
   } catch (err) {
     // Tagged, not swallowed: an unlogged catch here is how the Whale Tracker
     // stayed dead for months looking like a quiet chain.
-    console.error('[txs] page query failed:', err instanceof Error ? err.message : err)
+    console.error('[txs] page query failed:', dbErrorMessage(err))
   }
 
   return (

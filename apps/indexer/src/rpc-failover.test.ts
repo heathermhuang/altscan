@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { DrizzleQueryError } from 'drizzle-orm'
 import { processWithFailover, readWithFailover, withTimeout, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
 
 /**
@@ -365,6 +366,17 @@ describe('formatRedactedError', () => {
     const out = formatRedactedError(err, urls)
     expect(out).not.toContain('user:pass')
     expect(out).not.toContain('/v1/token')
+  })
+
+  // drizzle-orm >= 0.44 rethrows every driver error as a DrizzleQueryError whose
+  // message is the SQL and all of its params. Logged as is, a failed batch
+  // insert is tens of KB of statement and no reason.
+  it('logs what the database said about a failed query, not the statement', () => {
+    const cause = Object.assign(new Error('deadlock detected'), { code: '40P01' })
+    const err = new DrizzleQueryError('insert into "addresses" ("address") values ($1), ($2)', ['0xaa', '0xbb'], cause)
+    const out = formatRedactedError(err, urls)
+    expect(out).toContain('deadlock detected')
+    expect(out).not.toContain('insert into')
   })
 
   it('preserves the stack trace for debuggability', () => {

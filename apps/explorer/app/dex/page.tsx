@@ -1,3 +1,4 @@
+import { dbErrorMessage } from '@altscan/db'
 import { schema } from '@/lib/db'
 import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
@@ -52,7 +53,7 @@ export default async function DexPage({
       tokenSymbolMap.set(t.address, t.symbol)
     }
   } catch (err) {
-    console.error('[dex] page query failed:', err instanceof Error ? err.message : err)
+    console.error('[dex] page query failed:', dbErrorMessage(err))
   }
 
   return (

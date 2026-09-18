@@ -9,7 +9,7 @@
  * references blocks.number, so transactions must be deleted first).
  */
 import { indexerConfig } from './config-instance'
-import { getMaintenanceDb } from './db'
+import { getMaintenanceDb, dbErrorMessage, unwrapDbError } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listPartitions, ensureForwardPartitions, ensureInternalTxPartitions, type PartitionedParent } from './ensure-schema'
 import { buildRetentionPlan, parseCompactRetentionDays, bodyPruneIsRedundant } from './retention-policy'
@@ -513,7 +513,7 @@ export async function prunePartitioned(parent: PartitionedParent, cutoffBlock: n
         console.log(`[retention] dropped ${parent} partition ${p.name} (blocks ${p.lo}–${p.hi - 1})`)
         dropped++
       } catch (err) {
-        console.warn(`[retention] drop partition ${p.name} failed:`, err instanceof Error ? err.message : err)
+        console.warn(`[retention] drop partition ${p.name} failed:`, dbErrorMessage(err))
       }
     } else if (action.kind === 'retain-boundary') {
       // Straddles the cutoff → RETAINED on purpose. Logged rather than silent so
@@ -686,7 +686,7 @@ async function diskPctNow(): Promise<number | null> {
     return (bytes / 1024 / 1024 / 1024 / DB_DISK_GB) * 100
   } catch (err) {
     console.warn('[retention] ⚠ disk probe FAILED — peak sample lost for this point:',
-      err instanceof Error ? err.message : err)
+      dbErrorMessage(err))
     return null
   }
 }
@@ -857,7 +857,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     cutoffBlock = await cutoffBlockNumber(cutoff, days)
     console.log(`[retention] cutoff block_number = ${cutoffBlock ?? '(none — all blocks older than cutoff)'}`)
   } catch (err) {
-    console.error('[retention] cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
+    console.error('[retention] cutoffBlockNumber failed:', dbErrorMessage(err))
   }
 
   // token_transfers is RANGE-partitioned on BNB — relevant only to the compact
@@ -886,7 +886,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
         if (deleted > 0) console.log(`[retention] ${table}: deleted ${deleted} rows`)
         totalDeleted += deleted
       } catch (err) {
-        console.error(`[retention] ${table} delete failed:`, err instanceof Error ? err.message : err)
+        console.error(`[retention] ${table} delete failed:`, dbErrorMessage(err))
       }
     }
     // In-place body prune: null transactions.input on old rows, keep the compact row.
@@ -904,7 +904,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
         if (pruned > 0) console.log(`[retention] transactions.input: pruned ${pruned} rows (kept compact row)`)
         totalDeleted += pruned
       } catch (err) {
-        console.error('[retention] transactions.input body prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] transactions.input body prune failed:', dbErrorMessage(err))
       }
     }
   } else {
@@ -928,7 +928,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     try {
       compactCutoffBlock = await cutoffBlockNumber(compactCutoff, compactDays)
     } catch (err) {
-      console.error('[retention] compact cutoffBlockNumber failed:', err instanceof Error ? err.message : err)
+      console.error('[retention] compact cutoffBlockNumber failed:', dbErrorMessage(err))
     }
     if (compactCutoffBlock !== null && compactCutoffBlock > 0) {
       console.warn(`[retention] ⚠ COMPACT override active (${compactDays}d) — pruning compact tables below block ${compactCutoffBlock}`)
@@ -958,7 +958,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
            WHERE id = 1
         `)
       } catch (err) {
-        console.error('[retention] could not publish compact cutoff:', err instanceof Error ? err.message : err)
+        console.error('[retention] could not publish compact cutoff:', dbErrorMessage(err))
       }
       // Body sweep to the SAME cutoff first: when the compact cutoff is NEWER than
       // the body cutoff (emergency re-run tightens only compactDays; or a
@@ -977,7 +977,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
           if (n > 0) console.log(`[retention] [compact] ${table}: deleted ${n} rows (body sweep to compact cutoff)`)
           totalDeleted += n
         } catch (err) {
-          console.error(`[retention] [compact] ${table} body sweep failed:`, err instanceof Error ? err.message : err)
+          console.error(`[retention] [compact] ${table} body sweep failed:`, dbErrorMessage(err))
         }
       }
       // Last inflection before space is RELEASED: the compact body sweep above
@@ -996,14 +996,14 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
           totalDeleted += n
         }
       } catch (err) {
-        console.error('[retention] [compact] token_transfers prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] [compact] token_transfers prune failed:', dbErrorMessage(err))
       }
       // internal_transactions: always partitioned, so always a partition drop.
       try {
         const dropped = await prunePartitioned('internal_transactions', compactCutoffBlock)
         if (dropped > 0) console.log(`[retention] [compact] internal_transactions: dropped ${dropped} partition(s)`)
       } catch (err) {
-        console.error('[retention] [compact] internal_transactions prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] [compact] internal_transactions prune failed:', dbErrorMessage(err))
       }
       // transactions BEFORE blocks (FK transactions.block_number → blocks.number).
       try {
@@ -1011,7 +1011,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
         if (n > 0) console.log(`[retention] [compact] transactions: deleted ${n} rows`)
         totalDeleted += n
       } catch (err) {
-        console.error('[retention] [compact] transactions prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] [compact] transactions prune failed:', dbErrorMessage(err))
       }
       // blocks last — childless only.
       try {
@@ -1022,7 +1022,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
         if (n > 0) console.log(`[retention] [compact] blocks: deleted ${n} rows`)
         totalDeleted += n
       } catch (err) {
-        console.error('[retention] [compact] blocks prune failed:', err instanceof Error ? err.message : err)
+        console.error('[retention] [compact] blocks prune failed:', dbErrorMessage(err))
       }
     } else {
       console.log('[retention] [compact] no compact cutoff block — skipping compact prune')
@@ -1044,7 +1044,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
     if (zbCount > 0) console.log(`[retention] token_balances: deleted ${zbCount} zero-balance rows`)
     totalDeleted += zbCount
   } catch (err) {
-    console.warn('[retention] token_balances cleanup failed:', err instanceof Error ? err.message : err)
+    console.warn('[retention] token_balances cleanup failed:', dbErrorMessage(err))
   }
 
   console.log(`[retention] Done — ${totalDeleted} total rows removed`)
@@ -1053,7 +1053,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   // trajectory from logs alone, without needing to hit the admin endpoint.
   // Warns loudly at >70% disk usage so we catch trouble before the 90% alert.
   const diskPct = await reportSizes().catch(err => {
-    console.warn('[retention] size report failed:', err instanceof Error ? err.message : err)
+    console.warn('[retention] size report failed:', dbErrorMessage(err))
     return 0
   })
 
@@ -1075,7 +1075,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
         await db.execute(sql`VACUUM ANALYZE ${identSql(tableIdent(t))}`)
         console.log(`[retention] VACUUM ANALYZE ${t} done`)
       } catch (err) {
-        console.warn(`[retention] VACUUM ${t} failed:`, err instanceof Error ? err.message : err)
+        console.warn(`[retention] VACUUM ${t} failed:`, dbErrorMessage(err))
       }
     }
   }
@@ -1084,10 +1084,10 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   // writer never runs out of range between restarts. No-op unless partitioned.
   if (ttPartitioned) {
     await ensureForwardPartitions().catch(err =>
-      console.warn('[retention] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
+      console.warn('[retention] ensureForwardPartitions warning:', dbErrorMessage(err)))
   }
   await ensureInternalTxPartitions().catch(err =>
-    console.warn('[retention] ensureInternalTxPartitions warning:', err instanceof Error ? err.message : err))
+    console.warn('[retention] ensureInternalTxPartitions warning:', dbErrorMessage(err)))
 
   // Self-heal: tighten the window that actually holds the disk. Decided on the
   // MAX across every sample taken this run — the peak is created mid-run by the
@@ -1147,7 +1147,7 @@ async function runVacuumFull(): Promise<void> {
       await db.execute(sql`VACUUM FULL ANALYZE ${identSql(tableIdent(t))}`)
       console.log(`[retention] VACUUM FULL ANALYZE ${t} done`)
     } catch (err) {
-      console.warn(`[retention] VACUUM FULL ${t} failed:`, err instanceof Error ? err.message : err)
+      console.warn(`[retention] VACUUM FULL ${t} failed:`, dbErrorMessage(err))
     }
   }
   console.log('[retention] VACUUM FULL complete')
@@ -1220,7 +1220,7 @@ async function recomputeHolderCounts(): Promise<void> {
     }
     console.log(`[holder-count] chunked recompute done in ${Date.now() - start}ms (${pages} pages, ${updated} tokens updated)`)
   } catch (err) {
-    console.warn('[holder-count] recompute failed:', err instanceof Error ? err.message : err)
+    console.warn('[holder-count] recompute failed:', dbErrorMessage(err))
   }
 }
 
@@ -1270,26 +1270,26 @@ export async function startRetentionCleanup(): Promise<void> {
   const STARTUP_DELAY_MS = 15 * 60 * 1000
   console.log(`[retention] startup cleanup deferred by ${STARTUP_DELAY_MS / 60_000}min to avoid DB-pool starvation`)
   setTimeout(() => {
-    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', err))
+    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', unwrapDbError(err)))
   }, STARTUP_DELAY_MS)
 
   // One-time VACUUM FULL to reclaim disk space after bulk deletes.
   // Set VACUUM_FULL=1 in env vars, then remove it after the indexer restarts.
   if (indexerConfig.retention.vacuumFull) {
-    runVacuumFull().catch(err => console.error('[retention] VACUUM FULL error:', err))
+    runVacuumFull().catch(err => console.error('[retention] VACUUM FULL error:', unwrapDbError(err)))
   }
 
   setInterval(() => {
-    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', err))
+    runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', unwrapDbError(err)))
   }, RUN_EVERY_MS)
 
   // Recompute holder_count periodically (replaces per-block inline tracking).
   // First run is delayed so it doesn't collide with the retention job above.
   console.log(`[holder-count] recompute every ${HOLDER_COUNT_EVERY_MS / 60_000}min`)
   setTimeout(() => {
-    recomputeHolderCounts().catch(err => console.error('[holder-count] initial error:', err))
+    recomputeHolderCounts().catch(err => console.error('[holder-count] initial error:', unwrapDbError(err)))
     setInterval(() => {
-      recomputeHolderCounts().catch(err => console.error('[holder-count] interval error:', err))
+      recomputeHolderCounts().catch(err => console.error('[holder-count] interval error:', unwrapDbError(err)))
     }, HOLDER_COUNT_EVERY_MS)
   }, 60_000)
 }

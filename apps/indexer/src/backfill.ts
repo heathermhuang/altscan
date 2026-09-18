@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { dbErrorMessage, unwrapDbError } from './db'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
 import {
@@ -77,7 +78,7 @@ async function backfill() {
       chunk.map(n =>
         processBlock(n, provider, SKIP_LOGS).catch(err => {
           failed++
-          console.error(`[backfill] Block ${n} failed:`, err instanceof Error ? err.message : err)
+          console.error(`[backfill] Block ${n} failed:`, dbErrorMessage(err))
         })
       )
     )
@@ -110,6 +111,6 @@ async function backfill() {
 }
 
 backfill().catch(err => {
-  console.error('[backfill] Fatal error:', err)
+  console.error('[backfill] Fatal error:', unwrapDbError(err))
   process.exit(1)
 })

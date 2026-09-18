@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
       await db.execute(idx.sql)
       results[idx.name] = 'created'
     } catch (err) {
-      results[idx.name] = err instanceof Error ? err.message : 'failed'
+      results[idx.name] = err instanceof Error ? dbErrorMessage(err) : 'failed'
     }
   }
 

@@ -19,7 +19,7 @@
     "@astrojs/react": "^4.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "drizzle-orm": "^0.31.0",
+    "drizzle-orm": "^0.45.2",
     "jose": "^5.9.0"
   },
   "devDependencies": {

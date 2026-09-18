@@ -3,7 +3,7 @@ import { decodeV2Swap, SWAP_V2_TOPIC } from './dex-swap'
 import { indexerConfig } from './config-instance'
 import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
 import { sql } from 'drizzle-orm'
-import { getDb, getWriterDb, schema } from './db'
+import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
@@ -485,7 +485,7 @@ export async function processBlock(
       block.number,
       timestamp,
       block.hash,
-    ).catch(err => console.error('[webhook-notifier] delivery error:', err))
+    ).catch(err => console.error('[webhook-notifier] delivery error:', unwrapDbError(err)))
   }
 
   if (t) {
@@ -750,11 +750,20 @@ function kickAddressFlush(): void {
   const snapshot = addressPending
   addressPending = new Map()
   addressFlushInflight = flushAddresses(snapshot)
-    .catch(err => console.warn('[addresses] flush failed:', err instanceof Error ? err.message : err))
+    .catch(err => console.warn('[addresses] flush failed:', dbErrorMessage(err)))
     .finally(() => {
       addressFlushInflight = null
       if (addressPending.size > 0) kickAddressFlush()
     })
+}
+
+/**
+ * Postgres aborted this statement to break a deadlock. The three batched upserts
+ * below retry it: lock ordering removes same-statement cycles, but a concurrent
+ * writer on another path can still collide.
+ */
+export function isDeadlock(err: unknown): boolean {
+  return dbErrorMessage(err).includes('deadlock')
 }
 
 async function flushAddresses(pending: Map<string, AddressPending>): Promise<void> {
@@ -780,8 +789,7 @@ async function flushAddresses(pending: Map<string, AddressPending>): Promise<voi
         `)
         break
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('deadlock') && attempt < 3) {
+        if (isDeadlock(err) && attempt < 3) {
           await new Promise(r => setTimeout(r, 50 * attempt))
           continue
         }
@@ -851,7 +859,7 @@ function runHolderWorker(): void {
         try {
           await batchUpdateHolderBalances(merged)
         } catch (err) {
-          console.warn(`[holder-queue] merged batch of ${drained.length} failed:`, err instanceof Error ? err.message : err)
+          console.warn(`[holder-queue] merged batch of ${drained.length} failed:`, dbErrorMessage(err))
         }
       }
     } finally {
@@ -914,8 +922,7 @@ async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void
         `)
         break
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('deadlock') && attempt < 3) {
+        if (isDeadlock(err) && attempt < 3) {
           await new Promise(r => setTimeout(r, 50 * attempt))
           continue
         }
@@ -1287,7 +1294,7 @@ export function setDurableFloor(block: number): void {
   durableBlock = block
   for (const n of transferWritten) if (n <= durableBlock) transferWritten.delete(n)
   persistDurableBlock(durableBlock).catch(err =>
-    console.warn('[tt-writer] floor persist failed:', err instanceof Error ? err.message : err))
+    console.warn('[tt-writer] floor persist failed:', dbErrorMessage(err)))
 }
 
 /**
@@ -1346,7 +1353,7 @@ export async function rollbackTransferWriterTo(forkPoint: number): Promise<void>
         await persistDurableBlock(forkPoint)
         console.warn(`[tt-writer] reorg rollback: durable watermark rewound ${prev} → ${forkPoint}`)
       } catch (err) {
-        console.error(`[tt-writer] ALERT reorg rollback: watermark rewound in memory (${prev} → ${forkPoint}) but persist FAILED — a crash before the next drain-fold persists would resume past the fork:`, err instanceof Error ? err.message : err)
+        console.error(`[tt-writer] ALERT reorg rollback: watermark rewound in memory (${prev} → ${forkPoint}) but persist FAILED — a crash before the next drain-fold persists would resume past the fork:`, dbErrorMessage(err))
       }
     }
   } finally {
@@ -1497,7 +1504,7 @@ function runTransferWriter(): void {
           }
         } catch (err) {
           ttWriterConsecutiveFailures++
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = dbErrorMessage(err)
           // Re-queue (don't clobber a newer decode of the same block). The
           // quarantine flag travels inside the batch, so a requeued quarantine
           // stays a no-op and a requeued real batch stays a real write — no
@@ -1745,8 +1752,7 @@ async function ensureTokensBatch(
           await db.insert(schema.tokens).values(chunk).onConflictDoNothing()
           break
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          if (msg.includes('deadlock') && attempt < 3) {
+          if (isDeadlock(err) && attempt < 3) {
             await new Promise(r => setTimeout(r, 50 * attempt))
             continue
           }

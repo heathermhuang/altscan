@@ -4,7 +4,7 @@
  * to call on every startup — either a fresh DB or an existing one.
  */
 import { indexerConfig } from './config-instance'
-import { getDb } from './db'
+import { getDb, dbErrorMessage, unwrapDbError } from './db'
 import { sql } from 'drizzle-orm'
 import { getChainConfig } from '@altscan/chain-config'
 
@@ -244,7 +244,7 @@ export async function ensureSchema(): Promise<void> {
       await db.execute(sql.raw(`ALTER TABLE webhook_deliveries DROP CONSTRAINT IF EXISTS "${name}"`))
     }
   } catch (err) {
-    console.error('[indexer] legacy webhook_deliveries key check skipped:', err)
+    console.error('[indexer] legacy webhook_deliveries key check skipped:', unwrapDbError(err))
   }
 
   await db.execute(sql.raw(`
@@ -567,7 +567,7 @@ export async function ensureSchema(): Promise<void> {
       await db.execute(sql.raw(`DROP INDEX IF EXISTS "${name}"`))
     }
   } catch (err) {
-    console.warn('[indexer] Could not check for invalid indexes:', err instanceof Error ? err.message : err)
+    console.warn('[indexer] Could not check for invalid indexes:', dbErrorMessage(err))
   }
 
   console.log('[indexer] Schema ready.')
@@ -611,7 +611,7 @@ export async function ensureSchema(): Promise<void> {
   // inserting (await, not fire-and-forget) so no insert ever hits a missing range.
   if (ttPartitioned) {
     await ensureForwardPartitions().catch(err =>
-      console.warn('[indexer] ensureForwardPartitions warning:', err instanceof Error ? err.message : err))
+      console.warn('[indexer] ensureForwardPartitions warning:', dbErrorMessage(err)))
   }
 
   // Fire-and-forget: index builds run sequentially after ensureSchema() returns.
@@ -623,7 +623,7 @@ export async function ensureSchema(): Promise<void> {
       try {
         await db.execute(sql.raw(idx))
       } catch (err) {
-        console.warn(`[indexer] Index build warning (${name}):`, err instanceof Error ? err.message : err)
+        console.warn(`[indexer] Index build warning (${name}):`, dbErrorMessage(err))
       }
     }
     if (ttPartitioned) await ensurePartitionedWhaleIndex()
@@ -633,7 +633,7 @@ export async function ensureSchema(): Promise<void> {
         console.log(`[indexer] Retired the tx-hash dex key: ${stmt}`)
       }
     } catch (err) {
-      console.warn('[indexer] Could not retire dex_tx_log_unique:', err instanceof Error ? err.message : err)
+      console.warn('[indexer] Could not retire dex_tx_log_unique:', dbErrorMessage(err))
     }
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
@@ -977,7 +977,7 @@ export async function ensurePartitionedWhaleIndex(): Promise<void> {
     await db.execute(sql.raw(buildPartitionedWhaleIndexSql(parts[0].name).parent))
   } catch (err) {
     console.warn(`[indexer] ${TT_TOKEN_TS_IDX} parent create failed:`,
-      err instanceof Error ? err.message : err)
+      dbErrorMessage(err))
     return
   }
 
@@ -993,7 +993,7 @@ export async function ensurePartitionedWhaleIndex(): Promise<void> {
       // Logged, never swallowed: a partition that fails here leaves the parent
       // invalid, and the next boot resumes from exactly this point.
       console.warn(`[indexer] ${TT_TOKEN_TS_IDX} on ${part.name} failed:`,
-        err instanceof Error ? err.message : err)
+        dbErrorMessage(err))
     }
   }
 
@@ -1036,7 +1036,7 @@ export async function ensureForwardPartitions(): Promise<void> {
       ))
       created++
     } catch (err) {
-      console.warn(`[indexer] forward partition ${name} warning:`, err instanceof Error ? err.message : err)
+      console.warn(`[indexer] forward partition ${name} warning:`, dbErrorMessage(err))
       break
     }
     upper = hi
@@ -1108,7 +1108,7 @@ export async function ensureInternalTxPartitions(anchorBlock?: number): Promise<
       ))
       created++
     } catch (err) {
-      console.warn(`[indexer] internal_transactions partition ${name} warning:`, err instanceof Error ? err.message : err)
+      console.warn(`[indexer] internal_transactions partition ${name} warning:`, dbErrorMessage(err))
       break
     }
   }

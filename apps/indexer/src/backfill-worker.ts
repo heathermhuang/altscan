@@ -51,7 +51,7 @@ async function loadProviders(): Promise<ProvidersModule> {
   return providersModule
 }
 import { cfg } from './backfill-budget'
-import { getMaintenanceDb } from './db'
+import { getMaintenanceDb, dbErrorMessage, unwrapDbError } from './db'
 
 /** The two db shapes the worker needs — structurally satisfied by drizzle's
  *  Db and its transaction handle, and cheap to fake in unit tests. */
@@ -298,7 +298,7 @@ const stampOf = (entity: ClaimedEntity): string | null =>
  *  make the recovery UPDATE throw too, turning a recoverable page into an
  *  unrecoverable one. Bounded as well: provider errors can be very long. */
 function lastErrorText(err: unknown): string {
-  return sanitizeTokenMetadata(String(err), 'unknown error', 500)
+  return sanitizeTokenMetadata(String(unwrapDbError(err)), 'unknown error', 500)
 }
 
 async function fencedUpdate(ex: Executor, entity: ClaimedEntity, set: SQL): Promise<boolean> {
@@ -452,7 +452,7 @@ export async function processOnePage(
     // from has already rolled back.
     console.warn(
       `[backfill] write failed for ${entity.entity_type} ${entity.entity_id}:`,
-      err instanceof Error ? err.message : err,
+      dbErrorMessage(err),
     )
     const moved = await fencedUpdate(
       db,
@@ -659,7 +659,7 @@ export async function startBackfillWorker(): Promise<void> {
       await processOnePage(db, provider, entity)
       await sleep(cfg.pageSleepMs) // pacing between provider calls
     } catch (err) {
-      console.warn('[backfill] loop error:', err instanceof Error ? err.message : err)
+      console.warn('[backfill] loop error:', dbErrorMessage(err))
       await sleep(cfg.pollMs)
     }
   }

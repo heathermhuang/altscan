@@ -21,6 +21,7 @@
  */
 import { sql, type SQL } from 'drizzle-orm'
 import { createPageCache } from '@/lib/page-cache'
+import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { safeBigInt } from '@/lib/format'
@@ -206,7 +207,7 @@ export async function settleWhaleQueries(
 
   const unwrap = (r: PromiseSettledResult<unknown>, half: string): WhaleTx[] | null => {
     if (r.status === 'rejected') {
-      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+      const msg = dbErrorMessage(r.reason)
       console.error(`[whales] ${half} query failed: ${msg}`)
       return null
     }

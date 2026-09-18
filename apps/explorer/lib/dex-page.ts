@@ -7,6 +7,7 @@
  * dynamic and its `revalidate = 300` never applied.
  */
 import { desc, sql } from 'drizzle-orm'
+import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { createPageCache } from '@/lib/page-cache'
 
@@ -94,7 +95,7 @@ export const fetchDexPage = createPageCache(
       tokens = rows.map(t => ({ ...t, address: t.address.toLowerCase() }))
     } catch (err) {
       console.error('[dex] token metadata lookup failed:',
-        err instanceof Error ? err.message : err)
+        dbErrorMessage(err))
     }
     }
 

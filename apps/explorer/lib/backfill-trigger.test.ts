@@ -9,7 +9,8 @@ const onConflictDoNothing = vi.fn().mockResolvedValue(undefined)
 const values = vi.fn(() => ({ onConflictDoNothing }))
 const insert = vi.fn(() => ({ values }))
 const getDb = vi.fn(() => ({ insert }))
-vi.mock('@altscan/db', () => ({
+vi.mock('@altscan/db', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@altscan/db')>()),
   getDb: (...args: unknown[]) => getDb(...(args as [])),
   schema: { backfillWatermarks: 'backfill_watermarks_table' },
 }))

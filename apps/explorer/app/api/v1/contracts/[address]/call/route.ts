@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { Contract, Interface } from 'ethers'
@@ -77,7 +78,7 @@ export async function POST(
     return NextResponse.json({ result: serialized })
   } catch (err) {
     // Return safe error message without internal details
-    const message = err instanceof Error ? err.message.split('\n')[0] : 'Call failed'
+    const message = err instanceof Error ? dbErrorMessage(err).split('\n')[0] : 'Call failed'
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

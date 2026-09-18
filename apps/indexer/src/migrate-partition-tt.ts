@@ -37,7 +37,7 @@ import { indexerConfig } from './config-instance'
 import 'dotenv/config'
 import { createMaintenanceConnection } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
-import { getDb } from './db'
+import { getDb, unwrapDbError } from './db'
 import { sql } from 'drizzle-orm'
 import { isPartitioned, listTokenTransferPartitions, ensureForwardPartitions } from './ensure-schema'
 
@@ -177,7 +177,8 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error(`${TAG} FAILED:`, err instanceof Error ? err.stack ?? err.message : err)
+    const e = unwrapDbError(err)
+    console.error(`${TAG} FAILED:`, e instanceof Error ? e.stack ?? e.message : e)
     console.error(`${TAG} Phase 2 is transactional, so token_transfers is unchanged if it failed there. Re-run after inspecting.`)
     process.exit(1)
   })
