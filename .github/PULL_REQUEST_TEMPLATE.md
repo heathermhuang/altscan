@@ -26,10 +26,10 @@
 ## Checklist
 
 - [ ] `pnpm test` passes
-- [ ] `pnpm build` passes (or noted below why it doesn't apply)
+- [ ] `pnpm lint` and `pnpm --filter @altscan/explorer build` pass (or noted below why they don't apply)
 - [ ] Changes match the surrounding code style
 - [ ] Client components read chain config from the client helper (`@/lib/chain-client`), not server-only config
-- [ ] Updated docs and `CHANGELOG.md` where relevant
+- [ ] Updated docs where relevant, and added a `CHANGELOG.md` line under `[Unreleased]` for user-facing changes
 - [ ] Conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`…)
 
 ## Contributor License Agreement
