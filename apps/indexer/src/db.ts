@@ -26,3 +26,15 @@ export function getMaintenanceDb() {
 }
 
 export { schema, dbErrorMessage, unwrapDbError }
+
+/**
+ * The database cannot take a connection right now, so the boot retries instead
+ * of exiting. Postgres never puts the SQLSTATE in the message: once every slot is
+ * taken, too_many_connections says only "sorry, too many clients already", so it
+ * is recognised by its code.
+ */
+export function isConnectionError(err: unknown): boolean {
+  if ((unwrapDbError(err) as { code?: string })?.code === '53300') return true
+  const msg = dbErrorMessage(err)
+  return msg.includes('connection') || msg.includes('ECONNREFUSED')
+}
