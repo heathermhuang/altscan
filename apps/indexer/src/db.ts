@@ -50,6 +50,10 @@ export function isConnectionError(err: unknown): boolean {
   const code = (unwrapDbError(err) as { code?: string })?.code
   if (code === '53300' || code === '57P03') return true
   if (code === 'ECONNRESET') return true
+  // When every address of a multi-address host (localhost: ::1 and 127.0.0.1)
+  // refuses, Node reports one AggregateError with an empty message, so the
+  // ECONNREFUSED message check below never sees it: only .code carries it.
+  if (code === 'ECONNREFUSED') return true
   if (code !== undefined && POSTGRES_JS_SOCKET_CODES.has(code)) return true
   const msg = dbErrorMessage(err)
   return msg.includes('connection') || msg.includes('ECONNREFUSED')
