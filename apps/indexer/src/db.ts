@@ -27,14 +27,30 @@ export function getMaintenanceDb() {
 
 export { schema, dbErrorMessage, unwrapDbError }
 
+// postgres.js's own synthetic errors for a socket that closed, ended, was
+// destroyed, or timed out connecting mid-flight (postgres@3.4.8 src/errors.js,
+// Errors.connection()) — plain Errors whose message is "write <CODE> host:port",
+// never a Postgres protocol message, so only .code identifies them.
+const POSTGRES_JS_SOCKET_CODES = new Set([
+  'CONNECTION_CLOSED',
+  'CONNECTION_ENDED',
+  'CONNECTION_DESTROYED',
+  'CONNECT_TIMEOUT',
+])
+
 /**
  * The database cannot take a connection right now, so the boot retries instead
  * of exiting. Postgres never puts the SQLSTATE in the message: once every slot is
  * taken, too_many_connections says only "sorry, too many clients already", so it
- * is recognised by its code.
+ * is recognised by its code. Same for cannot_connect_now (57P03 — starting up,
+ * shutting down, or in recovery) and for the driver/transport-level codes below:
+ * none of their messages contain "connection" or "ECONNREFUSED".
  */
 export function isConnectionError(err: unknown): boolean {
-  if ((unwrapDbError(err) as { code?: string })?.code === '53300') return true
+  const code = (unwrapDbError(err) as { code?: string })?.code
+  if (code === '53300' || code === '57P03') return true
+  if (code === 'ECONNRESET') return true
+  if (code !== undefined && POSTGRES_JS_SOCKET_CODES.has(code)) return true
   const msg = dbErrorMessage(err)
   return msg.includes('connection') || msg.includes('ECONNREFUSED')
 }
