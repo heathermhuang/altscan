@@ -37,4 +37,59 @@ describe('isConnectionError (boot-time ensureSchema retry)', () => {
     const denied = Object.assign(new Error('permission denied for schema public'), { code: '42501' })
     expect(isConnectionError(wrap(denied))).toBe(false)
   })
+
+  // Captured against a real postgres:16: a query cut off mid-flight (the backend
+  // killed via pg_terminate_backend) surfaces from postgres.js as a plain Error,
+  // never the Postgres 57P01 "terminating connection due to administrator command"
+  // message — only .code identifies it, same as 53300 above.
+  it('retries when postgres.js reports the connection closed mid-query', () => {
+    const closed = Object.assign(new Error('write CONNECTION_CLOSED 127.0.0.1:5432'), { code: 'CONNECTION_CLOSED' })
+    expect(isConnectionError(wrap(closed))).toBe(true)
+  })
+
+  // postgres.js's connection.js builds CONNECTION_CLOSED, CONNECTION_ENDED,
+  // CONNECTION_DESTROYED and CONNECT_TIMEOUT from the same Errors.connection()
+  // factory (postgres@3.4.8 src/errors.js) — identical "write <CODE> host:port"
+  // shape, only the code differs. CONNECTION_CLOSED is covered above; these are
+  // its siblings, confirmed against that source rather than re-triggered live.
+  it('retries the other postgres.js socket-teardown codes', () => {
+    const ended = Object.assign(new Error('write CONNECTION_ENDED 127.0.0.1:5432'), { code: 'CONNECTION_ENDED' })
+    const destroyed = Object.assign(new Error('write CONNECTION_DESTROYED 127.0.0.1:5432'), { code: 'CONNECTION_DESTROYED' })
+    const timeout = Object.assign(new Error('write CONNECT_TIMEOUT 127.0.0.1:5432'), { code: 'CONNECT_TIMEOUT' })
+    expect(isConnectionError(wrap(ended))).toBe(true)
+    expect(isConnectionError(wrap(destroyed))).toBe(true)
+    expect(isConnectionError(wrap(timeout))).toBe(true)
+  })
+
+  // Captured against a real postgres:16: cannot_connect_now (57P03) covers "the
+  // database system is starting up", "...is shutting down" and "...is in recovery
+  // mode" — a genuine PostgresError this time (the server answered), but the
+  // message text is not "connection" or "ECONNREFUSED" so only .code catches it.
+  it('retries cannot_connect_now while the database is starting up', () => {
+    const startingUp = Object.assign(new Error('the database system is starting up'), { code: '57P03' })
+    expect(isConnectionError(wrap(startingUp))).toBe(true)
+  })
+
+  it('retries cannot_connect_now while the database is shutting down', () => {
+    const shuttingDown = Object.assign(new Error('the database system is shutting down'), { code: '57P03' })
+    expect(isConnectionError(wrap(shuttingDown))).toBe(true)
+  })
+
+  // Captured against a real postgres:16: a forced TCP RST mid-query surfaces from
+  // Node as a plain Error with code ECONNRESET and message "read ECONNRESET" — no
+  // "connection" substring, so the existing message check misses it too.
+  it('retries a connection reset mid-query', () => {
+    const reset = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    expect(isConnectionError(wrap(reset))).toBe(true)
+  })
+
+  // Deliberately NOT a connection error: a bad hostname or password is a
+  // misconfiguration, not a database that will become reachable if we wait. The
+  // retry loop is bounded at 20 attempts (apps/indexer/src/index.ts) — treating
+  // this as retryable would mean minutes of silent backoff before the boot fails
+  // instead of exiting 1 immediately and surfacing the real problem.
+  it('does not retry a DNS/auth misconfiguration', () => {
+    const notFound = Object.assign(new Error('getaddrinfo ENOTFOUND bad.invalid'), { code: 'ENOTFOUND' })
+    expect(isConnectionError(wrap(notFound))).toBe(false)
+  })
 })
