@@ -32,6 +32,7 @@ const TRAINING_UAS = [
   'Mozilla/5.0 (compatible; Bytespider; spider-feedback@bytedance.com)',
   'meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
   'Mozilla/5.0 (compatible; FacebookBot/1.0; +https://developers.facebook.com/docs/sharing/webmasters/facebookbot)',
+  'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)',
 ]
 
 describe('bot-policy', () => {
