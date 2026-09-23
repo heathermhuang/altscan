@@ -33,6 +33,22 @@ describe('isConnectionError (boot-time ensureSchema retry)', () => {
     expect(isConnectionError(wrap(refused))).toBe(true)
   })
 
+  // Captured through postgres.js against localhost, which resolves to ::1 and
+  // 127.0.0.1: Node tries every address of a multi-address host and, once all
+  // are refused, fails with an AggregateError whose .message is empty. The
+  // per-address "connect ECONNREFUSED ..." errors sit in .errors, so only the
+  // .code Node copies from the first attempt says ECONNREFUSED.
+  it('retries a refused connection to a host with several addresses', () => {
+    const refused = Object.assign(
+      new AggregateError([
+        Object.assign(new Error('connect ECONNREFUSED ::1:5432'), { code: 'ECONNREFUSED' }),
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }),
+      ]),
+      { code: 'ECONNREFUSED' },
+    )
+    expect(isConnectionError(wrap(refused))).toBe(true)
+  })
+
   it('does not retry a statement the database answered and refused', () => {
     const denied = Object.assign(new Error('permission denied for schema public'), { code: '42501' })
     expect(isConnectionError(wrap(denied))).toBe(false)
