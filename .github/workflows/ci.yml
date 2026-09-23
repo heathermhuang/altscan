@@ -100,6 +100,15 @@ jobs:
           BACKFILL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/seam_test
         run: npx vitest run apps/explorer/lib/backfill-serve.pg.test.ts
 
+      # The token page's transfer list: token_address = $1 ORDER BY block_number
+      # walked the whole table for a token that had gone quiet and hit the web
+      # statement_timeout. Asserts rows read, on both the BNB (partitioned) and ETH
+      # (plain) shapes. Its tables are TEMP, so it shares worker_test.
+      - name: PG-gated explorer suite (token page transfers)
+        env:
+          TOKEN_TRANSFERS_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/explorer/lib/token-transfers-query.pg.test.ts
+
       # getDb() itself: a query that fails after rows have streamed must not leave
       # holes in the next result on that connection (postgres.js row-counter bug,
       # patches/postgres@3.4.8.patch). Its table is TEMP, so it shares worker_test.
