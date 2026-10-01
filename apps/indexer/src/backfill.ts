@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { dbErrorMessage, unwrapDbError } from './db'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
+import { indexerConfig } from './config-instance'
 import {
   processBlock,
   initTransferWriter,
@@ -28,7 +29,10 @@ const rpcUrl = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
   .map(s => s.trim())
   .filter(Boolean)[0] ?? chain.defaultRpcUrl
 const network = Network.from(chain.chainId)
-const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
+const provider = new JsonRpcProvider(rpcUrl, network, {
+  staticNetwork: network,
+  batchMaxCount: indexerConfig.rpc.batchMaxCount,
+})
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
