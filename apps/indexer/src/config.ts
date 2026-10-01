@@ -237,6 +237,13 @@ export function readIndexerConfig(
   }
 
   const rpc = {
+    /**
+     * Most requests ethers bundles into one JSON-RPC batch on the block endpoints.
+     * 100 is ethers' own default. drpc's free plan rejects any batch over 3, and
+     * catch-up (INDEX_CONCURRENCY blocks in flight) always exceeds that — ETH sat
+     * wedged on one block for ~60h from 2026-09-28. 1 disables batching.
+     */
+    batchMaxCount: r.int('RPC_BATCH_MAX_COUNT', 100, { min: 1 }),
     readTimeoutMs: r.int('RPC_READ_TIMEOUT_MS', 10_000, { min: 1 }),
     /** Ceiling on pure RPC acquisition per block. */
     fetchTimeoutMs: r.int('RPC_FETCH_TIMEOUT_MS', 8_000, { min: 1 }),

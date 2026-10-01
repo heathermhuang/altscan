@@ -77,7 +77,10 @@ partially persisted block instead of skipping it (`tryQuarantine` in
 An endpoint that answers `eth_getBlockByNumber` at the tip may lack `eth_getBlockReceipts`
 or return `[]` for it. Known bad: `rpc.flashbots.net` (returns `[]`, worse than erroring),
 `1rpc.io` and `cloudflare-eth.com` (no `eth_getBlockReceipts`), `eth.merkle.io`
-(Cloudflare 1015 after ~1 call), `publicnode.com` on BNB (403s).
+(Cloudflare 1015 after ~1 call), `publicnode.com` on BNB (403s), `eth-pokt.nodies.app` free
+(refuses full-transaction blocks). `eth.drpc.org` free rejects batches over 3, which catch-up
+always exceeds — keep `RPC_BATCH_MAX_COUNT=1` wherever it is in the list. Probe at catch-up
+concurrency too: both worked at the tip and wedged ETH for ~60h once it fell behind.
 
 ## Config vs runtime state
 

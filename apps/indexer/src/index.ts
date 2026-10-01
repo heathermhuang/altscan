@@ -138,7 +138,7 @@ async function main() {
   // network ID up-front eliminates the probe entirely.
   const network = Network.from(chain.chainId)
   const providers = RPC_URLS.map(url =>
-    new JsonRpcProvider(url, network, { staticNetwork: network })
+    new JsonRpcProvider(url, network, { staticNetwork: network, batchMaxCount: indexerConfig.rpc.batchMaxCount })
   )
   // Internal transactions come from a SEPARATE trace endpoint (none of the block
   // endpoints can trace) and are gated on lag at the call site, so catch-up —
