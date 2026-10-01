@@ -141,8 +141,9 @@ function header(c: Chain, status: ChainStatus) {
   if (!newest) return;
   latest.textContent = `#${fmt(newest[0])}`;
   if (status === 'stalled') {
-    const speed = c.idx === null ? '' : c.idx === 0 ? ' · no new blocks' : c.idx > 1.5 ? ` · ${Math.round(c.idx)}× speed` : '';
-    st.innerHTML = `catching up · ${lagLabel(unixNow() - newest[1])} behind<span class="wide">${speed}</span>`;
+    // Only say "catching up" when the indexer is measurably gaining on the chain.
+    const how = c.idx === null ? '' : c.idx === 0 ? ' · no new blocks' : c.idx > 1.5 ? ` · catching up at ${Math.round(c.idx)}×` : '';
+    st.innerHTML = `indexer ${lagLabel(unixNow() - newest[1])} behind<span class="wide">${how}</span>`;
     rate.textContent = '';
   } else {
     st.textContent = '';
@@ -157,7 +158,7 @@ function panel(c: Chain, status: ChainStatus) {
   const win = Number(p.dataset.window);
   const newest = c.tuples[0];
   $('[data-p-status]', p)!.textContent =
-    status === 'live' ? '● live' : status === 'stalled' ? 'catching up' : status === 'offline' ? 'offline' : '—';
+    status === 'live' ? '● live' : status === 'stalled' ? (c.idx && c.idx > 1.5 ? 'catching up' : 'behind') : status === 'offline' ? 'offline' : '—';
   if (!newest) return;
   $('[data-p-latest]', p)!.textContent = `#${fmt(newest[0])}`;
   const recent = c.tuples.filter((b) => b[1] >= newest[1] - win);
@@ -183,6 +184,8 @@ function anatomy(c: Chain) {
   set('chain', c.id === 'eth' ? 'ethereum' : 'bnb chain');
   set('number', `#${fmt(l.number)}`);
   set('hash', short(l.hash));
+  // Post-Merge, an Ethereum block's `miner` is its fee recipient (often a builder), not the validator.
+  set('minerlabel', c.id === 'eth' ? 'fee recipient' : 'validator');
   set('miner', short(l.miner));
   set('time', time);
   set('tx', fmt(l.txCount));
