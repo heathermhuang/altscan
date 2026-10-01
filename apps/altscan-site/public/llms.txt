@@ -20,8 +20,9 @@
 
 ## Data
 
-- [Live chain status JSON](https://altscan.io/api/chains.json): current health,
-  latest block, and response time for every explorer (60s cache)
+- [Live chain status JSON](https://altscan.io/api/chains.json): each explorer's
+  latest indexed block and its recent blocks as [number, unix time, transactions,
+  gas %], newest first (12s edge cache)
 
 ## Usage policy
 
