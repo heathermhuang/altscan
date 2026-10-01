@@ -1,9 +1,10 @@
 import assert from 'node:assert';
 import {
-  spreadSeconds, ratePerMin, mergeBlocks, classify, playhead, nextAnchor, sinceOpened,
-  DELAY_S, STALL_S, REANCHOR_S,
+  spreadSeconds, ratePerMin, mergeBlocks, classify, retarget, playheadAt, indexRate, lagLabel, sinceOpened,
+  DELAY_S, STALL_S, MAX_RATE, JUMP_S,
 } from '../src/lib/tape.ts';
 import type { BlockTuple } from '../src/lib/chains.ts';
+import type { Playhead } from '../src/lib/tape.ts';
 
 let passed = 0;
 function t(name: string, fn: () => void) { fn(); passed++; console.log('ok -', name); }
@@ -78,32 +79,62 @@ t('classify: online without a block is offline', () => {
   assert.equal(classify(true, null, 1000), 'offline');
 });
 
-// playhead / nextAnchor
-t('playhead: starts DELAY behind the newest block and advances with the wall clock', () => {
+// playhead: follows the indexing speed, never moves back
+const at = (ph: Playhead, now: number) => playheadAt(ph, now);
+t('retarget: the first payload starts DELAY behind the newest block at chain speed', () => {
   assert.equal(DELAY_S, 12);
-  const a = { newestT: 1000, wall: 50 };
-  assert.equal(playhead(a, 50), 988);
-  assert.equal(playhead(a, 53.5), 991.5);
+  assert.deepEqual(retarget(null, 1000, null, 50), { p0: 988, wall0: 50, rate: 1 });
 });
-t('nextAnchor: first payload anchors', () => {
-  assert.deepEqual(nextAnchor(null, 1000, 50), { newestT: 1000, wall: 50 });
+t('retarget: live steady state keeps rate 1 and stays continuous', () => {
+  const a = retarget(null, 1000, null, 0);
+  const b = retarget(a, 1012, 1, 12);
+  assert.equal(b.p0, at(a, 12));
+  close(b.rate, 1);
 });
-t('nextAnchor: keeps the anchor while the target is within reach', () => {
-  assert.equal(REANCHOR_S, 30);
-  const a = { newestT: 1000, wall: 0 };
-  // 12s later the newest is 1012 and the playhead is exactly on target.
-  assert.equal(nextAnchor(a, 1012, 12), a);
-  // indexer burst: target 29s ahead of the playhead → still smooth
-  assert.equal(nextAnchor(a, 1041, 12), a);
+t('retarget: an indexer catching up at 15x replays at ~15x', () => {
+  const a = retarget(null, 1000, null, 0);
+  const b = retarget(a, 1180, 15, 12);
+  close(b.rate, 15);
 });
-t('nextAnchor: jumps forward when the target runs more than REANCHOR ahead', () => {
-  const a = { newestT: 1000, wall: 0 };
-  assert.deepEqual(nextAnchor(a, 1043, 12), { newestT: 1043, wall: 12 });
+t('retarget: a steady 15x catch-up holds speed and stops jumping after the first poll', () => {
+  const a = retarget(null, 1000, null, 0);
+  const b = retarget(a, 1180, 15, 12);       // first gap is beyond JUMP_S → jump
+  const c = retarget(b, 1360, 15, 24);       // next poll lands exactly on target
+  assert.equal(c.p0, at(b, 24));
+  close(c.rate, 15);
 });
-t('nextAnchor: never moves the playhead backwards during a stall', () => {
-  const a = { newestT: 1000, wall: 0 };
-  // newest stuck at 1000 for 100s: the playhead is ~88s past its target but is not pulled back
-  assert.equal(nextAnchor(a, 1000, 100), a);
+t('retarget: speed is capped', () => {
+  assert.equal(MAX_RATE, 20);
+  const a = retarget(null, 1000, null, 0);
+  assert.equal(retarget(a, 1400, 40, 12).rate, MAX_RATE);
+});
+t('retarget: a burst within JUMP_S is absorbed smoothly, not jumped', () => {
+  assert.equal(JUMP_S, 60);
+  const a = retarget(null, 1000, null, 0);
+  const b = retarget(a, 1012 + 29, 1, 12);
+  assert.equal(b.p0, at(a, 12));
+  close(b.rate, 1 + 29 / 12);
+});
+t('retarget: a gap beyond JUMP_S jumps forward to the target', () => {
+  const a = retarget(null, 1000, null, 0);
+  assert.deepEqual(retarget(a, 1012 + 61, 1, 12), { p0: 1061, wall0: 12, rate: 1 });
+});
+t('retarget: a stopped indexer freezes the tape, never reverses it', () => {
+  const a = retarget(null, 1000, null, 0);
+  const b = retarget(a, 1000, 0, 12);      // newest unchanged; playhead 12s past target
+  assert.equal(b.rate, 0);
+  assert.equal(b.p0, at(a, 12));
+  assert.equal(at(b, 60), b.p0);
+});
+t('indexRate: chain seconds per wall second between payloads', () => {
+  assert.equal(indexRate(null, 1000, 5), null);
+  assert.equal(indexRate({ newestT: 1000, wall: 0 }, 1180, 12), 15);
+  assert.equal(indexRate({ newestT: 1000, wall: 12 }, 1010, 12), null);
+});
+t('lagLabel: seconds, minutes, hours', () => {
+  assert.equal(lagLabel(45), '45s');
+  assert.equal(lagLabel(150), '3m');
+  assert.equal(lagLabel(145743), '40h');
 });
 
 // sinceOpened

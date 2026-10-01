@@ -4,12 +4,17 @@ import type { BlockTuple } from './chains';
 export const DELAY_S = 12;
 /** Newest indexed block older than this → the indexer is catching up. */
 export const STALL_S = 90;
-/** Jump the playhead forward (never back) once the target runs this far ahead of it. */
-export const REANCHOR_S = 30;
+/** Seconds between polls; the playhead aims to be on target by the next payload. */
+export const POLL_S = 12;
+/** Fastest replay, as a multiple of chain speed (a catching-up indexer can run ~15x). */
+export const MAX_RATE = 20;
+/** A target further ahead than this is jumped to rather than chased. */
+export const JUMP_S = 60;
 
 export interface TapeBlock { n: number; t0: number; t1: number; tx: number; g: number }
 export type ChainStatus = 'loading' | 'live' | 'stalled' | 'offline';
-export interface Anchor { newestT: number; wall: number }
+/** Chain time p0 at wall time wall0, advancing `rate` chain-seconds per wall-second. */
+export interface Playhead { p0: number; wall0: number; rate: number }
 
 /**
  * Give each block the interval it took: (previous block's time, own time]. Timestamps are whole
@@ -67,18 +72,37 @@ export function classify(online: boolean | null, newestT: number | null, now: nu
   return now - newestT > STALL_S ? 'stalled' : 'live';
 }
 
-export function playhead(anchor: Anchor, now: number): number {
-  return anchor.newestT - DELAY_S + (now - anchor.wall);
+export function playheadAt(ph: Playhead, now: number): number {
+  return ph.p0 + ph.rate * (now - ph.wall0);
+}
+
+/** Chain-seconds indexed per wall-second between two payloads; ~1 when live, ~15 catching up. */
+export function indexRate(prev: { newestT: number; wall: number } | null, newestT: number, now: number): number | null {
+  if (!prev || now <= prev.wall) return null;
+  return Math.max(0, (newestT - prev.newestT) / (now - prev.wall));
 }
 
 /**
- * The playhead runs on the wall clock, so a hidden tab or a slow poll never desyncs it. It only
- * re-anchors when the target (newest − DELAY) gets more than REANCHOR_S ahead — an indexer burst
- * after a stall. It never moves back: during a stall it runs past the newest block and the tape drains.
+ * Steer the playhead toward (newest − DELAY_S) so it arrives by the next poll, moving at the speed
+ * the indexer is actually adding blocks. Live, that is chain speed. Catching up, the tape replays
+ * what was just indexed, faster. Stopped, it freezes. It never moves backwards, and a target more
+ * than JUMP_S ahead is jumped to (a backlog cleared while the tab slept).
  */
-export function nextAnchor(anchor: Anchor | null, newestT: number, now: number): Anchor {
-  if (!anchor) return { newestT, wall: now };
-  return newestT - DELAY_S - playhead(anchor, now) > REANCHOR_S ? { newestT, wall: now } : anchor;
+export function retarget(ph: Playhead | null, newestT: number, idxRate: number | null, now: number): Playhead {
+  const clamp = (r: number) => Math.min(MAX_RATE, Math.max(0, r));
+  const target = newestT - DELAY_S;
+  if (!ph) return { p0: target, wall0: now, rate: 1 };
+  const cur = playheadAt(ph, now);
+  // After a jump, move at the measured indexing speed, or a 15x catch-up would jump every poll.
+  if (target - cur > JUMP_S) return { p0: target, wall0: now, rate: clamp(idxRate ?? 1) };
+  return { p0: cur, wall0: now, rate: clamp((target + POLL_S * (idxRate ?? 1) - cur) / POLL_S) };
+}
+
+/** Compact lag for the tape header: 45s, 3m, 40h. */
+export function lagLabel(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
 }
 
 /** Blocks indexed since the page opened, summed over chains seen both then and now. */

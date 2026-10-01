@@ -52,6 +52,14 @@ t('parseBlocks: drops malformed rows instead of coercing them', () => {
   ] });
   assert.deepEqual(r.blocks?.map((b) => b[0]), [100]);
 });
+t('parseBlocks: duplicate numbers from overlapping pages collapse to one', () => {
+  const r = parseBlocks({ blocks: [
+    row(101, '2026-10-01T12:00:12.000Z', 7, '250'),
+    row(100, '2026-10-01T12:00:00.000Z', 3, '500'),
+    row(100, '2026-10-01T12:00:00.000Z', 3, '500'),
+  ] });
+  assert.deepEqual(r.blocks?.map((b) => b[0]), [101, 100]);
+});
 t('parseBlocks: an empty list is offline (a bad upstream, not an idle chain)', () => {
   assert.deepEqual(parseBlocks({ blocks: [] }), { block: null, online: false });
 });

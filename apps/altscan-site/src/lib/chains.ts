@@ -64,12 +64,14 @@ export function parseBlocks(body: unknown): ChainState {
   }
   if (valid.length === 0) return { block: null, online: false };
 
-  valid.sort((a, b) => b.tuple[0] - a.tuple[0]);
+  // Pages fetched in parallel can overlap when a block lands between them.
+  const unique = [...new Map(valid.map((v) => [v.tuple[0], v])).values()];
+  unique.sort((a, b) => b.tuple[0] - a.tuple[0]);
   return {
-    block: valid[0].tuple[0],
+    block: unique[0].tuple[0],
     online: true,
-    blocks: valid.map((v) => v.tuple),
-    latest: valid[0].latest,
+    blocks: unique.map((v) => v.tuple),
+    latest: unique[0].latest,
   };
 }
 
