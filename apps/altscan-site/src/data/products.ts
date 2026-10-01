@@ -6,7 +6,7 @@ export interface Product {
   chain: string;        // "BNB Chain"
   logoLetter: string;   // "B"
   /** Newest blocks fetched per poll, in pages of up to 50 (the explorer's max). Enough to fill a
-   *  wide tape on first load: BNB runs ~0.45s/block, so 100 blocks ≈ 45s; ETH 16 ≈ 3 minutes. */
+   *  wide tape on first load: BNB runs ~0.45s/block, so 150 blocks ≈ 67s (a 1920px tape plus the replay delay); ETH 16 ≈ 3 minutes. */
   tapeBlocks: number;
   /** Seconds of history drawn in the explorer panel's mini tape. */
   miniWindowS: number;
@@ -15,7 +15,7 @@ export interface Product {
 export const products: Product[] = [
   {
     id: 'bnb', brand: 'BNBScan', domain: 'bnbscan.com', url: 'https://bnbscan.com',
-    chain: 'BNB Chain', logoLetter: 'B', tapeBlocks: 100, miniWindowS: 30,
+    chain: 'BNB Chain', logoLetter: 'B', tapeBlocks: 150, miniWindowS: 30,
   },
   {
     id: 'eth', brand: 'EthScan', domain: 'ethscan.io', url: 'https://ethscan.io',

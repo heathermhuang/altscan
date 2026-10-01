@@ -1,0 +1,23 @@
+---
+import { products } from '../data/products';
+---
+<section class="tapes" aria-labelledby="tapes-title" data-tapes>
+  <h2 id="tapes-title" class="sr-only">Blocks being indexed right now</h2>
+  {products.map((p) => (
+    <div class={`chain ${p.id}`} data-chain={p.id} data-state="loading">
+      <div class={`wrap th${p.id === products[0].id ? '' : ' rule'}`}>
+        <span class="who"><span class={`sq ${p.id}`}></span><b>{p.chain}</b><span class="dom">{p.domain}</span></span>
+        <span class="meta"><b data-latest>—</b><span data-status></span><span class="rate" data-rate></span></span>
+      </div>
+      <div class="tape" role="group" tabindex="0" aria-label={`${p.chain}, latest indexed blocks. Use the arrow keys to step through blocks and Enter to open one.`}
+        data-track data-url={p.url} data-domain={p.domain}>
+        <noscript><span class="tape-msg">live tapes need JavaScript · <a href={p.url}>open {p.domain} ↗</a></span></noscript>
+      </div>
+    </div>
+  ))}
+  <div class="wrap cap rule">
+    <span data-readout aria-live="polite">width = block time · fill = gas used<span class="wide"> · rates measured from indexed blocks</span> · ~12s behind newest block</span>
+    <span class="since"><b data-since>—</b> blocks indexed since you opened this page</span>
+  </div>
+  <noscript><style>.cap .since,[data-latest]{visibility:hidden}</style></noscript>
+</section>

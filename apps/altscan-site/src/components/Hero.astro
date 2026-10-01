@@ -1,13 +1,14 @@
 ---
 import { GITHUB } from '../data/site';
 ---
-<header class="hero wrap">
-  <span class="kick">// open-source · multi-chain · block explorer platform</span>
-  <h1>The alternative explorer,<br>for every chain.</h1>
-  <p class="lede">One open-source engine — one indexer, one schema — powering independent explorers across chains. Two live today, more on the way.</p>
-  <div class="cta-row">
-    <a class="btn primary" href="#explorers">Open an explorer →</a>
-    <a class="btn ghost" href={GITHUB}>View source ↗</a>
+<header class="wrap hero">
+  <p class="k">// open-source · multi-chain · block explorer platform</p>
+  <h1><span class="ln">The alternative explorer,</span><span class="ln">for every chain.</span></h1>
+  <div class="hero-row">
+    <p class="lede">One open-source engine, one indexer, one schema, powering independent explorers. Below: the blocks it is indexing right now.</p>
+    <div class="ctas">
+      <a class="btn p" href="#explorers">Open an explorer <span aria-hidden="true">→</span></a>
+      <a class="btn g" href={GITHUB}>View source <span aria-hidden="true">↗</span></a>
+    </div>
   </div>
-  <slot />
 </header>
