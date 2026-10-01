@@ -16,8 +16,8 @@ import { products } from '../data/products';
     </div>
   ))}
   <div class="wrap cap rule">
-    <span data-readout aria-live="polite">width = block time · fill = gas used<span class="wide"> · rates measured from indexed blocks</span> · ~12s behind newest block</span>
-    <span class="since"><b data-since>—</b> blocks indexed since you opened this page</span>
+    <span data-readout aria-live="polite">width = block time · fill = gas used · replayed ~12s behind what each explorer has indexed</span>
+    <span class="cap-r"><button class="pause off" type="button" data-pause aria-pressed="false">pause tapes</button><span class="since off" data-since-row><b data-since></b> blocks indexed since you opened this page</span></span>
   </div>
-  <noscript><style>.cap .since,[data-latest]{visibility:hidden}</style></noscript>
+  <noscript><style>[data-latest]{visibility:hidden}</style></noscript>
 </section>

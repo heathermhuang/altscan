@@ -72,8 +72,9 @@ export function classify(online: boolean | null, newestT: number | null, now: nu
   return now - newestT > STALL_S ? 'stalled' : 'live';
 }
 
-export function playheadAt(ph: Playhead, now: number): number {
-  return ph.p0 + ph.rate * (now - ph.wall0);
+/** Where the playhead is now; with `horizon` (the newest block received) it never runs past the data. */
+export function playheadAt(ph: Playhead, now: number, horizon = Infinity): number {
+  return Math.min(horizon, ph.p0 + ph.rate * (now - ph.wall0));
 }
 
 /** Chain-seconds indexed per wall-second between two payloads; ~1 when live, ~15 catching up. */
@@ -92,7 +93,8 @@ export function retarget(ph: Playhead | null, newestT: number, idxRate: number |
   const clamp = (r: number) => Math.min(MAX_RATE, Math.max(0, r));
   const target = newestT - DELAY_S;
   if (!ph) return { p0: target, wall0: now, rate: 1 };
-  const cur = playheadAt(ph, now);
+  // A burst-then-pause indexer can leave the extrapolated playhead past its data; resume from the data.
+  const cur = playheadAt(ph, now, newestT);
   // After a jump, move at the measured indexing speed, or a 15x catch-up would jump every poll.
   if (target - cur > JUMP_S) return { p0: target, wall0: now, rate: clamp(idxRate ?? 1) };
   return { p0: cur, wall0: now, rate: clamp((target + POLL_S * (idxRate ?? 1) - cur) / POLL_S) };

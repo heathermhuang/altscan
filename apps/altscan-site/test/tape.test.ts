@@ -126,6 +126,18 @@ t('retarget: a stopped indexer freezes the tape, never reverses it', () => {
   assert.equal(b.p0, at(a, 12));
   assert.equal(at(b, 60), b.p0);
 });
+t('retarget: a playhead that ran past the newest block is pulled back to it, not beyond', () => {
+  // A 15x catch-up stalls: the extrapolated playhead (1000 + 15*12 = 1180) is past the newest block (1100).
+  const ph = { p0: 1000, wall0: 0, rate: 15 };
+  const b = retarget(ph, 1100, 0, 12);
+  assert.equal(b.p0, 1100);
+  assert.equal(b.rate, 0);
+});
+t('playheadAt with a horizon never passes the newest block between polls', () => {
+  const ph = { p0: 1000, wall0: 0, rate: 15 };
+  assert.equal(playheadAt(ph, 12, 1100), 1100);
+  assert.equal(playheadAt(ph, 2, 1100), 1030);
+});
 t('indexRate: chain seconds per wall second between payloads', () => {
   assert.equal(indexRate(null, 1000, 5), null);
   assert.equal(indexRate({ newestT: 1000, wall: 0 }, 1180, 12), 15);

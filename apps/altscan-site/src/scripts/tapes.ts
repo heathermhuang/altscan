@@ -36,6 +36,7 @@ const section = $('[data-tapes]');
 const readout = $('[data-readout]');
 const legend = readout?.innerHTML ?? '';
 const sinceEl = $('[data-since]');
+const sinceRow = $('[data-since-row]');
 const cursor = $('[data-cursor]');
 
 const chains: Chain[] = [...document.querySelectorAll<HTMLElement>('[data-chain]')].map((el) => {
@@ -70,7 +71,6 @@ function tile(c: Chain, b: TapeBlock): HTMLAnchorElement {
   a.dataset.n = String(b.n);
   a.setAttribute('aria-label', `Block ${fmt(b.n)}, ${b.tx} transactions, gas ${b.g}%`);
   const w = Math.max(1, (b.t1 - b.t0) * S - 2);
-  a.style.width = `${w}px`;
   a.innerHTML = `<i style="height:${b.g}%"></i>` +
     (w > 230 ? `<span class="lb">#${fmt(b.n)} · ${b.tx} txs · ${b.g}% gas</span>` : '') +
     (w > 230 && spec?.id === c.id && spec.n === b.n ? '<span class="mark">↓ taken apart below</span>' : '');
@@ -80,12 +80,12 @@ function tile(c: Chain, b: TapeBlock): HTMLAnchorElement {
 function draw(c: Chain, i: number, wall: number, live: boolean) {
   if (!c.ph) return;
   const W = widths[i];
-  const P = c.frozenP ?? playheadAt(c.ph, wall);
+  const P = c.frozenP ?? playheadAt(c.ph, wall, c.tuples[0]?.[1]);
   const keep = new Set<number>();
   let lastT1: number | null = null;
   for (let k = c.blocks.length - 1; k >= 0; k--) {
     const b = c.blocks[k];
-    if (b.t1 > P) continue;
+    if (b.t0 > P) continue;               // not reached yet; it slides in from the right edge
     if (W - (P - b.t1) * S < 0) break;
     lastT1 ??= b.t1;
     keep.add(b.n);
@@ -94,15 +94,18 @@ function draw(c: Chain, i: number, wall: number, live: boolean) {
       el = tile(c, b);
       c.tiles.set(b.n, el);
       c.track.insertBefore(el, c.pend);
-      if (live && c.id === 'bnb' && !reduce && cursor) {
+      if (live && c.id === 'bnb' && !reduce && !paused && cursor) {
         cursor.animate([{ opacity: 1 }, { opacity: 0.35 }], { duration: 350, easing: 'ease-out' });
       }
     }
+    // A later poll can fill a gap between parallel pages, shrinking a drawn block's interval.
+    const w = `${Math.max(1, (b.t1 - b.t0) * S - 2).toFixed(1)}px`;
+    if (el.style.width !== w) el.style.width = w;
     el.style.transform = `translate3d(${(W - (P - b.t0) * S).toFixed(1)}px,0,0)`;
   }
   for (const [n, el] of c.tiles) if (!keep.has(n)) { el.remove(); c.tiles.delete(n); }
 
-  const gap = lastT1 === null ? 0 : (P - lastT1) * S;
+  const gap = lastT1 === null ? 0 : Math.max(0, (P - lastT1) * S);
   c.pend.hidden = c.online !== true || gap < 24;
   if (!c.pend.hidden) {
     c.pend.style.transform = `translate3d(${(W - gap + 1).toFixed(1)}px,0,0)`;
@@ -113,12 +116,13 @@ function draw(c: Chain, i: number, wall: number, live: boolean) {
 
 let raf = 0;
 let onScreen = true;
+let paused = false;
 function frame() {
   const wall = wallNow();
   chains.forEach((c, i) => draw(c, i, wall, true));
   raf = requestAnimationFrame(frame);
 }
-function startLoop() { if (!reduce && !raf && onScreen && !document.hidden) raf = requestAnimationFrame(frame); }
+function startLoop() { if (!reduce && !paused && !raf && onScreen && !document.hidden) raf = requestAnimationFrame(frame); }
 function stopLoop() { cancelAnimationFrame(raf); raf = 0; }
 
 /* ── Status, header, panels ────────────────────────────────────── */
@@ -138,7 +142,7 @@ function header(c: Chain, status: ChainStatus) {
   latest.textContent = `#${fmt(newest[0])}`;
   if (status === 'stalled') {
     const speed = c.idx === null ? '' : c.idx === 0 ? ' · no new blocks' : c.idx > 1.5 ? ` · ${Math.round(c.idx)}× speed` : '';
-    st.textContent = `catching up · ${lagLabel(unixNow() - newest[1])} behind${speed}`;
+    st.innerHTML = `catching up · ${lagLabel(unixNow() - newest[1])} behind<span class="wide">${speed}</span>`;
     rate.textContent = '';
   } else {
     st.textContent = '';
@@ -211,12 +215,16 @@ function anatomy(c: Chain) {
   }
 }
 
-/** Offline with nothing to show: say so in the track instead of leaving a blank strip. */
+/** With no blocks to draw, say what is happening in the track instead of leaving a blank strip. */
 function message(c: Chain, status: ChainStatus) {
   let m = $('.tape-msg', c.track);
-  if (status === 'offline' && c.tuples.length === 0) {
+  const text = c.tuples.length ? null
+    : status === 'loading' ? `connecting to ${c.domain}…`
+    : status === 'offline' ? `${c.domain} isn't answering · retrying every ${POLL_S}s · <a href="${c.url}">open ${c.domain} ↗</a>`
+    : null;
+  if (text) {
     if (!m) { m = document.createElement('span'); m.className = 'tape-msg'; c.track.appendChild(m); }
-    m.innerHTML = `${c.domain} isn't answering · retrying every ${POLL_S}s · <a href="${c.url}">open ${c.domain} ↗</a>`;
+    m.innerHTML = text;
   } else m?.remove();
 }
 
@@ -242,16 +250,17 @@ function apply(payload: Record<string, ChainState> | null) {
     } else {
       c.online = false;
       // Freeze where it stood; the grey tiles keep showing the last blocks seen.
-      if (c.ph) c.ph = { p0: playheadAt(c.ph, wall), wall0: wall, rate: 0 };
+      if (c.ph) c.ph = { p0: playheadAt(c.ph, wall, c.tuples[0]?.[1]), wall0: wall, rate: 0 };
     }
     const status = classify(c.online, c.tuples[0]?.[1] ?? null, unix);
     c.el.dataset.state = status;
     message(c, status);
     header(c, status);
     panel(c, status);
-    if (reduce || !raf) draw(c, i, wall, false);
+    if (reduce || paused || !raf) draw(c, i, wall, false);
   });
-  if (Object.keys(firstSeen).length && sinceEl) sinceEl.textContent = fmt(sinceOpened(firstSeen, current));
+  const since = sinceOpened(firstSeen, current);
+  if (sinceEl && sinceRow && since > 0) { sinceEl.textContent = fmt(since); sinceRow.classList.remove('off'); }
   anatomy(chains.find((c) => c.id === 'eth' && c.online) ?? chains.find((c) => c.online) ?? chains[0]);
 }
 
@@ -288,12 +297,12 @@ for (const c of chains) {
   });
   c.track.addEventListener('focus', () => {
     if (!c.ph) return;
-    c.frozenP = playheadAt(c.ph, wallNow());
+    c.frozenP = playheadAt(c.ph, wallNow(), c.tuples[0]?.[1]);
     const shown = [...c.tiles.keys()].sort((a, b) => b - a);
     highlight(c, shown[0] ?? null);
   });
   c.track.addEventListener('blur', () => {
-    c.frozenP = null;
+    if (!paused) c.frozenP = null;
     highlight(c, null);
     restoreReadout();
   });
@@ -313,6 +322,22 @@ for (const c of chains) {
   });
 }
 section?.addEventListener('pointerleave', restoreReadout);
+
+const pauseBtn = $<HTMLButtonElement>('[data-pause]');
+if (pauseBtn && !reduce) {
+  pauseBtn.classList.remove('off');
+  pauseBtn.addEventListener('click', () => {
+    paused = !paused;
+    pauseBtn.setAttribute('aria-pressed', String(paused));
+    pauseBtn.textContent = paused ? 'play tapes' : 'pause tapes';
+    const wall = wallNow();
+    for (const c of chains) {
+      if (paused && c.ph) c.frozenP ??= playheadAt(c.ph, wall, c.tuples[0]?.[1]);
+      else if (c.hl === null) c.frozenP = null;
+    }
+    if (paused) stopLoop(); else startLoop();
+  });
+}
 
 function highlight(c: Chain, n: number | null) {
   if (c.hl !== null) c.tiles.get(c.hl)?.classList.remove('hl');
@@ -378,5 +403,6 @@ if (term && !reduce && 'IntersectionObserver' in window) {
   io.observe(term);
 }
 
+chains.forEach((c) => message(c, 'loading'));
 poll();
 startLoop();
