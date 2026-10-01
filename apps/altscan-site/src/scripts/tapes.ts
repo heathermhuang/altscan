@@ -57,6 +57,8 @@ let S = innerWidth < 760 ? 24 : 34; // px per chain-second, equal on both tapes
 let widths = chains.map((c) => c.track.clientWidth);
 const firstSeen: Record<string, number> = {};
 let anatomyDone = false;
+/** The block the anatomy section takes apart; its tile on the tape is marked when it arrives. */
+let spec: { id: string; n: number } | null = null;
 
 /* ── Rendering ─────────────────────────────────────────────────── */
 
@@ -70,7 +72,8 @@ function tile(c: Chain, b: TapeBlock): HTMLAnchorElement {
   const w = Math.max(1, (b.t1 - b.t0) * S - 2);
   a.style.width = `${w}px`;
   a.innerHTML = `<i style="height:${b.g}%"></i>` +
-    (w > 230 ? `<span class="lb">#${fmt(b.n)} · ${b.tx} txs · ${b.g}% gas</span>` : '');
+    (w > 230 ? `<span class="lb">#${fmt(b.n)} · ${b.tx} txs · ${b.g}% gas</span>` : '') +
+    (w > 230 && spec?.id === c.id && spec.n === b.n ? '<span class="mark">↓ taken apart below</span>' : '');
   return a;
 }
 
@@ -186,6 +189,21 @@ function anatomy(c: Chain) {
   set('gasp', `How full the block ran: ${g}% of its gas limit${fee}.`);
   const bar = $('[data-a-gasbar]', root);
   if (bar) bar.style.width = `${g}%`;
+  // The same tile the tape draws for this block, at the tape's scale.
+  const tb = c.blocks.find((b) => b.n === l.number);
+  const fig = $('[data-a-spec]', root);
+  if (tb && fig) {
+    spec = { id: c.id, n: l.number };
+    const dt = tb.t1 - tb.t0;
+    fig.hidden = false;
+    fig.classList.toggle('bnb', c.id === 'bnb');
+    const tileEl = $('.spec-tile', fig)!;
+    requestAnimationFrame(() => {
+      tileEl.style.width = `${Math.max(4, dt * S)}px`;
+      $('i', tileEl)!.style.height = `${g}%`;
+    });
+    set('speccap', `its tile on the tape: ${dt.toFixed(dt < 2 ? 2 : 0)}s wide, ${g}% full`);
+  }
   for (const a of root.querySelectorAll<HTMLAnchorElement>('[data-a-link]')) {
     const path = a.dataset.aLink === '/blocks/' ? `/blocks/${l.number}` : a.dataset.aLink!;
     a.href = `${c.url}${path}`;
@@ -349,7 +367,7 @@ if (term && !reduce && 'IntersectionObserver' in window) {
     const n = line.textContent?.length ?? 0;
     line.style.setProperty('--n', String(n));
     line.style.setProperty('--d', `${delay}ms`);
-    delay += n * 28 + 220;
+    delay += n * 16 + 140;
   }
   term.classList.add('armed');
   const io = new IntersectionObserver(([e]) => {

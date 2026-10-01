@@ -9,7 +9,7 @@
   --eth:#1E3A8A; --ethT:#E4E9F6; --ethInk:#1E3A8A; --ethBrand:#1E3A8A;
   --off:#c4c4cc; --offT:#eeeef2; --offInk:#8a8a94;
   --live:#15803d; --warn:#9a4a32; --warnT:#fff8f5;
-  --pend:#b9c2de; --pendInk:#6c7bb0;
+  --pend:#b9c2de; --pendInk:#56659e;
   --band:#0c0c12; --bandLine:#0c0c12;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
   --sans:"Inter Variable","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -67,13 +67,6 @@ a{color:inherit;text-decoration:none}
 .btn.p{background:var(--ink);color:var(--bg)}
 .btn.g{background:var(--card);border:1px solid var(--hair)}
 .btn.g:hover{border-color:var(--hair3)}
-@media (prefers-reduced-motion:no-preference){
-  .hero .k,.hero h1 .ln,.hero-row{animation:rise .4s var(--ease) both}
-  .hero h1 .ln:nth-child(1){animation-delay:.06s}
-  .hero h1 .ln:nth-child(2){animation-delay:.12s}
-  .hero-row{animation-delay:.18s}
-}
-@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 
 /* ── Tapes ─────────────────────────────────────────────────────── */
 .tapes{background:var(--card);border-block:1px solid var(--hair);position:relative}
@@ -96,6 +89,7 @@ a{color:inherit;text-decoration:none}
 .tl .lb{position:absolute;left:8px;top:6px;font-family:var(--mono);font-size:12px;padding:1px 6px;border-radius:4px;white-space:nowrap;background:var(--t);color:var(--ethInk)}
 .chain[data-state=offline] .tl .lb{color:var(--offInk)}
 .tl.hl{outline:2px solid var(--ink);outline-offset:1px}
+.tl .mark{position:absolute;right:8px;bottom:6px;font-family:var(--mono);font-size:12px;padding:1px 6px;border-radius:4px;background:var(--ink);color:var(--bg);white-space:nowrap}
 .pd{position:absolute;left:0;top:8px;bottom:10px;border:1px dashed var(--pend);border-radius:3px;will-change:transform}
 .pd .lb{position:absolute;left:8px;top:6px;font-family:var(--mono);font-size:12px;color:var(--pendInk);white-space:nowrap}
 .tape-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12.5px;color:var(--mut)}
@@ -109,17 +103,22 @@ a{color:inherit;text-decoration:none}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 
 /* ── Sections ──────────────────────────────────────────────────── */
-.sec{padding-block:clamp(64px,9vw,128px)}
+.sec{padding-block:clamp(56px,7vw,104px)}
 .sec h2{font-size:clamp(34px,4.6vw,64px);letter-spacing:-.045em;line-height:1;font-weight:700;margin-top:14px}
 
 /* ── Anatomy ───────────────────────────────────────────────────── */
-.anat{display:grid;grid-template-columns:5fr 6fr;gap:clamp(24px,5vw,80px);margin-top:clamp(28px,4vw,56px);align-items:start}
+.anat{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,5vw,80px);margin-top:clamp(28px,4vw,56px);align-items:start}
 .bcard{background:var(--card);border:1px solid var(--hair);border-radius:16px;padding:26px;position:sticky;top:84px}
 .bnum{font-family:var(--mono);font-size:clamp(26px,2.8vw,38px);letter-spacing:-.04em;font-weight:500;margin:8px 0 18px}
 .kv{display:flex;justify-content:space-between;gap:12px;font-family:var(--mono);font-size:13.5px;line-height:2.15;color:var(--ink2);margin-inline:-8px;padding-inline:8px;border-radius:5px;transition:background-color .18s,color .18s}
 .kv dt{color:var(--mut)}
 .kv dd{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kv.on{background:var(--accT);color:var(--accInk)} .kv.on dt{color:var(--accInk)}
+.spec{margin:4px 0 18px}
+.spec-tile{position:relative;height:44px;border-radius:3px;overflow:hidden;background:var(--ethT);width:0;max-width:100%;transition:width .6s var(--ease)}
+.spec-tile i{position:absolute;left:0;right:0;bottom:0;background:var(--eth);height:0;transition:height .6s var(--ease) .2s}
+.spec.bnb .spec-tile{background:var(--bnbT)} .spec.bnb .spec-tile i{background:var(--bnb)}
+.spec figcaption{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
 .gas{height:7px;background:var(--ethT);border-radius:99px;margin-top:14px;overflow:hidden}
 .gas div{height:100%;width:0;background:var(--eth);transition:width .6s var(--ease)}
 .steps{list-style:none}
@@ -137,7 +136,7 @@ a{color:inherit;text-decoration:none}
 .also a:hover{text-decoration-color:currentColor}
 
 /* ── Explorer panels ───────────────────────────────────────────── */
-.prods{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:clamp(28px,4vw,48px)}
+.prods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:clamp(28px,4vw,48px)}
 .pan{border-radius:22px;padding:clamp(22px,2.6vw,36px);min-height:340px;display:flex;flex-direction:column;transition:transform .2s var(--ease)}
 .pan:hover{transform:translateY(-3px)}
 .pan.bnb{background:var(--bnbBrand);color:#1a1400}
@@ -168,7 +167,7 @@ a{color:inherit;text-decoration:none}
 .more a{color:var(--acc);white-space:nowrap}
 
 /* ── Open source band ──────────────────────────────────────────── */
-.oss{background:var(--band);border:1px solid var(--bandLine);color:#e9e9f0;border-radius:24px;padding:clamp(28px,4vw,56px);display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,4vw,56px);align-items:center}
+.oss{background:var(--band);border:1px solid var(--bandLine);color:#e9e9f0;border-radius:24px;padding:clamp(28px,4vw,56px);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(24px,4vw,56px);align-items:center}
 .oss .k{color:#9a9ab0}
 .oss h2{color:#fff;font-size:clamp(30px,3.4vw,48px)}
 .oss p{color:#a9a9bd;margin-top:14px;font-size:16px;max-width:440px}
@@ -187,7 +186,7 @@ a{color:inherit;text-decoration:none}
 .term .c{color:#7a7a8c} .term .ps{color:#5bd17e} .term .y{color:#F2C200}
 .term .ty{display:inline-block;white-space:pre;overflow:hidden;vertical-align:bottom}
 .term.armed .ty{width:0}
-.term.armed.go .ty{animation:type calc(var(--n) * 28ms) steps(var(--n),end) var(--d) forwards}
+.term.armed.go .ty{animation:type calc(var(--n) * 16ms) steps(var(--n),end) var(--d) forwards}
 @keyframes type{to{width:calc(var(--n) * 1ch)}}
 .term .caret{display:inline-block;width:.6em;height:1.1em;vertical-align:-.15em;background:#cdd4cf}
 @media (prefers-reduced-motion:no-preference){.term .caret{animation:blink 1s steps(1) infinite}}
@@ -213,7 +212,7 @@ a{color:inherit;text-decoration:none}
   .cap .wide{display:none}
   .ctas{width:100%}
   .ctas .btn{flex:1 1 0;justify-content:center;min-width:0;padding-inline:12px}
-  .anat,.prods,.oss{grid-template-columns:1fr}
+  .anat,.prods,.oss{grid-template-columns:minmax(0,1fr)}
   .bcard{position:static}
   .step{margin-inline:-14px;padding:22px 14px}
   .pan{min-height:280px}

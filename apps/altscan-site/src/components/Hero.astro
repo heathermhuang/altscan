@@ -1,5 +1,5 @@
 ---
-import { GITHUB } from '../data/site';
+import { products } from '../data/products';
 ---
 <header class="wrap hero">
   <p class="k">// open-source · multi-chain · block explorer platform</p>
@@ -7,8 +7,9 @@ import { GITHUB } from '../data/site';
   <div class="hero-row">
     <p class="lede">One open-source engine, one indexer, one schema, powering independent explorers. Below: the blocks it is indexing right now.</p>
     <div class="ctas">
-      <a class="btn p" href="#explorers">Open an explorer <span aria-hidden="true">→</span></a>
-      <a class="btn g" href={GITHUB}>View source <span aria-hidden="true">↗</span></a>
+      {products.map((p, i) => (
+        <a class={`btn ${i === 0 ? 'p' : 'g'}`} href={p.url}>Open {p.brand} <span aria-hidden="true">↗</span></a>
+      ))}
     </div>
   </div>
 </header>
