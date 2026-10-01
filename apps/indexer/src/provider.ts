@@ -1,6 +1,7 @@
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
 import { formatRedactedError } from './rpc-failover'
+import { indexerConfig } from './config-instance'
 
 /**
  * Shared RPC provider singleton for one-off callers (validator-syncer etc.).
@@ -41,7 +42,10 @@ export const TRACE_RPC_URLS = (process.env.TRACE_RPC_URL ?? '')
 
 const rpcUrl = RPC_URLS[0] ?? chain.defaultRpcUrl
 const network = Network.from(chain.chainId)
-const provider = new JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
+const provider = new JsonRpcProvider(rpcUrl, network, {
+  staticNetwork: network,
+  batchMaxCount: indexerConfig.rpc.batchMaxCount,
+})
 
 export function getProvider(): JsonRpcProvider {
   return provider

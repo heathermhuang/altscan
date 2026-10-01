@@ -23,6 +23,7 @@ describe('defaults match the values they replaced', () => {
     ['indexing.resumeGapScanBlocks', config.indexing.resumeGapScanBlocks, 20_000],
     ['indexing.maxLagBlocks', config.indexing.maxLagBlocks, 1000],
     ['indexing.profileBlocks', config.indexing.profileBlocks, 0],
+    ['rpc.batchMaxCount', config.rpc.batchMaxCount, 100],
     ['rpc.readTimeoutMs', config.rpc.readTimeoutMs, 10_000],
     ['rpc.fetchTimeoutMs', config.rpc.fetchTimeoutMs, 8_000],
     ['rpc.reorgTimeoutMs', config.rpc.reorgTimeoutMs, 45_000],
