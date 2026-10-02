@@ -163,7 +163,8 @@ function panel(c: Chain, status: ChainStatus) {
   $('[data-p-latest]', p)!.textContent = `#${fmt(newest[0])}`;
   const recent = c.tuples.filter((b) => b[1] >= newest[1] - win);
   const blocks = spreadSeconds(recent);
-  $('[data-p-count]', p)!.textContent = `${fmt(blocks.length)} blocks`;
+  // Count every block in the window; spreadSeconds drops the oldest second, which only anchors widths.
+  $('[data-p-count]', p)!.textContent = `${fmt(recent.length)} blocks`;
   const mini = $('[data-mini]', p)!;
   const W = mini.clientWidth;
   const span = blocks.length ? blocks[blocks.length - 1].t1 - blocks[0].t0 : 0;
