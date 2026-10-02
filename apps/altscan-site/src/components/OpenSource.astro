@@ -8,12 +8,11 @@ import GitHubIcon from './GitHubIcon.astro';
     <div>
       <p class="k">// free and open source</p>
       <h2 id="oss-title">One codebase.<br />Run it yourself.</h2>
-      <p>AGPL-3.0. The engine behind bnbscan.com and ethscan.io is yours to read, fork and self-host. Each chain is one entry in <code>chain-config</code>; set <code>CHAIN</code> and run it.</p>
-      <ul class="chips"><li>Next.js 15</li><li>Drizzle ORM</li><li>ethers v6</li><li>one schema</li><li>AGPL-3.0</li></ul>
+      <p>AGPL-3.0. The engine behind bnbscan.com and ethscan.io is yours to read, fork and self-host: Next.js 15, Drizzle ORM and ethers v6 on one Postgres schema. Each chain is one entry in <code>chain-config</code>; set <code>CHAIN</code> and run it.</p>
       <div class="obtn"><a class="b1" href={GITHUB}><GitHubIcon size={15} /> Star on GitHub</a><a class="b2" href={`${GITHUB}#getting-started`}>Self-host guide <span aria-hidden="true">→</span></a></div>
     </div>
     <div class="term" data-term>
-      <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="bar"><span>run one chain</span><button class="copy" type="button" data-copy={`git clone ${GITHUB}\ncd altscan && pnpm install\nCHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev`} hidden>copy</button></div>
       <pre tabindex="0" aria-label="Commands to run one chain locally"><span class="ty"><span class="c"># clone and run one chain</span></span>
 <span class="ty"><span class="ps">$</span> git clone {GITHUB}</span>
 <span class="ty"><span class="ps">$</span> cd altscan && pnpm install</span>

@@ -11,7 +11,7 @@ const windowLabel = p.miniWindowS >= 120 ? `last ${p.miniWindowS / 60} min` : `l
   <div class="mini" data-mini aria-hidden="true"></div>
   <dl class="pst">
     <div><dt>latest block</dt><dd data-p-latest>—</dd></div>
-    <div><dt>{windowLabel}</dt><dd data-p-count>—</dd></div>
+    <div><dt data-p-window>{windowLabel}</dt><dd data-p-count>—</dd></div>
     <div><dt>status</dt><dd data-p-status>—</dd></div>
   </dl>
   <span class="pgo">Open explorer <span aria-hidden="true">→</span></span>
