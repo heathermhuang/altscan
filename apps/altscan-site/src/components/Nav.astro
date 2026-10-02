@@ -2,11 +2,11 @@
 import { GITHUB } from '../data/site';
 import GitHubIcon from './GitHubIcon.astro';
 ---
-<nav><div class="nav-in">
-  <span class="brand">altscan<span class="cur">▋</span></span>
+<nav class="nav" aria-label="Main"><div class="wrap nav-in">
+  <a class="brand" href="/" aria-label="Altscan home">altscan<span class="cur" data-cursor aria-hidden="true">▋</span></a>
   <div class="nav-links">
-    <a href="#explorers">Explorers</a><a href="#capabilities">Capabilities</a>
-    <a href="#open-source">Open Source</a><a href={GITHUB}>Docs</a>
+    <a href="#explorers">Explorers</a><a href="#anatomy">Anatomy</a>
+    <a href="#open-source">Open source</a><a href={GITHUB}>Docs</a>
   </div>
   <a class="gh" href={GITHUB} aria-label="Altscan on GitHub"><GitHubIcon size={15} /> <b>GitHub</b></a>
 </div></nav>

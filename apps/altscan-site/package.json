@@ -9,18 +9,18 @@
     "build": "astro build",
     "preview": "wrangler dev",
     "deploy": "astro build && wrangler deploy",
-    "test": "tsx test/chains.test.ts",
+    "test": "tsx test/chains.test.ts && tsx test/tape.test.ts",
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^5.2.0",
     "@astrojs/cloudflare": "^12.2.0",
     "@astrojs/sitemap": "^3.2.0",
-    "@fontsource/inter": "^5.1.0",
-    "@fontsource/jetbrains-mono": "^5.1.0"
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.1.0",
+    "astro": "^5.2.0"
   },
   "devDependencies": {
-    "wrangler": "^4.115.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "wrangler": "^4.115.0"
   }
 }

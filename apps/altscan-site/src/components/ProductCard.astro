@@ -2,15 +2,17 @@
 import type { Product } from '../data/products';
 interface Props { product: Product; }
 const { product: p } = Astro.props;
+const windowLabel = p.miniWindowS >= 120 ? `last ${p.miniWindowS / 60} min` : `last ${p.miniWindowS}s`;
 ---
-<a class={`pcard ${p.id}`} href={p.url}>
-  <div class="edge"></div>
-  <div class="top"><span class="logo">{p.logoLetter}</span>
-    <h3>{p.brand}<small>{p.domain} · {p.chain}</small></h3>
+<a class={`pan ${p.id}`} href={p.url} data-panel={p.id} data-window={p.miniWindowS}>
+  <div class="ptop"><span class="logo" aria-hidden="true">{p.logoLetter}</span>
+    <div><div class="pname">{p.brand}</div><div class="pdom">{p.domain} · {p.chain}</div></div>
   </div>
-  <div class="pstats">
-    <div><div class="lbl">latest block</div><div class="n" data-chain-block={p.id}>—</div></div>
-    <div><div class="lbl">status</div><div class="n" style="color:var(--live)">● live</div></div>
-  </div>
-  <span class="open">Open explorer →</span>
+  <div class="mini" data-mini aria-hidden="true"></div>
+  <dl class="pst">
+    <div><dt>latest block</dt><dd data-p-latest>—</dd></div>
+    <div><dt>{windowLabel}</dt><dd data-p-count>—</dd></div>
+    <div><dt>status</dt><dd data-p-status>—</dd></div>
+  </dl>
+  <span class="pgo">Open explorer <span aria-hidden="true">→</span></span>
 </a>

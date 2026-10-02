@@ -1,0 +1,54 @@
+---
+// Filled from the newest ETH block in the first /api/chains.json response (BNB if ETH is
+// unavailable), then frozen while the visitor reads. Without data it stays a "—" skeleton.
+---
+<section id="anatomy" class="wrap sec" aria-labelledby="anatomy-title" data-anatomy>
+  <p class="k">// anatomy of a block</p>
+  <h2 id="anatomy-title">One real block,<br />taken apart.</h2>
+  <div class="anat">
+    <div class="bcard">
+      <p class="k" style="font-size:11px"><span data-a-chain>ethereum</span> · block</p>
+      <p class="bnum" data-a-number>#—</p>
+      <figure class="spec" data-a-spec hidden>
+        <div class="spec-tile"><i></i></div>
+        <figcaption data-a-speccap></figcaption>
+      </figure>
+      <dl>
+        <div class="kv" data-row="1"><dt>hash</dt><dd data-a-hash>—</dd></div>
+        <div class="kv" data-row="1"><dt data-a-minerlabel>fee recipient</dt><dd data-a-miner>—</dd></div>
+        <div class="kv" data-row="1"><dt>time</dt><dd data-a-time>—</dd></div>
+        <div class="kv" data-row="2"><dt>transactions</dt><dd data-a-tx>—</dd></div>
+        <div class="kv" data-row="3"><dt>gas used</dt><dd data-a-gas>—</dd></div>
+      </dl>
+      <div class="gas" aria-hidden="true"><div data-a-gasbar></div></div>
+    </div>
+    <div>
+      <ol class="steps">
+        <li class="step" data-step="1"><span class="n" aria-hidden="true">01</span><div>
+          <h3>Header</h3>
+          <p>Number, hash, who produced it and when, exactly as the chain recorded them.</p>
+          <a class="lnk" data-a-link="/blocks/" href="https://ethscan.io/blocks">ethscan.io/blocks ↗</a>
+        </div></li>
+        <li class="step" data-step="2"><span class="n" aria-hidden="true">02</span><div>
+          <h3 data-a-txh>Transactions</h3>
+          <p>Each with its receipt, logs and status. The receipts are checked against the block before anything is written.</p>
+          <a class="lnk" data-a-link="/txs" href="https://ethscan.io/txs">ethscan.io/txs ↗</a>
+        </div></li>
+        <li class="step" data-step="3"><span class="n" aria-hidden="true">03</span><div>
+          <h3>Gas</h3>
+          <p data-a-gasp>How full the block ran, and what it cost to get in.</p>
+          <a class="lnk" data-a-link="/gas" href="https://ethscan.io/gas">ethscan.io/gas ↗</a>
+        </div></li>
+        <li class="step" data-step="4"><span class="n" aria-hidden="true">04</span><div>
+          <h3>What Altscan derives</h3>
+          <p>Token transfers, DEX trades, whale movements and webhooks, written from the receipts and safe to replay.</p>
+          <a class="lnk" data-a-link="/dex" href="https://ethscan.io/dex">ethscan.io/dex ↗</a>
+        </div></li>
+      </ol>
+      <p class="also">Every explorer also has address pages with token and NFT holdings, token pages,
+        <a data-a-link="/verify" href="https://ethscan.io/verify">contract verification</a> through Sourcify,
+        <a data-a-link="/charts" href="https://ethscan.io/charts">network charts</a> and a
+        <a data-a-link="/api-docs" href="https://ethscan.io/api-docs">REST API</a> with keys and webhooks.</p>
+    </div>
+  </div>
+</section>
