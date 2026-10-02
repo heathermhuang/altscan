@@ -6,6 +6,7 @@ export const prerender = false;
 
 /** Matches the page's poll interval: at most one upstream call per chain per 12s per location. */
 const TTL_S = 12;
+const CACHE_CONTROL = `public, max-age=${TTL_S}, s-maxage=${TTL_S}`;
 
 interface Runtime {
   caches?: { default?: Cache };
@@ -36,6 +37,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const hit = await cache?.match(key);
   if (hit) {
     const res = new Response(hit.body, hit);
+    // Cloudflare stores cache-API objects with the zone's browser TTL (4h); restore ours on the way out.
+    res.headers.set('cache-control', CACHE_CONTROL);
     res.headers.set('x-altscan-cache', 'hit');
     return res;
   }
@@ -44,7 +47,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const res = new Response(JSON.stringify(buildChainsPayload(results, Date.now())), {
     headers: {
       'content-type': 'application/json',
-      'cache-control': `public, max-age=${TTL_S}, s-maxage=${TTL_S}`,
+      'cache-control': CACHE_CONTROL,
       'x-altscan-cache': 'miss',
     },
   });
