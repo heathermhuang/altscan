@@ -19,11 +19,11 @@ import { GITHUB } from '../data/site';
 
     <section id="explorers" class="wrap sec rule" aria-labelledby="explorers-title">
       <p class="k">// two explorers, live today</p>
-      <h2 id="explorers-title">Same engine.<br />Its own domain.</h2>
+      <h2 id="explorers-title">Same engine.<br />Each on its own domain.</h2>
       <div class="prods">
         {products.map((p) => <ProductCard product={p} />)}
       </div>
-      <p class="more"><span>More chains are on the way. Each new one is announced on GitHub first.</span><a href={GITHUB}>Watch the repo ↗</a></p>
+      <p class="more">More chains are on the way, and each is announced on GitHub first.<a href={GITHUB}>Watch the repo ↗</a></p>
     </section>
 
     <OpenSource />

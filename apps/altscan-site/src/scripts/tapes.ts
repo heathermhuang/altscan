@@ -55,6 +55,7 @@ const chains: Chain[] = [...document.querySelectorAll<HTMLElement>('[data-chain]
 });
 
 let S = innerWidth < 760 ? 24 : 34; // px per chain-second, equal on both tapes
+const MINI_PX_PER_S = 9; // explorer-panel mini tapes: a ~0.45s BNB block stays ≥ 2px wide
 let widths = chains.map((c) => c.track.clientWidth);
 const firstSeen: Record<string, number> = {};
 let anatomyDone = false;
@@ -69,10 +70,13 @@ function tile(c: Chain, b: TapeBlock): HTMLAnchorElement {
   a.href = `${c.url}/blocks/${b.n}`;
   a.tabIndex = -1;
   a.dataset.n = String(b.n);
-  a.setAttribute('aria-label', `Block ${fmt(b.n)}, ${b.tx} transactions, gas ${b.g}%`);
   const w = Math.max(1, (b.t1 - b.t0) * S - 2);
+  const label = `#${fmt(b.n)} · ${b.tx} txs · ${b.g}% gas`;
+  // Always named, and the name starts with the visible label (label-in-name), even when the
+  // label or marker is hidden for space.
+  a.setAttribute('aria-label', `${label}: block ${fmt(b.n)}, ${b.tx} transactions, ${b.g}% of its gas limit`);
   a.innerHTML = `<i style="height:${b.g}%"></i>` +
-    (w > 230 ? `<span class="lb">#${fmt(b.n)} · ${b.tx} txs · ${b.g}% gas</span>` : '') +
+    (w > 230 ? `<span class="lb">${label}</span>` : '') +
     (w > 230 && spec?.id === c.id && spec.n === b.n ? '<span class="mark">↓ taken apart below</span>' : '');
   return a;
 }
@@ -101,7 +105,9 @@ function draw(c: Chain, i: number, wall: number, live: boolean) {
     // A later poll can fill a gap between parallel pages, shrinking a drawn block's interval.
     const w = `${Math.max(1, (b.t1 - b.t0) * S - 2).toFixed(1)}px`;
     if (el.style.width !== w) el.style.width = w;
-    el.style.transform = `translate3d(${(W - (P - b.t0) * S).toFixed(1)}px,0,0)`;
+    const x = W - (P - b.t0) * S;
+    el.style.transform = `translate3d(${x.toFixed(1)}px,0,0)`;
+    el.classList.toggle('narrow', W - x < 170);
   }
   for (const [n, el] of c.tiles) if (!keep.has(n)) { el.remove(); c.tiles.delete(n); }
 
@@ -155,7 +161,12 @@ function header(c: Chain, status: ChainStatus) {
 function panel(c: Chain, status: ChainStatus) {
   const p = $(`[data-panel="${c.id}"]`);
   if (!p) return;
-  const win = Number(p.dataset.window);
+  const mini = $('[data-mini]', p)!;
+  const W = mini.clientWidth;
+  // One scale for both panels (MINI_PX_PER_S), so their tapes compare like the hero's; a narrow
+  // panel shows a shorter window rather than squeezing BNB's sub-second blocks below a pixel.
+  const win = Math.min(Number(p.dataset.window), Math.max(15, Math.floor(W / MINI_PX_PER_S / 5) * 5));
+  $('[data-p-window]', p)!.textContent = `last ${win}s`;
   const newest = c.tuples[0];
   $('[data-p-status]', p)!.textContent =
     status === 'live' ? '● live' : status === 'stalled' ? (c.idx && c.idx > 1.5 ? 'catching up' : 'behind') : status === 'offline' ? 'offline' : '—';
@@ -165,9 +176,7 @@ function panel(c: Chain, status: ChainStatus) {
   const blocks = spreadSeconds(recent);
   // Count every block in the window; spreadSeconds drops the oldest second, which only anchors widths.
   $('[data-p-count]', p)!.textContent = `${fmt(recent.length)} blocks`;
-  const mini = $('[data-mini]', p)!;
-  const W = mini.clientWidth;
-  const span = blocks.length ? blocks[blocks.length - 1].t1 - blocks[0].t0 : 0;
+  const span = win;
   mini.innerHTML = span > 0
     ? blocks.map((b) => `<span style="width:${Math.max(1, ((b.t1 - b.t0) / span) * W - 2).toFixed(1)}px"><i style="height:${b.g}%"></i></span>`).join('')
     : '';
@@ -389,8 +398,22 @@ if (steps.length && 'IntersectionObserver' in window) {
 }
 
 // Terminal: types its lines once when it scrolls into view.
+const copyBtn = $<HTMLButtonElement>('[data-copy]');
+if (copyBtn && navigator.clipboard) {
+  copyBtn.hidden = false;
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(copyBtn.dataset.copy ?? '');
+      copyBtn.textContent = 'copied';
+    } catch {
+      copyBtn.textContent = 'copy failed';
+    }
+    setTimeout(() => { copyBtn.textContent = 'copy'; }, 1600);
+  });
+}
+
 const term = $('[data-term]');
-if (term && !reduce && 'IntersectionObserver' in window) {
+if (term && !reduce && matchMedia('(min-width: 1101px)').matches && 'IntersectionObserver' in window) {
   let delay = 0;
   for (const line of term.querySelectorAll<HTMLElement>('.ty')) {
     const n = line.textContent?.length ?? 0;
