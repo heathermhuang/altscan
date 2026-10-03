@@ -154,7 +154,7 @@ a{color:inherit;text-decoration:none}
 .pan.bnb .logo{background:#1a1400;color:var(--bnbBrand)} .pan.eth .logo{background:#fff;color:var(--ethBrand)}
 .pname{font-size:clamp(26px,2.6vw,36px);letter-spacing:-.04em;font-weight:700;line-height:1}
 .pdom{font-family:var(--mono);font-size:13px;margin-top:4px;opacity:.78}
-.mini{display:flex;gap:2px;height:64px;margin:auto 0 18px;padding-top:28px;box-sizing:content-box}
+.mini{display:flex;justify-content:flex-end;gap:2px;height:64px;margin:auto 0 18px;padding-top:28px;box-sizing:content-box}
 .mini span{position:relative;border-radius:3px;overflow:hidden;flex-shrink:1;min-width:0}
 .mini i{position:absolute;left:0;right:0;bottom:0}
 .pan.bnb .mini span{background:rgba(26,20,0,.12)} .pan.bnb .mini i{background:rgba(26,20,0,.78)}
