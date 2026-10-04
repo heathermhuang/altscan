@@ -231,7 +231,7 @@ export const BSC: ChainConfig = {
   brandDomain: 'BNBScan.com',
   tagline: 'The Alternative BNB Chain Explorer',
   domain: 'bnbscan.com',
-  blockTime: 3,
+  blockTime: 0.45, // measured 2026-10-05: ~133 blocks/min over 1k-1M-block windows
   reorgDepth: 15,
   coingeckoId: 'binancecoin',
   nativeCirculatingSupply: 134_500_000, // ~implied from live cap/price; self-refines at runtime
