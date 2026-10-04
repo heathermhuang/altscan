@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest'
+import { gasPct, ratePerMin, spreadSeconds, type TapeTuple } from '@/lib/tape'
+
+const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
+
+describe('spreadSeconds', () => {
+  it('returns nothing for no tuples or a lone anchor', () => {
+    expect(spreadSeconds([])).toEqual([])
+    expect(spreadSeconds([t(10, 100)])).toEqual([])
+  })
+
+  it('gives a block the gap to the previous second; the oldest only anchors', () => {
+    expect(spreadSeconds([t(10, 100), t(11, 112, 5, 40)])).toEqual([{ n: 11, seconds: 12, txs: 5, gas: 40 }])
+  })
+
+  it('splits the gap evenly across blocks that share a second', () => {
+    const out = spreadSeconds([t(10, 100), t(11, 101), t(12, 101), t(13, 101)])
+    expect(out.map(b => b.n)).toEqual([11, 12, 13])
+    for (const b of out) expect(b.seconds).toBeCloseTo(1 / 3, 6)
+  })
+
+  it('widens the share when the gap is longer than a second', () => {
+    const out = spreadSeconds([t(10, 100), t(11, 105), t(12, 105)])
+    expect(out.map(b => b.seconds)).toEqual([2.5, 2.5])
+  })
+
+  it('sorts by block number, so newest-first input gives oldest-first output', () => {
+    const out = spreadSeconds([t(13, 103), t(12, 102), t(11, 101), t(10, 100)])
+    expect(out.map(b => b.n)).toEqual([11, 12, 13])
+    expect(out.map(b => b.seconds)).toEqual([1, 1, 1])
+  })
+
+  it('carries tx count and gas through unchanged', () => {
+    const out = spreadSeconds([t(1, 10), t(2, 12, 46, 9), t(3, 13, 0, 100)])
+    expect(out.map(b => [b.txs, b.gas])).toEqual([[46, 9], [0, 100]])
+  })
+
+  it('conserves time: displayed seconds sum to newest minus oldest second', () => {
+    const out = spreadSeconds([t(1, 50), t(2, 51), t(3, 51), t(4, 53), t(5, 53), t(6, 53), t(7, 60)])
+    expect(out.reduce((s, b) => s + b.seconds, 0)).toBeCloseTo(10, 9)
+  })
+})
+
+describe('ratePerMin', () => {
+  it('is null for no tuples or a single tuple', () => {
+    expect(ratePerMin([])).toBeNull()
+    expect(ratePerMin([t(10, 100)])).toBeNull()
+  })
+
+  it('is null when no time elapsed', () => {
+    expect(ratePerMin([t(10, 100), t(11, 100)])).toBeNull()
+  })
+
+  it('measures blocks per minute between the lowest and highest block, in any order', () => {
+    // 60 blocks over 30 s = 2 blocks/s = 120/min
+    expect(ratePerMin([t(160, 130), t(100, 100), t(130, 115)])).toBe(120)
+  })
+})
+
+describe('gasPct', () => {
+  it('floors the percentage of the limit', () => {
+    expect(gasPct(9n, 100n)).toBe(9)
+    expect(gasPct(1n, 3n)).toBe(33)
+    expect(gasPct(30_000_000n, 60_000_000n)).toBe(50)
+  })
+
+  it('is 0 when the limit is 0, missing, or the inputs are not integers', () => {
+    expect(gasPct(5n, 0n)).toBe(0)
+    expect(gasPct(5n, null)).toBe(0)
+    expect(gasPct(null, 100n)).toBe(0)
+    expect(gasPct('1.5', '100')).toBe(0)
+  })
+
+  it('accepts strings and numbers, and clamps to 0-100', () => {
+    expect(gasPct('25000', '100000')).toBe(25)
+    expect(gasPct(25, 100)).toBe(25)
+    expect(gasPct(300n, 100n)).toBe(100)
+    expect(gasPct(-5n, 100n)).toBe(0)
+  })
+})

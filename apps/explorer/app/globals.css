@@ -87,3 +87,84 @@
     }
   }
 }
+
+/* Block tape */
+@layer components {
+  /* components/home/BlockTape.tsx. Tile width is pure CSS: --s (seconds, inline) times
+     --pxs (px per second), so there is no layout JS and nothing to shift. */
+  .bt-track {
+    height: 64px;
+    overflow: hidden;
+  }
+  .bt-fade {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
+    mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
+  }
+  /* Keyboard focus on a tile in the fade zone would otherwise be dimmed. */
+  .bt-fade:has(:focus-visible) {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .bt-row {
+    --pxs: 24px;
+    display: flex;
+    justify-content: flex-end; /* newest at the right; older tiles overflow and clip on the left */
+    gap: 2px;
+    height: 100%;
+    padding: 8px 6px 10px 0; /* room for the 4px focus ring */
+  }
+  .bt-li {
+    display: flex;
+    flex: none;
+    width: max(2px, calc(var(--s) * var(--pxs) - 2px));
+  }
+  .bt-tile {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--acc-t);
+    container-type: inline-size;
+  }
+  .bt-tile:hover {
+    z-index: 1;
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  .bt-tile:focus-visible {
+    z-index: 1;
+  }
+  .bt-fill {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    background: var(--acc);
+  }
+  .bt-lb {
+    position: absolute;
+    left: 8px;
+    top: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--acc-t);
+    color: var(--ink);
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  /* The label is ~106px wide at 9 digits; show it only on tiles that can hold it. */
+  @container (max-width: 119px) {
+    .bt-lb {
+      display: none;
+    }
+  }
+  @media (min-width: 768px) {
+    .bt-track {
+      height: 84px;
+    }
+    .bt-row {
+      --pxs: 34px;
+    }
+  }
+}

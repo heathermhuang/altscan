@@ -4,15 +4,21 @@ import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
+import { BlockTape } from '@/components/home/BlockTape'
+import { SearchBar } from '@/components/layout/SearchBar'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdSlot } from '@/components/ads/AdSlot'
 import { swallow, swallowed } from '@/lib/observability'
+import { gasPct, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
 // Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
 export const revalidate = 60
+
+// The tape spans ~60s of chain time at 34px/s (~2k px, a full 1920 viewport): BNB 0.45s -> 134 blocks, ETH 12s -> 7.
+const TAPE_N = Math.min(140, Math.max(7, Math.ceil(60 / chainConfig.blockTime)))
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -242,7 +248,7 @@ export default async function HomePage() {
   }
 
   const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
-    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(7).catch(swallowed('home/blocks', [])), []),
+    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(TAPE_N).catch(swallowed('home/blocks', [])), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(swallowed('home/txs', [])), []),
     fetchNativePrice(),
     fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
@@ -256,6 +262,12 @@ export default async function HomePage() {
   latestTxs = txsResult
 
   const latestBlock = latestBlocks[0]
+  const tapeTuples: TapeTuple[] = latestBlocks.map(b => [
+    b.number,
+    Math.floor(new Date(b.timestamp).getTime() / 1000),
+    b.txCount,
+    gasPct(b.gasUsed, b.gasLimit),
+  ])
   const txCount24h = await dbTimeout(fetchTxCount24h(latestBlock), null)
 
   const priceDisplay = nativePrice
@@ -267,112 +279,112 @@ export default async function HomePage() {
   const changePositive = nativePrice ? nativePrice.change24h >= 0 : null
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <AutoRefresh intervalMs={30000} />
 
-      {/* Hero tagline */}
-      <div className="mb-8">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">
+      {/* Hero */}
+      <div className="max-w-7xl mx-auto px-4 pt-10 pb-8 md:pt-14 md:pb-10">
+        <p className="k">{'// '}{chainConfig.name} · block explorer</p>
+        <h1 className="mt-3 max-w-5xl text-balance text-ink font-bold tracking-[-0.035em] leading-[1.05] text-[clamp(30px,4.4vw,56px)]">
           {chainConfig.tagline}
         </h1>
-        <p className="text-sm text-gray-500">
+        <p className="mt-4 text-[15px] text-ink2">
           Maintained by{' '}
           <a
             href="https://mdt.io"
             target="_blank"
             rel="noopener noreferrer"
-            className={`${chainConfig.theme.linkText} hover:underline font-medium`}
+            className="text-acc-ink underline underline-offset-2 font-medium"
           >
             Measurable Data Token (MDT)
           </a>
           {' '}— open, independent, and community-driven.
         </p>
-      </div>
-
-      {/* Stats bar */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-500">Network Overview</h2>
-          <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
-            <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-pulse" />
-            Live
-          </span>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Latest Block"
-          value={latestBlock ? formatNumber(latestBlock.number) : '—'}
-          subtext={latestBlock ? timeAgo(new Date(latestBlock.timestamp)) : null}
-        />
-        <StatCard
-          label="24H Transactions"
-          value={txCount24h !== null ? formatNumber(txCount24h) : '—'}
-          subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
-        />
-        <StatCard
-          label={`${chainConfig.currency} Market Cap`}
-          value={marketCap ? formatMarketCap(marketCap.value) : '—'}
-          subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
-          subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
-        />
-        <StatCard
-          label={`${chainConfig.currency} Price`}
-          value={priceDisplay}
-          subtext={changeDisplay}
-          subtextPositive={changePositive}
-        />
+        <div className="mt-7 max-w-[720px]">
+          <SearchBar size="lg" />
         </div>
       </div>
 
-      <AdSlot
-        context="home"
-        placement="home_after_stats"
-        className="mb-8"
-      />
+      <BlockTape tuples={tapeTuples} chainName={chainConfig.name} />
 
-      {/* Two-column layout */}
-      <div className="grid md:grid-cols-2 gap-6">
-        <section className="min-w-0">
-          <SectionHeader title="Latest Blocks" href="/blocks" />
-          <BlockTable blocks={latestBlocks} compact />
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Stats */}
+        <h2 className="sr-only">Network overview</h2>
+        <div className="ledger mb-8">
+          <StatCard
+            label="Latest Block"
+            value={latestBlock ? formatNumber(latestBlock.number) : '—'}
+            subtext={latestBlock ? timeAgo(new Date(latestBlock.timestamp)) : null}
+          />
+          <StatCard
+            label="24H Transactions"
+            value={txCount24h !== null ? formatNumber(txCount24h) : '—'}
+            subtext={latestTxs[0] ? `last ${timeAgo(new Date(latestTxs[0].timestamp))}` : null}
+          />
+          <StatCard
+            label={`${chainConfig.currency} Market Cap`}
+            value={marketCap ? formatMarketCap(marketCap.value) : '—'}
+            subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
+            subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
+          />
+          <StatCard
+            label={`${chainConfig.currency} Price`}
+            value={priceDisplay}
+            subtext={changeDisplay}
+            subtextPositive={changePositive}
+          />
+        </div>
+
+        <AdSlot
+          context="home"
+          placement="home_after_stats"
+          className="mb-8"
+        />
+
+        {/* Two-column layout */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <section className="min-w-0">
+            <SectionHeader title="Latest Blocks" href="/blocks" />
+            <BlockTable blocks={latestBlocks.slice(0, 7)} compact />
+          </section>
+          <section className="min-w-0">
+            <SectionHeader title="Latest Transactions" href="/txs" />
+            <TxTable txs={latestTxs} compact />
+          </section>
+        </div>
+
+        {/* Crawlable intro — the only prose on the homepage; stays server-rendered */}
+        <section className="mt-10 max-w-3xl">
+          <h2 className="text-lg font-[650] tracking-[-0.02em] text-ink mb-2">What is {chainConfig.brandName}?</h2>
+          <div className="text-sm text-ink2 space-y-3">
+            <p>
+              {chainConfig.brandDomain} is an open, independent {chainConfig.name} block
+              explorer maintained by Measurable Data Token (MDT). It tracks blocks and
+              transactions in real time and offers a{' '}
+              <Link href="/token" className="text-acc-ink underline underline-offset-2">token directory</Link>,{' '}
+              <Link href="/dex" className="text-acc-ink underline underline-offset-2">DEX trade tracker</Link>,{' '}
+              <Link href="/gas" className="text-acc-ink underline underline-offset-2">gas tracker</Link>,{' '}
+              <Link href="/whales" className="text-acc-ink underline underline-offset-2">whale tracker</Link>, and a free{' '}
+              <Link href="/api-docs" className="text-acc-ink underline underline-offset-2">REST API</Link>
+              {' '}— no account required.
+            </p>
+            <p>
+              The same open-source engine,{' '}
+              <a href="https://altscan.io" className="text-acc-ink underline underline-offset-2">Altscan</a>,
+              powers our sister explorer at{' '}
+              <a href={chainConfig.peerUrl} className="text-acc-ink underline underline-offset-2">
+                {chainConfig.peerUrl.replace('https://', '')}
+              </a>
+              . Read more <Link href="/about" className="text-acc-ink underline underline-offset-2">about the project</Link>.
+            </p>
+          </div>
         </section>
-        <section className="min-w-0">
-          <SectionHeader title="Latest Transactions" href="/txs" />
-          <TxTable txs={latestTxs} compact />
-        </section>
       </div>
-
-      {/* Crawlable intro — the only prose on the homepage; stays server-rendered */}
-      <section className="mt-10 max-w-3xl">
-        <h2 className="text-lg font-semibold mb-2">What is {chainConfig.brandName}?</h2>
-        <div className="text-sm text-gray-600 space-y-3">
-          <p>
-            {chainConfig.brandDomain} is an open, independent {chainConfig.name} block
-            explorer maintained by Measurable Data Token (MDT). It tracks blocks and
-            transactions in real time and offers a{' '}
-            <Link href="/token" className={`${chainConfig.theme.linkText} hover:underline`}>token directory</Link>,{' '}
-            <Link href="/dex" className={`${chainConfig.theme.linkText} hover:underline`}>DEX trade tracker</Link>,{' '}
-            <Link href="/gas" className={`${chainConfig.theme.linkText} hover:underline`}>gas tracker</Link>,{' '}
-            <Link href="/whales" className={`${chainConfig.theme.linkText} hover:underline`}>whale tracker</Link>, and a free{' '}
-            <Link href="/api-docs" className={`${chainConfig.theme.linkText} hover:underline`}>REST API</Link>
-            {' '}— no account required.
-          </p>
-          <p>
-            The same open-source engine,{' '}
-            <a href="https://altscan.io" className={`${chainConfig.theme.linkText} hover:underline`}>Altscan</a>,
-            powers our sister explorer at{' '}
-            <a href={chainConfig.peerUrl} className={`${chainConfig.theme.linkText} hover:underline`}>
-              {chainConfig.peerUrl.replace('https://', '')}
-            </a>
-            . Read more <Link href="/about" className={`${chainConfig.theme.linkText} hover:underline`}>about the project</Link>.
-          </p>
-        </div>
-      </section>
-    </div>
+    </>
   )
 }
 
@@ -388,17 +400,17 @@ function StatCard({
   subtextPositive?: boolean | null
 }) {
   return (
-    <div className="bg-gray-50 rounded-xl p-4">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className="text-lg font-bold">{value}</p>
+    <div>
+      <p className="k">{label}</p>
+      <p className="mt-1 font-mono text-lg md:text-xl text-ink">{value}</p>
       {subtext && (
         <p
-          className={`text-xs mt-0.5 font-medium ${
+          className={`mt-0.5 font-mono text-xs ${
             subtextPositive === true
-              ? 'text-green-600'
+              ? 'text-live'
               : subtextPositive === false
-              ? 'text-red-500'
-              : 'text-gray-400'
+              ? 'text-warn'
+              : 'text-mut'
           }`}
         >
           {subtext}
@@ -411,8 +423,8 @@ function StatCard({
 function SectionHeader({ title, href }: { title: string; href: string }) {
   return (
     <div className="flex justify-between items-center mb-3">
-      <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-      <Link href={href} className={`text-sm ${chainConfig.theme.linkText} hover:underline`}>View all →</Link>
+      <h2 className="text-lg font-[650] tracking-[-0.02em] text-ink">{title}</h2>
+      <Link href={href} className="text-sm text-acc-ink hover:underline">View all →</Link>
     </div>
   )
 }
