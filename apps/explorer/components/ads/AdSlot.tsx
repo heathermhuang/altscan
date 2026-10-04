@@ -212,10 +212,10 @@ export function AdSlot({
           <div className="flex min-w-0 items-center gap-3">
             <BinanceMark />
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase text-gray-500">{copy.eyebrow}</p>
+              <p className="text-[10px] font-semibold uppercase text-gray-400">{copy.eyebrow}</p>
               <p className="truncate font-medium text-gray-200">
                 {copy.title}
-                <span className="ml-2 hidden text-gray-500 sm:inline">{copy.body}</span>
+                <span className="ml-2 hidden text-gray-400 sm:inline">{copy.body}</span>
               </p>
             </div>
           </div>
@@ -235,7 +235,7 @@ export function AdSlot({
         <div className="flex min-w-0 items-start gap-3">
           <BinanceMark />
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{copy.eyebrow}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{copy.eyebrow}</p>
             <p className="mt-0.5 font-semibold text-gray-900">{copy.title}</p>
             <p className="mt-1 text-sm leading-5 text-gray-500">{copy.body}</p>
           </div>
