@@ -7,10 +7,9 @@
   --acc:#5b5bf0; --accT:#EEF0FE; --accInk:#2e2e9e;
   --bnb:#F2C200; --bnbT:#F8E9A6; --bnbInk:#5c4700; --bnbBrand:#FACC15;
   --eth:#1E3A8A; --ethT:#E4E9F6; --ethInk:#1E3A8A; --ethBrand:#1E3A8A;
-  --off:#c4c4cc; --offT:#eeeef2; --offInk:#8a8a94;
+  --off:#c4c4cc; --offT:#eeeef2;
   --live:#15803d; --warn:#9a4a32; --warnT:#fff8f5;
   --pend:#b9c2de; --pendInk:#56659e;
-  --band:#0c0c12; --bandLine:#0c0c12;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
   --sans:"Inter Variable","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --g:clamp(16px,4vw,48px);
@@ -23,10 +22,9 @@
   --acc:#8b8bff; --accT:#1d1d3a; --accInk:#b9b9ff;
   --bnbT:#2a2410; --bnbInk:#f5d76e;
   --eth:#6f8fe8; --ethT:#16203d; --ethInk:#a9bdf5;
-  --off:#4a4a56; --offT:#1b1b22; --offInk:#8a8a98;
+  --off:#4a4a56; --offT:#1b1b22;
   --live:#34c46a; --warn:#f0a58c; --warnT:#2a1712;
   --pend:#3a4466; --pendInk:#8e9fd6;
-  --band:#121218; --bandLine:#23232c;
 }}
 
 /* ── Base ──────────────────────────────────────────────────────── */
@@ -58,7 +56,7 @@ a{color:inherit;text-decoration:none}
 /* ── Hero ──────────────────────────────────────────────────────── */
 .hero{padding-block:clamp(48px,8vw,112px) clamp(28px,4vw,48px)}
 .hero-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(24px,4vw,40px) 16px;align-items:end;margin-top:22px}
-/* Sized so each line fits its column without wrapping: one column below 1200px, beside the lede above. */
+/* Sized so each line fits its column without wrapping: one column below 1024px, beside the lede above. */
 .hero h1{font-size:min(12.4vw,108px);line-height:.94;letter-spacing:-.052em;font-weight:720}
 /* Every two-column section splits on one line: two equal columns 16px apart, like the explorer panels. */
 @media (min-width:1024px){.hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero h1{font-size:min(6.5vw,84px)}}
