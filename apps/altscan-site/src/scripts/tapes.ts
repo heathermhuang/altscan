@@ -273,6 +273,8 @@ function apply(payload: Record<string, ChainState> | null) {
     panel(c, status);
     if (reduce || paused || !raf) draw(c, i, wall, false);
   });
+  // Nothing moves until a chain has blocks, so the pause control waits for them too.
+  if (!reduce && chains.some((c) => c.tuples.length)) pauseBtn?.classList.remove('off');
   const since = sinceOpened(firstSeen, current);
   if (sinceEl && sinceRow && since > 0) { sinceEl.textContent = fmt(since); sinceRow.classList.remove('off'); }
   anatomy(chains.find((c) => c.id === 'eth' && c.online) ?? chains.find((c) => c.online) ?? chains[0]);
@@ -339,7 +341,6 @@ section?.addEventListener('pointerleave', restoreReadout);
 
 const pauseBtn = $<HTMLButtonElement>('[data-pause]');
 if (pauseBtn && !reduce) {
-  pauseBtn.classList.remove('off');
   pauseBtn.addEventListener('click', () => {
     paused = !paused;
     pauseBtn.setAttribute('aria-pressed', String(paused));

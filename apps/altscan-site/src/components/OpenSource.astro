@@ -56,8 +56,10 @@ const run = `git clone ${GITHUB}\ncd altscan && cp .env.docker.example .env\ndoc
     <div>
       <p class="k">// or run your own</p>
       <p>Postgres, Redis, the indexer and an explorer, from the repository's compose file. No configuration to start.</p>
-      <button class="copy" type="button" data-copy={run} hidden>copy commands</button>
     </div>
-    <pre class="term" tabindex="0" aria-label="Commands to run your own explorer">{run.split('\n').map((l) => <span class="cl"><span class="ps" aria-hidden="true">$ </span>{l}</span>)}</pre>
+    <div class="term">
+      <pre tabindex="0" aria-label="Commands to run your own explorer">{run.split('\n').map((l) => <span class="cl"><span class="ps" aria-hidden="true">$ </span>{l}</span>)}</pre>
+      <button class="copy" type="button" data-copy={run} hidden>copy</button>
+    </div>
   </div>
 </section>
