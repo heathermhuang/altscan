@@ -148,8 +148,8 @@ function header(c: Chain, status: ChainStatus) {
   latest.textContent = `#${fmt(newest[0])}`;
   if (status === 'stalled') {
     // Only say "catching up" when the indexer is measurably gaining on the chain.
-    const how = c.idx === null ? '' : c.idx === 0 ? ' · no new blocks' : c.idx > 1.5 ? ` · catching up at ${Math.round(c.idx)}×` : '';
-    st.innerHTML = `indexer ${lagLabel(unixNow() - newest[1])} behind<span class="wide">${how}</span>`;
+    const how = c.idx === null ? '' : c.idx === 0 ? ' · not advancing' : c.idx > 1.5 ? ` · catching up at ${Math.round(c.idx)}×` : '';
+    st.innerHTML = `<span class="wide">indexer </span>${lagLabel(unixNow() - newest[1])} behind${how}`;
     rate.textContent = '';
   } else {
     st.textContent = '';
@@ -166,20 +166,19 @@ function panel(c: Chain, status: ChainStatus) {
   // One scale for both panels (MINI_PX_PER_S), so their tapes compare like the hero's; a narrow
   // panel shows a shorter window rather than squeezing BNB's sub-second blocks below a pixel.
   const win = Math.min(Number(p.dataset.window), Math.max(15, Math.floor(W / MINI_PX_PER_S / 5) * 5));
-  $('[data-p-window]', p)!.textContent = `last ${win}s`;
+  $('[data-p-window]', p)!.textContent = `last ${win} sec`;
   const newest = c.tuples[0];
   $('[data-p-status]', p)!.textContent =
-    status === 'live' ? '● live' : status === 'stalled' ? (c.idx && c.idx > 1.5 ? 'catching up' : 'behind') : status === 'offline' ? 'offline' : '—';
+    status === 'live' ? '● live' : status === 'stalled' ? (c.idx === 0 ? 'not advancing' : c.idx && c.idx > 1.5 ? 'catching up' : 'behind') : status === 'offline' ? 'offline' : '—';
   if (!newest) return;
   $('[data-p-latest]', p)!.textContent = `#${fmt(newest[0])}`;
-  const recent = c.tuples.filter((b) => b[1] >= newest[1] - win);
-  const blocks = spreadSeconds(recent);
-  // Count every block in the window; spreadSeconds drops the oldest second, which only anchors widths.
-  $('[data-p-count]', p)!.textContent = `${fmt(recent.length)} blocks`;
-  const span = win;
-  mini.innerHTML = span > 0
-    ? blocks.map((b) => `<span style="width:${Math.max(1, ((b.t1 - b.t0) / span) * W - 2).toFixed(1)}px"><i style="height:${b.g}%"></i></span>`).join('')
-    : '';
+  // The first block older than the window anchors the one that crosses its start, which the
+  // panel clips, so the tape fills the panel edge to edge.
+  const cut = newest[1] - win;
+  const k = c.tuples.findIndex((b) => b[1] < cut);
+  $('[data-p-count]', p)!.textContent = `${fmt(k === -1 ? c.tuples.length : k)} blocks`;
+  const blocks = spreadSeconds(k === -1 ? c.tuples : c.tuples.slice(0, k + 1));
+  mini.innerHTML = blocks.map((b) => `<span style="width:${Math.max(1, ((b.t1 - b.t0) / win) * W - 2).toFixed(1)}px"><i style="height:${b.g}%"></i></span>`).join('');
 }
 
 function anatomy(c: Chain) {
@@ -267,6 +266,8 @@ function apply(payload: Record<string, ChainState> | null) {
     }
     const status = classify(c.online, c.tuples[0]?.[1] ?? null, unix);
     c.el.dataset.state = status;
+    // Behind and not moving reads as stopped, like offline, not as a live tape.
+    c.el.toggleAttribute('data-frozen', status === 'stalled' && c.idx === 0);
     message(c, status);
     header(c, status);
     panel(c, status);
@@ -298,7 +299,7 @@ async function poll() {
 function showReadout(c: Chain, n: number) {
   const b = c.blocks.find((x) => x.n === n);
   if (!b || !readout) return;
-  readout.innerHTML = `<b class="rb ${c.id}">#${fmt(b.n)}</b> ${b.tx} txs · gas ${b.g}% · ` +
+  readout.innerHTML = `<b class="rb ${c.id}">#${fmt(b.n)}</b> ${b.tx} txs · ${b.g}% gas · ` +
     `<a class="lnk" href="${c.url}/blocks/${b.n}">open on ${c.domain} ↗</a>`;
 }
 function restoreReadout() { if (readout && !chains.some((c) => c.hl !== null)) readout.innerHTML = legend; }
@@ -397,9 +398,9 @@ if (steps.length && 'IntersectionObserver' in window) {
   steps.forEach((s) => io.observe(s));
 }
 
-// Terminal: types its lines once when it scrolls into view.
 const copyBtn = $<HTMLButtonElement>('[data-copy]');
 if (copyBtn && navigator.clipboard) {
+  const label = copyBtn.textContent;
   copyBtn.hidden = false;
   copyBtn.addEventListener('click', async () => {
     try {
@@ -408,26 +409,8 @@ if (copyBtn && navigator.clipboard) {
     } catch {
       copyBtn.textContent = 'copy failed';
     }
-    setTimeout(() => { copyBtn.textContent = 'copy'; }, 1600);
+    setTimeout(() => { copyBtn.textContent = label; }, 1600);
   });
-}
-
-const term = $('[data-term]');
-if (term && !reduce && matchMedia('(min-width: 1101px)').matches && 'IntersectionObserver' in window) {
-  let delay = 0;
-  for (const line of term.querySelectorAll<HTMLElement>('.ty')) {
-    const n = line.textContent?.length ?? 0;
-    line.style.setProperty('--n', String(n));
-    line.style.setProperty('--d', `${delay}ms`);
-    delay += n * 16 + 140;
-  }
-  term.classList.add('armed');
-  const io = new IntersectionObserver(([e]) => {
-    if (!e.isIntersecting) return;
-    term.classList.add('go');
-    io.disconnect();
-  }, { threshold: 0.4 });
-  io.observe(term);
 }
 
 chains.forEach((c) => message(c, 'loading'));

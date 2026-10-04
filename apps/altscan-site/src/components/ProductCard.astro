@@ -2,7 +2,7 @@
 import type { Product } from '../data/products';
 interface Props { product: Product; }
 const { product: p } = Astro.props;
-const windowLabel = p.miniWindowS >= 120 ? `last ${p.miniWindowS / 60} min` : `last ${p.miniWindowS}s`;
+const windowLabel = p.miniWindowS >= 120 ? `last ${p.miniWindowS / 60} min` : `last ${p.miniWindowS} sec`;
 ---
 <a class={`pan ${p.id}`} href={p.url} data-panel={p.id} data-window={p.miniWindowS}>
   <div class="ptop"><span class="logo" aria-hidden="true">{p.logoLetter}</span>
