@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **altscan.io rebuilt around live block tapes.** Two tapes replay the blocks BNBScan and EthScan are indexing (width = block time, fill = gas used). One real block is taken apart, and both explorer panels carry their own mini tape. The page closes with a tape of the codebase itself, measured at build time (width = lines of TypeScript, fill = share that is tests). `/api/chains.json` now serves each explorer's recent blocks behind a 12-second edge cache (#172, #174, #176, #177).
+
 ### Security
 - **Upgraded drizzle-orm to 0.45.2** (drizzle-kit to 0.31.10), clearing the "SQL injection via improperly escaped SQL identifiers" advisory. Nothing here calls `sql.identifier()`, so it was not reachable. Since 0.44, drizzle wraps every database error in one that carries the SQL, not the reason. The deadlock retries, the indexer's boot-time database retry, and every log line and response that reports a database error now read the underlying Postgres error.
 
