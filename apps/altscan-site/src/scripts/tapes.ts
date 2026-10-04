@@ -55,7 +55,6 @@ const chains: Chain[] = [...document.querySelectorAll<HTMLElement>('[data-chain]
 });
 
 let S = innerWidth < 760 ? 24 : 34; // px per chain-second, equal on both tapes
-const MINI_PX_PER_S = 9; // explorer-panel mini tapes: a ~0.45s BNB block stays ≥ 2px wide
 let widths = chains.map((c) => c.track.clientWidth);
 const firstSeen: Record<string, number> = {};
 let anatomyDone = false;
@@ -163,10 +162,7 @@ function panel(c: Chain, status: ChainStatus) {
   if (!p) return;
   const mini = $('[data-mini]', p)!;
   const W = mini.clientWidth;
-  // One scale for both panels (MINI_PX_PER_S), so their tapes compare like the hero's; a narrow
-  // panel shows a shorter window rather than squeezing BNB's sub-second blocks below a pixel.
-  const win = Math.min(Number(p.dataset.window), Math.max(15, Math.floor(W / MINI_PX_PER_S / 5) * 5));
-  $('[data-p-window]', p)!.textContent = `last ${win} sec`;
+  const win = Number(p.dataset.window);
   const newest = c.tuples[0];
   $('[data-p-status]', p)!.textContent =
     status === 'live' ? '● live' : status === 'stalled' ? (c.idx === 0 ? 'not advancing' : c.idx && c.idx > 1.5 ? 'catching up' : 'behind') : status === 'offline' ? 'offline' : '—';
@@ -398,6 +394,10 @@ if (steps.length && 'IntersectionObserver' in window) {
   }, { rootMargin: '-40% 0px -50% 0px' });
   steps.forEach((s) => io.observe(s));
 }
+
+// The phone menu closes once one of its links is followed.
+const menu = $<HTMLDetailsElement>('[data-menu]');
+menu?.addEventListener('click', (e) => { if ((e.target as Element).closest('a')) menu.open = false; });
 
 const copyBtn = $<HTMLButtonElement>('[data-copy]');
 if (copyBtn && navigator.clipboard) {
