@@ -109,7 +109,13 @@ export function AdSlot({
   variant?: BinanceReferralVariant
   className?: string
 }) {
-  const [config, setConfig] = useState<AdConfig | null>(freshCachedConfig())
+  // Always null on the first render, like the server. Seeding from the module
+  // cache mismatched on hydration: the layout's footer AdSlot hydrates first and
+  // its effect fills the cache (from /api/ads or sessionStorage), so a page AdSlot
+  // hydrating after it rendered a card where the server HTML had none (React
+  // #418), and React client-rendered the whole page segment. The effect below
+  // still applies a cached config on the very next render.
+  const [config, setConfig] = useState<AdConfig | null>(null)
   // The roll is taken once per mount and held, so a re-render cannot swap the
   // ad out from under the reader mid-view.
   const [roll] = useState(() => Math.random())
