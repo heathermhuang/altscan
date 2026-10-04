@@ -57,7 +57,7 @@ a{color:inherit;text-decoration:none}
 
 /* ── Hero ──────────────────────────────────────────────────────── */
 .hero{padding-block:clamp(48px,8vw,112px) clamp(28px,4vw,48px)}
-.hero-grid{display:grid;gap:clamp(24px,4vw,64px);align-items:end;margin-top:22px}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(24px,4vw,64px);align-items:end;margin-top:22px}
 /* Sized so each line fits its column without wrapping: one column below 1200px, beside the lede above. */
 .hero h1{font-size:min(12.4vw,108px);line-height:.94;letter-spacing:-.052em;font-weight:720}
 @media (min-width:1200px){.hero-grid{grid-template-columns:minmax(0,1fr) minmax(0,400px)}.hero h1{font-size:min(7.2vw,104px)}}
