@@ -170,7 +170,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
 
   const load = () =>
     fetch(`/api/x/${explorerId}/settings.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((r) => (r.ok ? (r.json() as Promise<SettingsPayload>) : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((p: SettingsPayload) => {
         setPayload(p)
         setLinks({ quickLinks: quickLinkList(currentValue<LinksValue>(p, 'links')) })
@@ -226,7 +226,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: drafts[key], expectedVersion: payload.settings[key]?.version }),
     })
-    const body = await res.json().catch(() => ({}))
+    const body = (await res.json().catch(() => ({}))) as { version?: number; error?: string }
     setBusy(false)
     if (res.ok) {
       setMessage({ kind: 'ok', text: `${key} saved (v${body.version}) — live within ~60s` })
@@ -239,7 +239,7 @@ export function SettingsPanel({ explorerId }: { explorerId: string }) {
   async function showAudit(key: string) {
     setAuditKey(key)
     const res = await fetch(`/api/x/${explorerId}/settings/${key}/audit.json`)
-    const body = await res.json().catch(() => ({ entries: [] }))
+    const body = (await res.json().catch(() => ({ entries: [] }))) as { entries?: unknown }
     setAuditEntries(Array.isArray(body.entries) ? body.entries : [])
   }
 

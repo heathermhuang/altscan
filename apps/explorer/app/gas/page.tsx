@@ -5,6 +5,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
+import { confirmationWindow } from '@/lib/confirmation-window'
 
 export const revalidate = 45
 
@@ -85,8 +86,8 @@ export default async function GasPage() {
         <p className="text-sm text-gray-500">
           Gas prices fetched live from {chainConfig.name} RPC.
           {hasGasFloor
-            ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the base fee is lower. Transactions are typically confirmed within 1-3 blocks (~${chainConfig.blockTime}-${chainConfig.blockTime * 3} seconds).`
-            : ` Transactions are typically confirmed within 1-3 blocks (~${chainConfig.blockTime}-${chainConfig.blockTime * 3} seconds).`
+            ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the base fee is lower. Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
+            : ` Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
           }
         </p>
       </div>
