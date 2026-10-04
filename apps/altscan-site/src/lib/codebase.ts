@@ -9,7 +9,7 @@ export interface Pkg { path: string; lines: number; tests: number }
 export const PATH = ['packages/chain-config', 'packages/providers', 'apps/indexer', 'packages/db', 'packages/explorer-core', 'apps/explorer'];
 export const AROUND = ['apps/admin', 'apps/status', 'apps/altscan-site', 'packages/settings-schema', 'packages/types'];
 
-const SOURCE = /\.(ts|tsx|astro)$/;
+const SOURCE = /\.tsx?$/;
 const TEST = /\.test\.|\/test\//;
 
 /** Lines of tracked TypeScript per package, and how many of them are tests. */
@@ -19,7 +19,7 @@ export function measure(paths: string[]): Pkg[] {
     const files = execFileSync('git', ['ls-files', path], { cwd: root }).toString().split('\n').filter((f) => SOURCE.test(f));
     let lines = 0, tests = 0;
     for (const f of files) {
-      const n = readFileSync(`${root}/${f}`, 'utf8').split('\n').length;
+      const n = readFileSync(`${root}/${f}`, 'utf8').split('\n').length - 1; // as wc -l counts
       lines += n;
       if (TEST.test(f)) tests += n;
     }
