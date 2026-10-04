@@ -1,24 +1,66 @@
 ---
 import { GITHUB } from '../data/site';
 import GitHubIcon from './GitHubIcon.astro';
-// Commands mirror the README's "Running a specific chain" section — keep them runnable.
+import { measure, type Pkg } from '../lib/codebase';
+
+const { path, around } = measure();
+const groups = [
+  { label: 'the path a block takes →', pkgs: path },
+  { label: 'around it', pkgs: around },
+];
+const sum = (pkgs: Pkg[]) => pkgs.reduce((s, p) => s + p.lines, 0);
+const total = groups.reduce((s, g) => s + sum(g.pkgs), 0);
+const fmt = (n: number) => n.toLocaleString('en-US');
+const name = (p: string) => p.split('/')[1];
+const tree = (p: string) => `${GITHUB}/tree/main/${p}`;
+const built = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+// Mirrors the README's Docker quick start — keep it runnable.
+const run = `git clone ${GITHUB}\ncd altscan && cp .env.docker.example .env\ndocker compose up -d`;
 ---
-<section id="open-source" class="wrap sec" style="border-top:0;padding-top:0" aria-labelledby="oss-title">
-  <div class="oss">
+<section id="open-source" class="sec code" aria-labelledby="oss-title">
+  <div class="wrap code-head rule">
     <div>
-      <p class="k">// free and open source</p>
-      <h2 id="oss-title">One codebase.<br />Run it yourself.</h2>
-      <p>AGPL-3.0. The engine behind bnbscan.com and ethscan.io is yours to read, fork and self-host: Next.js 15, Drizzle ORM and ethers v6 on one Postgres schema. Each chain is one entry in <code>chain-config</code>; set <code>CHAIN</code> and run it.</p>
-      <div class="obtn"><a class="b1" href={GITHUB}><GitHubIcon size={15} /> Star on GitHub</a><a class="b2" href={`${GITHUB}#getting-started`}>Self-host guide <span aria-hidden="true">→</span></a></div>
+      <p class="k">// read the code · AGPL-3.0</p>
+      <h2 id="oss-title">The whole engine,<br />to scale.</h2>
     </div>
-    <div class="term" data-term>
-      <div class="bar"><span>run one chain</span><button class="copy" type="button" data-copy={`git clone ${GITHUB}\ncd altscan && pnpm install\nCHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev`} hidden>copy</button></div>
-      <pre tabindex="0" aria-label="Commands to run one chain locally"><span class="ty"><span class="c"># clone and run one chain</span></span>
-<span class="ty"><span class="ps">$</span> git clone {GITHUB}</span>
-<span class="ty"><span class="ps">$</span> cd altscan && pnpm install</span>
-<span class="ty"><span class="ps">$</span> <span class="y">CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb</span> \</span>
-<span class="ty">    pnpm --filter @altscan/explorer dev</span>
-<span class="ty"><span class="ps">$</span> </span><span class="caret" aria-hidden="true"></span></pre>
+    <div class="code-side">
+      <p>All {fmt(total)} lines of TypeScript in its apps and packages are public: read them, fork them, run your own. Left to right, the code a block passes through, from its chain's entry in <code>chain-config</code> to the explorer page that shows it.</p>
+      <div class="ctas"><a class="btn p" href={GITHUB}><GitHubIcon size={15} /> Star on GitHub</a><a class="btn g" href={`${GITHUB}/blob/main/docs/SELF_HOSTING.md`}>Self-host guide <span aria-hidden="true">→</span></a></div>
+    </div>
+  </div>
+  <div class="cband">
+    <div class="wrap cbar" aria-hidden="true">
+      {groups.map((g) => (
+        <div class="cgrp" style={`flex-grow:${sum(g.pkgs)}`}>
+          <p class="th">{g.label}</p>
+          <div class="ctiles">
+            {g.pkgs.map((p) => (
+              <span class="ct" style={`flex-grow:${p.lines}`}><i style={`height:${Math.round((p.tests / p.lines) * 100)}%`}></i><span class="lb">{p.path} · {fmt(p.lines)}</span></span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+    <div class="wrap cap rule">
+      <span>width = lines of TypeScript · fill = share that is tests · counted {built}</span>
+      <a class="lnk" href={GITHUB}>browse the source ↗</a>
+    </div>
+    <div class="wrap ledger">
+      {groups.map((g) => (
+        <ol aria-label={g.label.replace(' →', '')}>
+          {g.pkgs.map((p) => <li><a href={tree(p.path)}>{name(p.path)}</a> {fmt(p.lines)}{p.path === 'apps/altscan-site' && ' (this page)'}</li>)}
+        </ol>
+      ))}
+    </div>
+  </div>
+  <div class="wrap run">
+    <div>
+      <p class="k">// or run your own</p>
+      <p>Postgres, Redis, the indexer and an explorer, from the repository's compose file. No configuration to start.</p>
+    </div>
+    <div class="term">
+      <pre tabindex="0" aria-label="Commands to run your own explorer">{run.split('\n').map((l) => <span class="cl"><span class="ps" aria-hidden="true">$ </span>{l}</span>)}</pre>
+      <button class="copy" type="button" data-copy={run} hidden>copy</button>
     </div>
   </div>
 </section>

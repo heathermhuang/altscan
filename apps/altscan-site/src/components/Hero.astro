@@ -2,14 +2,16 @@
 import { products } from '../data/products';
 ---
 <header class="wrap hero">
-  <p class="k">// open-source · multi-chain · block explorer platform</p>
-  <h1><span class="ln">The alternative explorer,</span><span class="ln">for every chain.</span></h1>
-  <div class="hero-row">
-    <p class="lede">One open-source engine, one indexer, one schema, powering independent explorers. Below: the blocks it is indexing right now.</p>
-    <div class="ctas">
-      {products.map((p, i) => (
-        <a class={`btn ${i === 0 ? 'p' : 'g'}`} href={p.url}>Open {p.brand} <span aria-hidden="true">↗</span></a>
-      ))}
+  <p class="k">// open-source block explorers</p>
+  <div class="hero-grid">
+    <h1><span class="ln">Read the chain.</span><span class="ln">Read the code.</span></h1>
+    <div class="hero-side">
+      <p class="lede">Altscan is one open-source engine behind two independent explorers. Below, the blocks they are indexing right now. Further down, the code that indexes them.</p>
+      <div class="ctas">
+        {products.map((p, i) => (
+          <a class={`btn ${i === 0 ? 'p' : 'g'}`} href={p.url}>Open {p.brand} <span aria-hidden="true">↗</span></a>
+        ))}
+      </div>
     </div>
   </div>
 </header>
