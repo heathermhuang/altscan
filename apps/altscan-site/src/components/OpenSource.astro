@@ -1,11 +1,12 @@
 ---
 import { GITHUB } from '../data/site';
 import GitHubIcon from './GitHubIcon.astro';
-import { measure, PATH, AROUND, type Pkg } from '../lib/codebase';
+import { measure, type Pkg } from '../lib/codebase';
 
+const { path, around } = measure();
 const groups = [
-  { label: 'the path a block takes →', pkgs: measure(PATH) },
-  { label: 'around it', pkgs: measure(AROUND) },
+  { label: 'the path a block takes →', pkgs: path },
+  { label: 'around it', pkgs: around },
 ];
 const sum = (pkgs: Pkg[]) => pkgs.reduce((s, p) => s + p.lines, 0);
 const total = groups.reduce((s, g) => s + sum(g.pkgs), 0);
@@ -23,7 +24,7 @@ const run = `git clone ${GITHUB}\ncd altscan && cp .env.docker.example .env\ndoc
       <h2 id="oss-title">The whole engine,<br />to scale.</h2>
     </div>
     <div class="code-side">
-      <p>All {fmt(total)} lines of TypeScript are public: read them, fork them, run your own. Left to right, the code a block passes through, from its chain's entry in <code>chain-config</code> to the explorer page that shows it.</p>
+      <p>All {fmt(total)} lines of TypeScript in its apps and packages are public: read them, fork them, run your own. Left to right, the code a block passes through, from its chain's entry in <code>chain-config</code> to the explorer page that shows it.</p>
       <div class="ctas"><a class="btn p" href={GITHUB}><GitHubIcon size={15} /> Star on GitHub</a><a class="btn g" href={`${GITHUB}/blob/main/docs/SELF_HOSTING.md`}>Self-host guide <span aria-hidden="true">→</span></a></div>
     </div>
   </div>
