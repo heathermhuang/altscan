@@ -2,6 +2,7 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -9,7 +10,7 @@ import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { toChecksumAddress } from '@/lib/address-display'
+import { shortenAddress, toChecksumAddress } from '@/lib/address-display'
 import { swallow } from '@/lib/observability'
 
 // 60s (not 300): with ISR a transient miss — a fresh block during indexer
@@ -98,58 +99,85 @@ export default async function BlockDetailPage({
     ? ((Number(block.gasUsed) / Number(block.gasLimit)) * 100).toFixed(2)
     : '0'
 
+  const gasBarPct = Math.min(100, Math.max(0, Number(gasUsedPct)))
+  const hairChip = 'rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-ink2 transition-colors hover:border-hair3'
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Blocks', href: '/blocks' }, { name: `Block #${formatNumber(block.number)}` }]} />
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">Block #{formatNumber(block.number)}</h1>
-        <a
-          href={`${chainConfig.externalExplorerUrl}/block/${block.number}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`ml-auto text-xs text-gray-400 hover:${chainConfig.theme.linkText} border border-gray-200 hover:${chainConfig.theme.border} rounded px-2 py-1 transition-colors`}
-        >
-          View on {chainConfig.externalExplorer} ↗
-        </a>
-      </div>
-
-      <div className="bg-white rounded-xl border shadow-sm mb-8 overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <tbody className="divide-y">
-            <DetailRow label="Block Height" value={formatNumber(block.number)} />
-            <DetailRow
-              label="Timestamp"
-              value={`${timeAgo(new Date(block.timestamp))} (${new Date(block.timestamp).toUTCString()})`}
-            />
-            <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
-            <DetailRow label="Validator" value={toChecksumAddress(block.miner)} mono copy />
-            <DetailRow label="Block Hash" value={block.hash} mono copy />
-            <DetailRow label="Parent Hash" value={block.parentHash} mono copy />
-            <DetailRow
-              label="Gas Used"
-              value={`${formatNumber(Number(block.gasUsed ?? 0))} (${gasUsedPct}%)`}
-            />
-            <DetailRow label="Gas Limit" value={formatNumber(Number(block.gasLimit ?? 0))} />
-            {block.baseFeePerGas && (
-              <DetailRow
-                label="Base Fee Per Gas"
-                value={`${formatGwei(BigInt(block.baseFeePerGas))} Gwei`}
-              />
+      <div className="mb-5">
+        <p className="k">{'// '}block</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h1 className="text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
+            Block <span className="font-mono font-semibold">#{formatNumber(block.number)}</span>
+          </h1>
+          <nav aria-label="Adjacent blocks" className="flex items-center gap-2">
+            {block.number > 0 && (
+              <Link href={`/blocks/${block.number - 1}`} className={hairChip}>
+                ← #{formatNumber(block.number - 1)}
+              </Link>
             )}
-          </tbody>
-        </table>
+            <Link href={`/blocks/${block.number + 1}`} className={hairChip}>
+              #{formatNumber(block.number + 1)} →
+            </Link>
+          </nav>
+          <a
+            href={`${chainConfig.externalExplorerUrl}/block/${block.number}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`sm:ml-auto ${hairChip}`}
+          >
+            View on {chainConfig.externalExplorer} ↗
+          </a>
         </div>
       </div>
 
+      <dl className="ledger mb-6">
+        <Fact
+          label="Age"
+          value={timeAgo(new Date(block.timestamp))}
+          sub={new Date(block.timestamp).toUTCString()}
+        />
+        <Fact label="Transactions" value={formatNumber(block.txCount)} />
+        <Fact label="Gas used" value={`${gasUsedPct}%`} sub={formatNumber(Number(block.gasUsed ?? 0))}>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-acc-t" aria-hidden="true">
+            <div className="h-full bg-acc" style={{ width: `${gasBarPct}%` }} />
+          </div>
+        </Fact>
+        <Fact label="Validator" value={shortenAddress(block.miner)} title={toChecksumAddress(block.miner)} />
+      </dl>
+
+      <dl className="mb-8 divide-y divide-hair rounded-xl border border-hair bg-card">
+        <DetailRow label="Block Height" value={formatNumber(block.number)} />
+        <DetailRow
+          label="Timestamp"
+          value={`${timeAgo(new Date(block.timestamp))} (${new Date(block.timestamp).toUTCString()})`}
+        />
+        <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
+        <DetailRow label="Validator" value={toChecksumAddress(block.miner)} copy />
+        <DetailRow label="Block Hash" value={block.hash} copy />
+        <DetailRow label="Parent Hash" value={block.parentHash} copy />
+        <DetailRow
+          label="Gas Used"
+          value={`${formatNumber(Number(block.gasUsed ?? 0))} (${gasUsedPct}%)`}
+        />
+        <DetailRow label="Gas Limit" value={formatNumber(Number(block.gasLimit ?? 0))} />
+        {block.baseFeePerGas && (
+          <DetailRow
+            label="Base Fee Per Gas"
+            value={`${formatGwei(BigInt(block.baseFeePerGas))} Gwei`}
+          />
+        )}
+      </dl>
+
       {fromRpc && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 flex items-center gap-2 text-sm text-amber-800">
+        <div className="mb-6 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
           <span>⚡</span>
           <span>Block fetched live from {chainConfig.name} — it is outside our local retention window.</span>
         </div>
       )}
 
-      <h2 className="text-lg font-semibold mb-4">
+      <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">
         Transactions ({fromRpc ? (rpcBlock?.txHashes.length ?? 0) : txs.length}{!fromRpc && txs.length === 50 ? '+' : ''})
       </h2>
       {fromRpc && rpcBlock && rpcBlock.txs.length > 0 ? (
@@ -161,8 +189,31 @@ export default async function BlockDetailPage({
       ) : txs.length > 0 ? (
         <TxTable txs={txs} />
       ) : (
-        <p className="text-gray-500">No transactions in this block.</p>
+        <p className="text-mut">No transactions in this block.</p>
       )}
+    </div>
+  )
+}
+
+function Fact({
+  label,
+  value,
+  sub,
+  title,
+  children,
+}: {
+  label: string
+  value: string
+  sub?: string
+  title?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink" title={title}>{value}</dd>
+      {sub && <dd className="mt-0.5 break-words text-xs text-mut">{sub}</dd>}
+      {children}
     </div>
   )
 }
@@ -170,21 +221,19 @@ export default async function BlockDetailPage({
 function DetailRow({
   label,
   value,
-  mono = false,
   copy = false,
 }: {
   label: string
   value: string
-  mono?: boolean
   copy?: boolean
 }) {
   return (
-    <tr>
-      <td className="px-6 py-3 text-gray-500 w-48 font-medium shrink-0">{label}</td>
-      <td className={`px-6 py-3 break-all ${mono ? 'font-mono text-xs' : ''}`}>
+    <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:gap-6 sm:px-6">
+      <dt className="text-[13px] text-mut sm:w-44 sm:shrink-0">{label}</dt>
+      <dd className="min-w-0 break-all font-mono text-[13px] text-ink">
         {value}
         {copy && <CopyButton text={value} />}
-      </td>
-    </tr>
+      </dd>
+    </div>
   )
 }

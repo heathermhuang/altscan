@@ -111,6 +111,9 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
 
 const PAGE_SIZE = 25
 
+// Kicker-style column header, matching components/transactions/TxTable.
+const TH = 'text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut'
+
 export default async function AddressPage({
   params,
   searchParams,
@@ -235,65 +238,71 @@ export default async function AddressPage({
     <div className="max-w-7xl mx-auto px-4 py-8">
       {/* GoPlus risk warning */}
       {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3">
           <span className="text-lg mt-0.5">🚨</span>
           <div>
-            <p className="font-semibold text-red-800 text-sm">Security Risk Detected</p>
+            <p className="font-semibold text-ink text-sm">Security Risk Detected</p>
             <ul className="mt-1 space-y-0.5">
               {riskData.riskItems.map(item => (
-                <li key={item} className="text-xs text-red-700">• {item}</li>
+                <li key={item} className="text-xs text-ink2">• {item}</li>
               ))}
             </ul>
-            <p className="text-xs text-red-500 mt-1">Source: GoPlus Security</p>
+            <p className="text-xs text-mut mt-1">Source: GoPlus Security</p>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">Address</h1>
-        <a
-          href={`${chainConfig.externalExplorerUrl}/address/${addr}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`ml-auto text-xs text-gray-400 hover:${chainConfig.theme.linkText} border border-gray-200 hover:${chainConfig.theme.border} rounded px-2 py-1 transition-colors`}
-        >
-          View on {chainConfig.externalExplorer} ↗
-        </a>
-        {resolvedName && (
-          <Badge variant="default">
-            <span>🪪</span> {resolvedName}
-          </Badge>
-        )}
-        {contractStatus.isContract && <Badge variant="default">Contract</Badge>}
-        {(addressInfo?.label ?? getAddressLabel(addr)) && (
-          <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
-        )}
-        <WatchlistButton address={addr} />
-      </div>
-
-      {/* Address + stats */}
-      <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-        <div className="font-mono text-sm break-all text-gray-800">
-          {checksummedAddr}
+      <div className="mb-5">
+        <p className="k">{'// '}{contractStatus.isContract ? 'contract' : 'address'}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="mr-1 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Address</h1>
+          {resolvedName && (
+            <Badge variant="default">
+              <span>🪪</span> {resolvedName}
+            </Badge>
+          )}
+          {contractStatus.isContract && <Badge variant="default">Contract</Badge>}
+          {(addressInfo?.label ?? getAddressLabel(addr)) && (
+            <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
+          )}
+          <WatchlistButton address={addr} />
+          <a
+            href={`${chainConfig.externalExplorerUrl}/address/${addr}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sm:ml-auto rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-ink2 transition-colors hover:border-hair3"
+          >
+            View on {chainConfig.externalExplorer} ↗
+          </a>
+        </div>
+        <div className="mt-2 flex items-start font-mono text-[13px] text-ink2 sm:text-sm">
+          <span className="min-w-0 break-all pt-0.5">{checksummedAddr}</span>
           <CopyButton text={checksummedAddr} referralPlacement="address_copy" />
         </div>
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-          <StatItem
-            label={`${chainConfig.currency} Balance`}
-            value={balanceKnown ? `${formatNativeToken(displayBalance, 8)} ${chainConfig.currency}` : 'Unavailable'}
-            subValue={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
-          />
-          <StatItem
-            label="Transactions"
-            value={formatNumber(displayTxCount)}
-          />
-          <StatItem
-            label="First Seen"
-            value={displayFirstSeen ? timeAgo(displayFirstSeen) : 'Unknown'}
-          />
-        </div>
       </div>
+
+      {/* Fact strip */}
+      <dl className="ledger mb-6">
+        <Fact
+          label={`${chainConfig.currency} Balance`}
+          value={balanceKnown ? `${formatNativeToken(displayBalance, 8)} ${chainConfig.currency}` : 'Unavailable'}
+          sub={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
+        />
+        <Fact
+          label="Transactions"
+          value={formatNumber(displayTxCount)}
+        />
+        <Fact
+          label="First Seen"
+          value={displayFirstSeen ? timeAgo(displayFirstSeen) : 'Unknown'}
+          sub={displayFirstSeen ? displayFirstSeen.toUTCString().slice(5, 16) : undefined}
+        />
+        <Fact
+          label="Type"
+          value={contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'}
+        />
+      </dl>
 
       {gasReferralContext && (
         <AdSlot
@@ -306,24 +315,24 @@ export default async function AddressPage({
 
       {/* Contract section */}
       {contractStatus.isContract && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Contract</h2>
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Contract</h2>
           {contractResult?.verifiedAt ? (
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <Badge variant="success">Verified</Badge>
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-mut">
                   via {contractResult.verifySource} •{' '}
                   {contractResult.compilerVersion ?? 'unknown'}
                 </span>
               </div>
               {contractResult.license && (
-                <p className="text-sm text-gray-500 mb-2">
+                <p className="text-sm text-mut mb-2">
                   License: {contractResult.license}
                 </p>
               )}
               {contractResult.sourceCode && (
-                <pre className="mt-3 bg-gray-50 p-3 rounded text-xs overflow-auto max-h-64 border">
+                <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-hair bg-canvas p-3 font-mono text-xs text-ink2">
                   {contractResult.sourceCode.slice(0, 2000)}
                   {contractResult.sourceCode.length > 2000
                     ? '\n// ... truncated'
@@ -332,7 +341,7 @@ export default async function AddressPage({
               )}
               {contractResult.verifiedAt && contractResult.abi != null && (
                 <div className="mt-4">
-                  <h3 className="font-medium text-sm mb-2">Read Contract</h3>
+                  <h3 className="mb-2 text-sm font-medium text-ink">Read Contract</h3>
                   <AbiReader address={addr} abi={contractResult.abi as unknown[]} />
                 </div>
               )}
@@ -340,7 +349,7 @@ export default async function AddressPage({
           ) : (
             <div className="flex items-center gap-3">
               <Badge variant="pending">Unverified</Badge>
-              <Link href="/verify" className={`text-sm ${chainConfig.theme.linkText} hover:underline`}>
+              <Link href="/verify" className="text-sm text-acc-ink hover:underline">
                 Verify this contract →
               </Link>
             </div>
@@ -349,11 +358,12 @@ export default async function AddressPage({
       )}
 
       {/* Tab bar */}
-      <div className="flex overflow-x-auto border-b border-gray-200 mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className="flex overflow-x-auto border-b border-hair mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
         <TabLink
           href={`/address/${addr}?tab=txns`}
           active={activeTab === 'txns'}
-          label={`Transactions (${formatNumber(displayTxCount)})`}
+          label="Transactions"
+          count={`(${formatNumber(displayTxCount)})`}
         />
         <TabLink
           href={`/address/${addr}?tab=transfers`}
@@ -443,11 +453,11 @@ async function TxnsTab({
     if (isBot) {
       return (
         <div>
-          <p className="text-gray-500 mb-2">Transaction history is not available in the local index for this address.</p>
+          <p className="text-mut mb-2">Transaction history is not available in the local index for this address.</p>
           {total > 0 && (
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-mut">
               This address has {formatNumber(total)} transactions on-chain.{' '}
-              <a href={`${chainConfig.externalExplorerUrl}/address/${addr}`} target="_blank" rel="noopener noreferrer" className={`${chainConfig.theme.linkText} hover:underline`}>
+              <a href={`${chainConfig.externalExplorerUrl}/address/${addr}`} target="_blank" rel="noopener noreferrer" className="text-acc-ink hover:underline">
                 View on {chainConfig.externalExplorer} ↗
               </a>
             </p>
@@ -461,43 +471,47 @@ async function TxnsTab({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-gray-500">
+        <p className="font-mono text-[13px] text-mut">
           Transactions ({formatNumber(total)})
         </p>
         <a
           href={`/api/v1/addresses/${addr}/export`}
-          className={`text-xs ${chainConfig.theme.linkText} hover:underline border ${chainConfig.theme.border} rounded px-2 py-0.5`}
+          className="rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-acc-ink transition-colors hover:border-hair3 hover:underline"
           download
         >
           ↓ Export CSV
         </a>
       </div>
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{chainConfig.name} transactions for this address</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead className="bg-canvas border-b border-hair">
             <tr>
-              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
-              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From / To</th>
-              <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
+              <th scope="col" className={TH}>Tx Hash</th>
+              <th scope="col" className={`${TH} hidden sm:table-cell`}>Age</th>
+              <th scope="col" className={TH}>From / To</th>
+              <th scope="col" className={`${TH} hidden sm:table-cell`}>Value</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y divide-hair">
             {txs.map((tx) => (
-              <tr key={tx.hash} className="hover:bg-gray-50">
-                <td className="px-3 sm:px-4 py-2 font-mono text-xs">
-                  <Link href={`/tx/${tx.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+              <tr key={tx.hash} className="hover:bg-canvas transition-colors">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+                  <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
                     {tx.hash.slice(0, 14)}...
                   </Link>
+                  {/* Phones drop the Value column; it moves under the hash. */}
+                  <div className="text-xs text-mut sm:hidden">
+                    {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
+                  </div>
                 </td>
-                <td className="px-3 sm:px-4 py-2 text-gray-500 hidden sm:table-cell">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
                   {timeAgo(new Date(tx.timestamp))}
                 </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <div>
-                    <span className="text-gray-400 text-xs">
+                    <span className="text-mut text-xs">
                       {tx.fromAddress.toLowerCase() === addr ? 'OUT' : 'IN'}{' '}
                     </span>
                     <Link
@@ -506,7 +520,7 @@ async function TxnsTab({
                           ? tx.toAddress ?? addr
                           : tx.fromAddress
                       }`}
-                      className={`${chainConfig.theme.linkText} hover:underline`}
+                      className="text-acc-ink hover:underline"
                     >
                       {(
                         tx.fromAddress.toLowerCase() === addr
@@ -517,7 +531,7 @@ async function TxnsTab({
                     </Link>
                   </div>
                 </td>
-                <td className="px-3 sm:px-4 py-2">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
                   {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
                 </td>
               </tr>
@@ -577,7 +591,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
   if (incomplete || (transfers.length === 0 && page === 1)) {
     if (isBot) {
       return (
-        <p className="text-gray-500">
+        <p className="text-mut">
           {transfers.length === 0
             ? 'No token transfers found for this address.'
             : 'Full token transfer history is not available in the local index for this address.'}
@@ -606,39 +620,39 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
 
   return (
     <div>
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{chainConfig.name} token transfers for this address</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead className="bg-canvas border-b border-hair">
             <tr>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Block</th>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">From</th>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">To</th>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-              <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Amount</th>
+              <th scope="col" className={TH}>Tx Hash</th>
+              <th scope="col" className={TH}>Block</th>
+              <th scope="col" className={TH}>From</th>
+              <th scope="col" className={TH}>To</th>
+              <th scope="col" className={TH}>Token</th>
+              <th scope="col" className={TH}>Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y divide-hair">
             {transfers.map((t) => (
-              <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-gray-50">
-                <td className="px-4 py-2 font-mono text-xs">
-                  <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+              <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-canvas transition-colors">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+                  <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                     {t.txHash.slice(0, 14)}...
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{t.blockNumber}</td>
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
                 </td>
-                <td className="px-4 py-2 font-mono text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
                 </td>
-                <td className="px-4 py-2 text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <Link
                     href={`/token/${t.tokenAddress}`}
-                    className={`${chainConfig.theme.linkText} hover:underline`}
+                    className="text-acc-ink hover:underline"
                   >
                     {sanitizeSymbolOr(
                       tokenInfoMap.get(t.tokenAddress)?.symbol,
@@ -647,7 +661,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                         formatAddress(t.tokenAddress)))}
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-xs">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   {(() => {
                     const decimals = tokenInfoMap.get(t.tokenAddress)?.decimals ?? 0
                     const raw = t.value ?? '0'
@@ -726,24 +740,24 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
 
   if (holdings.length === 0) {
     if (isBot) {
-      return <p className="text-gray-500">No token holdings found for this address.</p>
+      return <p className="text-mut">No token holdings found for this address.</p>
     }
     return <HoldingsLazy addr={addr} />
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{chainConfig.name} token holdings for this address</caption>
-        <thead className="bg-gray-50 border-b">
+        <thead className="bg-canvas border-b border-hair">
           <tr>
-            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Token</th>
-            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Symbol</th>
-            <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500">Approx. Balance</th>
+            <th scope="col" className={TH}>Token</th>
+            <th scope="col" className={TH}>Symbol</th>
+            <th scope="col" className={TH}>Approx. Balance</th>
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody className="divide-y divide-hair">
           {holdings.map((h) => {
             const displayBalance = (() => {
               try {
@@ -760,14 +774,14 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
               }
             })()
             return (
-              <tr key={h.tokenAddress} className="hover:bg-gray-50">
-                <td className="px-4 py-2">
-                  <Link href={`/token/${h.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline font-medium`}>
+              <tr key={h.tokenAddress} className="hover:bg-canvas transition-colors">
+                <td className="px-3 sm:px-4 py-2">
+                  <Link href={`/token/${h.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
                     {sanitizeSymbolOr(h.name, h.tokenAddress.slice(0, 14) + '…')}
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-600">{sanitizeSymbolOr(h.symbol, '—')}</td>
-                <td className="px-4 py-2">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(h.symbol, '—')}</td>
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   {displayBalance} {sanitizeSymbolOr(h.symbol, '')}
                 </td>
               </tr>
@@ -832,8 +846,8 @@ async function AnalyticsTab({
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-      <h2 className="font-semibold text-gray-800 mb-4">Address Analytics</h2>
+    <div className="bg-card rounded-xl border border-hair p-6">
+      <h2 className="mb-4 font-semibold tracking-[-0.02em] text-ink">Address Analytics</h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         <AnalyticItem label="Total Sent" value={`${formatWei(totalSentNative)} ${chainConfig.currency}`} />
         <AnalyticItem
@@ -905,48 +919,48 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   // Augment with Moralis NFT holdings when DB has no data — lazy on client so bots don't trigger it
   if (nftTransfers.length === 0) {
     if (isBot) {
-      return <p className="text-gray-500 py-8 text-center">No NFT activity found for this address.</p>
+      return <p className="text-mut py-8 text-center">No NFT activity found for this address.</p>
     }
     return <NftsLazy addr={addr} />
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{chainConfig.name} NFT transfer activity for this address</caption>
-        <thead className="bg-gray-50 border-b">
+        <thead className="bg-canvas border-b border-hair">
           <tr>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">NFT</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">Token ID</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">Action</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">Block</th>
+            <th scope="col" className={TH}>NFT</th>
+            <th scope="col" className={TH}>Token ID</th>
+            <th scope="col" className={TH}>Action</th>
+            <th scope="col" className={TH}>Tx Hash</th>
+            <th scope="col" className={TH}>Block</th>
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody className="divide-y divide-hair">
           {nftTransfers.map((t, i) => (
-            <tr key={i} className="hover:bg-gray-50">
-              <td className="px-4 py-2">
-                <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+            <tr key={i} className="hover:bg-canvas transition-colors">
+              <td className="px-3 sm:px-4 py-2">
+                <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
                   {t.name ?? t.tokenAddress.slice(0, 12) + '...'}
                 </Link>
-                {t.symbol && <span className="ml-1 text-xs text-gray-400">({t.symbol})</span>}
+                {t.symbol && <span className="ml-1 text-xs text-mut">({t.symbol})</span>}
               </td>
-              <td className="px-4 py-2 font-mono text-xs">
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                 #{t.tokenId}
               </td>
-              <td className="px-4 py-2">
-                <span className={`text-xs font-medium ${t.toAddress.toLowerCase() === addr ? 'text-green-600' : 'text-red-500'}`}>
+              <td className="px-3 sm:px-4 py-2">
+                <span className={`font-mono text-xs font-medium ${t.toAddress.toLowerCase() === addr ? 'text-live' : 'text-warn'}`}>
                   {t.toAddress.toLowerCase() === addr ? 'Received' : 'Sent'}
                 </span>
               </td>
-              <td className="px-4 py-2 font-mono text-xs">
-                <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+                <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                   {t.txHash.slice(0, 14)}...
                 </Link>
               </td>
-              <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{t.blockNumber}</td>
             </tr>
           ))}
         </tbody>
@@ -962,31 +976,34 @@ function TabLink({
   href,
   active,
   label,
+  count,
 }: {
   href: string
   active: boolean
   label: string
+  count?: string
 }) {
   return (
     <Link
       href={href}
       className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
         active
-          ? `${chainConfig.theme.border} ${chainConfig.theme.linkText}`
-          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          ? 'border-acc text-acc-ink'
+          : 'border-transparent text-ink2 hover:text-ink hover:border-hair3'
       }`}
     >
       {label}
+      {count && <span className="ml-1 font-mono text-[13px] font-normal text-mut">{count}</span>}
     </Link>
   )
 }
 
-function StatItem({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
+function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div>
-      <p className="text-gray-500 text-xs mb-0.5">{label}</p>
-      <p className="font-semibold">{value}</p>
-      {subValue && <p className="text-xs text-gray-400">{subValue}</p>}
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
+      {sub && <dd className="mt-0.5 break-words text-xs text-mut">{sub}</dd>}
     </div>
   )
 }
@@ -994,8 +1011,8 @@ function StatItem({ label, value, subValue }: { label: string; value: string; su
 function AnalyticItem({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className="font-bold text-gray-900">{value}</p>
+      <p className="k mb-1">{label}</p>
+      <p className="font-mono text-[15px] text-ink">{value}</p>
     </div>
   )
 }
