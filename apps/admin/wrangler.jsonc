@@ -6,8 +6,7 @@
   // admin surface on an unprotected *.workers.dev / preview URL.
   "workers_dev": false,
   "preview_urls": false,
-  "main": "./dist/_worker.js/index.js",
-  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  "main": "@astrojs/cloudflare/entrypoints/server",
   "routes": [{ "pattern": "admin.altscan.io", "custom_domain": true }],
   "observability": { "enabled": true },
   "d1_databases": [

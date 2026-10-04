@@ -8,10 +8,6 @@ export const prerender = false;
 const TTL_S = 12;
 const CACHE_CONTROL = `public, max-age=${TTL_S}, s-maxage=${TTL_S}`;
 
-interface Runtime {
-  caches?: { default?: Cache };
-  ctx?: { waitUntil(promise: Promise<unknown>): void };
-}
 
 const PAGE = 50;
 
@@ -29,8 +25,8 @@ async function fetchBlocks(p: Product): Promise<unknown> {
 }
 
 export const GET: APIRoute = async ({ request, locals }) => {
-  const runtime = (locals as { runtime?: Runtime }).runtime;
-  const cache = runtime?.caches?.default;
+  // Workers' default cache. Absent outside workerd, where the route simply fetches every time.
+  const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
   // The query string is dropped from the key so `?x=` cannot bypass the cache and reach the explorers.
   const key = new Request(new URL('/api/chains.json', request.url).toString());
 
@@ -53,7 +49,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
   });
   if (cache) {
     const put = cache.put(key, res.clone());
-    if (runtime?.ctx) runtime.ctx.waitUntil(put);
+    const ctx = (locals as { cfContext?: { waitUntil(promise: Promise<unknown>): void } }).cfContext;
+    if (ctx) ctx.waitUntil(put);
     else await put;
   }
   return res;

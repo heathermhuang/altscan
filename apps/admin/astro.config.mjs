@@ -6,6 +6,12 @@ import react from '@astrojs/react';
 export default defineConfig({
   site: 'https://admin.altscan.io',
   output: 'server', // everything is per-request (auth + live data)
+  // Astro 7 defaults to JSX-style whitespace, which drops spaces between inline elements written on
+  // separate lines. Keep HTML-aware compression so the console renders as it did on Astro 5.
+  compressHTML: true,
+  // No sessions. Without this the adapter defaults to KV-backed sessions and adds a SESSION binding
+  // with no id, which wrangler would provision as a new KV namespace on deploy.
+  session: false,
   adapter: cloudflare({ imageService: 'compile', platformProxy: { enabled: true } }),
   integrations: [react()],
   vite: {

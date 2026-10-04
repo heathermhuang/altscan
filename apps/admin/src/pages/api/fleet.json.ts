@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro'
+import { env } from 'cloudflare:workers'
 import { listExplorers } from '../../lib/db'
 import { buildFleetPayload } from '../../lib/fleet'
 import { fetchExplorerHealth, fetchLatestDeploys } from '../../lib/upstream'
@@ -7,7 +8,6 @@ import { json } from '../../lib/http'
 export const prerender = false
 
 export const GET: APIRoute = async ({ locals }) => {
-  const env = locals.runtime.env
   const rows = await listExplorers(env, locals.member.tenantId)
   const probes = await Promise.all(
     rows.map(async (x) => {

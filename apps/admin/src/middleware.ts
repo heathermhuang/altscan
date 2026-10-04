@@ -1,4 +1,5 @@
 import { defineMiddleware } from 'astro:middleware'
+import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { verifyAccessJwt } from './lib/access'
 import { getDb } from './lib/db'
@@ -6,7 +7,6 @@ import { members } from './lib/schema'
 import type { Role } from './lib/rbac'
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  const env = context.locals.runtime.env
 
   let email: string | null = null
   if (import.meta.env.DEV && env.DEV_FAKE_EMAIL) {

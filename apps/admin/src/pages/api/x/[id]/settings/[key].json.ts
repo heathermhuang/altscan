@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro'
+import { env } from 'cloudflare:workers'
 import { getDb, getExplorer } from '../../../../../lib/db'
 import { audit } from '../../../../../lib/schema'
 import { canWrite } from '../../../../../lib/rbac'
@@ -12,7 +13,6 @@ export const prerender = false
 /** PUT proxy — RBAC-gated; injects the authenticated actor as updatedBy and
  *  records a console-side audit row on success. */
 export const PUT: APIRoute = async ({ params, locals, request }) => {
-  const env = locals.runtime.env
   if (!canWrite(locals.member.role)) return json({ error: 'forbidden: read-only role' }, 403)
 
   const explorer = await getExplorer(env, params.id!, locals.member.tenantId)

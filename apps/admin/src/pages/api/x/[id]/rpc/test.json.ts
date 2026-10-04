@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro'
+import { env } from 'cloudflare:workers'
 import { getChainConfig } from '@altscan/chain-config'
 import { getExplorer } from '../../../../../lib/db'
 import { json } from '../../../../../lib/http'
@@ -18,7 +19,6 @@ export const prerender = false
  * (cross-tenant = 404).
  */
 export const POST: APIRoute = async ({ params, locals, request }) => {
-  const env = locals.runtime.env
   if (!canWrite(locals.member.role)) return json({ error: 'forbidden: read-only role' }, 403)
 
   const explorer = await getExplorer(env, params.id!, locals.member.tenantId)
