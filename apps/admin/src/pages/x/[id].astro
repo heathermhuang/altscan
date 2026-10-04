@@ -1,11 +1,12 @@
 ---
+import { env } from 'cloudflare:workers';
 import Admin from '../../layouts/Admin.astro';
 import { SettingsPanel } from '../../islands/SettingsPanel';
 import { getExplorer } from '../../lib/db';
 import { safeExternalUrl } from '../../lib/safe-url';
 export const prerender = false;
 
-const explorer = await getExplorer(Astro.locals.runtime.env, Astro.params.id!, Astro.locals.member.tenantId);
+const explorer = await getExplorer(env, Astro.params.id!, Astro.locals.member.tenantId);
 if (!explorer) return new Response('unknown explorer', { status: 404 });
 ---
 <Admin title={`Altscan Admin — ${explorer.brand}`}>

@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro'
+import { env } from 'cloudflare:workers'
 import { getDb, getExplorer } from '../../../../lib/db'
 import { audit } from '../../../../lib/schema'
 import { canWrite } from '../../../../lib/rbac'
@@ -26,7 +27,6 @@ const PUBLIC_BASE = 'https://creatives.altscan.io'
  * middleware and a tenant-scoped explorer lookup (cross-tenant = 404).
  */
 export const POST: APIRoute = async ({ params, locals, request }) => {
-  const env = locals.runtime.env
   if (!canWrite(locals.member.role)) return json({ error: 'forbidden: read-only role' }, 403)
 
   const explorer = await getExplorer(env, params.id!, locals.member.tenantId)
