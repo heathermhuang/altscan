@@ -2,13 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Prevent horizontal overflow on mobile */
-html, body {
-  overflow-x: hidden;
+/* Ledger Tape tokens. --acc / --acc-ink / --acc-t / --acc-on are written on
+   <html> by app/layout.tsx from chain-config, so each chain gets its own accent. */
+:root {
+  color-scheme: light;
+  --ink: #101014;
+  --ink2: #3b3b45;
+  --mut: #6c6c77;
+  --faint: #b4b4c0;
+  --bg: #fbfbfc;
+  --card: #ffffff;
+  --hair: #e7e7ee;
+  --hair2: #f0f0f5;
+  --hair3: #cfcfd8;
+  --live: #15803d;
+  --liveT: #eaf6ee;
+  --warn: #9a4a32;
+  --warnT: #fff8f5;
 }
 
-/* Accessible focus ring for keyboard navigation */
-*:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+@layer base {
+  /* `clip`, not `hidden`: hidden on both html and body makes body a scroll
+     container and breaks the sticky header. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* Accessible focus ring for keyboard navigation */
+  *:focus-visible {
+    outline: 2px solid var(--acc-ink);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Kicker: mono caption above a heading or over a column. */
+  .k {
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mut);
+  }
+  /* Hairline divider (<hr class="rule"> or an empty <div class="rule">). */
+  .rule {
+    height: 1px;
+    border: 0;
+    background: var(--hair);
+  }
+  /* Fact strip: hairline-divided cells, 2 columns on phones, --cols (default 4) from md up.
+     Set a different count with the `[--cols:5]` class. */
+  .ledger {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--hair);
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .ledger > * {
+    background: var(--card);
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .ledger > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  @media (min-width: 768px) {
+    .ledger {
+      grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+    }
+    .ledger > :last-child:nth-child(odd) {
+      grid-column: auto;
+    }
+  }
 }

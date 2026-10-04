@@ -26,46 +26,46 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
   showStatus?: boolean
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{chainConfig.name} transactions</caption>
-        <thead className="bg-gray-50 border-b">
+        <thead className="bg-canvas border-b border-hair">
           <tr>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Tx Hash</th>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Age</th>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">From</th>
-            {!compact && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">To</th>}
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Value</th>
-            {showStatus && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Status</th>}
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">Tx Hash</th>
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut hidden sm:table-cell">Age</th>
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">From</th>
+            {!compact && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut hidden sm:table-cell">To</th>}
+            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">Value</th>
+            {showStatus && <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut hidden sm:table-cell">Status</th>}
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody className="divide-y divide-hair">
           {txs.map(tx => (
-            <tr key={tx.hash} className="hover:bg-gray-50/80 transition-colors">
-              <td className="px-3 sm:px-4 py-2 font-mono text-xs">
-                <Link href={`/tx/${tx.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+            <tr key={tx.hash} className="hover:bg-canvas transition-colors">
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+                <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
                   {formatAddress(tx.hash, 10)}
                 </Link>
               </td>
-              <td className="px-3 sm:px-4 py-2 text-gray-500 hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-xs">
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                 <AddressLink address={tx.fromAddress} />
               </td>
               {!compact && (
-                <td className="px-3 sm:px-4 py-2 font-mono text-xs hidden sm:table-cell">
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
                   {tx.toAddress ? (
                     <AddressLink address={tx.toAddress} />
                   ) : (
-                    <span className="text-gray-400">Contract Creation</span>
+                    <span className="text-mut">Contract Creation</span>
                   )}
                 </td>
               )}
-              <td className="px-3 sm:px-4 py-2">{formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}</td>
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">{formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}</td>
               {showStatus && (
                 <td className="px-3 sm:px-4 py-2 hidden sm:table-cell">
                   {tx.status == null ? (
-                    <span className="text-gray-400">—</span>
+                    <span className="text-mut">—</span>
                   ) : (
                     <Badge variant={tx.status ? 'success' : 'fail'}>
                       {tx.status ? 'Success' : 'Failed'}

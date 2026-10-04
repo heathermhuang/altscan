@@ -1,48 +1,43 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
+import { getChainConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain-client'
 
 const isDev = process.env.NODE_ENV === 'development'
 const PEER_URL = isDev ? chainConfig.peerDevUrl : chainConfig.peerUrl
 
+// Each network's own swatch colours come from its chain-config theme, so this
+// list never hardcodes a chain colour.
 const NETWORKS = [
   {
     id: 'bnb',
     label: 'BNB Chain',
     short: 'BNB',
-    dot: 'bg-yellow-600',
+    theme: getChainConfig('bnb').theme,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true">
-        <path d="M12 2L20 7.5V16.5L12 22L4 16.5V7.5L12 2Z" fill="black" fillOpacity="0.7" />
-        <line x1="6" y1="12" x2="18" y2="12" stroke="black" strokeWidth="2" strokeOpacity="0.35" />
-        <circle cx="12" cy="12" r="2" fill="black" fillOpacity="0.7" />
+        <path d="M12 2L20 7.5V16.5L12 22L4 16.5V7.5L12 2Z" fill="currentColor" fillOpacity="0.7" />
+        <line x1="6" y1="12" x2="18" y2="12" stroke="currentColor" strokeWidth="2" strokeOpacity="0.35" />
+        <circle cx="12" cy="12" r="2" fill="currentColor" fillOpacity="0.7" />
       </svg>
     ),
-    bgActive: 'bg-yellow-500',
-    highlightBg: 'bg-yellow-50',
-    highlightText: 'text-yellow-600',
-    highlightCheck: 'text-yellow-500',
   },
   {
     id: 'eth',
     label: 'Ethereum',
     short: 'ETH',
-    dot: 'bg-blue-400',
+    theme: getChainConfig('eth').theme,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true">
-        <path d="M12 2L19 12L12 16.5L5 12L12 2Z" fill="white" fillOpacity="0.9" />
-        <path d="M12 16.5L19 12L12 22L5 12L12 16.5Z" fill="white" fillOpacity="0.6" />
+        <path d="M12 2L19 12L12 16.5L5 12L12 2Z" fill="currentColor" fillOpacity="0.9" />
+        <path d="M12 16.5L19 12L12 22L5 12L12 16.5Z" fill="currentColor" fillOpacity="0.6" />
       </svg>
     ),
-    bgActive: 'bg-blue-900',
-    highlightBg: 'bg-blue-50',
-    highlightText: 'text-blue-700',
-    highlightCheck: 'text-blue-600',
   },
 ]
 
-export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { direction?: 'down' | 'up'; theme?: 'header' | 'footer' }) {
+export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | 'up' }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
@@ -61,25 +56,18 @@ export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { dire
   const current = NETWORKS.find(n => n.id === currentKey)!
   const chevronOpen = direction === 'up' ? !open : open
 
-  // Use chain theme for switcher styling
-  const { theme: ct } = chainConfig
-
   return (
     <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-[13px] font-semibold border ${
-          theme === 'footer'
-            ? 'bg-white/15 hover:bg-white/25 text-white border-white/20'
-            : `${ct.activeNav} hover:${ct.switcherHoverBg} ${ct.switcherBorder}`
-        }`}
+        className="flex items-center gap-2 h-8 px-3 rounded-full border border-hair bg-card hover:border-hair3 transition-colors font-mono text-xs font-medium text-ink"
         aria-label="Switch network"
         aria-expanded={open}
       >
-        <span className={`w-2 h-2 rounded-full ${current.dot} shrink-0`} />
+        <span className="w-2 h-2 rounded-[2px] bg-acc shrink-0" />
         {current.short}
         <svg
-          className={`w-3 h-3 transition-transform duration-150 ${chevronOpen ? 'rotate-180' : ''} ${theme === 'footer' ? 'text-white/70' : 'opacity-50'}`}
+          className={`w-3 h-3 text-mut transition-transform duration-150 ${chevronOpen ? 'rotate-180' : ''}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -87,44 +75,48 @@ export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { dire
       </button>
 
       {open && (
-        <div className={`absolute left-0 w-52 rounded-xl shadow-xl bg-white border border-gray-100 overflow-hidden z-50 ${
+        <div className={`absolute left-0 w-56 rounded-xl border border-hair bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50 ${
           direction === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
         }`}>
-          <p className="px-3 pt-2.5 pb-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+          <p className="k text-[11px] px-3 pt-2.5 pb-1.5">
             Switch Network
           </p>
           {NETWORKS.map(net => {
             const isCurrent = net.id === currentKey
             const href = isCurrent ? null : `${PEER_URL}${pathname}`
+            const mark = (
+              <span
+                className="w-7 h-7 rounded-[3px] flex items-center justify-center shrink-0"
+                style={{ backgroundColor: net.theme.accentHex, color: net.theme.accentOn }}
+              >
+                {net.icon}
+              </span>
+            )
             return (
               <div key={net.id}>
                 {isCurrent ? (
-                  <div className={`flex items-center gap-3 px-3 py-2.5 ${net.highlightBg}`}>
-                    <span className={`w-7 h-7 rounded-full ${net.bgActive} flex items-center justify-center shrink-0`}>
-                      {net.icon}
-                    </span>
+                  <div className="flex items-center gap-3 px-3 py-2.5 bg-hair2">
+                    {mark}
                     <div>
-                      <p className="text-[13px] font-semibold text-gray-900">{net.label}</p>
-                      <p className={`text-[11px] ${net.highlightText} font-medium`}>Currently viewing</p>
+                      <p className="text-[13px] font-semibold text-ink">{net.label}</p>
+                      <p className="font-mono text-[11px] text-acc-ink">Currently viewing</p>
                     </div>
-                    <svg className={`ml-auto w-4 h-4 ${net.highlightCheck} shrink-0`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <svg className="ml-auto w-4 h-4 text-acc-ink shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
                 ) : (
                   <a
                     href={href!}
-                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-hair2 transition-colors"
                     onClick={() => setOpen(false)}
                   >
-                    <span className={`w-7 h-7 rounded-full ${net.bgActive} flex items-center justify-center shrink-0`}>
-                      {net.icon}
-                    </span>
+                    {mark}
                     <div>
-                      <p className="text-[13px] font-semibold text-gray-900">{net.label}</p>
-                      <p className="text-[11px] text-gray-400">Switch explorer</p>
+                      <p className="text-[13px] font-semibold text-ink">{net.label}</p>
+                      <p className="font-mono text-[11px] text-mut">Switch explorer</p>
                     </div>
-                    <svg className="ml-auto w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="ml-auto w-4 h-4 text-mut shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
                   </a>
@@ -132,8 +124,8 @@ export function NetworkSwitcher({ direction = 'down', theme = 'header' }: { dire
               </div>
             )
           })}
-          <div className="px-3 py-2 border-t border-gray-100 bg-gray-50">
-            <p className="text-[10px] text-gray-400">
+          <div className="px-3 py-2 border-t border-hair bg-canvas">
+            <p className="font-mono text-[11px] text-mut">
               Same page on the other chain
             </p>
           </div>

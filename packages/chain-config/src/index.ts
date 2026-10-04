@@ -42,6 +42,14 @@ export type ChainTheme = {
   positiveChange: string
   /** Stat subtext color for negative change, e.g. "text-red-500" */
   negativeChange: string
+  /** Ledger Tape accent, hex: fills, rules, swatches (CSS var `--acc`) */
+  accentHex: string
+  /** Accent for links and text on a light surface, hex (`--acc-ink`) */
+  accentInk: string
+  /** Accent tint for tile tracks and active backgrounds, hex (`--acc-t`) */
+  accentTint: string
+  /** Text/marks drawn on an `accentHex` fill, hex (`--acc-on`) */
+  accentOn: string
 }
 
 export type ChainFeatures = {
@@ -296,6 +304,10 @@ export const BSC: ChainConfig = {
     switcherBorder: 'border-black/15',
     positiveChange: 'text-green-600',
     negativeChange: 'text-red-500',
+    accentHex: '#F2C200',
+    accentInk: '#7a5c00',
+    accentTint: '#F8E9A6',
+    accentOn: '#1a1400',
   },
   features: {
     hasValidators: true,
@@ -384,6 +396,10 @@ export const ETH: ChainConfig = {
     switcherBorder: 'border-white/20',
     positiveChange: 'text-green-600',
     negativeChange: 'text-red-500',
+    accentHex: '#1E3A8A',
+    accentInk: '#1E3A8A',
+    accentTint: '#E4E9F6',
+    accentOn: '#ffffff',
   },
   features: {
     hasValidators: false,

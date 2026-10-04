@@ -1,8 +1,6 @@
 import Link from 'next/link'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { getAddressLabel } from '@/lib/known-addresses'
-// chain-client: this component is rendered inside client components too.
-import { chainConfig } from '@/lib/chain-client'
 
 /**
  * The single place an address becomes visible text.
@@ -40,7 +38,7 @@ export function AddressLink({
     <Link
       href={`/address/${address.toLowerCase()}`}
       title={checksummed}
-      className={`${self ? 'text-gray-800 font-semibold' : `${chainConfig.theme.linkText} hover:underline`} ${label ? '' : 'font-mono'} ${className}`}
+      className={`${self ? 'text-ink font-semibold' : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
     >
       {text}
     </Link>
