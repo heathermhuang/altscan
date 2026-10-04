@@ -46,10 +46,13 @@ const run = `git clone ${GITHUB}\ncd altscan && cp .env.docker.example .env\ndoc
       <a class="lnk" href={GITHUB}>browse the source ↗</a>
     </div>
     <div class="wrap ledger">
-      {groups.map((g) => (
-        <ol aria-label={g.label.replace(' →', '')}>
-          {g.pkgs.map((p) => <li><a href={tree(p.path)}>{name(p.path)}</a> {fmt(p.lines)}{p.path === 'apps/altscan-site' && ' (this page)'}</li>)}
-        </ol>
+      {groups.map((g, i) => (
+        <div class="lgrp">
+          {i > 0 && <span class="lg" aria-hidden="true">{g.label}</span>}
+          <ol aria-label={g.label.replace(' →', '')}>
+            {g.pkgs.map((p) => <li><a href={tree(p.path)}>{name(p.path)}</a> {fmt(p.lines)}{p.path === 'apps/altscan-site' && ' (this page)'}</li>)}
+          </ol>
+        </div>
       ))}
     </div>
   </div>

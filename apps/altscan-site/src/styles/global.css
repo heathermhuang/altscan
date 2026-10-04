@@ -52,6 +52,15 @@ a{color:inherit;text-decoration:none}
 .nav-links a:hover{color:var(--ink)}
 .gh{font-family:var(--mono);font-size:12.5px;border:1px solid var(--hair);background:var(--card);padding:7px 12px;border-radius:9px;display:flex;gap:7px;align-items:center;transition:border-color .15s}
 .gh:hover{border-color:var(--acc)}
+.nav-r{display:flex;gap:8px;align-items:center}
+/* Phones: the section links move into a menu (a <details>, so it works without JS). */
+.menu{display:none;position:relative}
+.menu summary{list-style:none;cursor:pointer;font-family:var(--mono);font-size:12.5px;border:1px solid var(--hair);background:var(--card);padding:7px 12px;border-radius:9px}
+.menu summary::-webkit-details-marker{display:none}
+.menu[open] summary{border-color:var(--acc)}
+.menu-list{position:absolute;right:0;top:calc(100% + 8px);display:flex;flex-direction:column;min-width:190px;background:var(--card);border:1px solid var(--hair);border-radius:12px;padding:6px;box-shadow:0 10px 30px rgba(16,16,20,.12)}
+.menu-list a{padding:11px 12px;border-radius:8px;font-size:15px}
+.menu-list a:hover{background:var(--hair2)}
 
 /* ── Hero ──────────────────────────────────────────────────────── */
 .hero{padding-block:clamp(48px,8vw,112px) clamp(28px,4vw,48px)}
@@ -197,8 +206,11 @@ a{color:inherit;text-decoration:none}
 .ct .lb{position:absolute;left:8px;top:6px;font-family:var(--mono);font-size:12px;padding:1px 6px;border-radius:4px;white-space:nowrap;background:var(--hair);color:var(--ink)}
 @container (max-width:190px){.ct .lb{display:none}}
 .ledger{display:flex;flex-wrap:wrap;gap:4px 32px;font-family:var(--mono);font-size:12px;color:var(--mut);padding-bottom:16px}
-.ledger ol{list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px}
-.ledger ol:first-child li+li::before{content:"→";margin-right:14px;color:var(--faint)}
+.lgrp{display:flex;gap:4px 14px;align-items:baseline;min-width:0}
+.lg{white-space:nowrap}
+.ledger ol{list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px;min-width:0}
+/* The arrow trails each step, so a wrapped line ends on "→" rather than starting with one. */
+.lgrp:first-child li:not(:last-child)::after{content:"→";margin-left:14px;color:var(--faint)}
 .ledger a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--hair3);text-underline-offset:3px}
 .ledger a:hover{text-decoration-color:currentColor}
 .run{margin-top:clamp(40px,5vw,64px);align-items:start}
@@ -221,8 +233,8 @@ a{color:inherit;text-decoration:none}
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width:1023px){.code-head,.run{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:760px){
-  .nav-links{gap:18px}
-  .nav-links a:not(.keep){display:none}
+  .nav-links{display:none}
+  .menu{display:block}
   .chain:is([data-state=stalled],[data-state=offline]) [data-latest]{display:none}
   .tape{height:76px}
   .ctiles{height:64px}
