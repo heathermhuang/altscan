@@ -11,10 +11,11 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 const jetbrainsMono = JetBrains_Mono({
   weight: ['400', '500', '600'],
   subsets: ['latin'],
-  display: 'swap',
+  // 'optional', not preloaded: a second high-priority font competed with the page on slow
+  // connections, and swapping it in re-wrapped long hashes (CLS). A first visit may show
+  // the fallback mono; once cached, JetBrains Mono is ready before first paint.
+  display: 'optional',
   variable: '--font-mono',
-  // Not preloaded: mono is never the LCP element, and a second high-priority font
-  // competed with the page on slow connections (+~450ms Lighthouse mobile LCP).
   preload: false,
 })
 

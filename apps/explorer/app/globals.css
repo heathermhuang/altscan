@@ -88,6 +88,48 @@
   }
 }
 
+/* Data tables (components/blocks/BlockTable, components/transactions/TxTable) */
+@layer components {
+  /* One class on the <table> instead of the same utilities on every cell: these tables run to
+     50 rows, and per-cell class lists made React split the page payload into a row per <tr>. */
+  .dt {
+    width: 100%;
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 13px;
+  }
+  .dt thead {
+    background: var(--bg);
+    border-bottom: 1px solid var(--hair);
+  }
+  .dt th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+  }
+  .dt td {
+    padding: 8px 12px;
+  }
+  .dt tbody tr + tr {
+    border-top: 1px solid var(--hair);
+  }
+  .dt tbody tr {
+    transition: background-color 0.15s;
+  }
+  .dt tbody tr:hover {
+    background: var(--bg);
+  }
+  @media (min-width: 640px) {
+    .dt th,
+    .dt td {
+      padding-inline: 16px;
+    }
+  }
+}
+
 /* Block tape */
 @layer components {
   /* components/home/BlockTape.tsx. Tile width is pure CSS: --s (seconds, inline) times

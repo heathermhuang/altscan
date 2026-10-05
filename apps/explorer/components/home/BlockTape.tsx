@@ -61,7 +61,7 @@ export function BlockTape({ tuples, chainName }: { tuples: TapeTuple[]; chainNam
           <p className="max-w-7xl mx-auto px-4 h-full flex items-center font-mono text-xs text-mut">No indexed blocks yet</p>
         </div>
       ) : (
-        <div className="bt-track bt-fade">
+        <div className="bt-track bt-fade max-w-7xl mx-auto px-4">
           <ul
             data-tape
             role="list"

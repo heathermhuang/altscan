@@ -17,8 +17,8 @@ import { gasPct, type TapeTuple } from '@/lib/tape'
 // Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
 export const revalidate = 60
 
-// The tape spans ~60s of chain time at 34px/s (~2k px, a full 1920 viewport): BNB 0.45s -> 134 blocks, ETH 12s -> 7.
-const TAPE_N = Math.min(140, Math.max(7, Math.ceil(60 / chainConfig.blockTime)))
+// The tape fills the content column (1248px at 34px/s is ~37s of chain time): BNB 0.45s -> 85 blocks, ETH 12s -> 7.
+const TAPE_N = Math.min(100, Math.max(7, Math.ceil(38 / chainConfig.blockTime)))
 
 const jsonLd = {
   '@context': 'https://schema.org',
