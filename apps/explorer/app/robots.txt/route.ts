@@ -19,6 +19,8 @@ export async function GET() {
   lines.push('User-agent: *')
   lines.push('Allow: /')
   lines.push('Disallow: /address/')
+  // Noindex pages of a block's transactions: crawling them multiplies block renders for nothing.
+  lines.push('Disallow: /blocks/*/txs/')
   lines.push('Disallow: /api/')
   lines.push('')
 

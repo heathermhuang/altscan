@@ -47,7 +47,7 @@ export async function Footer() {
 
       {/* MDT attribution bar */}
       <div className="border-b border-hair">
-        <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <FooterLogo />
             <div>
@@ -55,7 +55,7 @@ export async function Footer() {
               <p className="text-mut text-xs">{tagline}</p>
             </div>
           </div>
-          <div className="text-center md:text-right">
+          <div className="md:text-right">
             <p className="k text-[11px] mb-0.5">Maintained by</p>
             <a
               href="https://mdt.io"
@@ -78,8 +78,8 @@ export async function Footer() {
       </div>
 
       {/* Links + network switcher + copyright */}
-      <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-1 font-mono text-[12.5px]">
+      <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[12.5px]">
           {quickLinks.map((l) =>
             l.href.startsWith('/') ? (
               <Link key={`${l.label}-${l.href}`} href={l.href} className="text-mut hover:text-ink transition-colors py-2">

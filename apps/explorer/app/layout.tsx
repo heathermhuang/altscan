@@ -63,6 +63,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       } as React.CSSProperties}
     >
       <body className="bg-canvas text-ink font-sans min-h-screen flex flex-col">
+        {/* First tab stop: hidden until focused, then pinned above the sticky header (z-50). */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-[9px] focus:border focus:border-hair focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-ink focus:ring-2 focus:ring-acc"
+        >
+          Skip to content
+        </a>
         {/* Google Analytics */}
         <Script
           src={`https://www.googletagmanager.com/gtag/js?id=${chainConfig.gaTrackingId}`}
@@ -77,7 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
         <Header />
-        <main className="flex-1">{children}</main>
+        <main id="main" tabIndex={-1} className="flex-1 scroll-mt-32 focus:outline-none">{children}</main>
         <Footer />
         <WebMcpProvider />
       </body>

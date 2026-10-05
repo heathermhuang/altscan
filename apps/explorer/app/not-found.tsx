@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { SearchBar } from '@/components/layout/SearchBar'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { chainConfig } from '@/lib/chain'
 
 export default function NotFound() {
   return (
@@ -8,8 +9,9 @@ export default function NotFound() {
       <p className="text-6xl font-black text-gray-200 mb-4">404</p>
       <h1 className="text-xl font-bold mb-2">Page not found</h1>
       <p className="text-gray-500 text-sm mb-8">
-        That address, block, or transaction hash doesn&apos;t exist on this explorer.
-        Try searching below.
+        Nothing here matches that block, transaction or address. This explorer keeps only recent{' '}
+        {chainConfig.name} history in its index and looks older blocks and transactions up live, so a
+        miss usually means a typo or a hash from another chain.
       </p>
       <div className="max-w-lg mx-auto mb-8">
         <SearchBar />
@@ -28,6 +30,15 @@ export default function NotFound() {
         <Link href="/txs" className="text-gray-600 hover:underline">Transactions</Link>
         <span className="text-gray-300">·</span>
         <Link href="/token" className="text-gray-600 hover:underline">Tokens</Link>
+        <span className="text-faint">·</span>
+        <a
+          href={chainConfig.externalExplorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-ink2 hover:underline"
+        >
+          Look it up on {chainConfig.externalExplorer} <span aria-hidden="true">↗</span>
+        </a>
       </div>
     </div>
   )
