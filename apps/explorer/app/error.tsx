@@ -1,5 +1,4 @@
 'use client'
-import { chainConfig } from '@/lib/chain-client'
 
 export default function Error({
   error,
@@ -16,17 +15,17 @@ export default function Error({
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-      <h2 className="text-xl font-bold mb-3">
+      <h1 className="mb-3 text-xl font-bold tracking-[-0.02em] text-ink">
         {isDbError ? 'Database not connected' : 'Something went wrong'}
-      </h2>
-      <p className="text-gray-500 mb-6 text-sm">
+      </h1>
+      <p className="mb-6 break-words text-sm text-ink2">
         {isDbError
-          ? 'Set DATABASE_URL in apps/web/.env.local to a running PostgreSQL instance to see live data.'
+          ? 'Set DATABASE_URL in apps/explorer/.env.local to a running PostgreSQL instance to see live data.'
           : error.message}
       </p>
       <button
         onClick={reset}
-        className={`${chainConfig.theme.buttonBg} hover:opacity-90 ${chainConfig.theme.buttonText} font-semibold px-4 py-2 rounded-lg text-sm`}
+        className="rounded-[9px] bg-ink px-4 py-2 text-sm font-semibold text-card transition-opacity hover:opacity-90"
       >
         Try again
       </button>

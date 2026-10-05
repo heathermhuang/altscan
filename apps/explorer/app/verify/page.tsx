@@ -47,21 +47,26 @@ export default function VerifyPage() {
 
   const statusStyles: Record<Status, string> = {
     idle:    '',
-    loading: 'bg-yellow-50 text-yellow-700 border border-yellow-200',
-    success: 'bg-green-50  text-green-700  border border-green-200',
-    error:   'bg-red-50    text-red-700    border border-red-200',
+    loading: 'border-l-acc',
+    success: 'border-l-live bg-live-t',
+    error:   'border-l-warn bg-warn-t',
   }
+
+  const field = 'w-full rounded-[9px] border border-hair bg-card px-3 py-2 text-sm text-ink placeholder:text-mut hover:border-hair3'
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-2">Verify Contract Source Code</h1>
-      <p className="text-gray-500 mb-8">
-        Verify and publish your contract source code. We check{' '}
-        <a href="https://sourcify.dev" className={`${chainConfig.theme.linkText} hover:underline`} target="_blank" rel="noreferrer">
-          Sourcify
-        </a>{' '}
-        for existing verifications on {chainConfig.name} (chain ID {chainConfig.chainId}).
-      </p>
+      <div className="mb-5">
+        <p className="k">{'// '}verify</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Verify Contract Source Code</h1>
+        <p className="mt-2 text-sm text-ink2">
+          Verify and publish your contract source code. We check{' '}
+          <a href="https://sourcify.dev" className="text-acc-ink underline hover:no-underline" target="_blank" rel="noreferrer">
+            Sourcify
+          </a>{' '}
+          for existing verifications on {chainConfig.name} (chain ID {chainConfig.chainId}).
+        </p>
+      </div>
 
       <AdSlot
         context="verify"
@@ -70,32 +75,34 @@ export default function VerifyPage() {
         className="mb-8"
       />
 
-      <form onSubmit={handleSubmit} className="bg-white rounded-xl border shadow-sm p-6 space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-5 rounded-xl border border-hair bg-card p-6">
         <div>
-          <label className="block text-sm font-medium mb-1">
-            Contract Address <span className="text-red-500">*</span>
+          <label htmlFor="verify-address" className="mb-1 block text-sm font-medium text-ink">
+            Contract Address <span className="text-warn">*</span>
           </label>
           <input
+            id="verify-address"
             value={address}
             onChange={e => setAddress(e.target.value)}
             placeholder="0x..."
-            className={`w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none ${chainConfig.theme.focusRing}`}
+            className={`${field} font-mono`}
             required
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Compiler Version</label>
+          <label htmlFor="verify-compiler" className="mb-1 block text-sm font-medium text-ink">Compiler Version</label>
           <input
+            id="verify-compiler"
             value={compiler}
             onChange={e => setCompiler(e.target.value)}
-            className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${chainConfig.theme.focusRing}`}
+            className={field}
           />
-          <p className="text-xs text-gray-400 mt-1">e.g. v0.8.19+commit.7dd6d404</p>
+          <p className="mt-1 text-xs text-mut">e.g. v0.8.19+commit.7dd6d404</p>
         </div>
 
         {status !== 'idle' && (
-          <div className={`p-3 rounded-lg text-sm ${statusStyles[status]}`}>
+          <div className={`rounded-xl border border-hair border-l-[3px] px-4 py-3 text-sm text-ink2 ${statusStyles[status]}`}>
             {status === 'loading' ? 'Checking Sourcify…' : message}
           </div>
         )}
@@ -103,7 +110,7 @@ export default function VerifyPage() {
         <button
           type="submit"
           disabled={status === 'loading'}
-          className={`w-full ${chainConfig.theme.buttonBg} hover:opacity-90 disabled:opacity-50 ${chainConfig.theme.buttonText} font-semibold py-2.5 px-4 rounded-lg transition-colors`}
+          className="w-full rounded-[9px] bg-ink px-4 py-2.5 font-semibold text-card transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {status === 'loading' ? 'Verifying…' : 'Verify & Publish'}
         </button>

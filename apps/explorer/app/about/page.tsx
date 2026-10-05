@@ -47,8 +47,6 @@ const faqs = [
 ]
 
 export default function AboutPage() {
-  const { theme } = chainConfig
-
   const faqJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
@@ -67,30 +65,31 @@ export default function AboutPage() {
       />
       <BreadcrumbJsonLd items={[{ name: 'About' }]} />
       {/* About section */}
-      <h1 className="text-3xl font-bold mb-4">About {chainConfig.brandDomain}</h1>
-      <p className="text-gray-600 mb-3 leading-relaxed">
+      <p className="k">{'// '}about</p>
+      <h1 className="mb-4 mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">About {chainConfig.brandDomain}</h1>
+      <p className="mb-3 leading-relaxed text-ink2">
         {chainConfig.brandDomain} is an independent, open-source block explorer for the{' '}
-        <strong>{chainConfig.name}</strong> network, maintained by{' '}
+        <strong className="text-ink">{chainConfig.name}</strong> network, maintained by{' '}
         <a
           href="https://mdt.io"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 hover:underline"
+          className="text-acc-ink underline hover:no-underline"
         >
           Measurable Data Token (MDT)
         </a>
         . We index every block, transaction, token transfer, and smart-contract event so you can
         explore on-chain activity in real-time.
       </p>
-      <p className="text-gray-600 mb-8 leading-relaxed">
+      <p className="mb-8 leading-relaxed text-ink2">
         Our goal is to provide a fast, reliable, and ad-free alternative explorer that anyone can
         use — from casual users checking a transaction to developers building on{' '}
         {chainConfig.name}.
       </p>
 
       {/* Key features */}
-      <h2 className="text-xl font-semibold mb-3">Key Features</h2>
-      <ul className="list-disc list-inside text-gray-600 mb-8 space-y-1.5">
+      <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">Key Features</h2>
+      <ul className="mb-8 list-inside list-disc space-y-1.5 text-ink2 marker:text-mut">
         <li>Real-time block and transaction indexing</li>
         <li>Address portfolio view with token balances and transfer history</li>
         <li>Token analytics, top holders, and DEX trade tracking</li>
@@ -101,14 +100,14 @@ export default function AboutPage() {
       </ul>
 
       {/* FAQ */}
-      <h2 className="text-xl font-semibold mb-4">Frequently Asked Questions</h2>
-      <div className="space-y-5 mb-10">
+      <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">Frequently Asked Questions</h2>
+      <div className="mb-10 space-y-3">
         {faqs.map((faq, i) => (
-          <details key={i} className="group border border-gray-200 rounded-lg">
-            <summary className="cursor-pointer px-4 py-3 font-medium text-gray-900 hover:bg-gray-50 rounded-lg select-none">
+          <details key={i} className="group rounded-xl border border-hair bg-card">
+            <summary className="cursor-pointer select-none rounded-xl px-4 py-3 font-medium text-ink hover:bg-canvas">
               {faq.q}
             </summary>
-            <p className="px-4 pb-3 text-gray-600 leading-relaxed">{faq.a}</p>
+            <p className="px-4 pb-3 leading-relaxed text-ink2">{faq.a}</p>
           </details>
         ))}
       </div>
@@ -117,13 +116,13 @@ export default function AboutPage() {
       <div className="flex flex-wrap gap-3 text-sm">
         <Link
           href="/"
-          className={`${theme.buttonBg} ${theme.buttonText} px-4 py-2 rounded-lg font-medium hover:opacity-90 transition-opacity`}
+          className="rounded-[9px] bg-ink px-4 py-2 font-medium text-card transition-opacity hover:opacity-90"
         >
           Start Exploring
         </Link>
         <Link
           href="/api-docs"
-          className="border border-gray-300 px-4 py-2 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          className="rounded-[9px] border border-hair px-4 py-2 font-medium text-ink2 transition-colors hover:border-hair3"
         >
           API Documentation
         </Link>
@@ -131,7 +130,7 @@ export default function AboutPage() {
           href="https://github.com/heathermhuang/altscan"
           target="_blank"
           rel="noopener noreferrer"
-          className="border border-gray-300 px-4 py-2 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          className="rounded-[9px] border border-hair px-4 py-2 font-medium text-ink2 transition-colors hover:border-hair3"
         >
           GitHub &rarr;
         </a>

@@ -1,6 +1,8 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { Badge } from '@/components/ui/Badge'
+import { CodeBlock } from '@/components/ui/CodeBlock'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -18,25 +20,26 @@ export default function DeveloperPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Developer Platform' }]} />
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Developer Platform</h1>
-        <p className="text-gray-600 text-lg">
+        <p className="k">{'// '}developer</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Developer Platform</h1>
+        <p className="mt-2 max-w-3xl text-ink2">
           Build on {chainConfig.name} with {chainConfig.brandName}&apos;s REST API, webhooks, and flexible query interface.
         </p>
       </div>
 
       {/* Quick Links */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <a href="/api-docs" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
-          <div className="font-semibold">API Reference</div>
-          <div className="text-sm text-gray-600 mt-1">Full endpoint documentation</div>
+        <a href="/api-docs" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
+          <div className="font-semibold text-ink">API Reference</div>
+          <div className="mt-1 text-sm text-ink2">Full endpoint documentation</div>
         </a>
-        <a href="#api-keys" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
-          <div className="font-semibold">API Keys</div>
-          <div className="text-sm text-gray-600 mt-1">Higher rate limits with a key</div>
+        <a href="#api-keys" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
+          <div className="font-semibold text-ink">API Keys</div>
+          <div className="mt-1 text-sm text-ink2">Higher rate limits with a key</div>
         </a>
-        <a href="#webhooks" className="bg-gray-50 border border-gray-200 rounded-xl p-4 hover:bg-gray-100 transition-colors">
-          <div className="font-semibold">Webhooks</div>
-          <div className="text-sm text-gray-600 mt-1">Real-time event notifications</div>
+        <a href="#webhooks" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
+          <div className="font-semibold text-ink">Webhooks</div>
+          <div className="mt-1 text-sm text-ink2">Real-time event notifications</div>
         </a>
       </div>
 
@@ -49,19 +52,19 @@ export default function DeveloperPage() {
 
       {/* API Keys Section */}
       <section id="api-keys" className="mb-10">
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <h2 className="text-xl font-bold">API Keys</h2>
+        <div className="overflow-hidden rounded-xl border border-hair bg-card">
+          <div className="flex items-center gap-3 border-b border-hair bg-canvas px-6 py-4">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">API Keys</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
-            <p className="text-gray-700">
+            <p className="text-ink2">
               Anonymous requests are rate-limited to <strong>10 req/min per IP</strong>.
               With an API key, you get <strong>100 req/min</strong> — 10x more capacity.
             </p>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Get an API Key</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Step 1 — sign a message with your wallet to prove ownership
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Get an API Key</h3>
+              <CodeBlock label="Get an API Key">{`# Step 1 — sign a message with your wallet to prove ownership
 # Message format (sign this exact string with eth_sign or personal_sign):
 #   BNBScan API Key Request
 #   Address: 0xyouraddress
@@ -91,48 +94,48 @@ curl -X POST ${BASE_URL}/api/v1/keys \\
   "key": "bnbs_abc123...",
   "keyPrefix": "bnbs_abc123",
   "message": "API key created. Save it now — the full key will not be shown again."
-}`}</pre>
+}`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Use Your Key</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# Pass your key via the X-API-Key header
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Use Your Key</h3>
+              <CodeBlock label="Use Your Key">{`# Pass your key via the X-API-Key header
 curl ${BASE_URL}/api/v1/blocks \\
   -H "X-API-Key: bnbs_abc123..."
 
 # List your keys
-curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</pre>
+curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <div className="font-semibold text-yellow-800 mb-1">Anonymous</div>
-                <div className="text-yellow-700">10 requests/minute per IP</div>
+            <dl className="ledger [--cols:2]">
+              <div>
+                <dt className="k">Anonymous</dt>
+                <dd className="mt-1 font-mono text-[15px] text-ink">10 requests/minute per IP</dd>
               </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <div className="font-semibold text-green-800 mb-1">With API Key</div>
-                <div className="text-green-700">100 requests/minute</div>
+              <div>
+                <dt className="k">With API Key</dt>
+                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute</dd>
               </div>
-            </div>
+            </dl>
           </div>
         </div>
       </section>
 
       {/* Webhooks Section */}
       <section id="webhooks" className="mb-10">
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <h2 className="text-xl font-bold">Webhooks</h2>
+        <div className="overflow-hidden rounded-xl border border-hair bg-card">
+          <div className="flex items-center gap-3 border-b border-hair bg-canvas px-6 py-4">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Webhooks</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
-            <p className="text-gray-700">
+            <p className="text-ink2">
               Subscribe to real-time on-chain events. {chainConfig.brandName} will POST to your URL whenever the specified
               events occur for the watched address. Requests are signed with HMAC-SHA256.
             </p>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Register a Webhook</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Register a Webhook</h3>
+              <CodeBlock label="Register a Webhook">{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -146,12 +149,12 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</pre>
   "id": 42,
   "secret": "abcdef1234...",
   "message": "Webhook created. Keep the secret..."
-}`}</pre>
+}`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Webhook Payload Format</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`// POST to your URL:
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Webhook Payload Format</h3>
+              <CodeBlock label="Webhook Payload Format">{`// POST to your URL:
 {
   "event": "tx",
   "timestamp": "2024-01-01T00:00:00.000Z",
@@ -167,12 +170,12 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</pre>
 // Headers included:
 // X-BNBScan-Signature: sha256=<hmac>
 // X-BNBScan-Event: tx
-// User-Agent: BNBScan-Webhook/1.0`}</pre>
+// User-Agent: BNBScan-Webhook/1.0`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Verify Signature (Node.js)</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`const crypto = require('crypto')
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Verify Signature (Node.js)</h3>
+              <CodeBlock label="Verify Signature (Node.js)">{`const crypto = require('crypto')
 
 function verifyWebhook(body, signature, secret) {
   const expected = 'sha256=' +
@@ -183,16 +186,16 @@ function verifyWebhook(body, signature, secret) {
     Buffer.from(signature),
     Buffer.from(expected)
   )
-}`}</pre>
+}`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Manage Webhooks</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`# List your webhooks
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Manage Webhooks</h3>
+              <CodeBlock label="Manage Webhooks">{`# List your webhooks
 curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress"
 
 # Delete a webhook
-curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
+curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
             </div>
           </div>
         </div>
@@ -200,39 +203,39 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
 
       {/* Flexible Query API Section */}
       <section id="query" className="mb-10">
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b bg-gray-50 flex items-center gap-3">
-            <h2 className="text-xl font-bold">Flexible Query API</h2>
+        <div className="overflow-hidden rounded-xl border border-hair bg-card">
+          <div className="flex items-center gap-3 border-b border-hair bg-canvas px-6 py-4">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Flexible Query API</h2>
           </div>
           <div className="px-6 py-5 space-y-4">
-            <p className="text-gray-700">
+            <p className="text-ink2">
               A single endpoint for querying any entity with flexible filters, ordering, pagination,
               and offset. Ideal for analytics and data pipelines.
             </p>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Endpoint</h3>
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Endpoint</h3>
               <div className="flex items-center gap-2">
-                <span className="bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded text-xs font-bold font-mono">POST</span>
-                <code className="font-mono text-sm font-semibold">/api/v1/query</code>
+                <Badge variant="pending">POST</Badge>
+                <code className="font-mono text-sm font-semibold text-ink">/api/v1/query</code>
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Query Transactions by Address</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST ${BASE_URL}/api/v1/query \\
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Query Transactions by Address</h3>
+              <CodeBlock label="Query Transactions by Address">{`curl -X POST ${BASE_URL}/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "transactions",
     "filter": { "address": "0x..." },
     "limit": 50,
     "orderBy": "desc"
-  }'`}</pre>
+  }'`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Query Token Transfers in Block Range</h3>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto leading-relaxed">{`curl -X POST ${BASE_URL}/api/v1/query \\
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Query Token Transfers in Block Range</h3>
+              <CodeBlock label="Query Token Transfers in Block Range">{`curl -X POST ${BASE_URL}/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "token_transfers",
@@ -242,71 +245,76 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</pre>
       "blockTo": 42001000
     },
     "limit": 100
-  }'`}</pre>
+  }'`}</CodeBlock>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-sm mb-3 text-gray-700">Supported Entities &amp; Filters</h3>
-              <div className="overflow-x-auto">
-              <table className="w-full text-xs border border-gray-200 rounded overflow-hidden">
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Supported Entities &amp; Filters</h3>
+              <div
+                tabIndex={0}
+                role="region"
+                aria-label="Supported query entities and their available filters"
+                className="overflow-x-auto rounded-lg border border-hair"
+              >
+              <table className="dt">
                 <caption className="sr-only">Supported query entities and their available filters</caption>
-                <thead className="bg-gray-100">
+                <thead>
                   <tr>
-                    <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600">Entity</th>
-                    <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600">Available Filters</th>
+                    <th scope="col">Entity</th>
+                    <th scope="col">Available Filters</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody>
                   <tr>
-                    <td className="px-3 py-2 font-mono">transactions</td>
-                    <td className="px-3 py-2 text-gray-600">address, from, to, blockNumber, blockFrom, blockTo</td>
+                    <td className="text-ink">transactions</td>
+                    <td className="text-ink2">address, from, to, blockNumber, blockFrom, blockTo</td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 font-mono">blocks</td>
-                    <td className="px-3 py-2 text-gray-600">blockFrom, blockTo</td>
+                    <td className="text-ink">blocks</td>
+                    <td className="text-ink2">blockFrom, blockTo</td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 font-mono">tokens</td>
-                    <td className="px-3 py-2 text-gray-600">— (ordered by holderCount)</td>
+                    <td className="text-ink">tokens</td>
+                    <td className="text-ink2">— (ordered by holderCount)</td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 font-mono">token_transfers</td>
-                    <td className="px-3 py-2 text-gray-600">address, from, to, tokenAddress, blockFrom, blockTo</td>
+                    <td className="text-ink">token_transfers</td>
+                    <td className="text-ink2">address, from, to, tokenAddress, blockFrom, blockTo</td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 font-mono">dex_trades</td>
-                    <td className="px-3 py-2 text-gray-600">address (maker), dex, blockFrom, blockTo</td>
+                    <td className="text-ink">dex_trades</td>
+                    <td className="text-ink2">address (maker), dex, blockFrom, blockTo</td>
                   </tr>
                 </tbody>
               </table>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-              <div className="bg-gray-50 border rounded-lg p-3">
-                <div className="font-semibold mb-1">Max limit</div>
-                <div className="text-gray-600 font-mono">100 rows</div>
+            <dl className="ledger [--cols:3]">
+              <div>
+                <dt className="text-xs text-mut">Max limit</dt>
+                <dd className="mt-1 font-mono text-[15px] text-ink">100 rows</dd>
               </div>
-              <div className="bg-gray-50 border rounded-lg p-3">
-                <div className="font-semibold mb-1">orderBy</div>
-                <div className="text-gray-600 font-mono">&quot;asc&quot; | &quot;desc&quot;</div>
+              <div>
+                <dt className="text-xs text-mut">orderBy</dt>
+                <dd className="mt-1 font-mono text-[15px] text-ink">&quot;asc&quot; | &quot;desc&quot;</dd>
               </div>
-              <div className="bg-gray-50 border rounded-lg p-3">
-                <div className="font-semibold mb-1">offset</div>
-                <div className="text-gray-600 font-mono">integer (pagination)</div>
+              <div>
+                <dt className="text-xs text-mut">offset</dt>
+                <dd className="mt-1 font-mono text-[15px] text-ink">integer (pagination)</dd>
               </div>
-            </div>
+            </dl>
           </div>
         </div>
       </section>
 
       {/* Footer CTA */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
-        <h3 className="font-bold text-lg mb-2">Ready to build?</h3>
-        <p className="text-gray-600 mb-4">Get your API key and start querying {chainConfig.name} in minutes.</p>
+      <div className="rounded-xl border border-hair bg-card p-6 text-center">
+        <h3 className="mb-2 text-lg font-semibold tracking-[-0.02em] text-ink">Ready to build?</h3>
+        <p className="mb-4 text-ink2">Get your API key and start querying {chainConfig.name} in minutes.</p>
         <a
           href="/api-docs"
-          className={`inline-block px-6 py-2.5 ${chainConfig.theme.buttonBg} hover:opacity-90 rounded-lg font-semibold transition-colors ${chainConfig.theme.buttonText}`}
+          className="inline-block rounded-[9px] bg-ink px-6 py-2.5 font-semibold text-card transition-opacity hover:opacity-90"
         >
           View Full API Reference →
         </a>

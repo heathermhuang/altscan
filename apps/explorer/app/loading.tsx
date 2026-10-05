@@ -1,33 +1,20 @@
+// The skeleton every route shows first while its page streams in: a detail page's first screen
+// (kicker + h1 + id line, a 4-cell fact strip, a table), about 1000px tall at the real row height.
+// That height keeps the footer below the fold on common viewports, so the real page replaces it
+// without moving anything visible (a shorter skeleton left the footer on screen and it jumped).
+// React ships this tree twice per page (Suspense fallback and RSC payload), so it is 8 elements
+// and the bars and row lines are drawn by the .skel-* gradients in globals.css, not by markup.
 export default function Loading() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 animate-pulse">
-      {/* Header skeleton */}
-      <div className="h-8 bg-gray-200 rounded w-64 mb-6" />
-
-      {/* Stats row skeleton */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-            <div className="h-3 bg-gray-200 rounded w-20 mb-2" />
-            <div className="h-6 bg-gray-200 rounded w-32" />
-          </div>
-        ))}
+      <div className="skel-head" />
+      <div className="ledger [--cols:4] skel-f">
+        <i />
+        <i />
+        <i />
+        <i />
       </div>
-
-      {/* Table skeleton */}
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <div className="bg-gray-50 border-b px-4 py-2">
-          <div className="h-4 bg-gray-200 rounded w-48" />
-        </div>
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="px-4 py-3 border-b flex gap-8">
-            <div className="h-4 bg-gray-200 rounded w-32" />
-            <div className="h-4 bg-gray-200 rounded w-16" />
-            <div className="h-4 bg-gray-200 rounded w-24" />
-            <div className="h-4 bg-gray-200 rounded w-20" />
-          </div>
-        ))}
-      </div>
+      <div className="skel-table" />
     </div>
   )
 }

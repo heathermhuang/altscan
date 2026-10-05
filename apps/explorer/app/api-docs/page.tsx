@@ -1,6 +1,8 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
+import { Badge } from '@/components/ui/Badge'
+import { CodeBlock } from '@/components/ui/CodeBlock'
 import type { Metadata } from 'next'
 
 export const revalidate = false
@@ -320,17 +322,18 @@ export default function ApiDocsPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'API Documentation' }]} />
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-2">API Reference</h1>
-        <p className="text-gray-600">
+        <p className="k">{'// '}api</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">API Reference</h1>
+        <p className="mt-2 text-ink2">
           {chainConfig.brandName} provides a public REST API for accessing {chainConfig.name} block explorer data.
           All endpoints return JSON. Base URL:{' '}
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">
+          <code className="rounded-[4px] bg-hair2 px-1.5 py-0.5 font-mono text-sm text-ink">
             https://{chainConfig.domain}
           </code>
         </p>
-        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900">
-          <strong>Rate Limiting:</strong> API requests are rate-limited to 100 requests per minute per IP address. Responses include{' '}
-          <code className="font-mono">X-RateLimit-Remaining</code> headers.
+        <div className="mt-4 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
+          <strong className="text-ink">Rate Limiting:</strong> API requests are rate-limited to 100 requests per minute per IP address. Responses include{' '}
+          <code className="font-mono text-ink">X-RateLimit-Remaining</code> headers.
         </div>
       </div>
 
@@ -343,7 +346,7 @@ export default function ApiDocsPage() {
 
       <div className="space-y-6">
         {endpoints.map((ep) => (
-          <EndpointCard key={ep.path} endpoint={ep} />
+          <EndpointCard key={`${ep.method} ${ep.path}`} endpoint={ep} />
         ))}
       </div>
     </div>
@@ -351,54 +354,52 @@ export default function ApiDocsPage() {
 }
 
 function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
-  const methodColor =
-    endpoint.method === 'GET'
-      ? 'bg-green-100 text-green-800 border border-green-200'
-      : 'bg-blue-100 text-blue-800 border border-blue-200'
-
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-hair bg-card">
       {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
-        <span className={`px-2.5 py-1 rounded text-xs font-bold font-mono ${methodColor}`}>
-          {endpoint.method}
-        </span>
-        <code className="font-mono text-sm font-semibold text-gray-900">{endpoint.path}</code>
+      <div className="flex flex-wrap items-center gap-3 border-b border-hair px-5 py-4">
+        <Badge variant={endpoint.method === 'GET' ? 'success' : 'pending'}>{endpoint.method}</Badge>
+        <h2 className="min-w-0">
+          <code className="break-all font-mono text-sm font-semibold text-ink">{endpoint.path}</code>
+        </h2>
       </div>
 
       {/* Body */}
-      <div className="px-5 py-4 space-y-4">
-        <p className="text-sm text-gray-700">{endpoint.description}</p>
+      <div className="space-y-4 px-5 py-4">
+        <p className="text-sm text-ink2">{endpoint.description}</p>
 
         {endpoint.params && endpoint.params.length > 0 && (
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-              Parameters
-            </h3>
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+            <h3 className="k mb-2">Parameters</h3>
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label={`Parameters for ${endpoint.method} ${endpoint.path}`}
+              className="overflow-x-auto rounded-lg border border-hair"
+            >
+            <table className="dt min-w-[36rem]">
               <caption className="sr-only">Parameters for {endpoint.method} {endpoint.path}</caption>
-              <thead className="bg-gray-50">
+              <thead>
                 <tr>
-                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Name</th>
-                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Type</th>
-                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Required</th>
-                  <th scope="col" className="text-left px-3 py-2 font-medium text-gray-600 text-xs">Description</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Required</th>
+                  <th scope="col">Description</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {endpoint.params.map((p) => (
-                  <tr key={p.name} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-mono text-xs text-gray-900">{p.name}</td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{p.type}</td>
-                    <td className="px-3 py-2 text-xs">
+                  <tr key={p.name}>
+                    <td className="text-ink">{p.name}</td>
+                    <td className="text-mut">{p.type}</td>
+                    <td>
                       {p.required ? (
-                        <span className="text-red-600 font-medium">Yes</span>
+                        <span className="font-medium text-warn">Yes</span>
                       ) : (
-                        <span className="text-gray-400">No</span>
+                        <span className="text-mut">No</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs text-gray-600">{p.description}</td>
+                    <td className="font-sans text-ink2">{p.description}</td>
                   </tr>
                 ))}
               </tbody>
@@ -408,13 +409,13 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
         )}
 
         <details className="group">
-          <summary className="cursor-pointer text-sm font-medium text-yellow-700 hover:text-yellow-900 select-none list-none flex items-center gap-1">
+          <summary className="flex cursor-pointer list-none select-none items-center gap-1 text-sm font-medium text-acc-ink hover:underline">
             <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
             Example Response
           </summary>
-          <pre className="mt-2 bg-gray-900 text-gray-100 rounded-lg p-4 text-xs overflow-auto leading-relaxed">
-            {endpoint.exampleResponse}
-          </pre>
+          <div className="mt-2">
+            <CodeBlock label={`Example response for ${endpoint.method} ${endpoint.path}`}>{endpoint.exampleResponse}</CodeBlock>
+          </div>
         </details>
       </div>
     </div>

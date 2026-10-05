@@ -28,42 +28,45 @@ export default async function ValidatorsPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">
-        {chainConfig.name} Validators{validators.length > 0 ? ` (${validators.length})` : ''}
-      </h1>
+      <div className="mb-5">
+        <p className="k">{'// '}validators</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
+          {chainConfig.name} Validators{validators.length > 0 ? ` (${validators.length})` : ''}
+        </h1>
+      </div>
 
       {validators.length === 0 ? (
-        <div className="bg-white rounded-xl border shadow-sm p-12 text-center">
-          <p className="text-gray-400 text-lg mb-2">No validators synced yet</p>
-          <p className="text-gray-300 text-sm">
+        <div className="rounded-xl border border-hair bg-card p-12 text-center">
+          <p className="mb-2 text-lg text-ink2">No validators synced yet</p>
+          <p className="text-sm text-mut">
             Validator data will appear here once the indexer has synced {chainConfig.name} validator information.
           </p>
         </div>
       ) : (
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="dt">
           <caption className="sr-only">{chainConfig.name} validators ranked by voting power</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead>
             <tr>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">#</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Validator</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Status</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Voting Power</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Commission</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Uptime</th>
+              <th scope="col">#</th>
+              <th scope="col">Validator</th>
+              <th scope="col">Status</th>
+              <th scope="col">Voting Power</th>
+              <th scope="col">Commission</th>
+              <th scope="col">Uptime</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody>
             {validators.map((v, i) => (
-              <tr key={v.address} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-2">
-                  <Link href={`/address/${v.address}`} className={`${chainConfig.theme.linkText} hover:underline font-medium`}>
+              <tr key={v.address}>
+                <td className="text-mut">{i + 1}</td>
+                <td>
+                  <Link href={`/address/${v.address}`} className="text-acc-ink font-medium hover:underline">
                     {v.moniker}
                   </Link>
                 </td>
-                <td className="px-4 py-2">
+                <td>
                   <Badge variant={
                     v.status === 'active'   ? 'success' :
                     v.status === 'jailed'   ? 'fail'    : 'default'
@@ -71,9 +74,9 @@ export default async function ValidatorsPage() {
                     {v.status}
                   </Badge>
                 </td>
-                <td className="px-4 py-2">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
-                <td className="px-4 py-2">{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
-                <td className="px-4 py-2">{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
+                <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
+                <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
+                <td>{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
               </tr>
             ))}
           </tbody>

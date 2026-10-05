@@ -6,7 +6,7 @@ import { routeForQuery } from '@/lib/search-route'
 const PLACEHOLDER = 'Search by address, tx hash, block number, or token name...'
 const PLACEHOLDER_SHORT = 'Address, tx, block or token'
 
-export function SearchBar({ size = 'md' }: { size?: 'lg' | 'md' }) {
+export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: string }) {
   const [query, setQuery] = useState('')
   const router = useRouter()
   const lg = size === 'lg'
@@ -18,7 +18,7 @@ export function SearchBar({ size = 'md' }: { size?: 'lg' | 'md' }) {
   }
 
   return (
-    <form onSubmit={handleSearch} role="search" className="w-full flex gap-2">
+    <form onSubmit={handleSearch} role="search" aria-label={label} className="w-full flex gap-2">
       <input
         type="text"
         value={query}
