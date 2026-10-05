@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Inter } from 'next/font/google'
+import localFont from 'next/font/local'
 import Script from 'next/script'
 import './globals.css'
 import { Header } from '@/components/layout/Header'
@@ -8,15 +9,17 @@ import { WebMcpProvider } from '@/components/agent/WebMcpProvider'
 import { chainConfig } from '@/lib/chain'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
-const jetbrainsMono = JetBrains_Mono({
-  weight: ['400', '500', '600'],
-  subsets: ['latin'],
-  // 'optional', not preloaded: a second high-priority font competed with the page on slow
-  // connections, and swapping it in re-wrapped long hashes (CLS). A first visit may show
-  // the fallback mono; once cached, JetBrains Mono is ready before first paint.
+// JetBrains Mono, subset to Basic Latin plus the UI's arrows (fonts/OFL.txt): one 8 KB variable
+// file for weights 400-600 instead of Google's 32 KB latin file, which sat on the critical path
+// behind the CSS and cost ~450ms of Lighthouse mobile LCP. No ligatures, so hashes render as typed.
+const jetbrainsMono = localFont({
+  src: './fonts/JetBrainsMono-subset.woff2',
+  weight: '400 600',
   display: 'optional',
   variable: '--font-mono',
-  preload: false,
+  fallback: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+  // The default Arial-metrics fallback is wrong for a monospace face.
+  adjustFontFallback: false,
 })
 
 export const metadata: Metadata = {
