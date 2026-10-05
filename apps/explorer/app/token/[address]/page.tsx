@@ -21,6 +21,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
+import { shortHash, toChecksumAddress } from '@/lib/address-display'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -247,121 +248,100 @@ export default async function TokenDetailPage({
     ? 'stablecoin'
     : 'token_research'
 
+  const checksummedAddr = toChecksumAddress(addr)
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Tokens', href: '/token' }, { name: `${token.name} (${token.symbol})` }]} />
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">{token.name}</h1>
-        <Badge variant="default">{token.symbol}</Badge>
-        <Badge variant="default">{token.type}</Badge>
-        <a
-          href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`ml-auto text-xs text-gray-400 hover:${chainConfig.theme.linkText} border border-gray-200 hover:${chainConfig.theme.border} rounded px-2 py-1 transition-colors`}
-        >
-          View on {chainConfig.externalExplorer} ↗
-        </a>
+      <div className="mb-5">
+        <p className="k">{'// '}token</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="mr-1 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
+            {token.name} <span className="font-mono font-semibold text-ink2">{token.symbol}</span>
+          </h1>
+          <Badge variant="default">{token.type}</Badge>
+          <a
+            href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sm:ml-auto rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-ink2 transition-colors hover:border-hair3"
+          >
+            View on {chainConfig.externalExplorer} ↗
+          </a>
+        </div>
+        <div className="mt-2 flex items-start font-mono text-[13px] text-ink2">
+          <span className="min-w-0 break-all pt-0.5">{checksummedAddr}</span>
+          <CopyButton text={checksummedAddr} />
+        </div>
       </div>
 
       {isLive && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 text-sm text-blue-800 flex items-center gap-2">
-          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
+          <svg className="w-4 h-4 shrink-0 text-acc-ink" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
           <span>Showing live data from {chainConfig.name} RPC — this token is not yet in the local index. Transfer history and holder data are unavailable.</span>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <p className="text-gray-500 text-xs mb-0.5">Contract</p>
-            <p className="font-mono text-xs">
-              {addr.slice(0, 14)}…<CopyButton text={addr} />
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500 text-xs mb-0.5">Decimals</p>
-            <p className="font-semibold">{token.decimals}</p>
-          </div>
-          <div>
-            <p className="text-gray-500 text-xs mb-0.5">Total Supply</p>
-            <p className="font-semibold">{displaySupply}</p>
-          </div>
-          {!isLive && (
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">Holders</p>
-              <p className="font-semibold">
-                <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+      <dl className={`ledger mb-6 ${isLive ? '[--cols:2]' : '[--cols:3]'}`}>
+        <Fact label="Decimals">{token.decimals}</Fact>
+        <Fact label="Total Supply">{displaySupply}</Fact>
+        {!isLive && (
+          <Fact label="Holders">
+            <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
+          </Fact>
+        )}
+      </dl>
 
       {marketData && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Market</h2>
+        <div className="mb-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold tracking-[-0.02em] text-ink">Market</h2>
             {marketData.dexUrl && (
               <a
                 href={marketData.dexUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-gray-400 hover:underline"
+                className="text-xs text-acc-ink hover:underline"
               >
                 {marketData.pairLabel} ↗
               </a>
             )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">Price</p>
-              <p className="font-semibold">
-                {marketData.priceUsd != null ? formatUsdPrice(marketData.priceUsd) : '—'}
-                {marketData.priceChange24h != null && (
-                  <span
-                    className={`ml-2 text-xs ${
-                      marketData.priceChange24h >= 0
-                        ? chainConfig.theme.positiveChange
-                        : chainConfig.theme.negativeChange
-                    }`}
-                  >
-                    {formatPercent(marketData.priceChange24h)}
-                  </span>
-                )}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">24h Volume</p>
-              <p className="font-semibold">
-                {marketData.volume24h != null ? formatCompactUsd(marketData.volume24h) : '—'}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">Liquidity</p>
-              <p className="font-semibold">
-                {marketData.liquidityUsd != null ? formatCompactUsd(marketData.liquidityUsd) : '—'}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">
-                {marketData.marketCap != null ? 'Market Cap' : 'FDV'}
-              </p>
-              <p className="font-semibold">
-                {marketData.marketCap != null
-                  ? formatCompactUsd(marketData.marketCap)
-                  : marketData.fdv != null
-                    ? formatCompactUsd(marketData.fdv)
-                    : '—'}
-              </p>
-            </div>
-          </div>
+          <dl className="ledger">
+            <Fact label="Price">
+              {marketData.priceUsd != null ? formatUsdPrice(marketData.priceUsd) : '—'}
+              {marketData.priceChange24h != null && (
+                <span
+                  className={`ml-2 text-xs ${
+                    marketData.priceChange24h >= 0
+                      ? 'text-live'
+                      : 'text-warn'
+                  }`}
+                >
+                  {formatPercent(marketData.priceChange24h)}
+                </span>
+              )}
+            </Fact>
+            <Fact label="24h Volume">
+              {marketData.volume24h != null ? formatCompactUsd(marketData.volume24h) : '—'}
+            </Fact>
+            <Fact label="Liquidity">
+              {marketData.liquidityUsd != null ? formatCompactUsd(marketData.liquidityUsd) : '—'}
+            </Fact>
+            <Fact label={marketData.marketCap != null ? 'Market Cap' : 'FDV'}>
+              {marketData.marketCap != null
+                ? formatCompactUsd(marketData.marketCap)
+                : marketData.fdv != null
+                  ? formatCompactUsd(marketData.fdv)
+                  : '—'}
+            </Fact>
+          </dl>
           {marketData.circulatingSupply != null && (
-            <p className="text-xs text-gray-400 mt-3">
+            <p className="text-xs text-mut mt-3">
               Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {token.symbol}
             </p>
           )}
-          <p className="text-[11px] text-gray-400 mt-2">
+          <p className="text-[11px] text-mut mt-2">
             Market data via DexScreener{marketData.source.includes('coingecko') ? ' + CoinGecko' : ''}. For information only.
           </p>
         </div>
@@ -388,16 +368,16 @@ export default async function TokenDetailPage({
 
       {/* Risk Signals */}
       {riskSignals.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">🛡️ Risk Signals</h2>
+        <div className="mb-6">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">🛡️ Risk Signals</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {riskSignals.map((s, i) => (
-              <div key={i} className={`flex items-start gap-2 rounded-lg p-2 text-sm
-                ${s.severity === 'danger' ? 'bg-red-50' : s.severity === 'warn' ? 'bg-yellow-50' : 'bg-green-50'}`}>
+              <div key={i} className={`flex items-start gap-2 rounded-xl border border-hair border-l-[3px] px-3 py-2 text-sm
+                ${s.severity === 'danger' ? 'border-l-warn bg-warn-t' : s.severity === 'warn' ? 'border-l-warn bg-card' : 'border-l-acc bg-card'}`}>
                 <span>{s.ok ? '✅' : s.severity === 'danger' ? '🚨' : '⚠️'}</span>
                 <div>
-                  <p className="font-medium">{s.label}</p>
-                  <p className="text-xs text-gray-600">{s.description}</p>
+                  <p className="font-medium text-ink">{s.label}</p>
+                  <p className="text-xs text-ink2">{s.description}</p>
                 </div>
               </div>
             ))}
@@ -407,27 +387,27 @@ export default async function TokenDetailPage({
 
       {/* Token Transfers */}
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold">
+        <h2 className="font-semibold tracking-[-0.02em] text-ink">
           Token Transfers{' '}
-          <span className="text-gray-400 font-normal text-sm">
+          <span className="text-mut font-normal text-sm">
             {countKnown ? `(${totalLabel} total)` : '(showing latest)'}
           </span>
         </h2>
       </div>
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden mb-4">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="dt">
           <caption className="sr-only">Token transfers for {token.symbol}</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead>
             <tr>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Block</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">From</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">To</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Amount</th>
+              <th scope="col">Tx Hash</th>
+              <th scope="col" className="hidden sm:table-cell">Block</th>
+              <th scope="col">From</th>
+              <th scope="col" className="hidden sm:table-cell">To</th>
+              <th scope="col">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody>
             {transfers.map((t) => {
               const amount = (() => {
                 try {
@@ -448,23 +428,23 @@ export default async function TokenDetailPage({
                 }
               })()
               return (
-                <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs">
+                <tr key={`${t.txHash}-${t.logIndex}`}>
+                  <td>
                     <Link
                       href={`/tx/${t.txHash}`}
-                      className={`${chainConfig.theme.linkText} hover:underline`}
+                      className="text-acc-ink hover:underline"
                     >
-                      {t.txHash.slice(0, 14)}…
+                      {shortHash(t.txHash)}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-gray-500">{t.blockNumber}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td className="text-mut hidden sm:table-cell">{t.blockNumber}</td>
+                  <td>
                     <AddressLink address={t.fromAddress} />
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td className="hidden sm:table-cell">
                     <AddressLink address={t.toAddress} />
                   </td>
-                  <td className="px-4 py-2">
+                  <td>
                     {amount} {token.symbol}
                   </td>
                 </tr>
@@ -472,7 +452,7 @@ export default async function TokenDetailPage({
             })}
             {transfers.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={5} className="py-8 text-center font-sans text-mut">
                   No transfers yet.
                 </td>
               </tr>
@@ -487,6 +467,15 @@ export default async function TokenDetailPage({
         perPage={PAGE_SIZE}
         baseUrl={`/token/${addr}`}
       />
+    </div>
+  )
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{children}</dd>
     </div>
   )
 }
