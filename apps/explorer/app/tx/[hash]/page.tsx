@@ -41,7 +41,7 @@ export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
   return []
 }
 
-// Transfers previewed under the summary card; the full list further down has the rest.
+// Transfers shown under the summary card; a tx with more has the full list further down.
 const TRANSFER_PREVIEW = 3
 
 async function fetchNativePrice(): Promise<number | null> {
@@ -459,6 +459,8 @@ export default async function TxDetailPage({
     }
   }
 
+  const transfersAllShown = transferInfos.length <= TRANSFER_PREVIEW
+
   const decoded = decodeTx(
     {
       hash: tx.hash,
@@ -560,10 +562,17 @@ export default async function TxDetailPage({
       )}
 
       {transferInfos.length > 0 && (
-        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+        // Up to TRANSFER_PREVIEW transfers are the whole list, shown once here. Past that this is a
+        // preview and the full list (id="token-transfers") follows the detail table.
+        <div
+          id={transfersAllShown ? 'token-transfers' : undefined}
+          className={`mb-6 rounded-xl border border-hair bg-card p-4${transfersAllShown ? ' scroll-mt-28' : ''}`}
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="font-semibold tracking-[-0.02em] text-ink">Token Transfers</h2>
-            {transferInfos.length > TRANSFER_PREVIEW && (
+            <h2 className="font-semibold tracking-[-0.02em] text-ink">
+              Token Transfers{transfersAllShown && ` (${transferInfos.length})`}
+            </h2>
+            {!transfersAllShown && (
               <a href="#token-transfers" className="shrink-0 text-sm text-acc-ink hover:underline">
                 All {transferInfos.length}{transfersTruncated ? '+' : ''} transfers ↓
               </a>
@@ -756,7 +765,7 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {transferInfos.length > 0 && (
+      {!transfersAllShown && (
         <div id="token-transfers" className="mb-6 scroll-mt-28 rounded-xl border border-hair bg-card p-4">
           <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Token Transfers ({transferInfos.length}{transfersTruncated ? '+' : ''})</h2>
           <div className="space-y-2">

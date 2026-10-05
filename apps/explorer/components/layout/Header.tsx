@@ -100,7 +100,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md">
 
-      {/* -- Top bar: logo + switcher + desktop nav (lg) or hamburger, then search on its own row -- */}
+      {/* -- Top bar: logo + switcher + desktop nav (lg) or hamburger + search (inline from xl, else its own row) -- */}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
 
@@ -148,9 +148,10 @@ export function Header() {
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? '-rotate-45 -translate-y-2' : ''}`} />
           </button>
 
-          {/* Search: the home hero owns it on `/`. Always its own row; the full-word nav has no room beside it. */}
+          {/* Search: the home hero owns it on `/`. Last in the row, so when xl's 1248px has no room for
+              it beside the nav it wraps onto its own row (as it always does below xl) instead of the nav. */}
           {pathname !== '/' && (
-            <div className="basis-full">
+            <div className="basis-full xl:basis-auto xl:w-[20rem] xl:shrink-0">
               <SearchBar />
             </div>
           )}
