@@ -9,9 +9,11 @@ import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 import { encodeTape, toTapeTuple } from '@/lib/tape'
 
-// Page 1's query also feeds the tape: ~32s of chain time fills the content column (BNB 72 blocks,
-// ETH 3), never fewer than a table page. Pages 2+ keep the plain page-size query.
-const TAPE_N = Math.min(100, Math.max(PER_PAGE, Math.ceil(32 / chainConfig.blockTime)))
+// Page 1's query also feeds the tape: ~20s of chain time (BNB 45 blocks; ghost tiles fill the rest of
+// the column), never fewer than a table page. Shorter than the homepage's because the table below
+// repeats the newest 25 and this dynamic page's HTML must stay inside one TCP window (Lighthouse
+// mobile LCP). Pages 2+ keep the plain page-size query.
+const TAPE_N = Math.min(100, Math.max(PER_PAGE, Math.ceil(20 / chainConfig.blockTime)))
 
 // Next.js statically analyses route segment config and cannot resolve an
 // imported identifier here — `export const revalidate = BLOCKS_REVALIDATE_SECONDS`
