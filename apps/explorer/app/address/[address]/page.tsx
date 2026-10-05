@@ -279,7 +279,9 @@ export default async function AddressPage({
             View on {chainConfig.externalExplorer} ↗
           </a>
         </div>
-        <div className="mt-2 flex items-start font-mono text-[13px] text-ink2 sm:text-sm">
+        {/* The address is the page's key fact, so it is the largest thing in the header (and the
+            LCP element, rather than the client-rendered ad card below). */}
+        <div className="mt-2 flex items-start font-mono text-[17px] leading-snug text-ink sm:text-xl">
           <span className="min-w-0 break-all pt-0.5">{checksummedAddr}</span>
           <CopyButton text={checksummedAddr} referralPlacement="address_copy" />
         </div>
