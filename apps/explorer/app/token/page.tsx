@@ -85,74 +85,77 @@ export default async function TokenListPage({
           ],
         }) }}
       />
-      <h1 className="text-2xl font-bold mb-2">{typeLabels[tokenType]}</h1>
-      <p className="text-gray-500 text-sm mb-4">
-        Browse all indexed {chainConfig.tokenStandard} tokens on {chainConfig.name}, ranked by holder count. {chainConfig.tokenStandard} is the standard fungible token interface — each token listed here is a smart contract that tracks balances across all holders.
-      </p>
+      <div className="mb-5">
+        <p className="k">{'// '}tokens</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">{typeLabels[tokenType]}</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink2">
+          Browse all indexed {chainConfig.tokenStandard} tokens on {chainConfig.name}, ranked by holder count. {chainConfig.tokenStandard} is the standard fungible token interface — each token listed here is a smart contract that tracks balances across all holders.
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex gap-2">
           {validTypes.map(t => (
             <a
               key={t}
               href={`/token?type=${t}`}
-              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              className={`rounded-[9px] border px-3 py-1.5 text-sm transition-colors ${
                 t === tokenType
-                  ? `${chainConfig.theme.border} font-semibold bg-opacity-10`
-                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  ? 'border-acc font-semibold text-acc-ink'
+                  : 'border-hair text-ink2 hover:border-hair3'
               }`}
             >
               {tabLabels[t]}
             </a>
           ))}
         </div>
-        <form action="/token" method="get" className="flex items-center gap-2 ml-auto">
+        <form action="/token" method="get" className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
           <input type="hidden" name="type" value={tokenType} />
           <input
             type="text"
             name="q"
             placeholder="Search by name, symbol, or address..."
             defaultValue={searchQuery ?? ''}
-            className={`px-3 py-1.5 text-sm rounded-lg border border-gray-200 ${chainConfig.theme.focusRing} outline-none w-64 transition-colors`}
+            className="min-w-0 flex-1 rounded-[9px] border border-hair bg-card px-3 py-1.5 text-sm text-ink placeholder:text-mut hover:border-hair3 sm:w-64 sm:flex-none"
           />
-          <button type="submit" className={`px-3 py-1.5 text-sm rounded-lg ${chainConfig.theme.buttonBg} ${chainConfig.theme.buttonText} font-medium hover:opacity-90 transition-colors`}>
+          <button type="submit" className="shrink-0 rounded-[9px] bg-ink px-3 py-1.5 text-sm font-semibold text-card transition-opacity hover:opacity-90">
             Search
           </button>
           {searchQuery && (
-            <a href={`/token?type=${tokenType}`} className="text-xs text-gray-400 hover:text-gray-600">Clear</a>
+            <a href={`/token?type=${tokenType}`} className="shrink-0 text-xs text-mut hover:text-ink">Clear</a>
           )}
         </form>
       </div>
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="dt">
           <caption className="sr-only">{typeLabels[tokenType]} sorted by holder count</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead>
             <tr>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">#</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Token</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Symbol</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Holders</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Total Supply</th>
+              <th scope="col">#</th>
+              <th scope="col">Token</th>
+              <th scope="col">Symbol</th>
+              <th scope="col">Holders</th>
+              <th scope="col">Total Supply</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody>
             {tokens.map((t, i) => (
-              <tr key={t.address} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-2">
-                  <Link href={`/token/${t.address}`} className={`${chainConfig.theme.linkText} hover:underline font-medium`}>
+              <tr key={t.address}>
+                <td className="text-mut">{i + 1}</td>
+                <td>
+                  <Link href={`/token/${t.address}`} className="text-acc-ink font-medium hover:underline">
                     {t.name}
                   </Link>
                 </td>
-                <td className="px-4 py-2 text-gray-500">{t.symbol}</td>
-                <td className="px-4 py-2">{formatNumber(t.holderCount)}</td>
-                <td className="px-4 py-2 text-gray-600">
+                <td className="text-mut">{t.symbol}</td>
+                <td>{formatNumber(t.holderCount)}</td>
+                <td className="text-mut">
                   {formatSupply(t.totalSupply, t.decimals)}
                 </td>
               </tr>
             ))}
             {tokens.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No tokens indexed yet.</td></tr>
+              <tr><td colSpan={5} className="py-8 text-center text-mut">No tokens indexed yet.</td></tr>
             )}
           </tbody>
         </table>
