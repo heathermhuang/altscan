@@ -273,7 +273,7 @@ export default async function HomePage() {
   const txCount24h = await dbTimeout(fetchTxCount24h(latestBlock), null)
 
   const priceDisplay = nativePrice
-    ? `$${nativePrice.usd.toFixed(2)}`
+    ? `$${nativePrice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '—'
   const changeDisplay = nativePrice
     ? `${nativePrice.change24h >= 0 ? '+' : ''}${nativePrice.change24h.toFixed(2)}%`

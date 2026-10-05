@@ -112,8 +112,8 @@ export function decodeTx(tx: {
       const outLeg = received[0]
       const inSym = inLeg.tokenSymbol ?? inLeg.tokenAddress.slice(0, 8)
       const outSym = outLeg.tokenSymbol ?? outLeg.tokenAddress.slice(0, 8)
-      const inAmt = inLeg.tokenDecimals != null ? formatTokenAmount(inLeg.value ?? '0', inLeg.tokenDecimals) : '?'
-      const outAmt = outLeg.tokenDecimals != null ? formatTokenAmount(outLeg.value ?? '0', outLeg.tokenDecimals) : '?'
+      const inAmt = inLeg.tokenDecimals != null ? formatTokenAmount(inLeg.value ?? '0', inLeg.tokenDecimals, 6) : '?'
+      const outAmt = outLeg.tokenDecimals != null ? formatTokenAmount(outLeg.value ?? '0', outLeg.tokenDecimals, 6) : '?'
       return {
         summary: `Swapped ${inAmt} ${inSym} for ${outAmt} ${outSym} on ${dexLabel}`,
         type: 'swap',

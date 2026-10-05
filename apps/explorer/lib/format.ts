@@ -1,4 +1,5 @@
 import { formatUnits } from 'ethers'
+import { shortenAddress } from './address-display'
 
 /** Safely convert a numeric string (possibly with decimals) to BigInt */
 export function safeBigInt(value: string | number | bigint | null | undefined): bigint {
@@ -102,6 +103,21 @@ export function timeAgo(date: Date): string {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
+/**
+ * The one absolute-timestamp format: `2026-10-04 23:04:41 UTC`.
+ *
+ * Built from the getUTC parts, never toLocaleString or toUTCString: those depend on the
+ * server's locale and timezone, so the same instant rendered three different
+ * ways across the explorer. Relative strings stay with timeAgo.
+ */
+export function formatUtc(date: Date | string | number): string {
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return '—'
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  const ymd = `${String(d.getUTCFullYear()).padStart(4, '0')}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`
+  return `${ymd} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())} UTC`
+}
+
 export function formatHash(hash: string, chars = 16): string {
   return `${hash.slice(0, chars)}...${hash.slice(-4)}`
 }
@@ -133,7 +149,31 @@ import { sanitizeSymbol as _sanitizeSymbol } from '@altscan/explorer-core/format
  * decision has to be made on the SANITIZED result, so make it once here.
  */
 export function sanitizeSymbolOr(raw: string | null | undefined, fallback: string): string {
-  return (raw ? _sanitizeSymbol(raw) : '') || fallback
+  return tokenTextOr(raw ? _sanitizeSymbol(raw) : '', fallback)
+}
+
+/** What a token slot reads when its symbol/name is unknown. */
+export const UNKNOWN_TOKEN = 'Unknown token'
+
+// The indexer persists symbol='???' / name='Unknown' when it cannot read them
+// (see app/token/[address]/page.tsx). Those are "missing", not a real symbol.
+const PLACEHOLDER_TOKEN_TEXT: ReadonlySet<string> = new Set(['???', 'Unknown'])
+
+/** `raw` unless it is empty or an indexer placeholder. Does NOT sanitise — for text already shown verbatim. */
+export function tokenTextOr(raw: string | null | undefined, fallback: string): string {
+  return raw && !PLACEHOLDER_TOKEN_TEXT.has(raw) ? raw : fallback
+}
+
+/**
+ * Text for a "Token" column: sanitised symbol, else sanitised name. When nothing
+ * printable survives, an indexer placeholder reads "Unknown token"; but a real
+ * symbol that the sanitiser stripped (all non-ASCII, e.g. CJK) is not unknown, so
+ * that shows the short contract address instead of mislabelling it.
+ */
+export function tokenLabel(symbol: string | null | undefined, name: string | null | undefined, address: string): string {
+  const printable = sanitizeSymbolOr(symbol, '') || sanitizeSymbolOr(name, '')
+  if (printable) return printable
+  return tokenTextOr(symbol, '') || tokenTextOr(name, '') ? shortenAddress(address) : UNKNOWN_TOKEN
 }
 
 /**
@@ -145,11 +185,25 @@ export function sanitizeSymbolOr(raw: string | null | undefined, fallback: strin
  * 232,619.50962301 AMP rendered as "232,619.5096". ethers' formatUnits is
  * string-based and exact, so the integer part is grouped and the fraction is
  * kept in full, with only trailing zeros trimmed.
+ *
+ * `maxFractionDigits` (>= 1) is for DISPLAY: it rounds half-up in BigInt to that
+ * many places (so 4,787,630.158322188632852549 reads 4,787,630.158322), and a
+ * nonzero amount that rounds away reads "<0.000001" rather than "0". Omit it
+ * for the exact value, e.g. a `title` attribute.
  */
-export function formatTokenAmount(value: string | bigint, decimals: number): string {
+export function formatTokenAmount(value: string | bigint, decimals: number, maxFractionDigits?: number): string {
   let raw: string
   try {
-    raw = formatUnits(safeBigInt(value), decimals)
+    let units = safeBigInt(value)
+    let places = decimals
+    if (maxFractionDigits !== undefined && places > maxFractionDigits) {
+      const scale = 10n ** BigInt(places - maxFractionDigits)
+      const rounded = (units + scale / 2n) / scale
+      if (rounded === 0n && units !== 0n) return `<0.${'0'.repeat(maxFractionDigits - 1)}1`
+      units = rounded
+      places = maxFractionDigits
+    }
+    raw = formatUnits(units, places)
   } catch {
     return String(value)
   }

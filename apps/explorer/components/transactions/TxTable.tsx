@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { formatNativeToken, formatAddress, timeAgo, safeBigInt } from '@/lib/format'
+import { formatNativeToken, timeAgo, safeBigInt } from '@/lib/format'
+import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { Badge } from '@/components/ui/Badge'
 import { chainConfig } from '@/lib/chain'
@@ -44,8 +45,8 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
           {txs.map(tx => (
             <tr key={tx.hash}>
               <td>
-                <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                  {formatAddress(tx.hash, 10)}
+                <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                  {shortHash(tx.hash)}
                 </Link>
               </td>
               <td className="text-mut hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>

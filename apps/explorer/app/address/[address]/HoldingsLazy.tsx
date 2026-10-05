@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { ProviderTokenBalance } from '@/lib/providers'
+import { tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { toChecksumAddress } from '@/lib/address-display'
 
 type HoldingsResponse = {
   tokens: ProviderTokenBalance[]
@@ -78,24 +80,24 @@ export function HoldingsLazy({ addr }: { addr: string }) {
             {tokens.map((t) => (
               <tr key={t.tokenAddress} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2">
-                  <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
-                    {t.name ?? t.tokenAddress.slice(0, 14) + '…'}
+                  <Link href={`/token/${t.tokenAddress}`} title={toChecksumAddress(t.tokenAddress)} className="text-acc-ink hover:underline font-medium">
+                    {tokenTextOr(t.name, UNKNOWN_TOKEN)}
                   </Link>
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{t.symbol ?? '—'}</td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   {(() => {
                     const f = parseFloat(t.balanceFormatted ?? '')
-                    if (!isNaN(f)) return f.toLocaleString(undefined, { maximumFractionDigits: 6 })
+                    if (!isNaN(f)) return f.toLocaleString('en-US', { maximumFractionDigits: 6 })
                     try {
                       const raw = BigInt(t.balance)
                       const d = 10n ** BigInt(t.decimals)
-                      return (Number(raw / d) + Number(raw % d) / Number(d)).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                      return (Number(raw / d) + Number(raw % d) / Number(d)).toLocaleString('en-US', { maximumFractionDigits: 6 })
                     } catch { return '—' }
                   })()}
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  {t.usdValue ? `$${parseFloat(t.usdValue).toFixed(2)}` : '—'}
+                  {t.usdValue ? `$${parseFloat(t.usdValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                 </td>
               </tr>
             ))}

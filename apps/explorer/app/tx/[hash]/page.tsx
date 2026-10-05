@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt, formatTokenAmount } from '@/lib/format'
+import { formatNativeToken, formatGwei, formatNumber, formatUtc, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -13,7 +13,7 @@ import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { toChecksumAddress } from '@/lib/address-display'
+import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
@@ -503,10 +503,10 @@ export default async function TxDetailPage({
           sub={confirmations != null && confirmations > 0 ? `${formatNumber(confirmations)} Confirmations` : undefined}
         >
           <Link href={`/blocks/${tx.blockNumber}`} className="text-acc-ink hover:underline">
-            {String(tx.blockNumber)}
+            {formatNumber(tx.blockNumber)}
           </Link>
         </Fact>
-        <Fact label="Age" sub={new Date(tx.timestamp).toUTCString()}>
+        <Fact label="Age" sub={formatUtc(tx.timestamp)}>
           {timeAgo(new Date(tx.timestamp))}
         </Fact>
         <Fact label="Value" sub={valueUsd ?? undefined}>
@@ -570,7 +570,7 @@ export default async function TxDetailPage({
         <Row label="Status" value={tx.status ? 'Success' : 'Failed'} />
         <RowShell label="Block">
           <Link href={`/blocks/${tx.blockNumber}`} className="font-mono text-acc-ink hover:underline">
-            {String(tx.blockNumber)}
+            {formatNumber(tx.blockNumber)}
           </Link>
           {confirmations != null && confirmations > 0 && (
             <span className="ml-2 rounded-[4px] bg-hair2 px-1.5 py-0.5 font-mono text-xs text-ink2">
@@ -580,7 +580,7 @@ export default async function TxDetailPage({
         </RowShell>
         <Row
           label="Timestamp"
-          value={`${timeAgo(new Date(tx.timestamp))} (${new Date(tx.timestamp).toUTCString()})`}
+          value={`${timeAgo(new Date(tx.timestamp))} (${formatUtc(tx.timestamp)})`}
           mono
         />
         <Row
@@ -727,7 +727,7 @@ export default async function TxDetailPage({
                 <span className="text-mut">For</span>
                 <span className="font-mono text-[13px] text-ink">
                   <Link href={`/token/${n.tokenAddress}`} className="text-acc-ink hover:underline">
-                    {getAddressLabel(n.tokenAddress) ?? `${n.tokenAddress.slice(0, 10)}…`}
+                    {getAddressLabel(n.tokenAddress) ?? shortenAddress(n.tokenAddress)}
                   </Link>
                   <span className="ml-1 text-mut">#{n.tokenId}</span>
                 </span>
@@ -743,8 +743,11 @@ export default async function TxDetailPage({
           <div className="space-y-2">
             {transferInfos.map((t, i) => {
               const formattedAmount = t.tokenDecimals != null
-                ? formatTokenAmount(t.value, t.tokenDecimals)
+                ? formatTokenAmount(t.value, t.tokenDecimals, 6)
                 : null
+              const fullAmount = t.tokenDecimals != null
+                ? formatTokenAmount(t.value, t.tokenDecimals)
+                : t.value
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-mut">From</span>
@@ -753,10 +756,10 @@ export default async function TxDetailPage({
                   <AddressLink address={t.toAddress} className="text-xs" />
                   <span className="text-mut">For</span>
                   <span className="font-mono text-[13px] text-ink">
-                    {formattedAmount ?? t.value}
+                    <span title={fullAmount}>{formattedAmount ?? t.value}</span>
                     {' '}
-                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
-                      {t.tokenSymbol ?? t.tokenAddress.slice(0, 10) + '…'}
+                    <Link href={`/token/${t.tokenAddress}`} title={toChecksumAddress(t.tokenAddress)} className="text-acc-ink hover:underline">
+                      {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
                     </Link>
                   </span>
                 </div>
@@ -770,7 +773,7 @@ export default async function TxDetailPage({
                 href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-acc-ink hover:underline"
+                className="text-acc-ink underline"
               >
                 View all on {chainConfig.externalExplorer} ↗
               </a>

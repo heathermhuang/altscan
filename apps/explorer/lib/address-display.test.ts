@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toChecksumAddress, shortenAddress } from './address-display'
+import { toChecksumAddress, shortenAddress, shortHash } from './address-display'
 
 describe('toChecksumAddress', () => {
   // Vectors from EIP-55 itself. These are the contract: a wallet that
@@ -57,5 +57,30 @@ describe('shortenAddress', () => {
 
   it('leaves malformed input alone instead of slicing garbage', () => {
     expect(shortenAddress('0x123')).toBe('0x123')
+  })
+})
+
+describe('shortHash', () => {
+  const H = '0xA0188FDE5D8C1B8E2C2D5F8E9A6B3C4D7E8F9A0B1C2D3E4F5A6B7C8D9E0F8946'
+
+  it('is 0x + 6 hex, an ellipsis, then 5 hex, lowercase, matching shortenAddress shape', () => {
+    expect(shortHash(H)).toBe('0xa0188f…f8946')
+    expect(shortHash(H.toLowerCase())).toBe('0xa0188f…f8946')
+    // same lead/tail counts as the address helper, so the two read alike
+    const a = shortenAddress('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')
+    expect(a.indexOf('…')).toBe(shortHash(H).indexOf('…'))
+    expect(a.length).toBe(shortHash(H).length)
+  })
+
+  it('never uses three dots', () => {
+    expect(shortHash(H)).not.toContain('...')
+  })
+
+  it('leaves malformed input whole rather than slicing garbage', () => {
+    expect(shortHash('0x123')).toBe('0x123')
+    expect(shortHash('')).toBe('')
+    expect(shortHash(null as unknown as string)).toBe('')
+    // a 40-hex address is not a hash
+    expect(shortHash('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toBe('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')
   })
 })

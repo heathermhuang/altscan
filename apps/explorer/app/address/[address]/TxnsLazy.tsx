@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { HistoryRow } from '@/lib/providers'
-import { formatNumber, timeAgo } from '@/lib/format'
+import { formatNativeToken, formatNumber, timeAgo } from '@/lib/format'
+import { shortHash } from '@/lib/address-display'
 
 type HistoryResponse = {
   // HistoryRow, not ProviderTx: the route serves a reduced projection so a
@@ -106,8 +107,8 @@ export function TxnsLazy({ addr }: { addr: string }) {
               {txs.map((tx) => (
                 <tr key={tx.hash} className={`hover:bg-canvas transition-colors ${tx.possibleSpam ? 'opacity-50' : ''}`}>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                      {tx.hash.slice(0, 14)}…
+                    <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                      {shortHash(tx.hash)}
                     </Link>
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
@@ -117,7 +118,7 @@ export function TxnsLazy({ addr }: { addr: string }) {
                     {tx.summary || tx.category}
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    {(Number(tx.value) / 1e18).toFixed(6)}
+                    {formatNativeToken(tx.value)}
                   </td>
                 </tr>
               ))}

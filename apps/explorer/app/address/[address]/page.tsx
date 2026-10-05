@@ -3,14 +3,14 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatNativeToken, formatNumber, timeAgo, formatAddress, safeBigInt, sanitizeSymbolOr } from '@/lib/format'
+import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { toChecksumAddress } from '@/lib/address-display'
+import { toChecksumAddress, shortenAddress, shortHash } from '@/lib/address-display'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/providers'
@@ -217,6 +217,9 @@ export default async function AddressPage({
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
     : null
+  // No index row and no RPC nonce: the tab says history is not in the local
+  // index, so a bare "0" here would claim a count we do not have.
+  const txCountText = noLocalData && displayTxCount === 0 ? '—' : formatNumber(displayTxCount)
   // USD value of native token balance
   const nativeUsd = balanceKnown && nativePrice && displayBalance
     ? (Number(displayBalance) / 1e18 * nativePrice)
@@ -291,12 +294,12 @@ export default async function AddressPage({
         />
         <Fact
           label="Transactions"
-          value={formatNumber(displayTxCount)}
+          value={txCountText}
         />
         <Fact
-          label="First Seen"
+          label="First indexed"
           value={displayFirstSeen ? timeAgo(displayFirstSeen) : 'Unknown'}
-          sub={displayFirstSeen ? displayFirstSeen.toUTCString().slice(5, 16) : undefined}
+          sub={displayFirstSeen ? formatUtc(displayFirstSeen) : undefined}
         />
         <Fact
           label="Type"
@@ -363,7 +366,7 @@ export default async function AddressPage({
           href={`/address/${addr}?tab=txns`}
           active={activeTab === 'txns'}
           label="Transactions"
-          count={`(${formatNumber(displayTxCount)})`}
+          count={`(${txCountText})`}
         />
         <TabLink
           href={`/address/${addr}?tab=transfers`}
@@ -498,8 +501,8 @@ async function TxnsTab({
             {txs.map((tx) => (
               <tr key={tx.hash} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                    {tx.hash.slice(0, 14)}...
+                  <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                    {shortHash(tx.hash)}
                   </Link>
                   {/* Phones drop the Value column; it moves under the hash. */}
                   <div className="text-xs text-mut sm:hidden">
@@ -514,21 +517,15 @@ async function TxnsTab({
                     <span className="text-mut text-xs">
                       {tx.fromAddress.toLowerCase() === addr ? 'OUT' : 'IN'}{' '}
                     </span>
-                    <Link
-                      href={`/address/${
-                        tx.fromAddress.toLowerCase() === addr
-                          ? tx.toAddress ?? addr
-                          : tx.fromAddress
-                      }`}
-                      className="text-acc-ink hover:underline"
-                    >
-                      {(
-                        tx.fromAddress.toLowerCase() === addr
-                          ? tx.toAddress ?? 'Contract Creation'
-                          : tx.fromAddress
-                      ).slice(0, 12)}
-                      ...
-                    </Link>
+                    {tx.fromAddress.toLowerCase() === addr ? (
+                      tx.toAddress ? (
+                        <AddressLink address={tx.toAddress} />
+                      ) : (
+                        <span className="text-mut">Contract Creation</span>
+                      )
+                    ) : (
+                      <AddressLink address={tx.fromAddress} />
+                    )}
                   </div>
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
@@ -638,11 +635,11 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
             {transfers.map((t) => (
               <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
-                    {t.txHash.slice(0, 14)}...
+                  <Link href={`/tx/${t.txHash}`} title={t.txHash} className="text-acc-ink hover:underline">
+                    {shortHash(t.txHash)}
                   </Link>
                 </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{t.blockNumber}</td>
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{formatNumber(t.blockNumber)}</td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
                 </td>
@@ -652,13 +649,13 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <Link
                     href={`/token/${t.tokenAddress}`}
+                    title={toChecksumAddress(t.tokenAddress)}
                     className="text-acc-ink hover:underline"
                   >
-                    {sanitizeSymbolOr(
+                    {tokenLabel(
                       tokenInfoMap.get(t.tokenAddress)?.symbol,
-                      sanitizeSymbolOr(
-                        tokenInfoMap.get(t.tokenAddress)?.name,
-                        formatAddress(t.tokenAddress)))}
+                      tokenInfoMap.get(t.tokenAddress)?.name,
+                      t.tokenAddress)}
                   </Link>
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
@@ -666,8 +663,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                     const decimals = tokenInfoMap.get(t.tokenAddress)?.decimals ?? 0
                     const raw = t.value ?? '0'
                     if (decimals > 0) {
-                      const formatted = Number(BigInt(raw)) / 10 ** decimals
-                      return formatted.toLocaleString(undefined, { maximumFractionDigits: 6 })
+                      return <span title={formatTokenAmount(raw, decimals)}>{formatTokenAmount(raw, decimals, 6)}</span>
                     }
                     return raw.slice(0, 12)
                   })()}
@@ -762,11 +758,7 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
             const displayBalance = (() => {
               try {
                 if (h.decimals !== null) {
-                  const divisor = 10n ** BigInt(h.decimals)
-                  const whole = BigInt(h.balance) / divisor
-                  const frac = BigInt(h.balance) % divisor
-                  const fracStr = frac.toString().padStart(h.decimals, '0').slice(0, 4).replace(/0+$/, '')
-                  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
+                  return formatTokenAmount(h.balance, h.decimals, 6)
                 }
                 return h.balance.slice(0, 18)
               } catch {
@@ -776,8 +768,8 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
             return (
               <tr key={h.tokenAddress} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2">
-                  <Link href={`/token/${h.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
-                    {sanitizeSymbolOr(h.name, h.tokenAddress.slice(0, 14) + '…')}
+                  <Link href={`/token/${h.tokenAddress}`} title={toChecksumAddress(h.tokenAddress)} className="text-acc-ink hover:underline font-medium">
+                    {tokenLabel(h.name, h.symbol, h.tokenAddress)}
                   </Link>
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(h.symbol, '—')}</td>
@@ -855,12 +847,12 @@ async function AnalyticsTab({
           value={`${formatWei(totalReceivedNative)} ${chainConfig.currency}`}
         />
         <AnalyticItem
-          label="First Seen"
-          value={firstSeen ? firstSeen.toLocaleDateString() : 'Unknown'}
+          label="First indexed"
+          value={firstSeen ? formatUtc(firstSeen) : 'Unknown'}
         />
         <AnalyticItem
           label="Last Seen"
-          value={lastSeen ? lastSeen.toLocaleDateString() : 'Unknown'}
+          value={lastSeen ? formatUtc(lastSeen) : 'Unknown'}
         />
       </div>
     </div>
@@ -943,7 +935,7 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
             <tr key={i} className="hover:bg-canvas transition-colors">
               <td className="px-3 sm:px-4 py-2">
                 <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
-                  {t.name ?? t.tokenAddress.slice(0, 12) + '...'}
+                  {t.name ?? shortenAddress(t.tokenAddress)}
                 </Link>
                 {t.symbol && <span className="ml-1 text-xs text-mut">({t.symbol})</span>}
               </td>
@@ -956,11 +948,11 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
                 </span>
               </td>
               <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
-                  {t.txHash.slice(0, 14)}...
+                <Link href={`/tx/${t.txHash}`} title={t.txHash} className="text-acc-ink hover:underline">
+                  {shortHash(t.txHash)}
                 </Link>
               </td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{t.blockNumber}</td>
+              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{formatNumber(t.blockNumber)}</td>
             </tr>
           ))}
         </tbody>
