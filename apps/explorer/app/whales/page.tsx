@@ -120,7 +120,7 @@ export default async function WhalesPage({
             </tr>
           </thead>
           <tbody>
-            {whales.map((w) => {
+            {whales.map((w, i) => {
               // Native and wrapped are 18-decimal; stablecoins differ per chain
               // (6 on Ethereum, 18 on BNB Chain), so resolve from config.
               const decimals =
@@ -129,7 +129,7 @@ export default async function WhalesPage({
               const symbol = w.tokenSymbol ?? chainConfig.currency
 
               return (
-                <tr key={`${w.hash}-${w.transferType}`}>
+                <tr key={`${w.hash}-${w.transferType}-${i}`}>
                   <td className="text-mut whitespace-nowrap hidden sm:table-cell">
                     {timeAgo(w.timestamp)}
                   </td>
