@@ -363,7 +363,7 @@ export default async function AddressPage({
       )}
 
       {/* Tab bar */}
-      <div className="flex overflow-x-auto border-b border-hair mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className="flex overflow-x-auto border-b border-hair mb-6 -mx-4 px-4 pr-6 max-sm:fade-r sm:mx-0 sm:px-0">
         <TabLink
           href={`/address/${addr}?tab=txns`}
           active={activeTab === 'txns'}

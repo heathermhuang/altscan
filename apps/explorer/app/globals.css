@@ -86,6 +86,18 @@
       grid-column: auto;
     }
   }
+  /* Right-edge fade on a row that scrolls sideways (the address tab bar): says there is more.
+     Give the row pr-6 so its last item can scroll clear of the fade, and apply it with a
+     max-* variant at the widths where the row actually overflows. */
+  .fade-r {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  /* Keyboard focus on an item in the fade zone would otherwise be dimmed. */
+  .fade-r:has(:focus-visible) {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 }
 
 /* Data tables (components/blocks/BlockTable, components/transactions/TxTable) */
