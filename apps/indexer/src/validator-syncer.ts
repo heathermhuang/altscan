@@ -170,7 +170,6 @@ async function upsertValidators(
         moniker,
         votingPower: vp.toString(),
         commission,
-        uptime: '0.99',
         status: 'active',
         updatedAt: now,
       }).onConflictDoUpdate({

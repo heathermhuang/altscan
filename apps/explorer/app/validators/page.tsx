@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import { formatNumber, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
@@ -7,6 +7,7 @@ import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
+import { blocksIn24h, blocksProduced, minerCounts, type MinerCount } from '@/lib/validator-blocks'
 
 export const metadata: Metadata = {
   title: `Validators`,
@@ -15,6 +16,21 @@ export const metadata: Metadata = {
 }
 
 export const revalidate = 300
+
+/** Blocks each miner produced over the last 24h of block numbers; null if the query fails. */
+async function fetchBlocks24h(): Promise<Map<string, number> | null> {
+  try {
+    const rows = await db.execute(sql`
+      SELECT miner, count(*)::int AS n FROM blocks
+      WHERE number > (SELECT max(number) FROM blocks) - ${blocksIn24h(chainConfig.blockTime)}::bigint
+      GROUP BY miner
+    `)
+    return minerCounts(Array.from(rows) as unknown as MinerCount[])
+  } catch (e) {
+    swallow('validators/blocks24h', e)
+    return null
+  }
+}
 
 export default async function ValidatorsPage() {
   if (!chainConfig.features.hasValidators) return notFound()
@@ -25,6 +41,11 @@ export default async function ValidatorsPage() {
       .orderBy(desc(schema.validators.votingPower))
       .limit(100)
   } catch (e) { swallow('validators/query', e) }  // DB not connected
+  const blockCounts = validators.length > 0 ? await fetchBlocks24h() : null
+  const blocksCell = (address: string) => {
+    const n = blocksProduced(blockCounts, address)
+    return n === null ? '—' : formatNumber(n)
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -54,6 +75,7 @@ export default async function ValidatorsPage() {
               <th scope="col">Status</th>
               <th scope="col">Voting Power</th>
               <th scope="col">Commission</th>
+              <th scope="col">Blocks (24h)</th>
             </tr>
           </thead>
           <tbody>
@@ -75,6 +97,7 @@ export default async function ValidatorsPage() {
                 </td>
                 <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
                 <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
+                <td>{blocksCell(v.address)}</td>
               </tr>
             ))}
           </tbody>
