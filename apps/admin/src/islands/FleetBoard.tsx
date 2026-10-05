@@ -34,7 +34,7 @@ export function FleetBoard() {
     let alive = true
     const load = () =>
       fetch('/api/fleet.json')
-        .then((r) => (r.ok ? (r.json() as Promise<FleetPayload>) : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((d: FleetPayload) => {
           if (alive) {
             setData(d)
