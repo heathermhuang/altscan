@@ -2,7 +2,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { formatGwei } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { confirmationWindow } from '@/lib/confirmation-window'
@@ -60,7 +60,7 @@ export default async function GasPage() {
         </p>
       </div>
 
-      <AdSlot
+      <AdReserve
         context="gas"
         placement="gas_top"
         className="mb-8"

@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
+  // Components under test (components/ads/AdSlot.test.ts) are .tsx; apps/explorer's tsconfig says
+  // jsx:"preserve" (Next compiles it), so without this their JSX falls back to the classic
+  // transform and dies with "React is not defined" the moment a branch returns an element.
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
       // Resolve the workspace DB package to its TS source instead of its

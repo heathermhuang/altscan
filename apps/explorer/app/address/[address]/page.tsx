@@ -25,7 +25,7 @@ import { WatchlistButton } from '@/components/ui/WatchlistButton'
 import { classifyCode, resolveContractStatusFromClass, resolveNativeBalance, type CodeClass } from '@/lib/contract-status'
 import { codeClassCache } from '@/lib/code-cache'
 import { AbiReader } from '@/components/contracts/AbiReader'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 
@@ -310,7 +310,7 @@ export default async function AddressPage({
       </dl>
 
       {gasReferralContext && (
-        <AdSlot
+        <AdReserve
           context={gasReferralContext}
           placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
           variant="compact"

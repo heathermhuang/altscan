@@ -157,7 +157,9 @@ export function AdSlot({
     })
   }, [chosen, placement, variant])
 
-  if (!chosen) return null
+  // Null until the config has loaded (so SSR and hydration match); after that an
+  // empty placement leaves a marker, which collapses AdReserve's reserved box.
+  if (!chosen) return config ? <span hidden data-ad-empty="" /> : null
 
   const handleClick = () => {
     window.gtag?.('event', 'ad_click', {
@@ -213,7 +215,7 @@ export function AdSlot({
 
   if (variant === 'footer') {
     return (
-      <div className={`border-b border-gray-800 bg-gray-950/60 ${className}`}>
+      <div className={`slot-footer border-b border-gray-800 bg-gray-950/60 ${className}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <BinanceMark />
@@ -235,18 +237,18 @@ export function AdSlot({
 
   return (
     <div
-      className={`overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'p-4' : 'p-5'} ${className}`}
+      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
     >
-      <div className={`flex gap-4 ${compact ? 'items-start' : 'flex-col sm:flex-row sm:items-center sm:justify-between'}`}>
+      <div className={`flex flex-col gap-4 sm:flex-row ${compact ? 'sm:items-start' : 'sm:items-center sm:justify-between'}`}>
         <div className="flex min-w-0 items-start gap-3">
           <BinanceMark />
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{copy.eyebrow}</p>
-            <p className="mt-0.5 font-semibold text-gray-900">{copy.title}</p>
-            <p className="mt-1 text-sm leading-5 text-gray-500">{copy.body}</p>
+            <p className="mt-0.5 line-clamp-2 font-semibold text-gray-900 sm:line-clamp-1">{copy.title}</p>
+            <p className="mt-1 line-clamp-3 text-sm leading-5 text-gray-500 sm:line-clamp-2">{copy.body}</p>
           </div>
         </div>
-        <div className={compact ? 'ml-auto shrink-0' : 'shrink-0'}>{cta}</div>
+        <div className={compact ? 'shrink-0 sm:ml-auto' : 'shrink-0'}>{cta}</div>
       </div>
     </div>
   )

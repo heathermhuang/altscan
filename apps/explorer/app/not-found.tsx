@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { SearchBar } from '@/components/layout/SearchBar'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import { chainConfig } from '@/lib/chain'
 
 export default function NotFound() {
@@ -16,7 +16,7 @@ export default function NotFound() {
       <div className="max-w-lg mx-auto mb-8">
         <SearchBar label="Search this explorer for a block, transaction or address" />
       </div>
-      <AdSlot
+      <AdReserve
         context="not_found"
         placement="not_found"
         variant="compact"

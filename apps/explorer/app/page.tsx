@@ -8,7 +8,7 @@ import { BlockTape } from '@/components/home/BlockTape'
 import { SearchBar } from '@/components/layout/SearchBar'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import { swallow, swallowed } from '@/lib/observability'
 import { encodeTape, gasPct, type TapeTuple } from '@/lib/tape'
 
@@ -341,7 +341,7 @@ export default async function HomePage() {
           />
         </div>
 
-        <AdSlot
+        <AdReserve
           context="home"
           placement="home_after_stats"
           className="mb-8"

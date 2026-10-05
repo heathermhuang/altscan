@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import { getSetting } from '@/lib/settings'
 import { resolveFooterText, resolveLinks } from '@/lib/settings-defaults'
 
@@ -38,7 +38,7 @@ export async function Footer() {
     <footer className="bg-card border-t border-hair text-mut text-sm mt-auto">
       {/* The footer ad variant is styled for a dark surface (translucent gray-950). */}
       <div className="bg-ink">
-        <AdSlot
+        <AdReserve
           context="footer"
           placement="footer_strip"
           variant="footer"

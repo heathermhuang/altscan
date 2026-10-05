@@ -1,6 +1,6 @@
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import { Badge } from '@/components/ui/Badge'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import type { Metadata } from 'next'
@@ -43,7 +43,7 @@ export default function DeveloperPage() {
         </a>
       </div>
 
-      <AdSlot
+      <AdReserve
         context="developer"
         placement="developer_after_links"
         variant="compact"
