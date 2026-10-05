@@ -3,7 +3,7 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent } from '@/lib/format'
+import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenTextOr } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -244,6 +244,11 @@ export default async function TokenDetailPage({
     }
   })()
 
+  // A token the indexer could not read (and the live re-resolve could not either) keeps its
+  // '???' / 'Unknown' placeholders: those are "missing", so the header says "—", not a name.
+  const nameText = tokenTextOr(token.name, '—')
+  const symbolText = tokenTextOr(token.symbol, '—')
+
   const tokenReferralContext = isStablecoinToken(token.symbol, token.name)
     ? 'stablecoin'
     : 'token_research'
@@ -257,7 +262,8 @@ export default async function TokenDetailPage({
         <p className="k">{'// '}token</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="mr-1 min-w-0 [overflow-wrap:anywhere] text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
-            {token.name} <span className="font-mono font-semibold text-ink2">{token.symbol}</span>
+            {nameText}
+            {symbolText !== '—' && <>{' '}<span className="font-mono font-semibold text-ink2">{symbolText}</span></>}
           </h1>
           <Badge variant="default">{token.type}</Badge>
           <a
@@ -284,7 +290,7 @@ export default async function TokenDetailPage({
 
       <dl className={`ledger mb-6 ${isLive ? '[--cols:2]' : '[--cols:3]'}`}>
         <Fact label="Decimals">{token.decimals}</Fact>
-        <Fact label="Total Supply">{displaySupply}</Fact>
+        <Fact label="Total Supply">{hasSupply(token.totalSupply) ? displaySupply : '—'}</Fact>
         {!isLive && (
           <Fact label="Holders">
             <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />

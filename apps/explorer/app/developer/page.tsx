@@ -35,7 +35,7 @@ export default function DeveloperPage() {
         </a>
         <a href="#api-keys" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
           <div className="font-semibold text-ink">API Keys</div>
-          <div className="mt-1 text-sm text-ink2">Higher rate limits with a key</div>
+          <div className="mt-1 text-sm text-ink2">Your own rate-limit bucket</div>
         </a>
         <a href="#webhooks" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
           <div className="font-semibold text-ink">Webhooks</div>
@@ -58,8 +58,9 @@ export default function DeveloperPage() {
           </div>
           <div className="px-6 py-5 space-y-4">
             <p className="text-ink2">
-              Anonymous requests are rate-limited to <strong>10 req/min per IP</strong>.
-              With an API key, you get <strong>100 req/min</strong> — 10x more capacity.
+              Requests are limited to <strong>100 req/min per IP</strong>. On the endpoints that take a key
+              (query, keys, webhook creation, contract call), a request with a valid API key counts against
+              that key&apos;s own <strong>100 req/min</strong> instead of your IP&apos;s.
             </p>
 
             <div>
@@ -110,11 +111,11 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
             <dl className="ledger [--cols:2]">
               <div>
                 <dt className="k">Anonymous</dt>
-                <dd className="mt-1 font-mono text-[15px] text-ink">10 requests/minute per IP</dd>
+                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute per IP</dd>
               </div>
               <div>
                 <dt className="k">With API Key</dt>
-                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute</dd>
+                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute per key</dd>
               </div>
             </dl>
           </div>

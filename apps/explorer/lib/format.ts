@@ -75,6 +75,28 @@ export function formatNumber(n: number | bigint): string {
   return Number(n).toLocaleString('en-US')
 }
 
+/**
+ * A holder count, or "—" when it is 0. Counts are recomputed on an interval (and the token
+ * row starts at 0), so a 0 above a populated holder list is a lag artifact, not a reading.
+ */
+export function formatHolders(n: number | null | undefined): string {
+  return n && Number.isFinite(n) ? formatNumber(n) : '—'
+}
+
+/** A derived figure, marked as one: "≈ 4,383". "—" when there is nothing to estimate. */
+export function formatEstimate(n: number | null | undefined): string {
+  return n && Number.isFinite(n) && n > 0 ? `≈ ${formatNumber(n)}` : '—'
+}
+
+/**
+ * Whether a stored total supply is a real reading. The indexer writes '0' when its
+ * totalSupply() call fails (and NFT contracts often have none), so null, '' and 0 all mean
+ * "unknown" — never "a supply of zero".
+ */
+export function hasSupply(raw: string | null | undefined): boolean {
+  return safeBigInt(raw) > 0n
+}
+
 /** Adaptive USD price: 2dp for ≥$1, 4dp for ≥$0.01, up to 8dp for micro-caps. */
 export function formatUsdPrice(n: number): string {
   if (!Number.isFinite(n)) return '—'

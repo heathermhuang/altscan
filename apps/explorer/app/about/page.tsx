@@ -82,7 +82,7 @@ export default function AboutPage() {
         explore on-chain activity in real-time.
       </p>
       <p className="mb-8 leading-relaxed text-ink2">
-        Our goal is to provide a fast, reliable, and ad-free alternative explorer that anyone can
+        Our goal is to provide a fast, reliable, and open-source alternative explorer that anyone can
         use — from casual users checking a transaction to developers building on{' '}
         {chainConfig.name}.
       </p>

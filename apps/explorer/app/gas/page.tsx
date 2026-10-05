@@ -67,9 +67,9 @@ export default async function GasPage() {
       />
 
       <dl className="ledger [--cols:3] mb-8">
-        <Fact label="Slow"     gwei={formatGwei(slow)}     est="~30s" />
-        <Fact label="Standard" gwei={formatGwei(standard)} est="~15s" />
-        <Fact label="Fast"     gwei={formatGwei(fast)}     est="~5s" />
+        <Fact label="Slow"     gwei={formatGwei(slow)}     basis="base fee" />
+        <Fact label="Standard" gwei={formatGwei(standard)} basis="base fee + 10%" />
+        <Fact label="Fast"     gwei={formatGwei(fast)}     basis="base fee + 30%" />
       </dl>
 
       <div className="mb-8 rounded-xl border border-hair bg-card p-6">
@@ -98,12 +98,12 @@ export default async function GasPage() {
   )
 }
 
-function Fact({ label, gwei, est }: { label: string; gwei: string; est: string }) {
+function Fact({ label, gwei, basis }: { label: string; gwei: string; basis: string }) {
   return (
     <div>
       <dt className="k">{label}</dt>
       <dd className="mt-1 break-words font-mono text-xl font-semibold text-ink">{gwei}</dd>
-      <dd className="mt-0.5 text-xs text-mut">Gwei · {est}</dd>
+      <dd className="mt-0.5 text-xs text-mut">Gwei · {basis}</dd>
     </div>
   )
 }

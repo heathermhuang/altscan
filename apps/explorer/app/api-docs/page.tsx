@@ -332,8 +332,9 @@ export default function ApiDocsPage() {
           </code>
         </p>
         <div className="mt-4 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
-          <strong className="text-ink">Rate Limiting:</strong> API requests are rate-limited to 100 requests per minute per IP address. Responses include{' '}
-          <code className="font-mono text-ink">X-RateLimit-Remaining</code> headers.
+          <strong className="text-ink">Rate Limiting:</strong> API requests are limited to 100 requests per minute per IP address (10 per minute for{' '}
+          <code className="font-mono text-ink">POST /api/v1/verify</code>). On the endpoints that take a key (query, keys, webhook creation, contract call), a request with a valid{' '}
+          <code className="font-mono text-ink">X-API-Key</code> counts against that key&apos;s own limit, 100 requests per minute, instead of the IP&apos;s. Over a limit the API answers 429.
         </div>
       </div>
 
