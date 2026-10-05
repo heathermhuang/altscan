@@ -51,19 +51,19 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
   }
 
   return (
-    <div className="bg-card border-y border-hair">
-      <div className="max-w-7xl mx-auto px-4 pt-3 flex items-center justify-between gap-4 min-h-[38px] font-mono text-xs text-mut">
+    <div className="bt-box">
+      <div className="bt-head">
         <span className="flex items-center min-w-0">
-          <span className="mr-2 w-[9px] h-[9px] shrink-0 rounded-[2px] bg-acc" aria-hidden="true" />
+          <span className="bt-dot" aria-hidden="true" />
           <span className="text-ink truncate">{chainName}</span>
         </span>
-        <span className="flex gap-3 whitespace-nowrap">
+        <span className="bt-stats">
           {heading ? (
             <span className="text-ink">{heading}</span>
           ) : (
             newest !== null && <span>latest <span className="text-ink">#{fmt(newest)}</span></span>
           )}
-          {rate !== null && <span className="hidden min-[480px]:inline">{rate.toFixed(1)} blocks/min</span>}
+          {rate !== null && <span className="bt-rate">{rate.toFixed(1)} blocks/min</span>}
         </span>
       </div>
 
@@ -113,7 +113,7 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 py-3 min-h-[60px] sm:min-h-[44px] font-mono text-xs leading-[18px] text-mut">
+      <div className="bt-leg">
         <p data-readout aria-live="polite" className={active ? 'text-ink' : undefined}>
           {active ? `#${fmt(active.n)} · ${active.txs} txns · gas ${active.gas}% · ${fmtSeconds(active.seconds)} s` : LEGEND}
         </p>

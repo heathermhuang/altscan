@@ -288,18 +288,18 @@ export default async function HomePage() {
       <AutoRefresh intervalMs={30000} />
 
       {/* Hero */}
-      <div className="max-w-7xl mx-auto px-4 pt-10 pb-8 md:pt-14 md:pb-10">
+      <div className="hero">
         <p className="k">{'// '}{chainConfig.name} · block explorer</p>
-        <h1 className="mt-3 max-w-5xl text-balance text-ink font-bold tracking-[-0.035em] leading-[1.05] text-[clamp(30px,4.4vw,56px)]">
+        <h1 className="hero-h">
           {chainConfig.tagline}
         </h1>
-        <p className="mt-4 text-[15px] text-ink2">
+        <p className="hero-p">
           Maintained by{' '}
           <a
             href="https://mdt.io"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-acc-ink underline underline-offset-2 font-medium"
+            className="lk-u font-medium"
           >
             Measurable Data Token (MDT)
           </a>
@@ -347,7 +347,7 @@ export default async function HomePage() {
         />
 
         {/* Two-column layout */}
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="two">
           <section className="min-w-0">
             <SectionHeader title="Latest Blocks" href="/blocks" />
             <BlockTable blocks={latestBlocks.slice(0, 7)} compact />
@@ -360,27 +360,27 @@ export default async function HomePage() {
 
         {/* Crawlable intro — the only prose on the homepage; stays server-rendered */}
         <section className="mt-10 max-w-3xl">
-          <h2 className="text-lg font-[650] tracking-[-0.02em] text-ink mb-2">What is {chainConfig.brandName}?</h2>
+          <h2 className="h2 mb-2">What is {chainConfig.brandName}?</h2>
           <div className="text-sm text-ink2 space-y-3">
             <p>
               {chainConfig.brandDomain} is an open, independent {chainConfig.name} block
               explorer maintained by Measurable Data Token (MDT). It tracks blocks and
               transactions in real time and offers a{' '}
-              <Link href="/token" className="text-acc-ink underline underline-offset-2">token directory</Link>,{' '}
-              <Link href="/dex" className="text-acc-ink underline underline-offset-2">DEX trade tracker</Link>,{' '}
-              <Link href="/gas" className="text-acc-ink underline underline-offset-2">gas tracker</Link>,{' '}
-              <Link href="/whales" className="text-acc-ink underline underline-offset-2">whale tracker</Link>, and a free{' '}
-              <Link href="/api-docs" className="text-acc-ink underline underline-offset-2">REST API</Link>
+              <Link href="/token" className="lk-u">token directory</Link>,{' '}
+              <Link href="/dex" className="lk-u">DEX trade tracker</Link>,{' '}
+              <Link href="/gas" className="lk-u">gas tracker</Link>,{' '}
+              <Link href="/whales" className="lk-u">whale tracker</Link>, and a free{' '}
+              <Link href="/api-docs" className="lk-u">REST API</Link>
               {' '}— no account required.
             </p>
             <p>
               The same open-source engine,{' '}
-              <a href="https://altscan.io" className="text-acc-ink underline underline-offset-2">Altscan</a>,
+              <a href="https://altscan.io" className="lk-u">Altscan</a>,
               powers our sister explorer at{' '}
-              <a href={chainConfig.peerUrl} className="text-acc-ink underline underline-offset-2">
+              <a href={chainConfig.peerUrl} className="lk-u">
                 {chainConfig.peerUrl.replace('https://', '')}
               </a>
-              . Read more <Link href="/about" className="text-acc-ink underline underline-offset-2">about the project</Link>.
+              . Read more <Link href="/about" className="lk-u">about the project</Link>.
             </p>
           </div>
         </section>
@@ -403,10 +403,10 @@ function StatCard({
   return (
     <div>
       <p className="k">{label}</p>
-      <p className="mt-1 font-mono text-lg md:text-xl text-ink">{value}</p>
+      <p className="stat-v">{value}</p>
       {subtext && (
         <p
-          className={`mt-0.5 font-mono text-xs ${
+          className={`stat-s ${
             subtextPositive === true
               ? 'text-live'
               : subtextPositive === false
@@ -423,8 +423,8 @@ function StatCard({
 
 function SectionHeader({ title, href }: { title: string; href: string }) {
   return (
-    <div className="flex justify-between items-center mb-3">
-      <h2 className="text-lg font-[650] tracking-[-0.02em] text-ink">{title}</h2>
+    <div className="sec">
+      <h2 className="h2">{title}</h2>
       <Link href={href} className="text-sm text-acc-ink hover:underline">View all →</Link>
     </div>
   )

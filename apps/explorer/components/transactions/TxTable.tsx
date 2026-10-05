@@ -27,12 +27,12 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
   showStatus?: boolean
 }) {
   return (
-    <div className="bg-card rounded-xl border border-hair overflow-hidden">
+    <div className="card">
       <div className="overflow-x-auto">
       {/* `.dt-tx` (app/globals.css) turns each row into a three-line card under 640px from these same
           cells, so every column is in the DOM at every width; `compact` only drops To from 640px up. */}
-      <table className={compact ? 'dt dt-tx dt-tx-c' : 'dt dt-tx'}>
-        <caption className="sr-only">{chainConfig.name} transactions</caption>
+      <table className={compact ? 'dt dt-tx dt-tx-c dt-a' : 'dt dt-tx dt-a'}>
+        <caption className="sr-only">{`${chainConfig.name} transactions`}</caption>
         <thead className="max-sm:sr-only">
           <tr>
             <th scope="col">Tx Hash</th>
@@ -47,17 +47,15 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
           {txs.map(tx => (
             <tr key={tx.hash}>
               <td>
-                <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                  {shortHash(tx.hash)}
-                </Link>
+                <Link href={`/tx/${tx.hash}`}>{shortHash(tx.hash)}</Link>
               </td>
               <td className="text-mut">{timeAgo(new Date(tx.timestamp))}</td>
               <td>
-                <AddressLink address={tx.fromAddress} title={false} />
+                <AddressLink address={tx.fromAddress} title={false} plain />
               </td>
               <td>
                 {tx.toAddress ? (
-                  <AddressLink address={tx.toAddress} title={false} />
+                  <AddressLink address={tx.toAddress} title={false} plain />
                 ) : (
                   <span className="text-mut">Contract Creation</span>
                 )}

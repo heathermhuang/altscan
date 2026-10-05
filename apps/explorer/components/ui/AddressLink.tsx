@@ -17,6 +17,9 @@ import { getAddressLabel } from '@/lib/known-addresses'
  * the checksummed address is ~40 high-entropy characters, and the page ships it again in
  * its RSC payload, so it counts against the homepage's one-TCP-window budget. The href
  * still carries the full address.
+ *
+ * `plain` drops the link's own colour, hover and mono classes, for a container that supplies
+ * them (a `dt-a` table: its links are accent links in the table's mono face).
  */
 export function AddressLink({
   address,
@@ -24,6 +27,7 @@ export function AddressLink({
   showLabel = true,
   self = false,
   title = true,
+  plain = false,
   className = '',
 }: {
   address: string
@@ -36,6 +40,8 @@ export function AddressLink({
   self?: boolean
   /** Put the full checksummed address in a `title` (hover text). Default true. */
   title?: boolean
+  /** The container styles the link (see above): no colour, hover or font classes of its own. */
+  plain?: boolean
   className?: string
 }) {
   const checksummed = toChecksumAddress(address)
@@ -46,7 +52,7 @@ export function AddressLink({
     <Link
       href={`/address/${address.toLowerCase()}`}
       title={title ? checksummed : undefined}
-      className={`${self ? 'text-ink font-semibold' : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
+      className={plain ? className || undefined : `${self ? 'text-ink font-semibold' : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
     >
       {text}
     </Link>

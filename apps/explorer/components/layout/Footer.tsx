@@ -7,7 +7,7 @@ import { resolveFooterText, resolveLinks } from '@/lib/settings-defaults'
 
 function FooterLogo() {
   return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] bg-acc text-acc-on">
+    <span className="mark">
       <svg viewBox="0 0 36 36" fill="none" className="w-6 h-6" aria-hidden="true">
         <path
           d="M18 2L33 10.5V25.5L18 34L3 25.5V10.5L18 2Z"
@@ -35,7 +35,7 @@ export async function Footer() {
   const { tagline, notAffiliatedWith } = resolveFooterText(footerOverride, chainConfig)
 
   return (
-    <footer className="bg-card border-t border-hair text-mut text-sm mt-auto">
+    <footer>
       {/* The footer ad variant is styled for a dark surface (translucent gray-950): --band stays dark
           in both schemes, where --ink turns near-white in dark. */}
       <div className="bg-band">
@@ -48,11 +48,11 @@ export async function Footer() {
 
       {/* MDT attribution bar */}
       <div className="border-b border-hair">
-        <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="ft-in">
           <div className="flex items-center gap-3">
             <FooterLogo />
             <div>
-              <p className="font-mono text-ink font-semibold text-[15px] leading-tight">{chainConfig.brandDomain}</p>
+              <p className="ft-b">{chainConfig.brandDomain}</p>
               <p className="text-mut text-xs">{tagline}</p>
             </div>
           </div>
@@ -62,7 +62,7 @@ export async function Footer() {
               href="https://mdt.io"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-acc-ink hover:underline font-semibold py-1 inline-block"
+              className="ft-a"
             >
               Measurable Data Token (MDT)
             </a>
@@ -70,7 +70,7 @@ export async function Footer() {
               href="https://altscan.io"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-acc-ink hover:underline text-xs font-medium mt-1.5 block"
+              className="ft-a2"
             >
               Powered by Altscan ↗
             </a>
@@ -79,11 +79,11 @@ export async function Footer() {
       </div>
 
       {/* Links + network switcher + copyright */}
-      <div className="max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[12.5px]">
+      <div className="ft-in">
+        <div className="ft-l">
           {quickLinks.map((l) =>
             l.href.startsWith('/') ? (
-              <Link key={`${l.label}-${l.href}`} href={l.href} className="text-mut hover:text-ink transition-colors py-2">
+              <Link key={`${l.label}-${l.href}`} href={l.href}>
                 {l.label}
               </Link>
             ) : (
@@ -92,7 +92,6 @@ export async function Footer() {
                 href={l.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-mut hover:text-ink transition-colors py-2"
               >
                 {l.label} ↗
               </a>
