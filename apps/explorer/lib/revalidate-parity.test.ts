@@ -5,6 +5,8 @@ import { revalidate as txsRevalidate } from '@/app/txs/page'
 import { revalidate as blocksRevalidate } from '@/app/blocks/page'
 import { revalidate as dexRevalidate } from '@/app/dex/page'
 import { revalidate as whalesRevalidate } from '@/app/whales/page'
+import { revalidate as blockRevalidate } from '@/app/blocks/[number]/page'
+import { revalidate as blockTxsRevalidate } from '@/app/blocks/[number]/txs/[page]/page'
 import { WHALES_REVALIDATE_SECONDS } from '@/lib/whales'
 
 describe('page revalidate matches the data-cache TTL', () => {
@@ -27,6 +29,8 @@ describe('page revalidate matches the data-cache TTL', () => {
     ['/blocks', blocksRevalidate],
     ['/dex', dexRevalidate],
     ['/whales', whalesRevalidate],
+    ['/blocks/[number]', blockRevalidate],
+    ['/blocks/[number]/txs/[page]', blockTxsRevalidate],
   ])('%s exports a plain number, which is what Next requires', (_route, value) => {
     expect(typeof value).toBe('number')
     expect(Number.isFinite(value)).toBe(true)
