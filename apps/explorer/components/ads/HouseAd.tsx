@@ -39,7 +39,7 @@ export function HouseAd({
         ? { target: '_blank', rel: 'sponsored nofollow noopener noreferrer' }
         : { rel: 'sponsored' })}
       onClick={onCtaClick}
-      className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md bg-gray-900 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+      className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md bg-ink px-3 text-xs font-bold text-card shadow-sm transition-colors hover:bg-ink2 focus:outline-none focus:ring-2 focus:ring-mut focus:ring-offset-2 focus:ring-offset-card"
     >
       {creative.ctaText}
     </a>
@@ -54,16 +54,16 @@ export function HouseAd({
       height={36}
       loading="lazy"
       decoding="async"
-      className="h-9 w-9 shrink-0 rounded-lg border border-gray-200 object-cover"
+      className="h-9 w-9 shrink-0 rounded-lg border border-hair object-cover"
     />
   ) : null
 
   if (variant === 'popover') {
     return (
-      <div className={`w-64 rounded-lg border border-gray-200 bg-white p-3 text-left shadow-lg ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase text-gray-500">Sponsored</p>
-        <p className="text-sm font-semibold text-gray-900">{creative.headline}</p>
-        {creative.body && <p className="mt-1 text-xs leading-5 text-gray-500">{creative.body}</p>}
+      <div className={`w-64 rounded-lg border border-hair bg-card p-3 text-left shadow-lg ${className}`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase text-mut">Sponsored</p>
+        <p className="text-sm font-semibold text-ink">{creative.headline}</p>
+        {creative.body && <p className="mt-1 text-xs leading-5 text-mut">{creative.body}</p>}
         <div className="mt-3">{cta}</div>
       </div>
     )
@@ -72,14 +72,14 @@ export function HouseAd({
   if (variant === 'inline') {
     return (
       <div
-        className={`flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${className}`}
+        className={`flex flex-col gap-3 rounded-lg border border-hair bg-canvas px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${className}`}
       >
         <div className="flex min-w-0 items-center gap-3">
           {mark}
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase text-gray-500">Sponsored</p>
-            <p className="font-semibold text-gray-900">{creative.headline}</p>
-            {creative.body && <p className="text-xs text-gray-600">{creative.body}</p>}
+            <p className="text-[10px] font-semibold uppercase text-mut">Sponsored</p>
+            <p className="font-semibold text-ink">{creative.headline}</p>
+            {creative.body && <p className="text-xs text-ink2">{creative.body}</p>}
           </div>
         </div>
         {cta}
@@ -111,7 +111,7 @@ export function HouseAd({
 
   return (
     <div
-      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
+      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-hair bg-card shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
     >
       <div
         className={`flex flex-col gap-4 sm:flex-row ${compact ? 'sm:items-start' : 'sm:items-center sm:justify-between'}`}
@@ -119,10 +119,10 @@ export function HouseAd({
         <div className="flex min-w-0 items-start gap-3">
           {mark}
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Sponsored</p>
-            <p className="mt-0.5 line-clamp-2 font-semibold text-gray-900 sm:line-clamp-1">{creative.headline}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-mut">Sponsored</p>
+            <p className="mt-0.5 line-clamp-2 font-semibold text-ink sm:line-clamp-1">{creative.headline}</p>
             {creative.body && (
-              <p className="mt-1 line-clamp-3 text-sm leading-5 text-gray-500 sm:line-clamp-2">{creative.body}</p>
+              <p className="mt-1 line-clamp-3 text-sm leading-5 text-mut sm:line-clamp-2">{creative.body}</p>
             )}
           </div>
         </div>

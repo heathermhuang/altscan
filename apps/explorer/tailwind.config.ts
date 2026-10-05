@@ -50,6 +50,7 @@ const config: Config = {
         'live-t': token('liveT'),
         warn: token('warn'),
         'warn-t': token('warnT'),
+        band: token('band'),
         acc: token('acc'),
         'acc-ink': token('acc-ink'),
         'acc-t': token('acc-t'),

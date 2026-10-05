@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { chainConfig } from '@/lib/chain-client'
 
 type AbiFunction = {
   name: string
@@ -16,7 +15,7 @@ export function AbiReader({ address, abi }: { address: string; abi: unknown[] })
   )
 
   if (functions.length === 0) {
-    return <p className="text-gray-500 text-sm">No readable functions found in ABI.</p>
+    return <p className="text-mut text-sm">No readable functions found in ABI.</p>
   }
 
   return (
@@ -56,21 +55,21 @@ function FunctionCard({ address, fn }: { address: string; fn: AbiFunction }) {
   }
 
   return (
-    <div className="border rounded-lg overflow-hidden">
+    <div className="border border-hair rounded-lg overflow-hidden">
       <button
-        className="w-full flex items-center justify-between px-4 py-2 bg-gray-50 hover:bg-gray-100 text-left text-sm font-mono"
+        className="w-full flex items-center justify-between px-4 py-2 bg-canvas hover:bg-hair2 text-left text-sm font-mono"
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="text-blue-700">{fn.name}</span>
-        <span className="text-gray-400 text-xs">{fn.outputs.map(o => o.type).join(', ')}</span>
+        <span className="text-acc-ink">{fn.name}</span>
+        <span className="text-mut text-xs">{fn.outputs.map(o => o.type).join(', ')}</span>
       </button>
       {expanded && (
         <div className="p-4 space-y-3 text-sm">
           {fn.inputs.map((inp, i) => (
             <div key={i}>
-              <label className="block text-gray-500 text-xs mb-1">{inp.name || `param${i}`} ({inp.type})</label>
+              <label className="block text-mut text-xs mb-1">{inp.name || `param${i}`} ({inp.type})</label>
               <input
-                className="w-full border rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                className="w-full border border-hair bg-card text-ink placeholder:text-mut rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-acc"
                 placeholder={inp.type}
                 value={args[i]}
                 onChange={e => {
@@ -84,13 +83,13 @@ function FunctionCard({ address, fn }: { address: string; fn: AbiFunction }) {
           <button
             onClick={call}
             disabled={loading}
-            className={`px-4 py-1.5 ${chainConfig.theme.buttonBg} hover:opacity-90 ${chainConfig.theme.buttonText} rounded text-sm font-medium disabled:opacity-50`}
+            className="px-4 py-1.5 bg-ink text-card hover:opacity-90 rounded text-sm font-medium disabled:opacity-50"
           >
             {loading ? 'Querying...' : 'Query'}
           </button>
-          {error && <p className="text-red-600 text-xs">{error}</p>}
+          {error && <p className="text-warn text-xs">{error}</p>}
           {result && (
-            <pre className="bg-gray-900 text-green-400 rounded p-3 text-xs overflow-auto max-h-40">{result}</pre>
+            <pre className="bg-hair2 text-ink rounded p-3 text-xs overflow-auto max-h-40">{result}</pre>
           )}
         </div>
       )}

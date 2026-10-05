@@ -2,10 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Ledger Tape tokens. --acc / --acc-ink / --acc-t / --acc-on are written on
-   <html> by app/layout.tsx from chain-config, so each chain gets its own accent. */
+/* Ledger Tape tokens. The chain accents arrive on <html> (app/layout.tsx, from chain-config) as
+   --acc-l / --acc-ink-l / --acc-t-l / --acc-on-l (light) and --acc-d / --acc-ink-d / --acc-t-d /
+   --acc-on-d (dark); --acc / --acc-ink / --acc-t / --acc-on below pick one set per scheme.
+   Dark follows prefers-color-scheme (no toggle): it is only a swap of these variables. */
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --ink: #101014;
   --ink2: #3b3b45;
   --mut: #6c6c77;
@@ -19,6 +21,35 @@
   --liveT: #eaf6ee;
   --warn: #9a4a32;
   --warnT: #fff8f5;
+  /* The footer's ad band: dark in both schemes (the strip's text is light), unlike --ink, which
+     turns near-white in dark. */
+  --band: #101014;
+  --acc: var(--acc-l);
+  --acc-ink: var(--acc-ink-l);
+  --acc-t: var(--acc-t-l);
+  --acc-on: var(--acc-on-l);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ededf2;
+    --ink2: #b9b9c6;
+    --mut: #8a8a98;
+    --faint: #4a4a56;
+    --bg: #0b0b0f;
+    --card: #121218;
+    --hair: #23232c;
+    --hair2: #1b1b22;
+    --hair3: #34343f;
+    --live: #34c46a;
+    --liveT: #12261a;
+    --warn: #f0a58c;
+    --warnT: #2a1712;
+    --band: #1b1b22;
+    --acc: var(--acc-d);
+    --acc-ink: var(--acc-ink-d);
+    --acc-t: var(--acc-t-d);
+    --acc-on: var(--acc-on-d);
+  }
 }
 
 @layer base {
@@ -52,6 +83,18 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--mut);
+  }
+  /* NetworkSwitcher swatch. It shows BOTH chains' accents, so it cannot use --acc: each swatch
+     carries its own light and dark pair (--nm-*) inline, and the scheme picks one. */
+  .net-mark {
+    background: var(--nm-l);
+    color: var(--nm-on-l);
+  }
+  @media (prefers-color-scheme: dark) {
+    .net-mark {
+      background: var(--nm-d);
+      color: var(--nm-on-d);
+    }
   }
   /* Hairline divider (<hr class="rule"> or an empty <div class="rule">). */
   .rule {

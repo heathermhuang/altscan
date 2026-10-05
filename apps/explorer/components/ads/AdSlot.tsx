@@ -181,7 +181,7 @@ export function AdSlot({
       target="_blank"
       rel="sponsored nofollow noopener noreferrer"
       onClick={handleClick}
-      className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md bg-[#fcd535] px-3 text-xs font-bold text-[#181a20] shadow-sm transition-colors hover:bg-[#f0b90b] focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2"
+      className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md bg-[#fcd535] px-3 text-xs font-bold text-[#181a20] shadow-sm transition-colors hover:bg-[#f0b90b] focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-card"
     >
       {copy.cta}
     </a>
@@ -189,10 +189,10 @@ export function AdSlot({
 
   if (variant === 'popover') {
     return (
-      <div className={`w-64 rounded-lg border border-yellow-200 bg-white p-3 text-left shadow-lg ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase text-gray-400">{copy.eyebrow}</p>
-        <p className="text-sm font-semibold text-gray-900">{copy.title}</p>
-        <p className="mt-1 text-xs leading-5 text-gray-500">{copy.body}</p>
+      <div className={`w-64 rounded-lg border border-yellow-200 bg-card p-3 text-left shadow-lg ${className}`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase text-mut">{copy.eyebrow}</p>
+        <p className="text-sm font-semibold text-ink">{copy.title}</p>
+        <p className="mt-1 text-xs leading-5 text-mut">{copy.body}</p>
         <div className="mt-3">{cta}</div>
       </div>
     )
@@ -201,12 +201,12 @@ export function AdSlot({
   if (variant === 'inline') {
     return (
       <div
-        className={`flex flex-col gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${className}`}
+        className={`flex flex-col gap-3 rounded-lg border border-yellow-200 bg-[#fcd535]/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${className}`}
       >
         <div>
-          <p className="text-[10px] font-semibold uppercase text-yellow-700">{copy.eyebrow}</p>
-          <p className="font-semibold text-gray-900">{copy.title}</p>
-          <p className="text-xs text-gray-600">{copy.body}</p>
+          <p className="text-[10px] font-semibold uppercase text-mut">{copy.eyebrow}</p>
+          <p className="font-semibold text-ink">{copy.title}</p>
+          <p className="text-xs text-ink2">{copy.body}</p>
         </div>
         {cta}
       </div>
@@ -218,7 +218,7 @@ export function AdSlot({
       <div className={`slot-footer border-b border-gray-800 bg-gray-950/60 ${className}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <BinanceMark />
+            <BinanceMark glyph="text-[#fcd535]" />
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase text-gray-400">{copy.eyebrow}</p>
               <p className="truncate font-medium text-gray-200">
@@ -237,15 +237,15 @@ export function AdSlot({
 
   return (
     <div
-      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
+      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-hair bg-card shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
     >
       <div className={`flex flex-col gap-4 sm:flex-row ${compact ? 'sm:items-start' : 'sm:items-center sm:justify-between'}`}>
         <div className="flex min-w-0 items-start gap-3">
           <BinanceMark />
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{copy.eyebrow}</p>
-            <p className="mt-0.5 line-clamp-2 font-semibold text-gray-900 sm:line-clamp-1">{copy.title}</p>
-            <p className="mt-1 line-clamp-3 text-sm leading-5 text-gray-500 sm:line-clamp-2">{copy.body}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-mut">{copy.eyebrow}</p>
+            <p className="mt-0.5 line-clamp-2 font-semibold text-ink sm:line-clamp-1">{copy.title}</p>
+            <p className="mt-1 line-clamp-3 text-sm leading-5 text-mut sm:line-clamp-2">{copy.body}</p>
           </div>
         </div>
         <div className={compact ? 'shrink-0 sm:ml-auto' : 'shrink-0'}>{cta}</div>
@@ -254,9 +254,11 @@ export function AdSlot({
   )
 }
 
-function BinanceMark() {
+// `glyph` is the glyph colour. The footer strip is a dark surface in both schemes, so it passes the
+// brand yellow; the cards sit on --card and keep text-ink.
+function BinanceMark({ glyph = 'text-ink' }: { glyph?: string }) {
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-yellow-200 bg-[#fcd535]/20 text-[#181a20]">
+    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-yellow-200 bg-[#fcd535]/20 ${glyph}`}>
       <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
         <path d="M12 2.25 15.08 5.33 12 8.41 8.92 5.33 12 2.25Zm5.25 5.25 3.08 3.08-3.08 3.08-3.08-3.08 3.08-3.08Zm-10.5 0 3.08 3.08-3.08 3.08-3.08-3.08L6.75 7.5ZM12 9.25l2.75 2.75L12 14.75 9.25 12 12 9.25Zm0 6.34 3.08 3.08L12 21.75l-3.08-3.08L12 15.59Z" />
       </svg>
