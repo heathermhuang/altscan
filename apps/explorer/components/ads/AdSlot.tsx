@@ -218,7 +218,7 @@ export function AdSlot({
       <div className={`slot-footer border-b border-gray-800 bg-gray-950/60 ${className}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <BinanceMark />
+            <BinanceMark glyph="text-[#fcd535]" />
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase text-gray-400">{copy.eyebrow}</p>
               <p className="truncate font-medium text-gray-200">
@@ -254,9 +254,11 @@ export function AdSlot({
   )
 }
 
-function BinanceMark() {
+// `glyph` is the glyph colour. The footer strip is a dark surface in both schemes, so it passes the
+// brand yellow; the cards sit on --card and keep text-ink.
+function BinanceMark({ glyph = 'text-ink' }: { glyph?: string }) {
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-yellow-200 bg-[#fcd535]/20 text-ink">
+    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-yellow-200 bg-[#fcd535]/20 ${glyph}`}>
       <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
         <path d="M12 2.25 15.08 5.33 12 8.41 8.92 5.33 12 2.25Zm5.25 5.25 3.08 3.08-3.08 3.08-3.08-3.08 3.08-3.08Zm-10.5 0 3.08 3.08-3.08 3.08-3.08-3.08L6.75 7.5ZM12 9.25l2.75 2.75L12 14.75 9.25 12 12 9.25Zm0 6.34 3.08 3.08L12 21.75l-3.08-3.08L12 15.59Z" />
       </svg>
