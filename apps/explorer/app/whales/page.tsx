@@ -3,7 +3,7 @@ import { timeAgo, safeBigInt } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { shortHash } from '@/lib/address-display'
@@ -92,7 +92,7 @@ export default async function WhalesPage({
         ))}
       </div>
 
-      <AdSlot
+      <AdReserve
         context="whales"
         placement="whales_before_table"
         variant="compact"

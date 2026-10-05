@@ -3,7 +3,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 
@@ -96,7 +96,7 @@ export default async function StakingPage() {
         />
       </dl>
 
-      <AdSlot
+      <AdReserve
         context="staking"
         placement="staking_after_stats"
         variant="compact"

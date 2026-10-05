@@ -7,7 +7,7 @@ import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent } from '@
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
-import { AdSlot } from '@/components/ads/AdSlot'
+import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
@@ -347,7 +347,7 @@ export default async function TokenDetailPage({
         </div>
       )}
 
-      <AdSlot
+      <AdReserve
         context={tokenReferralContext}
         placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
         variant="compact"
