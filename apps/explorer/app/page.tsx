@@ -18,8 +18,9 @@ import { encodeTape, gasPct, type TapeTuple } from '@/lib/tape'
 export const revalidate = 60
 
 // The tape fills the content column (1248px at 34px/s, ~37s), whose left ~120px is under a fade:
-// ~34s of chain time shows it all. BNB 0.45s -> 76 blocks, ETH 12s -> 7 (the tables' minimum).
-const TAPE_N = Math.min(100, Math.max(7, Math.ceil(34 / chainConfig.blockTime)))
+// ~32s of chain time shows the rest. BNB 0.45s -> 72 blocks, ETH 12s -> 7 (the tables' minimum).
+// Kept tight on purpose: the homepage HTML must stay inside one TCP window (Lighthouse mobile LCP).
+const TAPE_N = Math.min(100, Math.max(7, Math.ceil(32 / chainConfig.blockTime)))
 
 const jsonLd = {
   '@context': 'https://schema.org',

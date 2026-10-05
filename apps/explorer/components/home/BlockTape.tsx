@@ -79,7 +79,8 @@ export function BlockTape({ tape, chainName }: { tape: string; chainName: string
                 <a
                   href={`/blocks/${b.n}`}
                   tabIndex={b.n === roving ? 0 : -1}
-                  aria-label={`Block ${fmt(b.n)}, ${b.txs} ${b.txs === 1 ? 'transaction' : 'transactions'}, gas ${b.gas}%`}
+                  // Just the number: the live readout below announces txns, gas and time on focus.
+                  aria-label={`Block ${fmt(b.n)}`}
                 >
                   {b.seconds >= LABEL_MIN_SECONDS && <span>#{fmt(b.n)}</span>}
                 </a>
