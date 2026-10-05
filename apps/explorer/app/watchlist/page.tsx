@@ -24,11 +24,14 @@ export default function WatchlistPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Watchlist</h1>
+      <div className="mb-5">
+        <p className="k">{'// '}watchlist</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Watchlist</h1>
+      </div>
       {addresses.length === 0 ? (
-        <div className="py-16 text-center text-gray-400">
-          <p className="text-lg">Your watchlist is empty.</p>
-          <p className="text-sm mt-2">Click the star on any address page to add it here.</p>
+        <div className="py-16 text-center">
+          <p className="text-lg text-ink2">Your watchlist is empty.</p>
+          <p className="mt-2 text-sm text-mut">Click the star on any address page to add it here.</p>
           <AdSlot
             context="watchlist_empty"
             placement="watchlist_empty"
@@ -38,26 +41,28 @@ export default function WatchlistPage() {
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <div className="bg-card rounded-xl border border-hair overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="dt">
               <caption className="sr-only">Your watchlisted {chainConfig.name} addresses</caption>
-              <thead className="bg-gray-50 border-b">
+              <thead>
                 <tr>
-                  <th scope="col" className="text-left px-4 py-2 text-gray-500">Address</th>
-                  <th scope="col" className="text-left px-4 py-2 text-gray-500">Actions</th>
+                  <th scope="col">Address</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {addresses.map(addr => (
-                  <tr key={addr} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs">
-                      <AddressLink address={addr} short={false} />
+                  <tr key={addr}>
+                    <td>
+                      {/* Full address from sm up; the short form below it so Remove stays on screen on phones. */}
+                      <span className="sm:hidden"><AddressLink address={addr} /></span>
+                      <span className="hidden sm:inline"><AddressLink address={addr} short={false} /></span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td>
                       <button
                         onClick={() => remove(addr)}
-                        className="text-xs text-red-500 hover:underline"
+                        className="text-xs text-warn hover:underline"
                       >
                         Remove
                       </button>
