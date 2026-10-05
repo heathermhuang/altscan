@@ -267,3 +267,75 @@
     }
   }
 }
+
+/* Loading skeleton (app/loading.tsx). A handful of elements whose bars and row lines are drawn
+   with gradients, so the markup (shipped twice per page: Suspense fallback + RSC payload) stays
+   tiny. Heights match a detail page's first screen: header, 4-cell .ledger, 18 .dt rows (38px
+   from 640px, 56px below) ~1000px in all, so the footer starts below the fold. */
+@layer components {
+  .skel-head,
+  .skel-f > i,
+  .skel-table {
+    --sk: linear-gradient(var(--hair2), var(--hair2));
+  }
+  /* kicker (18px line), h1 (clamp like the real h1's line box), id line */
+  .skel-head {
+    --h1: clamp(27px, 3.57vw, 42px);
+    height: calc(54px + var(--h1));
+    margin-bottom: 20px;
+    background-image: var(--sk), var(--sk), var(--sk);
+    background-repeat: no-repeat;
+    background-size: 96px 12px, 256px var(--h1), min(384px, 100%) 20px;
+    background-position: 0 3px, 0 26px, 0 calc(34px + var(--h1));
+  }
+  /* The real .ledger supplies the card, 1px dividers and 2/4 columns; each cell draws its three bars. */
+  .skel-f {
+    margin-bottom: 24px;
+  }
+  .skel-f > i {
+    display: block;
+    height: 92px;
+    background-image: var(--sk), var(--sk), var(--sk);
+    background-repeat: no-repeat;
+    background-origin: content-box;
+    background-size: 64px 12px, 112px 20px, 80px 12px;
+    background-position: 0 0, 0 24px, 0 52px;
+  }
+  /* Card with a 34px header strip (::before), then 18 rows tiled with repeat-y: three bars and a
+     1px bottom line per row. 719/1043px = 34 + 18 rows, minus the last row's line, plus the border. */
+  .skel-table {
+    --rb: linear-gradient(transparent 22px, var(--hair2) 22px 34px, transparent 34px);
+    height: 1043px;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    background-color: var(--card);
+    background-image:
+      var(--rb), var(--rb), var(--rb),
+      linear-gradient(transparent 55px, var(--hair) 55px);
+    background-repeat: repeat-y;
+    background-size: 80px 56px, 48px 56px, 96px 56px, 100% 56px;
+    background-position: 12px 34px, 108px 34px, 172px 34px, 0 34px;
+  }
+  .skel-table::before {
+    content: "";
+    display: block;
+    height: 34px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--sk) 12px 11px / 192px 12px no-repeat, var(--bg);
+  }
+  @media (min-width: 640px) {
+    .skel-table {
+      --rb: linear-gradient(transparent 13px, var(--hair2) 13px 25px, transparent 25px);
+      height: 719px;
+      background-image:
+        var(--rb), var(--rb), var(--rb),
+        linear-gradient(transparent 37px, var(--hair) 37px);
+      background-size: 160px 38px, 112px 38px, 224px 38px, 100% 38px;
+      background-position: 16px 34px, 192px 34px, 320px 34px, 0 34px;
+    }
+    .skel-table::before {
+      background-position: 16px 11px, 0 0;
+    }
+  }
+}
