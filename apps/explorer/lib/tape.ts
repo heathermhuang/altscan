@@ -32,6 +32,26 @@ export function spreadSeconds(tuples: TapeTuple[]): TapeBlock[] {
   return out
 }
 
+/** Mean tile interval in seconds (0 for no blocks): the width of a "ghost" tile that pads the tape's left edge. */
+export function meanSeconds(blocks: TapeBlock[]): number {
+  if (!blocks.length) return 0
+  return blocks.reduce((sum, b) => sum + b.seconds, 0) / blocks.length
+}
+
+/**
+ * How many blocks before and after a block to fetch for its page's tape: ~18s of chain time to the
+ * left (older) and ~3.6s to the right (newer), so the highlighted tile sits near the right end and
+ * stays on screen. BNB (0.45s) gives 40 and 8; ETH (12s) gives 3 and 1, since one ETH tile is
+ * already ~400px wide.
+ */
+export function tapeWindow(blockTime: number): { before: number; after: number } {
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+  return {
+    before: clamp(Math.round(18 / blockTime), 3, 40),
+    after: clamp(Math.round(3.6 / blockTime), 1, 8),
+  }
+}
+
 /** Blocks per minute measured from the oldest and newest block received. */
 export function ratePerMin(tuples: TapeTuple[]): number | null {
   if (tuples.length < 2) return null
@@ -68,6 +88,17 @@ export function decodeTape(s: string): TapeTuple[] {
 }
 
 type Gas = bigint | string | number | null | undefined
+
+/** A block row (or the cached/ISO form of one) as a tape tuple. */
+export function toTapeTuple(b: {
+  number: number
+  timestamp: Date | string
+  txCount: number
+  gasUsed: Gas
+  gasLimit: Gas
+}): TapeTuple {
+  return [b.number, Math.floor(new Date(b.timestamp).getTime() / 1000), b.txCount, gasPct(b.gasUsed, b.gasLimit)]
+}
 
 /** Gas used as a whole percent of the limit, 0-100; 0 when the limit is zero or a value is not an integer. */
 export function gasPct(used: Gas, limit: Gas): number {

@@ -1,10 +1,10 @@
 import { db, schema } from '@/lib/db'
-import { eq } from 'drizzle-orm'
+import { between, desc, eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { TxTable } from '@/components/transactions/TxTable'
-import { formatGwei, formatNumber, timeAgo } from '@/lib/format'
+import { formatGwei, formatNumber, formatUtc, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
@@ -12,6 +12,8 @@ import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { shortenAddress, toChecksumAddress } from '@/lib/address-display'
 import { swallow } from '@/lib/observability'
+import { BlockTape } from '@/components/home/BlockTape'
+import { encodeTape, spreadSeconds, tapeWindow, toTapeTuple } from '@/lib/tape'
 
 // 60s (not 300): with ISR a transient miss — a fresh block during indexer
 // lag — caches its 404 for everyone until the next revalidate. Block content
@@ -95,6 +97,29 @@ export default async function BlockDetailPage({
         .where(eq(schema.transactions.blockNumber, blockNumber))
         .limit(50)
 
+  // The tape: this block and its neighbours by primary key (newer ones exist because the indexer
+  // is ahead). Omitted for an RPC block (outside local retention), a failed query, or too few
+  // neighbours to draw a tile.
+  let tape: string | null = null
+  if (!fromRpc) {
+    const { before, after } = tapeWindow(chainConfig.blockTime)
+    try {
+      const near = await db
+        .select({
+          number: schema.blocks.number,
+          timestamp: schema.blocks.timestamp,
+          gasUsed: schema.blocks.gasUsed,
+          gasLimit: schema.blocks.gasLimit,
+          txCount: schema.blocks.txCount,
+        })
+        .from(schema.blocks)
+        .where(between(schema.blocks.number, blockNumber - before, blockNumber + after))
+        .orderBy(desc(schema.blocks.number))
+      const tuples = near.map(toTapeTuple)
+      if (spreadSeconds(tuples).length > 0) tape = encodeTape(tuples)
+    } catch (e) { swallow('block/tape', e) }
+  }
+
   const gasUsedPct = block.gasUsed && block.gasLimit
     ? ((Number(block.gasUsed) / Number(block.gasLimit)) * 100).toFixed(2)
     : '0'
@@ -102,8 +127,16 @@ export default async function BlockDetailPage({
   const gasBarPct = Math.min(100, Math.max(0, Number(gasUsedPct)))
   const hairChip = 'rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-ink2 transition-colors hover:border-hair3'
 
+  // Capped at 50 rows by the query above; the block's own count says how many there really are.
+  const txsLabel = fromRpc
+    ? `${rpcBlock?.txHashes.length ?? 0}`
+    : txs.length === 50 && block.txCount > txs.length
+      ? `50 of ${formatNumber(block.txCount)}`
+      : `${txs.length}`
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
+    <div className="max-w-7xl mx-auto px-4 pt-8">
       <BreadcrumbJsonLd items={[{ name: 'Blocks', href: '/blocks' }, { name: `Block #${formatNumber(block.number)}` }]} />
       <div className="mb-5">
         <p className="k">{'// '}block</p>
@@ -136,7 +169,7 @@ export default async function BlockDetailPage({
         <Fact
           label="Age"
           value={timeAgo(new Date(block.timestamp))}
-          sub={new Date(block.timestamp).toUTCString()}
+          sub={formatUtc(new Date(block.timestamp))}
         />
         <Fact label="Transactions" value={formatNumber(block.txCount)} />
         <Fact label="Gas used" value={`${gasUsedPct}%`} sub={formatNumber(Number(block.gasUsed ?? 0))}>
@@ -146,12 +179,18 @@ export default async function BlockDetailPage({
         </Fact>
         <Fact label="Validator" value={shortenAddress(block.miner)} title={toChecksumAddress(block.miner)} />
       </dl>
+    </div>
 
+    {tape !== null && (
+      <BlockTape tape={tape} chainName={chainConfig.name} current={block.number} heading={`around #${formatNumber(block.number)}`} />
+    )}
+
+    <div className={`max-w-7xl mx-auto px-4 pb-8${tape !== null ? ' pt-6' : ''}`}>
       <dl className="mb-8 divide-y divide-hair rounded-xl border border-hair bg-card">
         <DetailRow label="Block Height" value={formatNumber(block.number)} />
         <DetailRow
           label="Timestamp"
-          value={`${timeAgo(new Date(block.timestamp))} (${new Date(block.timestamp).toUTCString()})`}
+          value={`${timeAgo(new Date(block.timestamp))} (${formatUtc(new Date(block.timestamp))})`}
         />
         <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
         <DetailRow label="Validator" value={toChecksumAddress(block.miner)} copy />
@@ -178,7 +217,7 @@ export default async function BlockDetailPage({
       )}
 
       <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">
-        Transactions ({fromRpc ? (rpcBlock?.txHashes.length ?? 0) : txs.length}{!fromRpc && txs.length === 50 ? '+' : ''})
+        Transactions ({txsLabel})
       </h2>
       {fromRpc && rpcBlock && rpcBlock.txs.length > 0 ? (
         // Same table as the indexed path. The bodies arrive with the block, so
@@ -192,6 +231,7 @@ export default async function BlockDetailPage({
         <p className="text-mut">No transactions in this block.</p>
       )}
     </div>
+    </>
   )
 }
 

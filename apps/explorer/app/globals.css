@@ -171,13 +171,50 @@
     background: var(--acc-t);
     container-type: inline-size;
   }
-  .bt-row a:hover {
+  .bt-row a:hover,
+  .bt-row a[aria-current] {
     z-index: 1;
     outline: 2px solid var(--ink);
     outline-offset: 1px;
   }
   .bt-row a:focus-visible {
     z-index: 1;
+  }
+  /* The current tile's ink outline would hide the global focus ring, so draw the ring outside it. */
+  .bt-row a[aria-current]:focus-visible {
+    box-shadow: 0 0 0 4px var(--card), 0 0 0 6px var(--acc-ink);
+  }
+  /* Lead-in: decorative ghost tiles (<li aria-hidden>, first child) fill the track left of the
+     oldest block, so a tape shorter than the column has no hole. Same tile width (--avg, the mean
+     block seconds, from the row) and the same 2px gap as real tiles. 270deg runs from the right
+     edge, so the period lines up flush with the oldest real tile. */
+  .bt-row > .bt-ghost {
+    --w: max(6px, calc(var(--avg, 1) * var(--pxs)));
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    opacity: 0.55;
+    background: repeating-linear-gradient(270deg, var(--acc-t) 0 calc(var(--w) - 2px), transparent 0 var(--w));
+  }
+  /* The current block (a block page's own tile): outline above, label chip floating over its top
+     edge in a taller track. The chip is outside the tile's overflow clip, so it fits any width. */
+  .bt-row > .bt-cur {
+    position: relative;
+  }
+  .bt-row .bt-chip {
+    left: auto;
+    top: auto;
+    right: 0;
+    bottom: calc(100% + 4px);
+    background: var(--ink);
+    color: var(--card);
+    pointer-events: none;
+  }
+  .bt-track.bt-has-cur {
+    height: 86px;
+  }
+  .bt-has-cur .bt-row {
+    padding-top: 30px;
   }
   /* Fill = gas used. */
   .bt-row a::before {
@@ -209,6 +246,9 @@
   @media (min-width: 768px) {
     .bt-track {
       height: 84px;
+    }
+    .bt-track.bt-has-cur {
+      height: 106px;
     }
     .bt-row {
       --pxs: 34px;

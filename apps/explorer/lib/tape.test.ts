@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeTape, encodeTape, gasPct, ratePerMin, spreadSeconds, type TapeTuple } from '@/lib/tape'
+import { decodeTape, encodeTape, gasPct, meanSeconds, ratePerMin, spreadSeconds, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -93,5 +93,44 @@ describe('gasPct', () => {
     expect(gasPct(25, 100)).toBe(25)
     expect(gasPct(300n, 100n)).toBe(100)
     expect(gasPct(-5n, 100n)).toBe(0)
+  })
+})
+
+describe('meanSeconds', () => {
+  it('is 0 for no blocks', () => {
+    expect(meanSeconds([])).toBe(0)
+  })
+
+  it('averages the tile intervals, so ghost tiles match the real ones', () => {
+    const out = spreadSeconds([t(1, 100), t(2, 101), t(3, 101), t(4, 104)])
+    // (0.5 + 0.5 + 3) / 3
+    expect(meanSeconds(out)).toBeCloseTo(4 / 3, 9)
+  })
+})
+
+describe('tapeWindow', () => {
+  it('is 40 before / 8 after on a 0.45s chain', () => {
+    expect(tapeWindow(0.45)).toEqual({ before: 40, after: 8 })
+  })
+
+  it('keeps a few tiles on a 12s chain, where one tile is ~400px', () => {
+    expect(tapeWindow(12)).toEqual({ before: 3, after: 1 })
+  })
+
+  it('never asks for more than 40 / 8 or fewer than 3 / 1', () => {
+    expect(tapeWindow(0.01)).toEqual({ before: 40, after: 8 })
+    expect(tapeWindow(600)).toEqual({ before: 3, after: 1 })
+  })
+})
+
+describe('toTapeTuple', () => {
+  it('floors the timestamp to whole seconds and turns gas into a percent', () => {
+    const row = { number: 7, timestamp: new Date(1_791_156_461_900), txCount: 41, gasUsed: 30n, gasLimit: 120n }
+    expect(toTapeTuple(row)).toEqual([7, 1_791_156_461, 41, 25])
+  })
+
+  it('accepts the cached form: ISO string timestamp, decimal-string gas', () => {
+    const row = { number: 8, timestamp: '2026-10-05T12:00:00.250Z', txCount: 0, gasUsed: '50', gasLimit: '100' }
+    expect(toTapeTuple(row)).toEqual([8, Math.floor(Date.parse('2026-10-05T12:00:00.250Z') / 1000), 0, 50])
   })
 })
