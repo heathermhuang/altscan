@@ -40,6 +40,7 @@ import { healNextGap } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, TRACE_RPC_URLS, safeRpcError } from './provider'
 import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
+import { startTokenMetadataHealer } from './token-metadata-healer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
 import { ensureSchema, ensureInternalTxPartitions } from './ensure-schema'
@@ -263,6 +264,10 @@ async function main() {
     syncValidators().catch(err => console.error('[validator-syncer] initial error:', safeErr(err)))
     setInterval(() => syncValidators().catch(err => console.error('[validator-syncer] interval error:', safeErr(err))), 60 * 60 * 1000)
   }
+
+  // Repairs 'Unknown'/'???' token rows the one-shot first-sight fetch left behind.
+  // Same RPC pool as block fetches; never throws and never touches block processing.
+  startTokenMetadataHealer(providers)
 
   const MAX_LAG = indexerConfig.indexing.maxLagBlocks
   // Consecutive PROVABLY-CLEAN failover failures before a block is stepped over.

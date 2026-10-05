@@ -44,6 +44,8 @@ describe('defaults match the values they replaced', () => {
     ['holders.countLagThreshold', config.holders.countLagThreshold, 1000],
     ['holders.recomputeChunk', config.holders.recomputeChunk, 2000],
     ['holders.recomputeSleepMs', config.holders.recomputeSleepMs, 100],
+    ['tokenHeal.intervalMin', config.tokenHeal.intervalMin, 10],
+    ['tokenHeal.batch', config.tokenHeal.batch, 40],
     ['retention.days', config.retention.days, 7],
     ['retention.deleteBatch', config.retention.deleteBatch, 50_000],
     ['retention.batchSleepMs', config.retention.batchSleepMs, 250],
@@ -126,6 +128,32 @@ describe('flag polarity', () => {
       // cannot be enabled by a plausible-looking value.
       expect(read({ GAP_HEAL_ENABLED: raw }).config.gapHeal.enabled).toBe(false)
     })
+
+  it('TOKEN_HEAL_ENABLED is ON unless exactly "0"', () => {
+    expect(read({}).config.tokenHeal.enabled).toBe(true)
+    expect(read({ TOKEN_HEAL_ENABLED: '0' }).config.tokenHeal.enabled).toBe(false)
+    expect(read({ TOKEN_HEAL_ENABLED: 'false' }).config.tokenHeal.enabled).toBe(true)
+  })
+
+  it('TOKEN_HEAL_BATCH and _INTERVAL_MIN fall back on garbage and out-of-range values', () => {
+    expect(read({ TOKEN_HEAL_BATCH: 'lots' }).config.tokenHeal.batch).toBe(40)
+    expect(read({ TOKEN_HEAL_BATCH: '0' }).config.tokenHeal.batch).toBe(40)
+    expect(read({ TOKEN_HEAL_BATCH: '5000' }).config.tokenHeal.batch).toBe(40)
+    expect(read({ TOKEN_HEAL_BATCH: '25' }).config.tokenHeal.batch).toBe(25)
+    expect(read({ TOKEN_HEAL_INTERVAL_MIN: '0' }).config.tokenHeal.intervalMin).toBe(10)
+    expect(read({ TOKEN_HEAL_INTERVAL_MIN: '5x' }).config.tokenHeal.intervalMin).toBe(10)
+  })
+
+  it('TOKEN_HEAL_INTERVAL_MIN tops out at a day, so setInterval can never exceed 2^31-1 ms', () => {
+    expect(read({ TOKEN_HEAL_INTERVAL_MIN: '1440' }).config.tokenHeal.intervalMin).toBe(1440)
+    // Past 2^31-1 ms Node fires the timer every 1 ms; 35,792 min is the first such value.
+    for (const raw of ['1441', '35792', '99999999999']) {
+      const { intervalMin } = read({ TOKEN_HEAL_INTERVAL_MIN: raw }).config.tokenHeal
+      expect(intervalMin).toBe(10)
+      expect(intervalMin * 60_000).toBeLessThanOrEqual(2 ** 31 - 1)
+    }
+    expect(1440 * 60_000).toBeLessThanOrEqual(2 ** 31 - 1)
+  })
 
   it('GAP_HEAL_ENABLED turns on only for exactly "1"', () => {
     expect(read({ GAP_HEAL_ENABLED: '1' }).config.gapHeal.enabled).toBe(true)
