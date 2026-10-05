@@ -2,13 +2,256 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Prevent horizontal overflow on mobile */
-html, body {
-  overflow-x: hidden;
+/* Ledger Tape tokens. --acc / --acc-ink / --acc-t / --acc-on are written on
+   <html> by app/layout.tsx from chain-config, so each chain gets its own accent. */
+:root {
+  color-scheme: light;
+  --ink: #101014;
+  --ink2: #3b3b45;
+  --mut: #6c6c77;
+  --faint: #b4b4c0;
+  --bg: #fbfbfc;
+  --card: #ffffff;
+  --hair: #e7e7ee;
+  --hair2: #f0f0f5;
+  --hair3: #cfcfd8;
+  --live: #15803d;
+  --liveT: #eaf6ee;
+  --warn: #9a4a32;
+  --warnT: #fff8f5;
 }
 
-/* Accessible focus ring for keyboard navigation */
-*:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+@layer base {
+  /* `clip`, not `hidden`: hidden on both html and body makes body a scroll
+     container and breaks the sticky header. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* Accessible focus ring for keyboard navigation */
+  *:focus-visible {
+    outline: 2px solid var(--acc-ink);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Kicker: mono caption above a heading or over a column. */
+  .k {
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mut);
+  }
+  /* Hairline divider (<hr class="rule"> or an empty <div class="rule">). */
+  .rule {
+    height: 1px;
+    border: 0;
+    background: var(--hair);
+  }
+  /* Fact strip: hairline-divided cells, 2 columns on phones, --cols (default 4) from md up.
+     Set a different count with the `[--cols:5]` class. */
+  .ledger {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--hair);
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .ledger > * {
+    background: var(--card);
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .ledger > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  @media (min-width: 768px) {
+    .ledger {
+      grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+    }
+    .ledger > :last-child:nth-child(odd) {
+      grid-column: auto;
+    }
+  }
+}
+
+/* Data tables (components/blocks/BlockTable, components/transactions/TxTable) */
+@layer components {
+  /* One class on the <table> instead of the same utilities on every cell: these tables run to
+     50 rows, and per-cell class lists made React split the page payload into a row per <tr>. */
+  .dt {
+    width: 100%;
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 13px;
+  }
+  .dt thead {
+    background: var(--bg);
+    border-bottom: 1px solid var(--hair);
+  }
+  .dt th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+  }
+  .dt td {
+    padding: 8px 12px;
+  }
+  .dt tbody tr + tr {
+    border-top: 1px solid var(--hair);
+  }
+  .dt tbody tr {
+    transition: background-color 0.15s;
+  }
+  .dt tbody tr:hover {
+    background: var(--bg);
+  }
+  @media (min-width: 640px) {
+    .dt th,
+    .dt td {
+      padding-inline: 16px;
+    }
+  }
+}
+
+/* Block tape */
+@layer components {
+  /* components/home/BlockTape.tsx. Tile width is pure CSS: --s (seconds, inline) times
+     --pxs (px per second), so there is no layout JS and nothing to shift. */
+  .bt-track {
+    height: 64px;
+    overflow: hidden;
+  }
+  .bt-fade {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
+    mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
+  }
+  /* Keyboard focus on a tile in the fade zone would otherwise be dimmed. */
+  .bt-fade:has(:focus-visible) {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .bt-row {
+    --pxs: 24px;
+    display: flex;
+    justify-content: flex-end; /* newest at the right; older tiles overflow and clip on the left */
+    gap: 2px;
+    height: 100%;
+    padding: 8px 6px 10px 0; /* room for the 4px focus ring */
+  }
+  /* Tiles are bare <li><a> (selectors, not classes) to keep the ~130 of them small in the
+     HTML: the page's streamed content must stay inside the first network chunk. */
+  .bt-row > li {
+    display: flex;
+    flex: none;
+    width: max(2px, calc(var(--s) * var(--pxs) - 2px));
+  }
+  .bt-row a {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--acc-t);
+    container-type: inline-size;
+  }
+  .bt-row a:hover,
+  .bt-row a[aria-current] {
+    z-index: 1;
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  .bt-row a:focus-visible {
+    z-index: 1;
+  }
+  /* The current tile's ink outline would hide the global focus ring, so draw the ring outside it. */
+  .bt-row a[aria-current]:focus-visible {
+    box-shadow: 0 0 0 4px var(--card), 0 0 0 6px var(--acc-ink);
+  }
+  /* Lead-in: decorative ghost tiles (<li aria-hidden>, first child) fill the track left of the
+     oldest block, so a tape shorter than the column has no hole. Same tile width (--avg, the mean
+     block seconds, from the row) and the same 2px gap as real tiles. 270deg runs from the right
+     edge, so the period lines up flush with the oldest real tile. */
+  .bt-row > .bt-ghost {
+    --w: max(6px, calc(var(--avg, 1) * var(--pxs)));
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    opacity: 0.55;
+    background: repeating-linear-gradient(270deg, var(--acc-t) 0 calc(var(--w) - 2px), transparent 0 var(--w));
+  }
+  /* The current block (a block page's own tile): outline above, label chip floating over its top
+     edge in a taller track. The chip is outside the tile's overflow clip, so it fits any width. */
+  .bt-row > .bt-cur {
+    position: relative;
+  }
+  .bt-row .bt-chip {
+    left: auto;
+    top: auto;
+    right: 0;
+    bottom: calc(100% + 4px);
+    background: var(--ink);
+    color: var(--card);
+    pointer-events: none;
+  }
+  .bt-track.bt-has-cur {
+    height: 86px;
+  }
+  .bt-has-cur .bt-row {
+    padding-top: 30px;
+  }
+  /* Fill = gas used. */
+  .bt-row a::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: var(--g);
+    background: var(--acc);
+  }
+  .bt-row span {
+    position: absolute;
+    left: 8px;
+    top: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--acc-t);
+    color: var(--ink);
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  /* The label is ~106px wide at 9 digits; show it only on tiles that can hold it. */
+  @container (max-width: 119px) {
+    .bt-row span {
+      display: none;
+    }
+  }
+  @media (min-width: 768px) {
+    .bt-track {
+      height: 84px;
+    }
+    .bt-track.bt-has-cur {
+      height: 106px;
+    }
+    .bt-row {
+      --pxs: 34px;
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
+import { shortenAddress } from '@/lib/address-display'
 
 interface BlockRow {
   number: number
@@ -16,36 +17,36 @@ export function BlockTable({ blocks, compact = false }: {
   compact?: boolean
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
       <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="dt">
         <caption className="sr-only">Recent blocks on {chainConfig.name}</caption>
-        <thead className="bg-gray-50 border-b">
+        <thead>
           <tr>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Block</th>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Age</th>
-            <th scope="col" className="text-left px-3 sm:px-4 py-2 font-medium text-gray-500">Txns</th>
-            {!compact && <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Miner</th>}
-            {!compact && <th scope="col" className="text-left px-4 py-2 font-medium text-gray-500 hidden sm:table-cell">Gas Used</th>}
+            <th scope="col">Block</th>
+            <th scope="col">Age</th>
+            <th scope="col">Txns</th>
+            {!compact && <th scope="col" className="hidden sm:table-cell">Validator</th>}
+            {!compact && <th scope="col" className="hidden sm:table-cell">Gas Used</th>}
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody>
           {blocks.map(b => (
-            <tr key={b.number} className="hover:bg-gray-50/80 transition-colors">
-              <td className="px-3 sm:px-4 py-2">
-                <Link href={`/blocks/${b.number}`} className={`${chainConfig.theme.linkText} font-medium hover:underline`}>
+            <tr key={b.number}>
+              <td>
+                <Link href={`/blocks/${b.number}`} className="text-acc-ink font-medium hover:underline">
                   {formatNumber(b.number)}
                 </Link>
               </td>
-              <td className="px-3 sm:px-4 py-2 text-gray-500">{timeAgo(new Date(b.timestamp))}</td>
-              <td className="px-3 sm:px-4 py-2">{b.txCount}</td>
+              <td className="text-mut">{timeAgo(new Date(b.timestamp))}</td>
+              <td>{b.txCount}</td>
               {!compact && (
-                <td className="px-4 py-2 text-gray-500 font-mono text-xs hidden sm:table-cell">
-                  {b.miner.slice(0, 10)}...
+                <td className="text-mut hidden sm:table-cell font-mono">
+                  {shortenAddress(b.miner)}
                 </td>
               )}
               {!compact && (
-                <td className="px-4 py-2 text-gray-500 hidden sm:table-cell">
+                <td className="text-mut hidden sm:table-cell">
                   {b.gasUsed ? formatNumber(Number(b.gasUsed)) : '—'}
                 </td>
               )}

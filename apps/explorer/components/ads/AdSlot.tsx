@@ -109,7 +109,13 @@ export function AdSlot({
   variant?: BinanceReferralVariant
   className?: string
 }) {
-  const [config, setConfig] = useState<AdConfig | null>(freshCachedConfig())
+  // Always null on the first render, like the server. Seeding from the module
+  // cache mismatched on hydration: the layout's footer AdSlot hydrates first and
+  // its effect fills the cache (from /api/ads or sessionStorage), so a page AdSlot
+  // hydrating after it rendered a card where the server HTML had none (React
+  // #418), and React client-rendered the whole page segment. The effect below
+  // still applies a cached config on the very next render.
+  const [config, setConfig] = useState<AdConfig | null>(null)
   // The roll is taken once per mount and held, so a re-render cannot swap the
   // ad out from under the reader mid-view.
   const [roll] = useState(() => Math.random())
@@ -212,10 +218,10 @@ export function AdSlot({
           <div className="flex min-w-0 items-center gap-3">
             <BinanceMark />
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase text-gray-500">{copy.eyebrow}</p>
+              <p className="text-[10px] font-semibold uppercase text-gray-400">{copy.eyebrow}</p>
               <p className="truncate font-medium text-gray-200">
                 {copy.title}
-                <span className="ml-2 hidden text-gray-500 sm:inline">{copy.body}</span>
+                <span className="ml-2 hidden text-gray-400 sm:inline">{copy.body}</span>
               </p>
             </div>
           </div>
@@ -235,7 +241,7 @@ export function AdSlot({
         <div className="flex min-w-0 items-start gap-3">
           <BinanceMark />
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{copy.eyebrow}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{copy.eyebrow}</p>
             <p className="mt-0.5 font-semibold text-gray-900">{copy.title}</p>
             <p className="mt-1 text-sm leading-5 text-gray-500">{copy.body}</p>
           </div>

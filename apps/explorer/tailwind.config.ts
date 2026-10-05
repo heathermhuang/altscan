@@ -16,6 +16,18 @@ import type { Config } from 'tailwindcss'
 // is open-ended, and a missed entry is a broken deploy.
 import { getAllThemeClasses } from '../../packages/chain-config/src/index'
 
+// Colours are CSS variables (app/globals.css, and the chain accents written on
+// <html> in app/layout.tsx). A bare `var()` string cannot take Tailwind's `/NN`
+// opacity modifier, so resolve it through color-mix when one is requested.
+// Without a modifier Tailwind passes undefined, or its own `var(--tw-*-opacity)`:
+// both stay a plain var() so the common case works in every browser.
+// Tailwind accepts a colour function at runtime; its types list only strings.
+const token = (name: string) =>
+  (({ opacityValue }: { opacityValue?: string }) =>
+    opacityValue === undefined || opacityValue.startsWith('var(')
+      ? `var(--${name})`
+      : `color-mix(in srgb, var(--${name}) calc(${opacityValue} * 100%), transparent)`) as unknown as string
+
 const config: Config = {
   content: [
     './app/**/*.{ts,tsx}',
@@ -23,7 +35,31 @@ const config: Config = {
   ],
   safelist: getAllThemeClasses(),
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        ink: token('ink'),
+        ink2: token('ink2'),
+        mut: token('mut'),
+        faint: token('faint'),
+        canvas: token('bg'),
+        card: token('card'),
+        hair: token('hair'),
+        hair2: token('hair2'),
+        hair3: token('hair3'),
+        live: token('live'),
+        'live-t': token('liveT'),
+        warn: token('warn'),
+        'warn-t': token('warnT'),
+        acc: token('acc'),
+        'acc-ink': token('acc-ink'),
+        'acc-t': token('acc-t'),
+        'acc-on': token('acc-on'),
+      },
+      fontFamily: {
+        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+      },
+    },
   },
   plugins: [],
 }

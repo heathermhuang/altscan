@@ -34,7 +34,7 @@ const DESKTOP_NAV = [
 
 function BnbLogo() {
   return (
-    <svg viewBox="0 0 36 36" fill="none" className="w-8 h-8 shrink-0" aria-hidden="true">
+    <svg viewBox="0 0 36 36" fill="none" className="w-6 h-6" aria-hidden="true">
       <path
         d="M18 2L33 10.5V25.5L18 34L3 25.5V10.5L18 2Z"
         fill="currentColor"
@@ -53,7 +53,7 @@ function BnbLogo() {
 
 function EthLogo() {
   return (
-    <svg viewBox="0 0 36 36" fill="none" className="w-8 h-8 shrink-0" aria-hidden="true">
+    <svg viewBox="0 0 36 36" fill="none" className="w-6 h-6" aria-hidden="true">
       {/* Ethereum diamond shape */}
       <path d="M18 3L28 18L18 24L8 18L18 3Z" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       <path d="M18 24L28 18L18 33L8 18L18 24Z" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
@@ -74,7 +74,6 @@ function Logo() {
 export function Header() {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
-  const { theme } = chainConfig
 
   // Close mobile menu on route change
   useEffect(() => { setOpen(false) }, [pathname])
@@ -82,18 +81,20 @@ export function Header() {
   const groups = [...new Set(NAV_LINKS.map(l => l.group))]
 
   return (
-    <header className={`${theme.headerBg} ${theme.headerText} shadow-md sticky top-0 z-50`}>
+    <header className="sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md">
 
-      {/* -- Top bar: logo + desktop nav + hamburger -- */}
+      {/* -- Top bar: logo + switcher + search (xl) + desktop nav + hamburger -- */}
       <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center h-14 gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
 
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <Logo />
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] bg-acc text-acc-on">
+              <Logo />
+            </span>
             <div className="leading-tight">
-              <span className="font-black text-[17px] tracking-tight block">{chainConfig.brandDomain}</span>
-              <span className="text-[10px] opacity-50 font-medium hidden sm:block leading-none">
+              <span className="font-mono font-semibold text-[15px] tracking-tight block">{chainConfig.brandDomain}</span>
+              <span className="text-[11px] text-mut hidden sm:block leading-none mt-0.5">
                 by Measurable Data Token
               </span>
             </div>
@@ -102,6 +103,13 @@ export function Header() {
           {/* Network switcher */}
           <NetworkSwitcher />
 
+          {/* Search: the home hero owns it on `/`. Own row below xl, inline from xl. */}
+          {pathname !== '/' && (
+            <div className="order-last basis-full xl:order-none xl:basis-auto xl:w-[22rem] xl:shrink-0">
+              <SearchBar />
+            </div>
+          )}
+
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end">
             {DESKTOP_NAV.map(({ href, label }) => (
@@ -109,8 +117,9 @@ export function Header() {
                 key={href}
                 href={href}
                 title={label === '⭐' ? 'Watchlist' : undefined}
-                className={`px-2.5 py-3 rounded-md transition-colors whitespace-nowrap ${
-                  pathname === href ? `${theme.activeNav} font-semibold` : 'hover:bg-black/10'
+                aria-current={pathname === href ? 'page' : undefined}
+                className={`px-1.5 lg:px-2.5 py-2 border-b-2 transition-colors whitespace-nowrap ${
+                  pathname === href ? 'text-acc-ink border-acc font-semibold' : 'text-ink2 hover:text-ink border-transparent'
                 }`}
               >
                 {label}
@@ -122,7 +131,7 @@ export function Header() {
           <button
             onClick={() => setOpen(!open)}
             aria-label={open ? 'Close menu' : 'Open menu'}
-            className="md:hidden ml-auto flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-lg hover:bg-black/10 transition-colors"
+            className="md:hidden ml-auto flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-[9px] border border-hair bg-card hover:border-hair3 transition-colors"
           >
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? 'rotate-45 translate-y-2' : ''}`} />
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 ${open ? 'opacity-0 scale-x-0' : ''}`} />
@@ -131,34 +140,28 @@ export function Header() {
         </div>
       </div>
 
-      {/* -- Search row (always visible) -- */}
-      <div className="border-t border-current/10">
-        <div className="max-w-7xl mx-auto px-4 py-2">
-          <SearchBar />
-        </div>
-      </div>
-
       {/* -- Mobile menu panel -- */}
       {open && (
-        <div className={`md:hidden border-t border-current/10 ${theme.headerBg}`}>
+        <div className="md:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 pt-3 pb-1">
             <NetworkSwitcher />
           </div>
           <div className="max-w-7xl mx-auto px-4 py-4 space-y-5">
             {groups.map(group => (
               <div key={group}>
-                <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest mb-2">
-                  {group}
+                <p className="k text-[11px] mb-1">
+                  <span aria-hidden="true">{'// '}</span>{group}
                 </p>
-                <div className="grid grid-cols-2 gap-1">
+                <div className="border-t border-hair">
                   {NAV_LINKS.filter(l => l.group === group).map(link => (
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                      aria-current={pathname === link.href ? 'page' : undefined}
+                      className={`block border-b border-b-hair border-l-2 pl-3 py-2.5 text-sm transition-colors ${
                         pathname === link.href
-                          ? `${theme.activeNav} font-semibold`
-                          : 'hover:bg-black/10 opacity-80'
+                          ? 'border-l-acc text-acc-ink font-semibold'
+                          : 'border-l-transparent text-ink2 hover:text-ink'
                       }`}
                     >
                       {link.label}

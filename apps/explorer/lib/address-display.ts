@@ -42,3 +42,14 @@ export function shortenAddress(address: string, lead = 6, tail = 5): string {
   if (!/^0x[0-9a-fA-F]{40}$/.test(checksummed)) return checksummed
   return `${checksummed.slice(0, 2 + lead)}…${checksummed.slice(-tail)}`
 }
+
+/**
+ * Truncated transaction-hash display in the same shape as shortenAddress:
+ * `0xa0188f…78946`. Hashes carry no checksum, so they render lowercase. Malformed
+ * input is returned whole, for the same reason shortenAddress does.
+ */
+export function shortHash(hash: string, lead = 6, tail = 5): string {
+  const lower = (hash ?? '').toLowerCase()
+  if (!/^0x[0-9a-f]{64}$/.test(lower)) return hash ?? ''
+  return `${lower.slice(0, 2 + lead)}…${lower.slice(-tail)}`
+}

@@ -29,8 +29,13 @@ export function CopyButton({
 
   return (
     <span className="relative inline-flex items-center">
-      <button onClick={copy} className="text-xs text-gray-400 hover:text-gray-600 ml-1" title="Copy">
-        {copied ? '✓' : '⎘'}
+      <button
+        onClick={copy}
+        aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+        title="Copy"
+        className={`ml-1 inline-flex h-6 w-6 items-center justify-center rounded-[6px] border border-hair bg-card text-xs hover:border-hair3 transition-colors ${copied ? 'text-live' : 'text-mut hover:text-ink'}`}
+      >
+        <span aria-hidden="true">{copied ? '✓' : '⎘'}</span>
       </button>
       {showReferral && referralPlacement && (
         <div className="absolute left-0 top-full z-50 mt-2">

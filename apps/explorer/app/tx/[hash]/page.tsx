@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNativeToken, formatGwei, formatNumber, timeAgo, safeBigInt, formatTokenAmount } from '@/lib/format'
+import { formatNativeToken, formatGwei, formatNumber, formatUtc, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -13,7 +13,7 @@ import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
 import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { toChecksumAddress } from '@/lib/address-display'
+import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
@@ -473,45 +473,86 @@ export default async function TxDetailPage({
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Transactions', href: '/txs' }, { name: `Tx ${hash.slice(0, 18)}…` }]} />
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <h1 className="text-2xl font-bold">Transaction Details</h1>
-        <Badge variant={tx.status ? 'success' : 'fail'}>
-          {tx.status ? 'Success' : 'Failed'}
-        </Badge>
-        <a
-          href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`ml-auto text-xs text-gray-400 hover:${chainConfig.theme.linkText} border border-gray-200 hover:${chainConfig.theme.border} rounded px-2 py-1 transition-colors`}
-        >
-          View on {chainConfig.externalExplorer} ↗
-        </a>
+      <div className="mb-5">
+        <p className="k">{'// '}transaction</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h1 className="text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Transaction Details</h1>
+          <a
+            href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sm:ml-auto rounded-[9px] border border-hair px-2.5 py-1 font-mono text-xs text-ink2 transition-colors hover:border-hair3"
+          >
+            View on {chainConfig.externalExplorer} ↗
+          </a>
+        </div>
+        <div className="mt-2 flex items-start font-mono text-[13px] text-ink2">
+          <span className="min-w-0 break-all pt-0.5">{tx.hash}</span>
+          <CopyButton text={tx.hash} />
+        </div>
       </div>
 
+      <dl className="ledger [--cols:5] mb-4">
+        <Fact label="Status">
+          <Badge variant={tx.status ? 'success' : 'fail'}>
+            {tx.status ? 'Success' : 'Failed'}
+          </Badge>
+        </Fact>
+        <Fact
+          label="Block"
+          sub={confirmations != null && confirmations > 0 ? `${formatNumber(confirmations)} Confirmations` : undefined}
+        >
+          <Link href={`/blocks/${tx.blockNumber}`} className="text-acc-ink hover:underline">
+            {formatNumber(tx.blockNumber)}
+          </Link>
+        </Fact>
+        <Fact label="Age" sub={formatUtc(tx.timestamp)}>
+          {timeAgo(new Date(tx.timestamp))}
+        </Fact>
+        <Fact label="Value" sub={valueUsd ?? undefined}>
+          {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
+        </Fact>
+        <Fact label="Fee" sub={feeUsd ?? undefined}>
+          {formatNativeToken(fee, 8)} {chainConfig.currency}
+        </Fact>
+      </dl>
+
+      <p className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[13px]">
+        <span className="k">From</span>
+        <AddressLink address={tx.fromAddress} />
+        <span className="text-mut" aria-hidden="true">→</span>
+        <span className="k">To</span>
+        {tx.toAddress ? (
+          <AddressLink address={tx.toAddress} />
+        ) : (
+          <span className="text-mut">Contract Creation</span>
+        )}
+      </p>
+
       {fromRpc && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
           <span>⚡</span>
           <span>Fetched live from {chainConfig.name} — this transaction is outside our local retention window.</span>
         </div>
       )}
 
       {bodyPruned && !bodyUnavailable && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
           <span>⚡</span>
           <span>Input data &amp; event logs fetched live from {chainConfig.name} — this transaction is older than our local body-retention window.</span>
         </div>
       )}
       {bodyUnavailable && (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-gray-600">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           <span>⏳</span>
           <span>Input data &amp; event logs are temporarily unavailable — try again shortly. The transaction summary below is unaffected.</span>
         </div>
       )}
 
       {decoded && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3">
           <span className="text-2xl">{decoded.emoji}</span>
-          <p className="text-sm text-yellow-800">{decoded.summary}</p>
+          <p className="text-sm text-ink2">{decoded.summary}</p>
         </div>
       )}
 
@@ -524,140 +565,122 @@ export default async function TxDetailPage({
         />
       )}
 
-      <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <tbody className="divide-y">
-            <Row label="Transaction Hash" value={tx.hash} mono copy />
-            <Row label="Status" value={tx.status ? 'Success' : 'Failed'} />
-            <tr>
-              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Block</td>
-              <td className="px-6 py-3">
-                <Link href={`/blocks/${tx.blockNumber}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                  {String(tx.blockNumber)}
-                </Link>
-                {confirmations != null && confirmations > 0 && (
-                  <span className="ml-2 text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">
-                    {formatNumber(confirmations)} Confirmations
-                  </span>
-                )}
-              </td>
-            </tr>
+      <dl className="mb-6 divide-y divide-hair rounded-xl border border-hair bg-card">
+        <Row label="Transaction Hash" value={tx.hash} mono copy />
+        <Row label="Status" value={tx.status ? 'Success' : 'Failed'} />
+        <RowShell label="Block">
+          <Link href={`/blocks/${tx.blockNumber}`} className="font-mono text-acc-ink hover:underline">
+            {formatNumber(tx.blockNumber)}
+          </Link>
+          {confirmations != null && confirmations > 0 && (
+            <span className="ml-2 rounded-[4px] bg-hair2 px-1.5 py-0.5 font-mono text-xs text-ink2">
+              {formatNumber(confirmations)} Confirmations
+            </span>
+          )}
+        </RowShell>
+        <Row
+          label="Timestamp"
+          value={`${timeAgo(new Date(tx.timestamp))} (${formatUtc(tx.timestamp)})`}
+          mono
+        />
+        <Row
+          label="From"
+          value={toChecksumAddress(tx.fromAddress)}
+          mono copy
+          link={`/address/${tx.fromAddress}`}
+          addressLabel={getAddressLabel(tx.fromAddress)}
+          copyReferralPlacement="address_copy"
+        />
+        <Row
+          label="To"
+          value={tx.toAddress ? toChecksumAddress(tx.toAddress) : 'Contract Creation'}
+          mono
+          copy={!!tx.toAddress}
+          link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
+          addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
+          copyReferralPlacement={tx.toAddress ? 'address_copy' : undefined}
+        />
+        <RowShell label="Value" mono>
+          {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
+          {valueUsd && <span className="ml-1 text-mut">({valueUsd})</span>}
+        </RowShell>
+        <RowShell label="Transaction Fee" mono>
+          {formatNativeToken(fee, 8)} {chainConfig.currency}
+          {feeUsd && <span className="ml-1 text-mut">({feeUsd})</span>}
+        </RowShell>
+        <Row
+          label="Gas Price"
+          value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
+          mono
+        />
+        {gasBreakdown && (
+          <>
             <Row
-              label="Timestamp"
-              value={`${timeAgo(new Date(tx.timestamp))} (${new Date(tx.timestamp).toUTCString()})`}
-            />
-            <Row
-              label="From"
-              value={toChecksumAddress(tx.fromAddress)}
-              mono copy
-              link={`/address/${tx.fromAddress}`}
-              addressLabel={getAddressLabel(tx.fromAddress)}
-              copyReferralPlacement="address_copy"
-            />
-            <Row
-              label="To"
-              value={tx.toAddress ? toChecksumAddress(tx.toAddress) : 'Contract Creation'}
+              label="Base / Priority Fee"
+              value={`${formatGwei(gasBreakdown.baseFeePerGas)} Gwei base · ${formatGwei(gasBreakdown.effectiveGasPrice - gasBreakdown.baseFeePerGas)} Gwei tip`}
               mono
-              copy={!!tx.toAddress}
-              link={tx.toAddress ? `/address/${tx.toAddress}` : undefined}
-              addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
-              copyReferralPlacement={tx.toAddress ? 'address_copy' : undefined}
             />
-            <tr>
-              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Value</td>
-              <td className="px-6 py-3">
-                {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
-                {valueUsd && <span className="text-gray-400 ml-1">({valueUsd})</span>}
-              </td>
-            </tr>
-            <tr>
-              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Transaction Fee</td>
-              <td className="px-6 py-3">
-                {formatNativeToken(fee, 8)} {chainConfig.currency}
-                {feeUsd && <span className="text-gray-400 ml-1">({feeUsd})</span>}
-              </td>
-            </tr>
-            <Row
-              label="Gas Price"
-              value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
-            />
-            {gasBreakdown && (
-              <>
-                <Row
-                  label="Base / Priority Fee"
-                  value={`${formatGwei(gasBreakdown.baseFeePerGas)} Gwei base · ${formatGwei(gasBreakdown.effectiveGasPrice - gasBreakdown.baseFeePerGas)} Gwei tip`}
-                />
-                <tr>
-                  <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Burnt Fees</td>
-                  <td className="px-6 py-3">
-                    🔥 {formatNativeToken(gasBreakdown.burnt, 8)} {chainConfig.currency}
-                    <span className="text-gray-400 ml-2 text-xs">
-                      validator received {formatNativeToken(gasBreakdown.priorityTip, 8)} {chainConfig.currency}
-                    </span>
-                  </td>
-                </tr>
-              </>
-            )}
-            <tr>
-              <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">Gas Used / Limit</td>
-              <td className="px-6 py-3">
-                <span>
-                  {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'}
-                  {' / '}
-                  {gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'}
-                </span>
-                {gasPercent != null && (
-                  <span className="ml-2 text-xs text-gray-500">({gasPercent}%)</span>
-                )}
-                {gasPercent != null && (
-                  <div className="mt-1 w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-yellow-500"
-                      style={{ width: `${Math.min(gasPercent, 100)}%` }}
-                    />
-                  </div>
-                )}
-              </td>
-            </tr>
-            {tx.methodId && tx.methodId !== '0x' && !(decodedUtf8 && !methodName) && (
-              <Row
-                label="Method"
-                value={methodName ? `${methodName} (${tx.methodId})` : tx.methodId}
-                mono
+            <RowShell label="Burnt Fees" mono>
+              🔥 {formatNativeToken(gasBreakdown.burnt, 8)} {chainConfig.currency}
+              <span className="ml-2 text-xs text-mut">
+                validator received {formatNativeToken(gasBreakdown.priorityTip, 8)} {chainConfig.currency}
+              </span>
+            </RowShell>
+          </>
+        )}
+        <RowShell label="Gas Used / Limit" mono>
+          <span>
+            {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS ? formatNumber(Number(gasUsed)) : '—'}
+            {' / '}
+            {gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS ? formatNumber(Number(gasLimit)) : '—'}
+          </span>
+          {gasPercent != null && (
+            <span className="ml-2 text-xs text-mut">({gasPercent}%)</span>
+          )}
+          {gasPercent != null && (
+            <div className="mt-1.5 h-1.5 w-48 max-w-full overflow-hidden rounded-full bg-acc-t">
+              <div
+                className="h-full rounded-full bg-acc"
+                style={{ width: `${Math.min(gasPercent, 100)}%` }}
               />
-            )}
-            {nonce != null && (
-              <Row label="Nonce" value={String(nonce)} />
-            )}
-            <Row label="Position In Block" value={String(tx.txIndex)} />
-            {txType != null && (
-              <Row label="Transaction Type" value={TX_TYPE_LABELS[txType] ?? `Type ${txType}`} />
-            )}
-          </tbody>
-        </table>
-        </div>
-      </div>
+            </div>
+          )}
+        </RowShell>
+        {tx.methodId && tx.methodId !== '0x' && !(decodedUtf8 && !methodName) && (
+          <Row
+            label="Method"
+            value={methodName ? `${methodName} (${tx.methodId})` : tx.methodId}
+            mono
+          />
+        )}
+        {nonce != null && (
+          <Row label="Nonce" value={String(nonce)} mono />
+        )}
+        <Row label="Position In Block" value={String(tx.txIndex)} mono />
+        {txType != null && (
+          <Row label="Transaction Type" value={TX_TYPE_LABELS[txType] ?? `Type ${txType}`} />
+        )}
+      </dl>
 
       {/* Input Data */}
       {hasInput && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
           <details>
-            <summary className="cursor-pointer font-semibold text-sm select-none list-none flex items-center gap-2 group">
-              <span className="group-open:rotate-90 transition-transform inline-block text-gray-400">▶</span>
+            <summary className="cursor-pointer font-semibold text-sm text-ink select-none list-none flex items-center gap-2 group">
+              <span className="group-open:rotate-90 transition-transform inline-block text-mut" aria-hidden="true">▶</span>
               View Input Data
             </summary>
             <div className="mt-3 space-y-3">
               <div>
-                <p className="text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Hex</p>
-                <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-auto max-h-48 break-all whitespace-pre-wrap">
+                <p className="k mb-1">Hex</p>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-hair bg-canvas p-3 font-mono text-xs text-ink2">
                   {effectiveInput}
                 </pre>
               </div>
               {decodedUtf8 && (
                 <div>
-                  <p className="text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">UTF-8 Decoded</p>
-                  <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-auto max-h-48 break-all whitespace-pre-wrap">
+                  <p className="k mb-1">UTF-8 Decoded</p>
+                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-hair bg-canvas p-3 font-mono text-xs text-ink2">
                     {decodedUtf8}
                   </pre>
                 </div>
@@ -668,45 +691,45 @@ export default async function TxDetailPage({
       )}
 
       {internalTxs.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Internal Transactions ({internalTxs.length})</h2>
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Internal Transactions ({internalTxs.length})</h2>
           <div className="space-y-2">
             {sortByTraceAddress(internalTxs).map((it) => (
               <div key={it.traceAddress} className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge variant="default">{it.callType}</Badge>
-                <span className="text-gray-500">From</span>
+                <span className="text-mut">From</span>
                 <AddressLink address={it.fromAddress} className="text-xs" />
-                <span className="text-gray-500">To</span>
+                <span className="text-mut">To</span>
                 {it.toAddress
                   ? <AddressLink address={it.toAddress} className="text-xs" />
-                  : <span className="text-xs text-gray-400">(contract creation)</span>}
-                <span className="text-gray-500">For</span>
-                <span className="font-medium">{formatNativeToken(safeBigInt(it.value))} {chainConfig.currency}</span>
+                  : <span className="text-xs text-mut">(contract creation)</span>}
+                <span className="text-mut">For</span>
+                <span className="font-mono text-[13px] text-ink">{formatNativeToken(safeBigInt(it.value))} {chainConfig.currency}</span>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-gray-500">
+          <p className="mt-3 text-xs text-mut">
             Value-moving calls, contract creations and self-destructs decoded from execution traces. Zero-value calls are not listed.
           </p>
         </div>
       )}
 
       {nftTransfers.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">NFT Transfers ({nftTransfers.length})</h2>
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">NFT Transfers ({nftTransfers.length})</h2>
           <div className="space-y-2">
             {nftTransfers.map((n, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-500">From</span>
+                <span className="text-mut">From</span>
                 <AddressLink address={n.fromAddress} className="text-xs" />
-                <span className="text-gray-500">To</span>
+                <span className="text-mut">To</span>
                 <AddressLink address={n.toAddress} className="text-xs" />
-                <span className="text-gray-500">For</span>
-                <span className="font-medium">
-                  <Link href={`/token/${n.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                    {getAddressLabel(n.tokenAddress) ?? `${n.tokenAddress.slice(0, 10)}…`}
+                <span className="text-mut">For</span>
+                <span className="font-mono text-[13px] text-ink">
+                  <Link href={`/token/${n.tokenAddress}`} className="text-acc-ink hover:underline">
+                    {getAddressLabel(n.tokenAddress) ?? shortenAddress(n.tokenAddress)}
                   </Link>
-                  <span className="ml-1 text-gray-500">#{n.tokenId}</span>
+                  <span className="ml-1 text-mut">#{n.tokenId}</span>
                 </span>
               </div>
             ))}
@@ -715,25 +738,28 @@ export default async function TxDetailPage({
       )}
 
       {transferInfos.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 p-4">
-          <h2 className="font-semibold mb-3">Token Transfers ({transferInfos.length}{transfersTruncated ? '+' : ''})</h2>
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Token Transfers ({transferInfos.length}{transfersTruncated ? '+' : ''})</h2>
           <div className="space-y-2">
             {transferInfos.map((t, i) => {
               const formattedAmount = t.tokenDecimals != null
-                ? formatTokenAmount(t.value, t.tokenDecimals)
+                ? formatTokenAmount(t.value, t.tokenDecimals, 6)
                 : null
+              const fullAmount = t.tokenDecimals != null
+                ? formatTokenAmount(t.value, t.tokenDecimals)
+                : t.value
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-gray-500">From</span>
+                  <span className="text-mut">From</span>
                   <AddressLink address={t.fromAddress} className="text-xs" />
-                  <span className="text-gray-500">To</span>
+                  <span className="text-mut">To</span>
                   <AddressLink address={t.toAddress} className="text-xs" />
-                  <span className="text-gray-500">For</span>
-                  <span className="font-medium">
-                    {formattedAmount ?? t.value}
+                  <span className="text-mut">For</span>
+                  <span className="font-mono text-[13px] text-ink">
+                    <span title={fullAmount}>{formattedAmount ?? t.value}</span>
                     {' '}
-                    <Link href={`/token/${t.tokenAddress}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {t.tokenSymbol ?? t.tokenAddress.slice(0, 10) + '…'}
+                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
+                      {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
                     </Link>
                   </span>
                 </div>
@@ -741,13 +767,13 @@ export default async function TxDetailPage({
             })}
           </div>
           {transfersTruncated && (
-            <p className="mt-3 text-xs text-gray-500">
+            <p className="mt-3 text-xs text-mut">
               Showing the first {TX_TRANSFERS_SHOWN} token transfers — this transaction has more.{' '}
               <a
                 href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`${chainConfig.theme.linkText} hover:underline`}
+                className="text-acc-ink underline"
               >
                 View all on {chainConfig.externalExplorer} ↗
               </a>
@@ -757,18 +783,18 @@ export default async function TxDetailPage({
       )}
 
       {txLogs.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm p-4">
-          <h2 className="font-semibold mb-3">Event Logs ({txLogs.length})</h2>
+        <div className="rounded-xl border border-hair bg-card p-4">
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Event Logs ({txLogs.length})</h2>
           <div className="space-y-3">
             {txLogs.map((log, i) => {
               const decoded = decodeEventName(log.topic0)
               return (
-                <div key={i} className="bg-gray-50 rounded p-3 text-xs overflow-auto">
+                <div key={i} className="overflow-auto rounded-lg border border-hair bg-canvas p-3 text-xs">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-gray-400 font-mono">#{i}</span>
+                    <span className="font-mono text-mut">#{i}</span>
                     <AddressLink address={log.address} short={false} />
                     {decoded && (
-                      <span className="bg-yellow-100 text-yellow-700 rounded px-1.5 py-0.5 font-semibold text-xs">
+                      <span className="rounded-[4px] bg-acc-t px-1.5 py-0.5 text-xs font-semibold text-acc-ink">
                         {decoded.name}
                       </span>
                     )}
@@ -776,36 +802,36 @@ export default async function TxDetailPage({
                   <div className="space-y-1 pl-6">
                     {log.topic0 && (
                       <div className="flex gap-2">
-                        <span className="text-gray-400 w-14 shrink-0">Topic0</span>
-                        <span className="font-mono text-gray-600 break-all">{log.topic0}</span>
+                        <span className="w-14 shrink-0 text-mut">Topic0</span>
+                        <span className="font-mono text-ink2 break-all">{log.topic0}</span>
                       </div>
                     )}
                     {log.topic1 && (
                       <div className="flex gap-2">
-                        <span className="text-gray-400 w-14 shrink-0">Topic1</span>
+                        <span className="w-14 shrink-0 text-mut">Topic1</span>
                         <span className="font-mono break-all">
-                          <span className="text-gray-600">{log.topic1}</span>
+                          <span className="text-ink2">{log.topic1}</span>
                           {decoded && decoded.params[0] && (
-                            <span className="text-yellow-600 ml-2">→ {decoded.params[0]}: {decodeTopicParam(log.topic1)}</span>
+                            <span className="ml-2 text-acc-ink">→ {decoded.params[0]}: {decodeTopicParam(log.topic1)}</span>
                           )}
                         </span>
                       </div>
                     )}
                     {log.topic2 && (
                       <div className="flex gap-2">
-                        <span className="text-gray-400 w-14 shrink-0">Topic2</span>
+                        <span className="w-14 shrink-0 text-mut">Topic2</span>
                         <span className="font-mono break-all">
-                          <span className="text-gray-600">{log.topic2}</span>
+                          <span className="text-ink2">{log.topic2}</span>
                           {decoded && decoded.params[1] && (
-                            <span className="text-yellow-600 ml-2">→ {decoded.params[1]}: {decodeTopicParam(log.topic2)}</span>
+                            <span className="ml-2 text-acc-ink">→ {decoded.params[1]}: {decodeTopicParam(log.topic2)}</span>
                           )}
                         </span>
                       </div>
                     )}
                     {log.data && log.data !== '0x' && (
                       <div className="flex gap-2">
-                        <span className="text-gray-400 w-14 shrink-0">Data</span>
-                        <span className="font-mono text-gray-600 break-all">
+                        <span className="w-14 shrink-0 text-mut">Data</span>
+                        <span className="font-mono text-ink2 break-all">
                           {log.data.slice(0, 130)}{log.data.length > 130 ? '…' : ''}
                         </span>
                       </div>
@@ -817,6 +843,39 @@ export default async function TxDetailPage({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function Fact({
+  label,
+  sub,
+  children,
+}: {
+  label: string
+  sub?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{children}</dd>
+      {sub && <dd className="mt-0.5 break-words text-xs text-mut">{sub}</dd>}
+    </div>
+  )
+}
+
+function RowShell({
+  label, mono = false, children,
+}: {
+  label: string
+  mono?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:gap-6 sm:px-6">
+      <dt className="text-[13px] text-mut sm:w-44 sm:shrink-0">{label}</dt>
+      <dd className={`min-w-0 break-all text-[13px] text-ink ${mono ? 'font-mono' : ''}`}>{children}</dd>
     </div>
   )
 }
@@ -833,21 +892,18 @@ function Row({
   copyReferralPlacement?: BinanceReferralPlacement
 }) {
   return (
-    <tr>
-      <td className="px-6 py-3 text-gray-500 w-44 font-medium shrink-0">{label}</td>
-      <td className={`px-6 py-3 break-all ${mono ? 'font-mono text-xs' : ''}`}>
-        {link ? (
-          <Link href={link} className={`${chainConfig.theme.linkText} hover:underline`}>{value}</Link>
-        ) : (
-          value
-        )}
-        {copy && <CopyButton text={value} referralPlacement={copyReferralPlacement} />}
-        {addressLabel && (
-          <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 border border-yellow-200 rounded px-1.5 py-0.5">
-            {addressLabel}
-          </span>
-        )}
-      </td>
-    </tr>
+    <RowShell label={label} mono={mono}>
+      {link ? (
+        <Link href={link} className="text-acc-ink hover:underline">{value}</Link>
+      ) : (
+        value
+      )}
+      {copy && <CopyButton text={value} referralPlacement={copyReferralPlacement} />}
+      {addressLabel && (
+        <span className="ml-2 rounded-[4px] bg-acc-t px-1.5 py-0.5 text-xs text-acc-ink">
+          {addressLabel}
+        </span>
+      )}
+    </RowShell>
   )
 }

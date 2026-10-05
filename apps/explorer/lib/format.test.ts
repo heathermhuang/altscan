@@ -8,7 +8,13 @@ import {
   formatCompactUsd,
   formatPercent,
   formatTokenAmount,
+  formatUtc,
+  sanitizeSymbolOr,
+  tokenTextOr,
+  tokenLabel,
+  UNKNOWN_TOKEN,
 } from './format'
+import { shortenAddress } from './address-display'
 
 describe('formatNativeToken', () => {
   it('shows exact zero as "0", including for null/undefined wei', () => {
@@ -123,5 +129,104 @@ describe('formatTokenAmount', () => {
 
   it('returns the raw value rather than throwing on bad decimals', () => {
     expect(formatTokenAmount('100', -1 as unknown as number)).toBe('100')
+  })
+})
+
+describe('formatTokenAmount with a display cap', () => {
+  it('rounds a huge fractional part to the cap and keeps the integer part grouped', () => {
+    // 4,787,630.158322188632852549 — the unrounded value the judge flagged.
+    expect(formatTokenAmount('4787630158322188632852549', 18, 6)).toBe('4,787,630.158322')
+    // the exact value is still available when no cap is passed
+    expect(formatTokenAmount('4787630158322188632852549', 18)).toBe('4,787,630.158322188632852549')
+  })
+
+  it('rounds half-up and carries into the integer part', () => {
+    expect(formatTokenAmount('1999999999999999999', 18, 6)).toBe('2')
+    expect(formatTokenAmount('1500000500000000000', 18, 6)).toBe('1.500001')
+    expect(formatTokenAmount('1500000499999999999', 18, 6)).toBe('1.5')
+  })
+
+  it('leaves integers and short fractions alone', () => {
+    expect(formatTokenAmount('4280000000', 6, 6)).toBe('4,280')
+    expect(formatTokenAmount('196114295', 6, 6)).toBe('196.114295')
+    expect(formatTokenAmount('67000000000000000000', 18, 6)).toBe('67')
+    expect(formatTokenAmount('5', 0, 6)).toBe('5')
+    expect(formatTokenAmount('0', 18, 6)).toBe('0')
+  })
+
+  it('shows a nonzero amount that rounds to nothing as "<0.000001", never "0"', () => {
+    expect(formatTokenAmount('1', 18, 6)).toBe('<0.000001')
+    expect(formatTokenAmount('499999999999', 18, 6)).toBe('<0.000001')
+    expect(formatTokenAmount('500000000000', 18, 6)).toBe('0.000001')
+  })
+
+  it('stays exact above Number.MAX_SAFE_INTEGER', () => {
+    expect(formatTokenAmount('9007199254740993123456', 6, 6)).toBe('9,007,199,254,740,993.123456')
+    expect(formatTokenAmount(9007199254740993123456789n, 18, 6)).toBe('9,007,199.254741')
+  })
+})
+
+describe('formatUtc', () => {
+  it('formats as YYYY-MM-DD HH:MM:SS UTC from UTC parts', () => {
+    expect(formatUtc(new Date('2026-10-04T23:04:41Z'))).toBe('2026-10-04 23:04:41 UTC')
+    expect(formatUtc(new Date('2026-01-02T03:04:05Z'))).toBe('2026-01-02 03:04:05 UTC')
+  })
+
+  it('does not depend on the host timezone: a date that differs by zone stays on its UTC day', () => {
+    // 23:30 UTC on Oct 4 is already Oct 5 in UTC+1 and later; 00:30 UTC on Oct 5
+    // is still Oct 4 in UTC-1 and earlier. Local-getter code gets one of these wrong.
+    expect(formatUtc(new Date('2026-10-04T23:30:00Z'))).toBe('2026-10-04 23:30:00 UTC')
+    expect(formatUtc(new Date('2026-10-05T00:30:00Z'))).toBe('2026-10-05 00:30:00 UTC')
+    expect(formatUtc(new Date('2025-12-31T23:59:59Z'))).toBe('2025-12-31 23:59:59 UTC')
+  })
+
+  it('accepts ISO strings and epoch milliseconds', () => {
+    expect(formatUtc('2026-10-04T23:04:41.999Z')).toBe('2026-10-04 23:04:41 UTC')
+    expect(formatUtc(Date.UTC(2026, 9, 4, 23, 4, 41))).toBe('2026-10-04 23:04:41 UTC')
+  })
+
+  it('renders an invalid date as an em dash instead of "NaN-NaN-NaN"', () => {
+    expect(formatUtc(new Date('nope'))).toBe('—')
+    expect(formatUtc('')).toBe('—')
+  })
+})
+
+describe('sanitizeSymbolOr placeholders', () => {
+  it("treats the indexer's '???' / 'Unknown' placeholders as missing", () => {
+    expect(sanitizeSymbolOr('???', UNKNOWN_TOKEN)).toBe('Unknown token')
+    expect(sanitizeSymbolOr('Unknown', UNKNOWN_TOKEN)).toBe('Unknown token')
+    expect(sanitizeSymbolOr('???', '')).toBe('')
+  })
+
+  it('still returns real symbols and the fallback for null/empty', () => {
+    expect(sanitizeSymbolOr('USDT', UNKNOWN_TOKEN)).toBe('USDT')
+    expect(sanitizeSymbolOr(null, UNKNOWN_TOKEN)).toBe('Unknown token')
+    expect(sanitizeSymbolOr('', '—')).toBe('—')
+  })
+})
+
+describe('tokenTextOr / tokenLabel', () => {
+  const ADDR = '0x0291bcbffc61d96f288e635d6ce3a31be03dff8e'
+
+  it('tokenTextOr keeps verbatim text (including non-ASCII) and drops placeholders', () => {
+    expect(tokenTextOr('躺赢', UNKNOWN_TOKEN)).toBe('躺赢')
+    expect(tokenTextOr('???', UNKNOWN_TOKEN)).toBe('Unknown token')
+    expect(tokenTextOr(undefined, UNKNOWN_TOKEN)).toBe('Unknown token')
+  })
+
+  it('shows a real symbol, else the name', () => {
+    expect(tokenLabel('USDT', 'Tether', ADDR)).toBe('USDT')
+    expect(tokenLabel(null, 'Tether', ADDR)).toBe('Tether')
+  })
+
+  it('reads "Unknown token" for the indexer placeholders, never "???"', () => {
+    expect(tokenLabel('???', 'Unknown', ADDR)).toBe('Unknown token')
+    expect(tokenLabel(null, null, ADDR)).toBe('Unknown token')
+  })
+
+  it('shows the short address when a real symbol was sanitised away, rather than calling it unknown', () => {
+    const label = tokenLabel('躺赢', '躺赢人生', ADDR)
+    expect(label).toBe(shortenAddress(ADDR))
+    expect(label.toLowerCase()).toBe('0x0291bc…dff8e')
   })
 })

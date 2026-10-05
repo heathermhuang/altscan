@@ -61,7 +61,7 @@ export function HouseAd({
   if (variant === 'popover') {
     return (
       <div className={`w-64 rounded-lg border border-gray-200 bg-white p-3 text-left shadow-lg ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase text-gray-400">Sponsored</p>
+        <p className="mb-1 text-[10px] font-semibold uppercase text-gray-500">Sponsored</p>
         <p className="text-sm font-semibold text-gray-900">{creative.headline}</p>
         {creative.body && <p className="mt-1 text-xs leading-5 text-gray-500">{creative.body}</p>}
         <div className="mt-3">{cta}</div>
@@ -94,10 +94,10 @@ export function HouseAd({
           <div className="flex min-w-0 items-center gap-3">
             {mark}
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase text-gray-500">Sponsored</p>
+              <p className="text-[10px] font-semibold uppercase text-gray-400">Sponsored</p>
               <p className="truncate font-medium text-gray-200">
                 {creative.headline}
-                {creative.body && <span className="ml-2 hidden text-gray-500 sm:inline">{creative.body}</span>}
+                {creative.body && <span className="ml-2 hidden text-gray-400 sm:inline">{creative.body}</span>}
               </p>
             </div>
           </div>
@@ -119,7 +119,7 @@ export function HouseAd({
         <div className="flex min-w-0 items-start gap-3">
           {mark}
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Sponsored</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Sponsored</p>
             <p className="mt-0.5 font-semibold text-gray-900">{creative.headline}</p>
             {creative.body && <p className="mt-1 text-sm leading-5 text-gray-500">{creative.body}</p>}
           </div>

@@ -33,9 +33,9 @@ export function WatchlistButton({ address }: { address: string }) {
     <button
       onClick={toggle}
       title={watching ? 'Remove from watchlist' : 'Add to watchlist'}
-      className={`text-lg transition-colors ${watching ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-[9px] border border-hair bg-card text-lg leading-none transition-colors hover:border-hair3 ${watching ? 'text-acc-ink' : 'text-mut hover:text-ink'}`}
     >
-      {watching ? '⭐' : '☆'}
+      {watching ? '★' : '☆'}
     </button>
   )
 }
