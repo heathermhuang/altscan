@@ -52,6 +52,15 @@ export function tapeWindow(blockTime: number): { before: number; after: number }
   }
 }
 
+/**
+ * How many of the newest blocks a "latest blocks" tape fetches: ~32s of chain time, which fills the
+ * content column (1248px at 34px/s is ~37s, and its left ~120px sits under a fade). BNB (0.45s)
+ * gives 72, ETH (12s) gives 7 (the tables' minimum); never more than 100.
+ */
+export function latestTapeCount(blockTime: number): number {
+  return Math.min(100, Math.max(7, Math.ceil(32 / blockTime)))
+}
+
 /** Blocks per minute measured from the oldest and newest block received. */
 export function ratePerMin(tuples: TapeTuple[]): number | null {
   if (tuples.length < 2) return null

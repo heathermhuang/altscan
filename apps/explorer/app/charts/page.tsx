@@ -1,10 +1,12 @@
-import { db } from '@/lib/db'
-import { sql } from 'drizzle-orm'
+import { db, schema } from '@/lib/db'
+import { desc, sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 import { formatGwei } from '@/lib/format'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
+import { BlockTape } from '@/components/home/BlockTape'
 import { swallow } from '@/lib/observability'
+import { encodeTape, latestTapeCount, spreadSeconds, toTapeTuple } from '@/lib/tape'
 
 export const revalidate = 300
 
@@ -97,6 +99,29 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
   }
 }
 
+// The newest blocks as a tape (same window as the homepage, one primary-key-ordered query), for
+// when there are no daily charts to draw. null if there is nothing to show.
+async function fetchRecentTape(): Promise<string | null> {
+  try {
+    const rows = await withTimeout(db
+      .select({
+        number: schema.blocks.number,
+        timestamp: schema.blocks.timestamp,
+        gasUsed: schema.blocks.gasUsed,
+        gasLimit: schema.blocks.gasLimit,
+        txCount: schema.blocks.txCount,
+      })
+      .from(schema.blocks)
+      .orderBy(desc(schema.blocks.number))
+      .limit(latestTapeCount(chainConfig.blockTime)))
+    const tuples = rows.map(toTapeTuple)
+    return spreadSeconds(tuples).length > 0 ? encodeTape(tuples) : null
+  } catch (e) {
+    swallow('charts/tape', e)
+    return null
+  }
+}
+
 export default async function ChartsPage() {
   // Run sequentially — each query can use 100MB+ on 36M row tables.
   // Promise.all() on these caused concurrent memory spikes → OOM.
@@ -104,14 +129,37 @@ export default async function ChartsPage() {
   const gasData = await fetchDailyGasHistory()
   const blockData = await fetchDailyBlockCount()
 
+  const header = (
+    <div className="mb-6">
+      <p className="k">{'// '}charts</p>
+      <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Charts</h1>
+      <p className="mt-2 text-sm text-ink2">{chainConfig.name} network activity from the blocks this explorer has indexed.</p>
+    </div>
+  )
+
+  // With under 3 days of anything, every card below would say "not enough data". Show the blocks
+  // the explorer does have instead, and pay for that query only then.
+  const tape = [txData, gasData, blockData].every((d) => d.length < 3) ? await fetchRecentTape() : null
+  if (tape !== null) {
+    return (
+      <>
+        <div className="max-w-7xl mx-auto px-4 pt-8">
+          <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
+          {header}
+          <h2 className="k mb-3"><span aria-hidden="true">{'// '}</span>recent blocks</h2>
+        </div>
+        <BlockTape tape={tape} chainName={chainConfig.name} />
+        <div className="max-w-7xl mx-auto px-4 pb-8 pt-4">
+          <p className="text-sm text-mut">Daily transaction, gas and block charts appear once 3 days of blocks are indexed.</p>
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
-      <div className="mb-6">
-        <p className="k">{'// '}charts</p>
-        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Charts</h1>
-        <p className="mt-2 text-sm text-ink2">{chainConfig.name} network activity from the blocks this explorer has indexed.</p>
-      </div>
+      {header}
 
       <div className="space-y-8">
         <ChartCard title="Daily Transaction Count" data={txData}>
@@ -130,8 +178,8 @@ export default async function ChartsPage() {
               formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
             />
           ) : BigInt(chainConfig.minGasPriceWei) > 0n ? (
-            <div className="flex items-center justify-center h-32 text-ink2 text-sm">
-              {chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline mx-1">Gas Tracker</a> for current rates.
+            <div className="flex items-center justify-center h-32 text-center text-ink2 text-sm">
+              <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline">Gas Tracker</a> for current rates.</p>
             </div>
           ) : null}
         </ChartCard>

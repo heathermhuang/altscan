@@ -186,6 +186,20 @@
   }
 }
 
+/* Gas-used bar under a block's Gas Used (components/blocks/BlockTable, /blocks only): a fill on a
+   track, drawn as two background layers, so the whole bar is one empty span whose width comes from
+   the row's inline --g. */
+@layer components {
+  .gbar {
+    display: block;
+    width: 96px;
+    height: 4px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(var(--acc), var(--acc)) 0 0 / var(--g, 0%) 100% no-repeat, var(--acc-t);
+  }
+}
+
 /* Transaction rows on phones (components/transactions/TxTable). Under 640px each row is a
    three-line card laid out from the same cells as the desktop table, so there is no second set of
    markup: 1) status dot, hash, age  2) from -> to  3) value and its unit. Cells are told apart by

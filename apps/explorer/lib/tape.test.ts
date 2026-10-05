@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeTape, encodeTape, gasPct, meanSeconds, ratePerMin, spreadSeconds, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
+import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -132,5 +132,17 @@ describe('toTapeTuple', () => {
   it('accepts the cached form: ISO string timestamp, decimal-string gas', () => {
     const row = { number: 8, timestamp: '2026-10-05T12:00:00.250Z', txCount: 0, gasUsed: '50', gasLimit: '100' }
     expect(toTapeTuple(row)).toEqual([8, Math.floor(Date.parse('2026-10-05T12:00:00.250Z') / 1000), 0, 50])
+  })
+})
+
+describe('latestTapeCount', () => {
+  it('is ~32s of chain time: 72 on BNB, the 7-block minimum on ETH', () => {
+    expect(latestTapeCount(0.45)).toBe(72)
+    expect(latestTapeCount(12)).toBe(7)
+  })
+
+  it('never exceeds 100 or drops below 7', () => {
+    expect(latestTapeCount(0.1)).toBe(100)
+    expect(latestTapeCount(60)).toBe(7)
   })
 })
