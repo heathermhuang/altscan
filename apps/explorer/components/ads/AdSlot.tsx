@@ -215,7 +215,7 @@ export function AdSlot({
 
   if (variant === 'footer') {
     return (
-      <div className={`ad-footer border-b border-gray-800 bg-gray-950/60 ${className}`}>
+      <div className={`slot-footer border-b border-gray-800 bg-gray-950/60 ${className}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <BinanceMark />
@@ -237,7 +237,7 @@ export function AdSlot({
 
   return (
     <div
-      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'ad-compact p-4' : 'ad-card p-5'} ${className}`}
+      className={`flex flex-col justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'slot-compact p-4' : 'slot-card p-5'} ${className}`}
     >
       <div className={`flex flex-col gap-4 sm:flex-row ${compact ? 'sm:items-start' : 'sm:items-center sm:justify-between'}`}>
         <div className="flex min-w-0 items-start gap-3">

@@ -341,48 +341,51 @@
   }
 }
 
-/* Ad boxes (components/ads). AdSlot mounts its card only after it has fetched its config in the
-   browser, so each in-flow variant has ONE fixed height per breakpoint and AdReserve holds exactly
-   that much space on the server. Copy is clamped to fit: a card shows at most 2 lines of title and
-   3 of body (stacked, CTA below, under 640px) or 1 and 2 (one row, from 640px). Heights, border
-   box: under 640px, card = 2 + 40 pad + (15 eyebrow + 2 + 48 title + 4 + 60 body) + 16 gap + 36 CTA;
-   compact has 32 pad. From 640px, card = 2 + 40 + (15 + 2 + 24 + 4 + 40); footer = 1 + 24 pad + 40
+/* Sponsored boxes (components/ads). AdSlot mounts its card only after it has fetched its config in
+   the browser, so each in-flow variant has ONE height per breakpoint at the default text size and
+   AdReserve (.rsv-*) holds exactly that much space on the server. Copy is clamped to fit: a card
+   shows at most 2 lines of title and 3 of body (stacked, CTA below, under 640px) or 1 and 2 (one
+   row, from 640px), so at the default size the content never exceeds the box and the box is
+   exactly --slot-*-h. The boxes (.slot-*) take it as a min-height, not a height: with scaled-up
+   text the box grows (one small shift) instead of clipping the CTA. Heights, border box: under
+   640px, card = 2 + 40 pad + (15 eyebrow + 2 + 48 title + 4 + 60 body) + 16 gap + 36 CTA; compact
+   has 32 pad. From 640px, card = 2 + 40 + (15 + 2 + 24 + 4 + 40); footer = 1 + 24 pad + 40
    (under 640px: + 12 gap + 36 CTA). Change the copy clamps in AdSlot/HouseAd and these together. */
 :root {
-  --ad-card-h: 223px;
-  --ad-compact-h: 215px;
-  --ad-footer-h: 113px;
+  --slot-card-h: 223px;
+  --slot-compact-h: 215px;
+  --slot-footer-h: 113px;
 }
 @media (min-width: 640px) {
   :root {
-    --ad-card-h: 127px;
-    --ad-compact-h: 119px;
-    --ad-footer-h: 65px;
+    --slot-card-h: 127px;
+    --slot-compact-h: 119px;
+    --slot-footer-h: 65px;
   }
 }
 @layer components {
-  .ad-card {
-    height: var(--ad-card-h);
+  .slot-card {
+    min-height: var(--slot-card-h);
   }
-  .ad-compact {
-    height: var(--ad-compact-h);
+  .slot-compact {
+    min-height: var(--slot-compact-h);
   }
-  .ad-footer {
-    height: var(--ad-footer-h);
+  .slot-footer {
+    min-height: var(--slot-footer-h);
   }
-  .ad-r-card {
-    min-height: var(--ad-card-h);
+  .rsv-card {
+    min-height: var(--slot-card-h);
   }
-  .ad-r-compact {
-    min-height: var(--ad-compact-h);
+  .rsv-compact {
+    min-height: var(--slot-compact-h);
   }
-  .ad-r-footer {
-    min-height: var(--ad-footer-h);
+  .rsv-footer {
+    min-height: var(--slot-footer-h);
   }
   /* AdSlot leaves <span hidden data-ad-empty> when nothing was chosen (restricted country,
      placement disabled since the page rendered): drop the reserve, and its margin with it,
      so the page is exactly as it was before ads were reserved. */
-  :is(.ad-r-card, .ad-r-compact, .ad-r-footer):has(> [data-ad-empty]) {
+  :is(.rsv-card, .rsv-compact, .rsv-footer):has(> [data-ad-empty]) {
     min-height: 0;
     margin: 0;
   }
