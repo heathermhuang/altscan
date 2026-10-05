@@ -346,7 +346,7 @@ export default function ApiDocsPage() {
 
       <div className="space-y-6">
         {endpoints.map((ep) => (
-          <EndpointCard key={ep.path} endpoint={ep} />
+          <EndpointCard key={`${ep.method} ${ep.path}`} endpoint={ep} />
         ))}
       </div>
     </div>
@@ -371,8 +371,13 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
         {endpoint.params && endpoint.params.length > 0 && (
           <div>
             <h3 className="k mb-2">Parameters</h3>
-            <div tabIndex={0} className="overflow-x-auto rounded-lg border border-hair">
-            <table className="dt">
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label={`Parameters for ${endpoint.method} ${endpoint.path}`}
+              className="overflow-x-auto rounded-lg border border-hair"
+            >
+            <table className="dt min-w-[36rem]">
               <caption className="sr-only">Parameters for {endpoint.method} {endpoint.path}</caption>
               <thead>
                 <tr>
@@ -394,7 +399,7 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
                         <span className="text-mut">No</span>
                       )}
                     </td>
-                    <td className="min-w-[15rem] font-sans text-ink2">{p.description}</td>
+                    <td className="font-sans text-ink2">{p.description}</td>
                   </tr>
                 ))}
               </tbody>
@@ -409,7 +414,7 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
             Example Response
           </summary>
           <div className="mt-2">
-            <CodeBlock>{endpoint.exampleResponse}</CodeBlock>
+            <CodeBlock label={`Example response for ${endpoint.method} ${endpoint.path}`}>{endpoint.exampleResponse}</CodeBlock>
           </div>
         </details>
       </div>

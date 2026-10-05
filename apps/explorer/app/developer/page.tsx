@@ -64,7 +64,7 @@ export default function DeveloperPage() {
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Get an API Key</h3>
-              <CodeBlock>{`# Step 1 — sign a message with your wallet to prove ownership
+              <CodeBlock label="Get an API Key">{`# Step 1 — sign a message with your wallet to prove ownership
 # Message format (sign this exact string with eth_sign or personal_sign):
 #   BNBScan API Key Request
 #   Address: 0xyouraddress
@@ -99,7 +99,7 @@ curl -X POST ${BASE_URL}/api/v1/keys \\
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Use Your Key</h3>
-              <CodeBlock>{`# Pass your key via the X-API-Key header
+              <CodeBlock label="Use Your Key">{`# Pass your key via the X-API-Key header
 curl ${BASE_URL}/api/v1/blocks \\
   -H "X-API-Key: bnbs_abc123..."
 
@@ -135,7 +135,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Register a Webhook</h3>
-              <CodeBlock>{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
+              <CodeBlock label="Register a Webhook">{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -154,7 +154,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Webhook Payload Format</h3>
-              <CodeBlock>{`// POST to your URL:
+              <CodeBlock label="Webhook Payload Format">{`// POST to your URL:
 {
   "event": "tx",
   "timestamp": "2024-01-01T00:00:00.000Z",
@@ -175,7 +175,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Verify Signature (Node.js)</h3>
-              <CodeBlock>{`const crypto = require('crypto')
+              <CodeBlock label="Verify Signature (Node.js)">{`const crypto = require('crypto')
 
 function verifyWebhook(body, signature, secret) {
   const expected = 'sha256=' +
@@ -191,7 +191,7 @@ function verifyWebhook(body, signature, secret) {
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Manage Webhooks</h3>
-              <CodeBlock>{`# List your webhooks
+              <CodeBlock label="Manage Webhooks">{`# List your webhooks
 curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress"
 
 # Delete a webhook
@@ -223,7 +223,7 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Query Transactions by Address</h3>
-              <CodeBlock>{`curl -X POST ${BASE_URL}/api/v1/query \\
+              <CodeBlock label="Query Transactions by Address">{`curl -X POST ${BASE_URL}/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "transactions",
@@ -235,7 +235,7 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Query Token Transfers in Block Range</h3>
-              <CodeBlock>{`curl -X POST ${BASE_URL}/api/v1/query \\
+              <CodeBlock label="Query Token Transfers in Block Range">{`curl -X POST ${BASE_URL}/api/v1/query \\
   -H "Content-Type: application/json" \\
   -d '{
     "entity": "token_transfers",
@@ -250,7 +250,12 @@ curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Supported Entities &amp; Filters</h3>
-              <div tabIndex={0} className="overflow-x-auto rounded-lg border border-hair">
+              <div
+                tabIndex={0}
+                role="region"
+                aria-label="Supported query entities and their available filters"
+                className="overflow-x-auto rounded-lg border border-hair"
+              >
               <table className="dt">
                 <caption className="sr-only">Supported query entities and their available filters</caption>
                 <thead>

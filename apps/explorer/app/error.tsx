@@ -15,12 +15,12 @@ export default function Error({
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-      <h2 className="mb-3 text-xl font-bold tracking-[-0.02em] text-ink">
+      <h1 className="mb-3 text-xl font-bold tracking-[-0.02em] text-ink">
         {isDbError ? 'Database not connected' : 'Something went wrong'}
-      </h2>
+      </h1>
       <p className="mb-6 break-words text-sm text-ink2">
         {isDbError
-          ? 'Set DATABASE_URL in apps/web/.env.local to a running PostgreSQL instance to see live data.'
+          ? 'Set DATABASE_URL in apps/explorer/.env.local to a running PostgreSQL instance to see live data.'
           : error.message}
       </p>
       <button
