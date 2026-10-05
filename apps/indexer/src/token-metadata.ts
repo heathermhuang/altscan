@@ -33,6 +33,9 @@ export type TokenMetadata = {
   totalSupply: string | null
 }
 
+/** `meta.transportFailed`: at least one call failed for a reason that says nothing about the contract. */
+export type FetchedTokenMetadata = TokenMetadata & { transportFailed: boolean }
+
 const STRING_ABI = new Interface([
   'function name() view returns (string)',
   'function symbol() view returns (string)',
@@ -42,11 +45,48 @@ const STRING_ABI = new Interface([
 
 type Fn = 'name' | 'symbol' | 'decimals' | 'totalSupply'
 
+// JSON-RPC codes for "slow down": -32005 is the de-facto limit-exceeded code.
+const TRANSPORT_RPC_CODES = new Set([-32005, 429])
+const TRANSPORT_ETHERS_CODES = new Set(['TIMEOUT', 'NETWORK_ERROR', 'SERVER_ERROR'])
+const TRANSPORT_TEXT =
+  /rate.?limit|too many requests|\b429\b|timed? ?out|timeout|missing response|throttl|capacity|ETIMEDOUT|ECONN\w*|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|bad gateway|service unavailable|gateway time/i
+
+type RpcErrorShape = { code?: unknown; message?: unknown; data?: unknown }
+
+/**
+ * Did this eth_call fail for a reason that says nothing about the contract?
+ *
+ * ethers reports an eth_call that the NODE refused as CALL_EXCEPTION too — a
+ * rate-limit response (-32005, "method eth_call in batch triggered rate limit")
+ * arrives as `CALL_EXCEPTION: missing revert data`, so the code alone cannot tell
+ * a revert from a throttle; the JSON-RPC error under `info.error` has to be read.
+ *
+ * Only explicit transport signals count. An unrecognised error is treated as the
+ * contract's answer: a permanently-odd contract misread as "transport" would be
+ * retried first every run forever and stop the healer each time.
+ */
+export function isTransportError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const e = err as { code?: unknown; shortMessage?: unknown; message?: unknown; data?: unknown; info?: { error?: RpcErrorShape }; error?: RpcErrorShape }
+  const rpc = e.info?.error ?? e.error
+  if (typeof rpc?.code === 'number' && TRANSPORT_RPC_CODES.has(rpc.code)) return true
+  const text = [e.shortMessage, e.message, rpc?.message].filter((x): x is string => typeof x === 'string').join(' ')
+  // A revert is the contract answering, whatever its reason string happens to say.
+  const revertData = [rpc?.data, e.data].some(d => typeof d === 'string' && d.length > 2)
+  if (revertData || /execution reverted/i.test(text)) return false
+  if (typeof e.code === 'string' && TRANSPORT_ETHERS_CODES.has(e.code)) return true
+  return TRANSPORT_TEXT.test(text)
+}
+
+/** Collects, across the calls of one fetch, whether any failed for a transport reason. */
+type Probe = { transportFailed: boolean }
+
 /** Raw return data, or null when the call failed (revert, rate limit, timeout). */
-async function callRaw(runner: CallRunner, to: string, fn: Fn): Promise<string | null> {
+async function callRaw(runner: CallRunner, to: string, fn: Fn, probe: Probe): Promise<string | null> {
   try {
     return await runner.call({ to, data: STRING_ABI.encodeFunctionData(fn) })
-  } catch {
+  } catch (err) {
+    if (isTransportError(err)) probe.transportFailed = true
     return null
   }
 }
@@ -76,8 +116,9 @@ async function readText(
   to: string,
   fn: 'name' | 'symbol',
   maxLength: number,
+  probe: Probe,
 ): Promise<string | null> {
-  const raw = await callRaw(runner, to, fn)
+  const raw = await callRaw(runner, to, fn, probe)
   if (raw === null) return null
   let text: string | null
   try {
@@ -88,8 +129,8 @@ async function readText(
   return sanitizeNullableText(text, maxLength)
 }
 
-async function readDecimals(runner: CallRunner, to: string): Promise<number | null> {
-  const raw = await callRaw(runner, to, 'decimals')
+async function readDecimals(runner: CallRunner, to: string, probe: Probe): Promise<number | null> {
+  const raw = await callRaw(runner, to, 'decimals', probe)
   if (raw === null) return null
   try {
     return Number(STRING_ABI.decodeFunctionResult('decimals', raw)[0])
@@ -98,8 +139,8 @@ async function readDecimals(runner: CallRunner, to: string): Promise<number | nu
   }
 }
 
-async function readTotalSupply(runner: CallRunner, to: string): Promise<string | null> {
-  const raw = await callRaw(runner, to, 'totalSupply')
+async function readTotalSupply(runner: CallRunner, to: string, probe: Probe): Promise<string | null> {
+  const raw = await callRaw(runner, to, 'totalSupply', probe)
   if (raw === null) return null
   try {
     return BigInt(STRING_ABI.decodeFunctionResult('totalSupply', raw)[0]).toString()
@@ -111,7 +152,10 @@ async function readTotalSupply(runner: CallRunner, to: string): Promise<string |
 /**
  * Fetch name, symbol, decimals and totalSupply. Never throws: a field that could
  * not be read is null, so each caller picks its own fallback — the block processor
- * stores placeholders, the healer leaves the column alone.
+ * stores placeholders, the healer leaves the column alone. `transportFailed` says
+ * whether any null is down to the endpoint (rate limit, timeout, network) rather
+ * than the contract, which is the healer's cue to try again soon instead of
+ * writing the token off for a day.
  *
  * `sequential` issues the four calls one after another. The default fires them
  * together, which ethers coalesces into one JSON-RPC batch — the shape that
@@ -122,22 +166,22 @@ export async function fetchTokenMetadata(
   runner: CallRunner,
   address: string,
   opts: { sequential?: boolean } = {},
-): Promise<TokenMetadata> {
+): Promise<FetchedTokenMetadata> {
+  const probe: Probe = { transportFailed: false }
   if (!opts.sequential) {
     const [name, symbol, decimals, totalSupply] = await Promise.all([
-      readText(runner, address, 'name', 255),
-      readText(runner, address, 'symbol', 50),
-      readDecimals(runner, address),
-      readTotalSupply(runner, address),
+      readText(runner, address, 'name', 255, probe),
+      readText(runner, address, 'symbol', 50, probe),
+      readDecimals(runner, address, probe),
+      readTotalSupply(runner, address, probe),
     ])
-    return { name, symbol, decimals, totalSupply }
+    return { name, symbol, decimals, totalSupply, transportFailed: probe.transportFailed }
   }
-  return {
-    name: await readText(runner, address, 'name', 255),
-    symbol: await readText(runner, address, 'symbol', 50),
-    decimals: await readDecimals(runner, address),
-    totalSupply: await readTotalSupply(runner, address),
-  }
+  const name = await readText(runner, address, 'name', 255, probe)
+  const symbol = await readText(runner, address, 'symbol', 50, probe)
+  const decimals = await readDecimals(runner, address, probe)
+  const totalSupply = await readTotalSupply(runner, address, probe)
+  return { name, symbol, decimals, totalSupply, transportFailed: probe.transportFailed }
 }
 
 // ── Healer decisions (pure — the healer module only does I/O around these) ──
@@ -185,6 +229,38 @@ export function planHeal(row: HealRow, meta: TokenMetadata): HealPatch | null {
   }
   if (meta.decimals !== null && meta.decimals !== row.decimals) patch.decimals = meta.decimals
   return Object.keys(patch).length > 0 ? patch : null
+}
+
+/** Consecutive transport failures after which a run gives up and leaves the rest for the next tick. */
+export const TRANSPORT_STREAK_LIMIT = 3
+
+export type HealStep = {
+  patch: HealPatch | null
+  /** Only a token the contract actually answered for is left alone for HEAL_RETRY_MS. */
+  markTried: boolean
+  transportFailed: boolean
+  /** Consecutive transport failures including this token. */
+  streak: number
+  stop: boolean
+}
+
+/**
+ * What the healer does with one fetched token. `meta` is null when the whole
+ * fetch timed out. A transport failure is not an answer: the token is not marked
+ * tried (the next tick retries it) and counts toward the early stop — a run that
+ * starts while the endpoint is throttled must not write off the top of the list
+ * for a day. Whatever DID resolve is still written back.
+ */
+export function decideHeal(row: HealRow, meta: FetchedTokenMetadata | null, streak: number): HealStep {
+  const transportFailed = meta === null || meta.transportFailed
+  const nextStreak = transportFailed ? streak + 1 : 0
+  return {
+    patch: meta === null ? null : planHeal(row, meta),
+    markTried: !transportFailed,
+    transportFailed,
+    streak: nextStreak,
+    stop: nextStreak >= TRANSPORT_STREAK_LIMIT,
+  }
 }
 
 /** The first `batchSize` rows (in the order given) not tried within `ttlMs`. */

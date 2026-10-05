@@ -15,7 +15,7 @@ import { indexerConfig } from './config-instance'
 import { withTimeout } from './rpc-failover'
 import {
   HEAL_RETRY_MS, UNKNOWN_NAME, UNKNOWN_SYMBOL,
-  fetchTokenMetadata, planHeal, pruneTried, selectHealBatch,
+  decideHeal, fetchTokenMetadata, pruneTried, selectHealBatch,
   type HealRow,
 } from './token-metadata'
 
@@ -73,26 +73,35 @@ async function runOnce(providers: readonly JsonRpcProvider[], batchSize: number)
 
     let attempted = 0
     let healed = 0
+    let transportErrors = 0
+    let streak = 0
+    let stoppedEarly = false
     let topUnresolvedHolders = 0
     for (const row of batch) {
       if (Date.now() - started > RUN_BUDGET_MS) break
       attempted++
-      tried.set(row.address, Date.now())
       const provider = providers[providerCursor++ % providers.length]
-      const patch = await withTimeout(
+      const meta = await withTimeout(
         fetchTokenMetadata(provider, row.address, { sequential: true }),
         TOKEN_TIMEOUT_MS,
         'token-heal fetch',
-      ).then(meta => planHeal(row, meta), () => null)
-      if (patch) {
-        await db.update(schema.tokens).set(patch).where(eq(schema.tokens.address, row.address))
+      ).catch(() => null) // a hung endpoint: no answer, so a transport failure
+      const step = decideHeal(row, meta, streak)
+      streak = step.streak
+      if (step.transportFailed) transportErrors++
+      if (step.patch) {
+        await db.update(schema.tokens).set(step.patch).where(eq(schema.tokens.address, row.address))
         healed++
       } else {
         topUnresolvedHolders = Math.max(topUnresolvedHolders, row.holderCount)
       }
+      // After the write, so a DB error aborting the run leaves the token to the next tick.
+      if (step.markTried) tried.set(row.address, Date.now())
+      if (step.stop) { stoppedEarly = true; break }
       await sleep(DELAY_BETWEEN_TOKENS_MS)
     }
-    console.log(`${TAG} tried ${attempted}, healed ${healed}, still-unresolved ${attempted - healed} (top holder ${topUnresolvedHolders})`)
+    if (stoppedEarly) console.warn(`${TAG} stopped early: ${transportErrors} transport errors`)
+    console.log(`${TAG} tried ${attempted}, healed ${healed}, still-unresolved ${attempted - healed} (top holder ${topUnresolvedHolders}), transport errors ${transportErrors}`)
   } catch (err) {
     console.error(`${TAG} error:`, dbErrorMessage(err))
   } finally {
