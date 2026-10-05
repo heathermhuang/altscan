@@ -81,39 +81,39 @@ export function HoldersLazy({
   })()
 
   return (
-    <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
-      <div className="px-4 py-3 border-b flex items-center justify-between gap-2">
-        <h2 className="font-semibold">
+    <div className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
+      <div className="px-4 py-3 border-b border-hair flex items-center justify-between gap-2">
+        <h2 className="font-semibold tracking-[-0.02em] text-ink">
           Top Holders
           {data.source === 'moralis' && data.holderCount != null && (
-            <span className="text-gray-400 font-normal text-sm">
+            <span className="text-mut font-normal text-sm">
               {' '}({formatNumber(data.holderCount)} total)
             </span>
           )}
         </h2>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-[11px] text-mut">
           {data.source === 'moralis' ? 'via Moralis' : 'Estimated from recent transfers'}
         </span>
       </div>
       {data.source === 'local' && (
-        <div className="px-4 py-2 bg-yellow-50 text-yellow-800 text-xs border-b">
+        <div className="px-4 py-2 bg-warn-t text-ink2 text-xs border-b border-hair border-l-[3px] border-l-warn">
           ⚠️ Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.
         </div>
       )}
       <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="dt">
         <caption className="sr-only">Top holders of {symbol}</caption>
-        <thead className="bg-gray-50 border-b">
+        <thead>
           <tr>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500 w-10">#</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">Address</th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">
+            <th scope="col">#</th>
+            <th scope="col">Address</th>
+            <th scope="col">
               {data.source === 'moralis' ? 'Balance' : 'Approx. Balance'}
             </th>
-            <th scope="col" className="text-left px-4 py-2 text-gray-500">% of Supply</th>
+            <th scope="col">% of Supply</th>
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody>
           {data.holders.map((holder, i) => {
             const holderAmount = (() => {
               try {
@@ -136,15 +136,17 @@ export function HoldersLazy({
               }
             })()
             return (
-              <tr key={holder.addr} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-2 font-mono text-xs">
-                  <AddressLink address={holder.addr} short={false} />
+              <tr key={holder.addr}>
+                <td className="text-mut">{i + 1}</td>
+                <td>
+                  {/* Full address from sm up; the short form below it so Balance and % stay on screen on phones. */}
+                  <span className="sm:hidden"><AddressLink address={holder.addr} /></span>
+                  <span className="hidden sm:inline"><AddressLink address={holder.addr} short={false} /></span>
                 </td>
-                <td className="px-4 py-2">
+                <td>
                   {holderAmount} {symbol}
                 </td>
-                <td className="px-4 py-2 text-gray-600">{pct}</td>
+                <td className="text-mut">{pct}</td>
               </tr>
             )
           })}

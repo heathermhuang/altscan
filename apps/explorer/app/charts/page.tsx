@@ -107,7 +107,11 @@ export default async function ChartsPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
-      <h1 className="text-2xl font-bold mb-8">Charts</h1>
+      <div className="mb-6">
+        <p className="k">{'// '}charts</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Charts</h1>
+        <p className="mt-2 text-sm text-ink2">{chainConfig.name} network activity from the blocks this explorer has indexed.</p>
+      </div>
 
       <div className="space-y-8">
         <ChartCard title="Daily Transaction Count" data={txData}>
@@ -126,8 +130,8 @@ export default async function ChartsPage() {
               formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
             />
           ) : BigInt(chainConfig.minGasPriceWei) > 0n ? (
-            <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
-              {chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className={`${chainConfig.theme.linkText} hover:underline mx-1`}>Gas Tracker</a> for current rates.
+            <div className="flex items-center justify-center h-32 text-ink2 text-sm">
+              {chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline mx-1">Gas Tracker</a> for current rates.
             </div>
           ) : null}
         </ChartCard>
@@ -152,13 +156,13 @@ function ChartCard({ title, data, children }: { title: string; data: DataPoint[]
     : null
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-      <h2 className="font-semibold text-gray-800 mb-1">{title}</h2>
+    <div className="bg-card rounded-xl border border-hair p-4 sm:p-6">
+      <h2 className="font-semibold tracking-[-0.02em] text-ink mb-1">{title}</h2>
       {dateRange && (
-        <p className="text-xs text-gray-400 mb-4">{dateRange} ({data.length} days)</p>
+        <p className="text-xs text-mut mb-4">{dateRange} ({data.length} days)</p>
       )}
       {data.length > 0 && data.length < 3 ? (
-        <div className="h-48 flex items-center justify-center text-gray-400">
+        <div className="h-48 flex items-center justify-center text-mut">
           Not enough data yet — only {data.length} day{data.length === 1 ? '' : 's'} recorded.
           Charts will appear once at least 3 days of data are available.
         </div>
@@ -180,7 +184,7 @@ function LineChart({
 }) {
   if (data.length === 0) {
     return (
-      <div className="h-48 flex items-center justify-center text-gray-400">
+      <div className="h-48 flex items-center justify-center text-mut">
         No data yet
       </div>
     )
@@ -224,59 +228,59 @@ function LineChart({
         aria-label={label}
       >
         {/* Grid lines */}
-        {yTicks.map((t, i) => (
-          <line
-            key={i}
-            x1={pad.left}
-            y1={t.y}
-            x2={width - pad.right}
-            y2={t.y}
-            stroke="#f0f0f0"
-            strokeWidth="1"
-          />
-        ))}
+        <g className="stroke-hair" strokeWidth="1">
+          {yTicks.map((t, i) => (
+            <line
+              key={i}
+              x1={pad.left}
+              y1={t.y}
+              x2={width - pad.right}
+              y2={t.y}
+            />
+          ))}
+        </g>
         {/* Y-axis labels */}
-        {yTicks.map((t, i) => (
-          <text
-            key={i}
-            x={pad.left - 5}
-            y={t.y + 4}
-            textAnchor="end"
-            fontSize="11"
-            fill="#6b7280"
-          >
-            {t.label}
-          </text>
-        ))}
-        {/* X-axis labels */}
-        {xLabels.map((d, i) => {
-          const idx = data.indexOf(d)
-          const x = pad.left + (idx / (data.length - 1 || 1)) * innerW
-          return (
+        <g className="fill-mut" fontSize="11">
+          {yTicks.map((t, i) => (
             <text
               key={i}
-              x={x}
-              y={height - 5}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#6b7280"
+              x={pad.left - 5}
+              y={t.y + 4}
+              textAnchor="end"
             >
-              {d.date.slice(5)}
+              {t.label}
             </text>
-          )
-        })}
+          ))}
+        </g>
+        {/* X-axis labels */}
+        <g className="fill-mut" fontSize="10">
+          {xLabels.map((d, i) => {
+            const idx = data.indexOf(d)
+            const x = pad.left + (idx / (data.length - 1 || 1)) * innerW
+            return (
+              <text
+                key={i}
+                x={x}
+                y={height - 5}
+                textAnchor="middle"
+              >
+                {d.date.slice(5)}
+              </text>
+            )
+          })}
+        </g>
         {/* Line */}
         <polyline
           points={polyline}
           fill="none"
-          stroke="#EAB308"
+          className="stroke-acc"
           strokeWidth="2"
           strokeLinejoin="round"
         />
         {/* Dots — only if few data points */}
         {data.length <= 30 &&
           points.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r="3" fill="#EAB308" />
+            <circle key={i} cx={p.x} cy={p.y} r="3" className="fill-acc" />
           ))}
       </svg>
     </div>

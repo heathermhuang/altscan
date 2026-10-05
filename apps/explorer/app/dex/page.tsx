@@ -13,6 +13,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { shortHash } from '@/lib/address-display'
 
 export const metadata: Metadata = {
   title: `DEX Trades`,
@@ -70,26 +71,20 @@ export default async function DexPage({
           ],
         }) }}
       />
-      <h1 className="text-2xl font-bold mb-2">DEX Trades</h1>
-      <p className="text-gray-500 text-sm mb-6">
-        Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.dex.primary} and other AMMs is indexed in real-time as on-chain Swap events.
-      </p>
+      <div className="mb-5">
+        <p className="k">{'// '}dex</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">DEX Trades</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink2">
+          Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.dex.primary} and other AMMs is indexed in real-time as on-chain Swap events.
+        </p>
+      </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Total Trades</p>
-          <p className="text-lg font-bold">{totalTrades.toLocaleString()}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">Unique Traders</p>
-          <p className="text-lg font-bold">{uniqueMakers.toLocaleString()}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-          <p className="text-xs text-gray-500 mb-1">DEXes Found</p>
-          <p className="text-lg font-bold">{topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'}</p>
-        </div>
-      </div>
+      <dl className="ledger [--cols:3] mb-6">
+        <Fact label="Total Trades" value={totalTrades.toLocaleString()} />
+        <Fact label="Unique Traders" value={uniqueMakers.toLocaleString()} />
+        <Fact label="DEXes Found" value={topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'} />
+      </dl>
 
       <AdSlot
         context="dex"
@@ -100,30 +95,30 @@ export default async function DexPage({
 
       {/* Top Pairs */}
       {topPairs.length > 0 && (
-        <div className="bg-white rounded-xl border shadow-sm mb-6 overflow-hidden">
-          <div className="px-4 py-3 border-b">
-            <h2 className="font-semibold">Top Pairs by Trade Count <span className="text-xs font-normal text-gray-400">(last {TOP_PAIRS_WINDOW.toLocaleString()} trades)</span></h2>
+        <div className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
+          <div className="px-4 py-3 border-b border-hair">
+            <h2 className="font-semibold tracking-[-0.02em] text-ink">Top Pairs by Trade Count <span className="text-xs font-normal text-mut">(last {TOP_PAIRS_WINDOW.toLocaleString()} trades)</span></h2>
           </div>
           <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="dt">
             <caption className="sr-only">Top trading pairs by trade count over the last {TOP_PAIRS_WINDOW.toLocaleString()} trades on {chainConfig.name}</caption>
-            <thead className="bg-gray-50 border-b">
+            <thead>
               <tr>
-                <th scope="col" className="text-left px-4 py-2 text-gray-500">#</th>
-                <th scope="col" className="text-left px-4 py-2 text-gray-500">Pair Address</th>
-                <th scope="col" className="text-left px-4 py-2 text-gray-500">DEX</th>
-                <th scope="col" className="text-left px-4 py-2 text-gray-500">Trades</th>
+                <th scope="col" className="hidden sm:table-cell">#</th>
+                <th scope="col">Pair Address</th>
+                <th scope="col" className="hidden sm:table-cell">DEX</th>
+                <th scope="col">Trades</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody>
               {topPairs.map((pair, i) => (
-                <tr key={pair.pair_address} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                <tr key={pair.pair_address}>
+                  <td className="text-mut hidden sm:table-cell">{i + 1}</td>
+                  <td>
                     <AddressLink address={pair.pair_address} />
                   </td>
-                  <td className="px-4 py-2 text-gray-700">{pair.dex}</td>
-                  <td className="px-4 py-2 font-semibold">{pair.trade_count.toLocaleString()}</td>
+                  <td className="text-ink2 hidden sm:table-cell">{pair.dex}</td>
+                  <td className="font-semibold">{pair.trade_count.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -134,24 +129,24 @@ export default async function DexPage({
 
       {/* Trades table */}
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold">Recent Trades</h2>
+        <h2 className="font-semibold tracking-[-0.02em] text-ink">Recent Trades</h2>
       </div>
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden mb-4">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="dt">
           <caption className="sr-only">Recent DEX trades on {chainConfig.name}</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead>
             <tr>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">DEX</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Pair</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Amount In</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Amount Out</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Maker</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Age</th>
+              <th scope="col">Tx Hash</th>
+              <th scope="col" className="hidden sm:table-cell">DEX</th>
+              <th scope="col" className="hidden sm:table-cell">Pair</th>
+              <th scope="col">Amount In</th>
+              <th scope="col">Amount Out</th>
+              <th scope="col" className="hidden sm:table-cell">Maker</th>
+              <th scope="col" className="hidden sm:table-cell">Age</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody>
             {trades.map(t => {
               // Look up token decimals from enriched data, default to 18
               const inDecimals = tokenDecimalsMap.get(t.tokenIn?.toLowerCase() ?? '') ?? 18
@@ -161,33 +156,33 @@ export default async function DexPage({
               const inSymbol = tokenSymbolMap.get(t.tokenIn?.toLowerCase() ?? '') ?? ''
               const outSymbol = tokenSymbolMap.get(t.tokenOut?.toLowerCase() ?? '') ?? ''
               return (
-                <tr key={t.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/tx/${t.txHash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {t.txHash.slice(0, 14)}…
+                <tr key={t.id}>
+                  <td className="whitespace-nowrap">
+                    <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
+                      {shortHash(t.txHash)}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-gray-700">{t.dex}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td className="text-ink2 hidden sm:table-cell">{t.dex}</td>
+                  <td className="hidden sm:table-cell">
                     <AddressLink address={t.pairAddress} />
                   </td>
-                  <td className="px-4 py-2 text-gray-700">
+                  <td>
                     {amtIn > 1e6 ? `${(amtIn / 1e6).toFixed(2)}M` : amtIn > 1000 ? `${(amtIn / 1000).toFixed(2)}K` : amtIn.toFixed(4)}
-                    {inSymbol && <span className="text-gray-400 ml-1 text-xs">{inSymbol}</span>}
+                    {inSymbol && <span className="text-mut ml-1 text-xs">{inSymbol}</span>}
                   </td>
-                  <td className="px-4 py-2 text-gray-700">
+                  <td>
                     {amtOut > 1e6 ? `${(amtOut / 1e6).toFixed(2)}M` : amtOut > 1000 ? `${(amtOut / 1000).toFixed(2)}K` : amtOut.toFixed(4)}
-                    {outSymbol && <span className="text-gray-400 ml-1 text-xs">{outSymbol}</span>}
+                    {outSymbol && <span className="text-mut ml-1 text-xs">{outSymbol}</span>}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td className="hidden sm:table-cell">
                     <AddressLink address={t.maker} />
                   </td>
-                  <td className="px-4 py-2 text-gray-500">{timeAgo(t.timestamp)}</td>
+                  <td className="text-mut hidden sm:table-cell">{timeAgo(t.timestamp)}</td>
                 </tr>
               )
             })}
             {trades.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-16 text-center"><p className="text-gray-400 text-lg mb-1">No DEX trades found</p><p className="text-gray-300 text-sm">Trades from {chainConfig.dex.primary} and other DEXes will appear here as they are indexed.</p></td></tr>
+              <tr><td colSpan={7} className="py-16 text-center font-sans"><p className="text-ink2 text-lg mb-1">No DEX trades found</p><p className="text-mut text-sm">Trades from {chainConfig.dex.primary} and other DEXes will appear here as they are indexed.</p></td></tr>
             )}
           </tbody>
         </table>
@@ -199,6 +194,15 @@ export default async function DexPage({
         perPage={DEX_PAGE_SIZE}
         baseUrl="/dex"
       />
+    </div>
+  )
+}
+
+function Fact({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
     </div>
   )
 }

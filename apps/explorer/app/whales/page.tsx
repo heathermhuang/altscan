@@ -6,6 +6,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdSlot } from '@/components/ads/AdSlot'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { shortHash } from '@/lib/address-display'
 import { swallow } from '@/lib/observability'
 
 export const revalidate = 300
@@ -60,14 +61,15 @@ export default async function WhalesPage({
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Whale Tracker' }]} />
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">Whale Tracker</h1>
-        <p className="text-gray-500 text-sm">
+      <div className="mb-5">
+        <p className="k">{'// '}whales</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Whale Tracker</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink2">
           Large transfers on {chainConfig.name} — native (≥{formatTokenAmount(nativeMinWei, 18)} {chainConfig.currency}), {wrapped.symbol}
           {stablecoins.length > 0 && <>, and stablecoins (≥${formatTokenAmount(stablecoins[0].minValue, stablecoins[0].decimals)})</>}
         </p>
         {period === 'all' && (
-          <p className="text-gray-400 text-xs mt-1">
+          <p className="text-mut text-xs mt-1">
             Max covers everything currently retained, which is a few days rather than the full chain history.
           </p>
         )}
@@ -79,10 +81,10 @@ export default async function WhalesPage({
           <Link
             key={key}
             href={`/whales?period=${key}`}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+            className={`rounded-[9px] border px-3 py-1.5 text-sm font-medium transition-colors ${
               period === key
-                ? `${chainConfig.theme.headerBg} ${chainConfig.theme.border} ${chainConfig.theme.headerText}`
-                : `bg-white border-gray-200 text-gray-600 ${chainConfig.theme.border.replace('border-', 'hover:border-')} ${chainConfig.theme.linkHover}`
+                ? 'border-acc text-acc-ink'
+                : 'border-hair text-ink2 hover:border-hair3'
             }`}
           >
             {label}
@@ -98,27 +100,27 @@ export default async function WhalesPage({
       />
 
       {degraded && whales.length > 0 && (
-        <p className="mb-3 text-xs text-gray-500">
+        <p className="mb-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           Showing partial results — one data source is unavailable.
         </p>
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+      <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="dt">
           <caption className="sr-only">Large transfers on {chainConfig.name} — {PERIOD_CAPTIONS[period]}</caption>
-          <thead className="bg-gray-50 border-b">
+          <thead>
             <tr>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Age</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">Tx Hash</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">From</th>
-              <th scope="col" className="text-left px-4 py-2 text-gray-500">To</th>
-              <th scope="col" className="text-right px-4 py-2 text-gray-500">Amount</th>
+              <th scope="col" className="hidden sm:table-cell">Age</th>
+              <th scope="col">Tx Hash</th>
+              <th scope="col">From</th>
+              <th scope="col" className="hidden sm:table-cell">To</th>
+              <th scope="col" className="text-right">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
-            {whales.map((w) => {
+          <tbody>
+            {whales.map((w, i) => {
               // Native and wrapped are 18-decimal; stablecoins differ per chain
               // (6 on Ethereum, 18 on BNB Chain), so resolve from config.
               const decimals =
@@ -127,42 +129,42 @@ export default async function WhalesPage({
               const symbol = w.tokenSymbol ?? chainConfig.currency
 
               return (
-                <tr key={`${w.hash}-${w.transferType}`} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-gray-500 whitespace-nowrap">
+                <tr key={`${w.hash}-${w.transferType}-${i}`}>
+                  <td className="text-mut whitespace-nowrap hidden sm:table-cell">
                     {timeAgo(w.timestamp)}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link href={`/tx/${w.hash}`} className={`${chainConfig.theme.linkText} hover:underline`}>
-                      {w.hash.slice(0, 14)}…
+                  <td className="whitespace-nowrap">
+                    <Link href={`/tx/${w.hash}`} className="text-acc-ink hover:underline">
+                      {shortHash(w.hash)}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td>
                     <AddressLink address={w.fromAddress} />
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">
+                  <td className="hidden sm:table-cell">
                     {w.toAddress ? (
                       <AddressLink address={w.toAddress} />
                     ) : (
-                      <span className="text-gray-400 italic">Contract Create</span>
+                      <span className="text-mut">Contract Create</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 font-semibold text-right">
+                  <td className="font-semibold text-right">
                     {displayAmount}{' '}
-                    <span className="text-gray-500 font-normal text-xs">{symbol}</span>
+                    <span className="text-mut font-normal text-xs">{symbol}</span>
                   </td>
                 </tr>
               )
             })}
             {whales.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center">
+                <td colSpan={5} className="py-8 text-center font-sans">
                   {degraded ? (
                     <>
-                      <p className="text-gray-500">Couldn&rsquo;t load whale transfers right now.</p>
-                      <p className="text-gray-400 text-xs mt-1">This is a problem on our side, not an empty market. Try again shortly.</p>
+                      <p className="text-ink2">Couldn&rsquo;t load whale transfers right now.</p>
+                      <p className="text-mut text-xs mt-1">This is a problem on our side, not an empty market. Try again shortly.</p>
                     </>
                   ) : (
-                    <p className="text-gray-400">No large transfers found for this time period.</p>
+                    <p className="text-mut">No large transfers found for this time period.</p>
                   )}
                 </td>
               </tr>

@@ -42,7 +42,11 @@ export default async function BlocksPage({
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Blocks' }]} />
-      <h1 className="text-2xl font-bold mb-6">Blocks</h1>
+      <div className="mb-5">
+        <p className="k">{'// '}blocks</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Blocks</h1>
+        <p className="mt-2 text-sm text-ink2">The latest {chainConfig.name} blocks, newest first.</p>
+      </div>
       <BlockTable blocks={blocks} />
       <div className="mt-4 flex justify-end">
         <Pagination page={page} total={total} perPage={PER_PAGE} baseUrl="/blocks" />
