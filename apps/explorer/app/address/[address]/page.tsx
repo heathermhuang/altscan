@@ -501,7 +501,7 @@ async function TxnsTab({
             {txs.map((tx) => (
               <tr key={tx.hash} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                  <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
                     {shortHash(tx.hash)}
                   </Link>
                   {/* Phones drop the Value column; it moves under the hash. */}
@@ -635,7 +635,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
             {transfers.map((t) => (
               <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${t.txHash}`} title={t.txHash} className="text-acc-ink hover:underline">
+                  <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                     {shortHash(t.txHash)}
                   </Link>
                 </td>
@@ -649,7 +649,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
                   <Link
                     href={`/token/${t.tokenAddress}`}
-                    title={toChecksumAddress(t.tokenAddress)}
+                   
                     className="text-acc-ink hover:underline"
                   >
                     {tokenLabel(
@@ -768,7 +768,7 @@ async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
             return (
               <tr key={h.tokenAddress} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2">
-                  <Link href={`/token/${h.tokenAddress}`} title={toChecksumAddress(h.tokenAddress)} className="text-acc-ink hover:underline font-medium">
+                  <Link href={`/token/${h.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
                     {tokenLabel(h.name, h.symbol, h.tokenAddress)}
                   </Link>
                 </td>
@@ -948,7 +948,7 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
                 </span>
               </td>
               <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                <Link href={`/tx/${t.txHash}`} title={t.txHash} className="text-acc-ink hover:underline">
+                <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                   {shortHash(t.txHash)}
                 </Link>
               </td>

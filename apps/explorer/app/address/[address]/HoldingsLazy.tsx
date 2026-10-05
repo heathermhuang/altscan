@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { ProviderTokenBalance } from '@/lib/providers'
 import { tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
-import { toChecksumAddress } from '@/lib/address-display'
 
 type HoldingsResponse = {
   tokens: ProviderTokenBalance[]
@@ -80,7 +79,7 @@ export function HoldingsLazy({ addr }: { addr: string }) {
             {tokens.map((t) => (
               <tr key={t.tokenAddress} className="hover:bg-canvas transition-colors">
                 <td className="px-3 sm:px-4 py-2">
-                  <Link href={`/token/${t.tokenAddress}`} title={toChecksumAddress(t.tokenAddress)} className="text-acc-ink hover:underline font-medium">
+                  <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
                     {tokenTextOr(t.name, UNKNOWN_TOKEN)}
                   </Link>
                 </td>

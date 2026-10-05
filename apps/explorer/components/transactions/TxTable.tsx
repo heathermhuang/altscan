@@ -45,7 +45,7 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
           {txs.map(tx => (
             <tr key={tx.hash}>
               <td>
-                <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
                   {shortHash(tx.hash)}
                 </Link>
               </td>

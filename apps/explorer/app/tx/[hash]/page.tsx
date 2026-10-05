@@ -758,7 +758,7 @@ export default async function TxDetailPage({
                   <span className="font-mono text-[13px] text-ink">
                     <span title={fullAmount}>{formattedAmount ?? t.value}</span>
                     {' '}
-                    <Link href={`/token/${t.tokenAddress}`} title={toChecksumAddress(t.tokenAddress)} className="text-acc-ink hover:underline">
+                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
                       {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
                     </Link>
                   </span>

@@ -107,7 +107,7 @@ export function TxnsLazy({ addr }: { addr: string }) {
               {txs.map((tx) => (
                 <tr key={tx.hash} className={`hover:bg-canvas transition-colors ${tx.possibleSpam ? 'opacity-50' : ''}`}>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/tx/${tx.hash}`} title={tx.hash} className="text-acc-ink hover:underline">
+                    <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
                       {shortHash(tx.hash)}
                     </Link>
                   </td>

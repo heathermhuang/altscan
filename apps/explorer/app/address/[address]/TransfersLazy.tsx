@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { TokenTransferRow } from '@/lib/providers'
 import { timeAgo, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
-import { toChecksumAddress, shortHash } from '@/lib/address-display'
+import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 
 type TransfersResponse = {
@@ -99,7 +99,7 @@ export function TransfersLazy({ addr }: { addr: string }) {
               {transfers.map((t) => (
                 <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-canvas transition-colors">
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/tx/${t.txHash}`} title={t.txHash} className="text-acc-ink hover:underline">
+                    <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                       {shortHash(t.txHash)}
                     </Link>
                   </td>
@@ -113,7 +113,7 @@ export function TransfersLazy({ addr }: { addr: string }) {
                     <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/token/${t.tokenAddress}`} title={toChecksumAddress(t.tokenAddress)} className="text-acc-ink hover:underline">
+                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
                       {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
                     </Link>
                   </td>

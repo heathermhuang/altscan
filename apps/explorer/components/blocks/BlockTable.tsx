@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
-import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
+import { shortenAddress } from '@/lib/address-display'
 
 interface BlockRow {
   number: number
@@ -41,7 +41,7 @@ export function BlockTable({ blocks, compact = false }: {
               <td className="text-mut">{timeAgo(new Date(b.timestamp))}</td>
               <td>{b.txCount}</td>
               {!compact && (
-                <td className="text-mut hidden sm:table-cell font-mono" title={toChecksumAddress(b.miner)}>
+                <td className="text-mut hidden sm:table-cell font-mono">
                   {shortenAddress(b.miner)}
                 </td>
               )}
