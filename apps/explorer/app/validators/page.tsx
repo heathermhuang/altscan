@@ -10,7 +10,7 @@ import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: `Validators`,
-  description: `${chainConfig.name} validator set — view active validators, voting power, commission rates, and uptime on ${chainConfig.brandDomain}.`,
+  description: `${chainConfig.name} validator set — view active validators, voting power, and commission rates on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/validators' },
 }
 
@@ -54,7 +54,6 @@ export default async function ValidatorsPage() {
               <th scope="col">Status</th>
               <th scope="col">Voting Power</th>
               <th scope="col">Commission</th>
-              <th scope="col">Uptime</th>
             </tr>
           </thead>
           <tbody>
@@ -76,7 +75,6 @@ export default async function ValidatorsPage() {
                 </td>
                 <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
                 <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
-                <td>{(parseFloat(v.uptime ?? '0') * 100).toFixed(1)}%</td>
               </tr>
             ))}
           </tbody>

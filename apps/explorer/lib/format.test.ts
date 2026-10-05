@@ -13,6 +13,10 @@ import {
   tokenTextOr,
   tokenLabel,
   UNKNOWN_TOKEN,
+  formatHolders,
+  formatEstimate,
+  hasSupply,
+  formatUtcClock,
 } from './format'
 import { shortenAddress } from './address-display'
 
@@ -191,6 +195,17 @@ describe('formatUtc', () => {
   })
 })
 
+describe('formatUtcClock', () => {
+  it('is the HH:MM of the UTC time, whatever the host timezone', () => {
+    expect(formatUtcClock(new Date('2026-10-04T23:04:41Z'))).toBe('23:04 UTC')
+    expect(formatUtcClock(new Date('2026-01-02T03:04:05Z'))).toBe('03:04 UTC')
+  })
+
+  it('renders an invalid date as an em dash', () => {
+    expect(formatUtcClock(new Date('nope'))).toBe('—')
+  })
+})
+
 describe('sanitizeSymbolOr placeholders', () => {
   it("treats the indexer's '???' / 'Unknown' placeholders as missing", () => {
     expect(sanitizeSymbolOr('???', UNKNOWN_TOKEN)).toBe('Unknown token')
@@ -228,5 +243,43 @@ describe('tokenTextOr / tokenLabel', () => {
     const label = tokenLabel('躺赢', '躺赢人生', ADDR)
     expect(label).toBe(shortenAddress(ADDR))
     expect(label.toLowerCase()).toBe('0x0291bc…dff8e')
+  })
+})
+
+describe('"—" instead of a number we do not have', () => {
+  it('tokenTextOr with "—" reads the indexer placeholders as unknown, never "Unknown" or "???"', () => {
+    expect(tokenTextOr('Unknown', '—')).toBe('—')
+    expect(tokenTextOr('???', '—')).toBe('—')
+    expect(tokenTextOr('Unknown Token', '—')).toBe('—') // the page's live RPC lookup, for a token with no name()
+    expect(tokenTextOr(null, '—')).toBe('—')
+    expect(tokenTextOr('', '—')).toBe('—')
+    expect(tokenTextOr('Tether USD', '—')).toBe('Tether USD')
+  })
+
+  it('formatHolders shows "—" for 0 (a lagging count), and a real count unchanged', () => {
+    expect(formatHolders(0)).toBe('—')
+    expect(formatHolders(null)).toBe('—')
+    expect(formatHolders(undefined)).toBe('—')
+    expect(formatHolders(NaN)).toBe('—')
+    expect(formatHolders(1)).toBe('1')
+    expect(formatHolders(1234567)).toBe('1,234,567')
+  })
+
+  it('formatEstimate marks a derived figure with ≈, and "—" when there is none', () => {
+    expect(formatEstimate(4383)).toBe('≈ 4,383')
+    expect(formatEstimate(1)).toBe('≈ 1')
+    expect(formatEstimate(0)).toBe('—')
+    expect(formatEstimate(null)).toBe('—')
+    expect(formatEstimate(Infinity)).toBe('—')
+  })
+
+  it('hasSupply is false for null, empty, 0 and unparseable values, true for any positive supply', () => {
+    expect(hasSupply('0')).toBe(false)
+    expect(hasSupply(null)).toBe(false)
+    expect(hasSupply(undefined)).toBe(false)
+    expect(hasSupply('')).toBe(false)
+    expect(hasSupply('not a number')).toBe(false)
+    expect(hasSupply('1')).toBe(true)
+    expect(hasSupply('1000000000000000000000000')).toBe(true)
   })
 })

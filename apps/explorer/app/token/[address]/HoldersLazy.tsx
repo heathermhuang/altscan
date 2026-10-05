@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatNumber } from '@/lib/format'
+import { formatHolders, formatNumber } from '@/lib/format'
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
 
@@ -42,7 +42,7 @@ export function HoldersCountLazy({ address, fallback }: { address: string; fallb
       alive = false
     }
   }, [address])
-  return <>{formatNumber(count ?? fallback)}</>
+  return <>{formatHolders(count ?? fallback)}</>
 }
 
 export function HoldersLazy({

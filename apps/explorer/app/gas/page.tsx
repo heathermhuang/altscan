@@ -6,6 +6,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { confirmationWindow } from '@/lib/confirmation-window'
+import { gasTierBasis } from '@/lib/gas-tiers'
 
 export const revalidate = 45
 
@@ -34,6 +35,7 @@ export default async function GasPage() {
   const slow     = effectiveGasPrice
   const standard = (effectiveGasPrice * 110n) / 100n
   const fast     = (effectiveGasPrice * 130n) / 100n
+  const basis    = gasTierBasis(baseFee, MIN_GAS_PRICE)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -67,9 +69,9 @@ export default async function GasPage() {
       />
 
       <dl className="ledger [--cols:3] mb-8">
-        <Fact label="Slow"     gwei={formatGwei(slow)}     est="~30s" />
-        <Fact label="Standard" gwei={formatGwei(standard)} est="~15s" />
-        <Fact label="Fast"     gwei={formatGwei(fast)}     est="~5s" />
+        <Fact label="Slow"     gwei={formatGwei(slow)}     basis={basis.slow} />
+        <Fact label="Standard" gwei={formatGwei(standard)} basis={basis.standard} />
+        <Fact label="Fast"     gwei={formatGwei(fast)}     basis={basis.fast} />
       </dl>
 
       <div className="mb-8 rounded-xl border border-hair bg-card p-6">
@@ -98,12 +100,12 @@ export default async function GasPage() {
   )
 }
 
-function Fact({ label, gwei, est }: { label: string; gwei: string; est: string }) {
+function Fact({ label, gwei, basis }: { label: string; gwei: string; basis: string }) {
   return (
     <div>
       <dt className="k">{label}</dt>
       <dd className="mt-1 break-words font-mono text-xl font-semibold text-ink">{gwei}</dd>
-      <dd className="mt-0.5 text-xs text-mut">Gwei · {est}</dd>
+      <dd className="mt-0.5 text-xs text-mut">Gwei · {basis}</dd>
     </div>
   )
 }

@@ -75,6 +75,28 @@ export function formatNumber(n: number | bigint): string {
   return Number(n).toLocaleString('en-US')
 }
 
+/**
+ * A holder count, or "—" when it is 0. Counts are recomputed on an interval (and the token
+ * row starts at 0), so a 0 above a populated holder list is a lag artifact, not a reading.
+ */
+export function formatHolders(n: number | null | undefined): string {
+  return n && Number.isFinite(n) ? formatNumber(n) : '—'
+}
+
+/** A derived figure, marked as one: "≈ 4,383". "—" when there is nothing to estimate. */
+export function formatEstimate(n: number | null | undefined): string {
+  return n && Number.isFinite(n) && n > 0 ? `≈ ${formatNumber(n)}` : '—'
+}
+
+/**
+ * Whether a stored total supply is a real reading. The indexer writes '0' when its
+ * totalSupply() call fails (and NFT contracts often have none), so null, '' and 0 all mean
+ * "unknown" — never "a supply of zero".
+ */
+export function hasSupply(raw: string | null | undefined): boolean {
+  return safeBigInt(raw) > 0n
+}
+
 /** Adaptive USD price: 2dp for ≥$1, 4dp for ≥$0.01, up to 8dp for micro-caps. */
 export function formatUsdPrice(n: number): string {
   if (!Number.isFinite(n)) return '—'
@@ -155,9 +177,16 @@ export function sanitizeSymbolOr(raw: string | null | undefined, fallback: strin
 /** What a token slot reads when its symbol/name is unknown. */
 export const UNKNOWN_TOKEN = 'Unknown token'
 
+/** `23:04 UTC`: the clock part of formatUtc, for a label that says when a page was rendered. */
+export function formatUtcClock(date: Date | string | number): string {
+  const full = formatUtc(date)
+  return full === '—' ? full : `${full.slice(11, 16)} UTC`
+}
+
 // The indexer persists symbol='???' / name='Unknown' when it cannot read them
-// (see app/token/[address]/page.tsx). Those are "missing", not a real symbol.
-const PLACEHOLDER_TOKEN_TEXT: ReadonlySet<string> = new Set(['???', 'Unknown'])
+// (see app/token/[address]/page.tsx), and the page's live RPC lookup names a nameless
+// token 'Unknown Token'. Those are "missing", not a real symbol.
+const PLACEHOLDER_TOKEN_TEXT: ReadonlySet<string> = new Set(['???', 'Unknown', 'Unknown Token'])
 
 /** `raw` unless it is empty or an indexer placeholder. Does NOT sanitise — for text already shown verbatim. */
 export function tokenTextOr(raw: string | null | undefined, fallback: string): string {

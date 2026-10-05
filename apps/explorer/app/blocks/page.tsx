@@ -47,7 +47,7 @@ export default async function BlocksPage({
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Blocks</h1>
         <p className="mt-2 text-sm text-ink2">The latest {chainConfig.name} blocks, newest first.</p>
       </div>
-      <BlockTable blocks={blocks} />
+      <BlockTable blocks={blocks} gasBar />
       <div className="mt-4 flex justify-end">
         <Pagination page={page} total={total} perPage={PER_PAGE} baseUrl="/blocks" />
       </div>

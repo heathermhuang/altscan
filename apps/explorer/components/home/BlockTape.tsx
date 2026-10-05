@@ -21,7 +21,7 @@ const LABEL_MIN_SECONDS = 3.5
  * Blocks as tiles: width = how long the block took, fill = gas used, newest at the right.
  * `tape` is the page's blocks query in `encodeTape` form (any order works).
  * `current` outlines one block and makes it the first tab stop (the block's own page); `heading`
- * replaces the header's "latest #N" (e.g. "around #N").
+ * replaces the header's "latest #N" (e.g. "around #N", or "as of 21:04 UTC" on a cached page).
  * Widths are pure CSS (app/globals.css, "Block tape"), so nothing here measures layout.
  */
 export function BlockTape({ tape, chainName, current, heading }: { tape: string; chainName: string; current?: number; heading?: string }) {
@@ -76,7 +76,7 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
           <ul
             data-tape
             role="list"
-            aria-label={`${chainName} ${heading ? 'indexed blocks around this one' : 'latest indexed blocks'}`}
+            aria-label={`${chainName} ${current !== undefined ? 'indexed blocks around this one' : heading ? 'recent indexed blocks' : 'latest indexed blocks'}`}
             className="bt-row"
             style={{ '--avg': +avg.toFixed(3) } as CSSProperties}
             onKeyDown={onKeyDown}

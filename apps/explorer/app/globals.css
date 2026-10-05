@@ -186,6 +186,120 @@
   }
 }
 
+/* Gas-used bar under a block's Gas Used (components/blocks/BlockTable, /blocks only): a fill on a
+   track, drawn as two background layers, so the whole bar is one empty span whose width comes from
+   the row's inline --g. */
+@layer components {
+  .gbar {
+    display: block;
+    width: 96px;
+    height: 4px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(var(--acc), var(--acc)) 0 0 / var(--g, 0%) 100% no-repeat, var(--acc-t);
+  }
+}
+
+/* Transaction rows on phones (components/transactions/TxTable). Under 640px each row is a
+   three-line card laid out from the same cells as the desktop table, so there is no second set of
+   markup: 1) status dot, hash, age  2) from -> to  3) value and its unit. Cells are told apart by
+   position (hash, age, from, to, value, status), so keep that order in TxTable. */
+@layer components {
+  /* `compact` (the homepage) has no To column on desktop; the cell is there for phones. */
+  @media (min-width: 640px) {
+    .dt-tx-c :is(th, td):nth-child(4) {
+      display: none;
+    }
+  }
+  @media (max-width: 639.98px) {
+    .dt-tx,
+    .dt-tx tbody {
+      display: block;
+    }
+    .dt-tx tbody tr {
+      display: grid;
+      grid-template-columns: 10px fit-content(55%) minmax(0, 1fr) auto;
+      column-gap: 8px;
+      row-gap: 2px;
+      align-items: center;
+      padding: 10px 12px;
+    }
+    .dt-tx td {
+      padding: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dt-tx td:nth-child(1) {
+      grid-area: 1 / 2 / 2 / 4;
+    }
+    .dt-tx td:nth-child(2) {
+      grid-area: 1 / 4;
+      text-align: right;
+    }
+    .dt-tx td:nth-child(3) {
+      grid-area: 2 / 2;
+    }
+    .dt-tx td:nth-child(4) {
+      grid-area: 2 / 3 / 3 / 5;
+    }
+    .dt-tx td:nth-child(5) {
+      grid-area: 3 / 2 / 4 / 5;
+    }
+    .dt-tx td:nth-child(3),
+    .dt-tx td:nth-child(4),
+    .dt-tx td:nth-child(5) {
+      font-size: 12px;
+    }
+    .dt-tx td:nth-child(5) {
+      color: var(--ink2);
+    }
+    /* The arrow is decoration: the empty alternative keeps it out of the accessible name. */
+    .dt-tx td:nth-child(4)::before {
+      content: "\2192";
+      content: "\2192" / "";
+      margin-right: 6px;
+      color: var(--mut);
+    }
+    /* Status: a dot, filled for success and a ring for failure, so the two differ by shape and not
+       only by colour. The badge text stays in the cell, visually hidden, as the label. A tx whose
+       status is unknown has nothing to show. */
+    .dt-tx td:nth-child(6) {
+      grid-area: 1 / 1;
+    }
+    .dt-tx td:nth-child(6):not(.tx-ok, .tx-bad) {
+      display: none;
+    }
+    .dt-tx .tx-ok {
+      color: var(--live);
+    }
+    .dt-tx .tx-bad {
+      color: var(--warn);
+    }
+    .dt-tx td:nth-child(6)::before {
+      content: "";
+      display: block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .dt-tx td.tx-bad:nth-child(6)::before {
+      background: none;
+      box-shadow: inset 0 0 0 2px currentColor;
+    }
+    .dt-tx td:nth-child(6) > * {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+}
+
 /* Block tape */
 @layer components {
   /* components/home/BlockTape.tsx. Tile width is pure CSS: --s (seconds, inline) times

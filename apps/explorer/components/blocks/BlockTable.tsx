@@ -1,7 +1,9 @@
+import type { CSSProperties } from 'react'
 import Link from 'next/link'
 import { formatNumber, timeAgo } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { shortenAddress } from '@/lib/address-display'
+import { gasPct } from '@/lib/tape'
 
 interface BlockRow {
   number: number
@@ -12,9 +14,11 @@ interface BlockRow {
   gasLimit: string | bigint | null
 }
 
-export function BlockTable({ blocks, compact = false }: {
+export function BlockTable({ blocks, compact = false, gasBar = false }: {
   blocks: BlockRow[]
   compact?: boolean
+  /** A bar under Gas Used, filled to the block's share of its gas limit. Off by default: it is per-row markup. */
+  gasBar?: boolean
 }) {
   return (
     <div className="bg-card rounded-xl border border-hair overflow-hidden">
@@ -47,7 +51,7 @@ export function BlockTable({ blocks, compact = false }: {
               )}
               {!compact && (
                 <td className="text-mut hidden sm:table-cell">
-                  {b.gasUsed ? formatNumber(Number(b.gasUsed)) : '—'}
+                  <GasUsed block={b} bar={gasBar} />
                 </td>
               )}
             </tr>
@@ -56,5 +60,22 @@ export function BlockTable({ blocks, compact = false }: {
       </table>
       </div>
     </div>
+  )
+}
+
+/** Gas Used cell. No gas figure (null, or 0n for an empty block) reads "—", with no bar. */
+function GasUsed({ block, bar }: { block: BlockRow; bar: boolean }) {
+  if (!block.gasUsed) return <>—</>
+  const pct = gasPct(block.gasUsed, block.gasLimit)
+  return (
+    <>
+      {formatNumber(Number(block.gasUsed))}
+      {bar && (
+        <>
+          {' '}({pct}%)
+          <span className="gbar" style={{ '--g': `${pct}%` } as CSSProperties} />
+        </>
+      )}
+    </>
   )
 }

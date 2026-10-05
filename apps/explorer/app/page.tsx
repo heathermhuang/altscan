@@ -10,17 +10,16 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { swallow, swallowed } from '@/lib/observability'
-import { encodeTape, gasPct, type TapeTuple } from '@/lib/tape'
+import { encodeTape, gasPct, latestTapeCount, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
 // Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
 export const revalidate = 60
 
-// The tape fills the content column (1248px at 34px/s, ~37s), whose left ~120px is under a fade:
-// ~32s of chain time shows the rest. BNB 0.45s -> 72 blocks, ETH 12s -> 7 (the tables' minimum).
+// How many blocks the tape draws (lib/tape.ts: ~32s of chain time, BNB 72, ETH 7).
 // Kept tight on purpose: the homepage HTML must stay inside one TCP window (Lighthouse mobile LCP).
-const TAPE_N = Math.min(100, Math.max(7, Math.ceil(32 / chainConfig.blockTime)))
+const TAPE_N = latestTapeCount(chainConfig.blockTime)
 
 const jsonLd = {
   '@context': 'https://schema.org',
