@@ -7,7 +7,7 @@ import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
-import { sanitizeTokenMetadata } from './postgres-text'
+import { fetchTokenMetadata, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { fetchBlockTraces, decodeCallTracerBlock, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
@@ -1637,13 +1637,6 @@ export async function flushTransferWriter(): Promise<void> {
 export { TT_QUEUE_HIGH_WATER_ROWS, TT_QUEUE_HIGH_WATER_BLOCKS, ASYNC_TT_WRITER }
 
 // ── Token metadata lookup ───────────────────────────────────────────
-const ERC20_ABI = [
-  'function name() view returns (string)',
-  'function symbol() view returns (string)',
-  'function decimals() view returns (uint8)',
-  'function totalSupply() view returns (uint256)',
-]
-
 /**
  * Deterministic ascending lock order for a multi-row upsert.
  *
@@ -1697,20 +1690,14 @@ async function ensureTokensBatch(
   const results = await Promise.all(
     toFetch.map(async (addr) => {
       try {
-        const contract = new Contract(addr, ERC20_ABI, provider)
-        const [name, symbol, decimals, totalSupply] = await Promise.all([
-          contract.name().catch(() => 'Unknown'),
-          contract.symbol().catch(() => '???'),
-          contract.decimals().catch(() => 18),
-          contract.totalSupply().catch(() => 0n),
-        ])
+        const meta = await fetchTokenMetadata(provider, addr)
         return {
           address: addr,
-          name: sanitizeTokenMetadata(name, 'Unknown', 255),
-          symbol: sanitizeTokenMetadata(symbol, '???', 50),
-          decimals: Number(decimals),
+          name: meta.name ?? UNKNOWN_NAME,
+          symbol: meta.symbol ?? UNKNOWN_SYMBOL,
+          decimals: meta.decimals ?? 18,
           type: tokensToEnsure.get(addr)!,
-          totalSupply: BigInt(totalSupply).toString(),
+          totalSupply: meta.totalSupply ?? '0',
           holderCount: 0,
         }
       } catch {
