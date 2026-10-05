@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   alternates: { canonical: '/search' },
 }
 
+// Same heading as the detail pages (app/blocks/[number]/page.tsx).
+const H1 = 'mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink'
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -50,11 +53,12 @@ export default async function SearchPage({
 
       if (tokenMatches.length > 1) {
         return (
-          <div className="max-w-7xl mx-auto px-4 py-16">
-            <h1 className="text-2xl font-bold mb-2">Search Results</h1>
-            <p className="text-gray-500 mb-6">
+          <div className="max-w-7xl mx-auto px-4 py-8">
+            <p className="k">{'// '}search</p>
+            <h1 className={H1}>Search results</h1>
+            <p className="mt-3 mb-6 text-ink2">
               Found {tokenMatches.length} tokens matching{' '}
-              <span className="font-mono bg-gray-100 px-2 py-0.5 rounded">{query}</span>
+              <span className="font-mono text-ink break-all">{query}</span>
             </p>
             {showReferral && (
               <AdSlot
@@ -64,30 +68,30 @@ export default async function SearchPage({
                 className="mb-6"
               />
             )}
-            <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+            <div className="bg-card rounded-xl border border-hair overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="dt">
                 <caption className="sr-only">Token search results for {query}</caption>
-                <thead className="bg-gray-50 border-b">
+                <thead>
                   <tr>
-                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Name</th>
-                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Symbol</th>
-                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Type</th>
-                    <th scope="col" className="text-left px-4 py-2 text-gray-500">Contract</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Symbol</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Contract</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody>
                   {tokenMatches.map(token => (
-                    <tr key={token.address} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium">
-                        <Link href={`/token/${token.address}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+                    <tr key={token.address}>
+                      <td>
+                        <Link href={`/token/${token.address}`} className="text-acc-ink font-medium hover:underline">
                           {token.name}
                         </Link>
                       </td>
-                      <td className="px-4 py-2 text-gray-700">{token.symbol}</td>
-                      <td className="px-4 py-2 text-gray-500">{token.type}</td>
-                      <td className="px-4 py-2 font-mono text-xs">
-                        <Link href={`/token/${token.address}`} className={`${chainConfig.theme.linkText} hover:underline`}>
+                      <td className="text-ink">{token.symbol}</td>
+                      <td className="text-mut">{token.type}</td>
+                      <td>
+                        <Link href={`/token/${token.address}`} className="text-acc-ink hover:underline">
                           {token.address.slice(0, 14)}…
                         </Link>
                       </td>
@@ -98,7 +102,7 @@ export default async function SearchPage({
               </div>
             </div>
             <div className="mt-6">
-              <Link href="/" className={`${chainConfig.theme.linkText} hover:underline font-medium`}>← Back to home</Link>
+              <Link href="/" className="text-acc-ink hover:underline font-medium">← Back to home</Link>
             </div>
           </div>
         )
@@ -107,14 +111,15 @@ export default async function SearchPage({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold mb-3">No results found</h1>
+    <div className="max-w-7xl mx-auto px-4 py-8">
+      <p className="k">{'// '}search</p>
+      <h1 className={H1}>No results found</h1>
       {query ? (
-        <p className="text-gray-500 mb-6">
-          No match for <span className="font-mono bg-gray-100 px-2 py-0.5 rounded">{query}</span>
+        <p className="mt-3 mb-6 text-ink2">
+          No match for <span className="font-mono text-ink break-all">{query}</span>
         </p>
       ) : (
-        <p className="text-gray-500 mb-6">Enter a block number, transaction hash, address, or token name in the search bar.</p>
+        <p className="mt-3 mb-6 text-ink2">Enter a block number, transaction hash, address, or token name in the search bar.</p>
       )}
       {showReferral && (
         <AdSlot
@@ -124,19 +129,17 @@ export default async function SearchPage({
           className="mb-6 text-left"
         />
       )}
-      <div className="flex flex-wrap justify-center gap-4 text-sm">
-        <div className="bg-white border rounded-lg p-4 text-left max-w-xs">
-          <p className="font-semibold mb-2">Search tips</p>
-          <ul className="text-gray-500 space-y-1">
-            <li>• Block number: <span className="font-mono">12345678</span></li>
-            <li>• Tx hash: <span className="font-mono">0x + 64 hex chars</span></li>
-            <li>• Address: <span className="font-mono">0x + 40 hex chars</span></li>
-            <li>• Token name: <span className="font-mono">USDT, BNB, CAKE…</span></li>
-          </ul>
-        </div>
+      <div className="max-w-xs rounded-xl border border-hair bg-card p-4 text-sm">
+        <p className="font-semibold mb-2 text-ink">Search tips</p>
+        <ul className="text-mut space-y-1">
+          <li>• Block number: <span className="font-mono text-ink2">12345678</span></li>
+          <li>• Tx hash: <span className="font-mono text-ink2">0x + 64 hex chars</span></li>
+          <li>• Address: <span className="font-mono text-ink2">0x + 40 hex chars</span></li>
+          <li>• Token name: <span className="font-mono text-ink2">USDT, BNB, CAKE…</span></li>
+        </ul>
       </div>
       <div className="mt-8">
-        <Link href="/" className={`${chainConfig.theme.linkText} hover:underline font-medium`}>← Back to home</Link>
+        <Link href="/" className="text-acc-ink hover:underline font-medium">← Back to home</Link>
       </div>
     </div>
   )

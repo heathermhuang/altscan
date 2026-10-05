@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { routeForQuery } from '@/lib/search-route'
 
 const PLACEHOLDER = 'Search by address, tx hash, block number, or token name...'
 const PLACEHOLDER_SHORT = 'Address, tx, block or token'
@@ -12,12 +13,8 @@ export function SearchBar({ size = 'md' }: { size?: 'lg' | 'md' }) {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    const q = query.trim()
-    if (!q) return
-    if (/^0x[0-9a-fA-F]{64}$/.test(q)) router.push(`/tx/${q}`)
-    else if (/^0x[0-9a-fA-F]{40}$/.test(q)) router.push(`/address/${q}`)
-    else if (/^\d+$/.test(q)) router.push(`/blocks/${q}`)
-    else router.push(`/search?q=${encodeURIComponent(q)}`)
+    const href = routeForQuery(query)
+    if (href) router.push(href)
   }
 
   return (
