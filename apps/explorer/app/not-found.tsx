@@ -1,11 +1,7 @@
 import Link from 'next/link'
-import type { ChainKey } from '@altscan/chain-config'
 import { SearchBar } from '@/components/layout/SearchBar'
 import { AdSlot } from '@/components/ads/AdSlot'
 import { chainConfig } from '@/lib/chain'
-
-// How far back this explorer indexes. Keyed by ChainKey so a new chain is a compile error here.
-const INDEXED_WINDOW: Record<ChainKey, string> = { bnb: '2 days', eth: '4 days' }
 
 export default function NotFound() {
   return (
@@ -13,9 +9,9 @@ export default function NotFound() {
       <p className="text-6xl font-black text-gray-200 mb-4">404</p>
       <h1 className="text-xl font-bold mb-2">Page not found</h1>
       <p className="text-gray-500 text-sm mb-8">
-        Nothing here matches that block, transaction or address. This explorer indexes about
-        the last {INDEXED_WINDOW[chainConfig.key]} of {chainConfig.name} and looks older blocks and
-        transactions up live, so a miss usually means a typo or a hash from another chain.
+        Nothing here matches that block, transaction or address. This explorer keeps only recent{' '}
+        {chainConfig.name} history in its index and looks older blocks and transactions up live, so a
+        miss usually means a typo or a hash from another chain.
       </p>
       <div className="max-w-lg mx-auto mb-8">
         <SearchBar />
