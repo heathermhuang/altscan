@@ -44,7 +44,11 @@ export default async function TransactionsPage({
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Transactions' }]} />
-      <h1 className="text-2xl font-bold mb-6">Transactions</h1>
+      <div className="mb-5">
+        <p className="k">{'// '}transactions</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Transactions</h1>
+        <p className="mt-2 text-sm text-ink2">The latest {chainConfig.name} transactions, newest first.</p>
+      </div>
       <TxTable txs={txs} />
       <div className="mt-4 flex justify-end">
         <Pagination page={page} total={total} perPage={PER_PAGE} baseUrl="/txs" />
