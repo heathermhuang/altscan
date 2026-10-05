@@ -313,6 +313,14 @@ export function readIndexerConfig(
     recomputeSleepMs: r.int('HOLDER_RECOMPUTE_SLEEP_MS', 100, { min: 0 }),
   }
 
+  const tokenHeal = {
+    /** ON unless '0'. Re-fetches token metadata a one-shot first-sight fetch left as a placeholder. */
+    enabled: r.enabledUnlessZero('TOKEN_HEAL_ENABLED'),
+    intervalMin: r.int('TOKEN_HEAL_INTERVAL_MIN', 10, { min: 1 }),
+    /** Tokens tried per run; each costs ~4 sequential eth_calls, so the ceiling is deliberate. */
+    batch: r.int('TOKEN_HEAL_BATCH', 40, { min: 1, max: 200 }),
+  }
+
   const retention = {
     days: r.int('RETENTION_DAYS', 7, { min: 1 }),
     deleteBatch: r.int('RETENTION_DELETE_BATCH', 50_000, { min: 1 }),
@@ -391,7 +399,7 @@ export function readIndexerConfig(
   }
 
   const config = {
-    indexing, rpc, reorg, gapHeal, transferWriter, holders,
+    indexing, rpc, reorg, gapHeal, transferWriter, holders, tokenHeal,
     retention, partitions, internalTx, backfill, verifier, runtime,
 
     /**
