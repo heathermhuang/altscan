@@ -41,6 +41,9 @@ export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
   return []
 }
 
+// Transfers previewed under the summary card; the full list further down has the rest.
+const TRANSFER_PREVIEW = 3
+
 async function fetchNativePrice(): Promise<number | null> {
   const binanceSymbol = chainConfig.market.binanceSymbol
   const ccSymbol = chainConfig.market.cryptoCompareSymbol
@@ -556,6 +559,22 @@ export default async function TxDetailPage({
         </div>
       )}
 
+      {transferInfos.length > 0 && (
+        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="font-semibold tracking-[-0.02em] text-ink">Token Transfers</h2>
+            {transferInfos.length > TRANSFER_PREVIEW && (
+              <a href="#token-transfers" className="shrink-0 text-sm text-acc-ink hover:underline">
+                All {transferInfos.length}{transfersTruncated ? '+' : ''} transfers ↓
+              </a>
+            )}
+          </div>
+          <div className="space-y-2">
+            {transferInfos.slice(0, TRANSFER_PREVIEW).map((t, i) => <TransferRow key={i} t={t} />)}
+          </div>
+        </div>
+      )}
+
       {(!tx.status || (gasPercent != null && gasPercent >= 95)) && (
         <AdSlot
           context="tx_failed"
@@ -738,33 +757,10 @@ export default async function TxDetailPage({
       )}
 
       {transferInfos.length > 0 && (
-        <div className="mb-6 rounded-xl border border-hair bg-card p-4">
+        <div id="token-transfers" className="mb-6 scroll-mt-28 rounded-xl border border-hair bg-card p-4">
           <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Token Transfers ({transferInfos.length}{transfersTruncated ? '+' : ''})</h2>
           <div className="space-y-2">
-            {transferInfos.map((t, i) => {
-              const formattedAmount = t.tokenDecimals != null
-                ? formatTokenAmount(t.value, t.tokenDecimals, 6)
-                : null
-              const fullAmount = t.tokenDecimals != null
-                ? formatTokenAmount(t.value, t.tokenDecimals)
-                : t.value
-              return (
-                <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-mut">From</span>
-                  <AddressLink address={t.fromAddress} className="text-xs" />
-                  <span className="text-mut">To</span>
-                  <AddressLink address={t.toAddress} className="text-xs" />
-                  <span className="text-mut">For</span>
-                  <span className="font-mono text-[13px] text-ink">
-                    <span title={fullAmount}>{formattedAmount ?? t.value}</span>
-                    {' '}
-                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
-                      {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
-                    </Link>
-                  </span>
-                </div>
-              )
-            })}
+            {transferInfos.map((t, i) => <TransferRow key={i} t={t} />)}
           </div>
           {transfersTruncated && (
             <p className="mt-3 text-xs text-mut">
@@ -843,6 +839,41 @@ export default async function TxDetailPage({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+type TransferInfo = {
+  tokenAddress: string
+  fromAddress: string
+  toAddress: string
+  value: string
+  tokenSymbol?: string
+  tokenDecimals?: number
+}
+
+// One row of the token-transfer list; the summary preview and the full list render the same markup.
+function TransferRow({ t }: { t: TransferInfo }) {
+  const formattedAmount = t.tokenDecimals != null
+    ? formatTokenAmount(t.value, t.tokenDecimals, 6)
+    : null
+  const fullAmount = t.tokenDecimals != null
+    ? formatTokenAmount(t.value, t.tokenDecimals)
+    : t.value
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-mut">From</span>
+      <AddressLink address={t.fromAddress} className="text-xs" />
+      <span className="text-mut">To</span>
+      <AddressLink address={t.toAddress} className="text-xs" />
+      <span className="text-mut">For</span>
+      <span className="font-mono text-[13px] text-ink">
+        <span title={fullAmount}>{formattedAmount ?? t.value}</span>
+        {' '}
+        <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
+          {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
+        </Link>
+      </span>
     </div>
   )
 }
