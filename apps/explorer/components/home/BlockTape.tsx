@@ -8,10 +8,14 @@ const LEGEND = 'width = block time · fill = gas used · newest on the right'
 const fmt = (n: number) => n.toLocaleString('en-US')
 const fmtSeconds = (s: number) => (s < 1 ? s.toFixed(2) : s.toFixed(1))
 
+// Tiles carry no data attributes (the HTML ships ~130 of them): the block number is the href's tail.
 const blockOf = (e: SyntheticEvent) => {
-  const a = (e.target as HTMLElement).closest<HTMLElement>('a[data-n]')
-  return a ? Number(a.dataset.n) : null
+  const href = (e.target as HTMLElement).closest('a')?.getAttribute('href')
+  return href ? Number(href.slice('/blocks/'.length)) : null
 }
+
+// A label fits only on tiles at least ~120px wide (3.5s at 34px/s): ETH, never BNB.
+const LABEL_MIN_SECONDS = 3.5
 
 /**
  * Latest blocks as tiles: width = how long the block took, fill = gas used, newest at the right.
@@ -70,16 +74,13 @@ export function BlockTape({ tuples, chainName }: { tuples: TapeTuple[]; chainNam
             onBlur={() => setActiveN(null)}
           >
             {blocks.map(b => (
-              <li key={b.n} className="bt-li" style={{ '--s': +b.seconds.toFixed(3) } as CSSProperties}>
+              <li key={b.n} style={{ '--s': +b.seconds.toFixed(3), '--g': `${b.gas}%` } as CSSProperties}>
                 <a
                   href={`/blocks/${b.n}`}
-                  data-n={b.n}
                   tabIndex={b.n === roving ? 0 : -1}
                   aria-label={`Block ${fmt(b.n)}, ${b.txs} ${b.txs === 1 ? 'transaction' : 'transactions'}, gas ${b.gas}%`}
-                  className="bt-tile"
                 >
-                  <span className="bt-fill" style={{ height: `${b.gas}%` }} />
-                  <span className="bt-lb">#{fmt(b.n)}</span>
+                  {b.seconds >= LABEL_MIN_SECONDS && <span>#{fmt(b.n)}</span>}
                 </a>
               </li>
             ))}

@@ -13,6 +13,9 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-mono',
+  // Not preloaded: mono is never the LCP element, and a second high-priority font
+  // competed with the page on slow connections (+~450ms Lighthouse mobile LCP).
+  preload: false,
 })
 
 export const metadata: Metadata = {
