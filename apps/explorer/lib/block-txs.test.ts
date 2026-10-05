@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BLOCK_TXS_PER_PAGE, blockTxsHref, parseTxsPage, txsLabel, txsPageCount } from '@/lib/block-txs'
+import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, parseTxsPage, txsLabel, txsPageCount } from '@/lib/block-txs'
 
 describe('parseTxsPage', () => {
   it.each([['2', 2], ['3', 3], ['10', 10], ['2000', 2000]])('%s is page %i', (raw, page) => {
@@ -19,6 +19,24 @@ describe('txsPageCount', () => {
 
   it('pins the page size the route and the query share', () => {
     expect(BLOCK_TXS_PER_PAGE).toBe(50)
+  })
+})
+
+describe('pageExists', () => {
+  it('page 1 is the block page itself, whatever the block is made of', () => {
+    expect(pageExists(1, true, 0)).toBe(true)
+    expect(pageExists(1, false, 141)).toBe(true)
+  })
+  it('later pages need the block in the DB and enough transactions', () => {
+    expect(pageExists(2, true, 141)).toBe(true)
+    expect(pageExists(3, true, 141)).toBe(true)
+    expect(pageExists(4, true, 141)).toBe(false)
+    expect(pageExists(2, true, 51)).toBe(true)
+    expect(pageExists(2, true, 50)).toBe(false)
+    expect(pageExists(2, true, 0)).toBe(false)
+  })
+  it('an RPC-only block has no rows to page', () => {
+    expect(pageExists(2, false, 141)).toBe(false)
   })
 })
 

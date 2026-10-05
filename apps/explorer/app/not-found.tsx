@@ -41,7 +41,7 @@ export default function NotFound() {
           rel="noopener noreferrer"
           className="text-ink2 hover:underline"
         >
-          Search on {chainConfig.externalExplorer} ↗
+          Look it up on {chainConfig.externalExplorer} <span aria-hidden="true">↗</span>
         </a>
       </div>
     </div>

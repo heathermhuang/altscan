@@ -84,7 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
         <Header />
-        <main id="main" tabIndex={-1} className="flex-1 focus:outline-none">{children}</main>
+        <main id="main" tabIndex={-1} className="flex-1 scroll-mt-32 focus:outline-none">{children}</main>
         <Footer />
         <WebMcpProvider />
       </body>

@@ -15,7 +15,7 @@ import { shortenAddress, toChecksumAddress } from '@/lib/address-display'
 import { swallow } from '@/lib/observability'
 import { BlockTape } from '@/components/home/BlockTape'
 import { encodeTape, spreadSeconds, tapeWindow, toTapeTuple } from '@/lib/tape'
-import { BLOCK_TXS_PER_PAGE, blockTxsHref, txsLabel, txsPageCount } from '@/lib/block-txs'
+import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, txsLabel, txsPageCount } from '@/lib/block-txs'
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
 // (cache() dedupes).
@@ -28,6 +28,20 @@ const getBlock = cache(async (blockNumber: number) => {
   const rpcBlock: RpcBlock | null = !dbBlock ? await fetchBlockFromRpc(blockNumber) : null
   return { dbBlock, rpcBlock }
 })
+
+// Pages after the first are DB-only: they can never be served from an RPC block, and every (block,
+// page) is its own ISR path, so a node call per miss would multiply upstream load for no render.
+// Unlike getBlock this does not swallow a DB error: a failed lookup must be an uncached error
+// response, not a 404 that ISR caches for a minute.
+const getDbBlock = cache(async (blockNumber: number) => {
+  const [row] = await db.select().from(schema.blocks).where(eq(schema.blocks.number, blockNumber)).limit(1)
+  return row ?? null
+})
+
+async function lookupBlock(blockNumber: number, page: number) {
+  if (page === 1) return getBlock(blockNumber)
+  return { dbBlock: await getDbBlock(blockNumber), rpcBlock: null }
+}
 
 // Missing entities return noindex metadata instead of throwing notFound():
 // on this Next version, notFound() from metadata/body during an on-demand
@@ -44,10 +58,9 @@ export async function blockMetadata(blockNumber: number, page: number | null): P
   if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber) || page === null) {
     return { title: 'Block Not Found', ...NOT_FOUND_METADATA }
   }
-  const { dbBlock, rpcBlock } = await getBlock(blockNumber)
+  const { dbBlock, rpcBlock } = await lookupBlock(blockNumber, page)
   const block = dbBlock ?? rpcBlock
-  // Pages past the first only exist for an indexed block that has that many transactions.
-  if (!block || (page > 1 && (!dbBlock || page > txsPageCount(block.txCount)))) {
+  if (!block || !pageExists(page, !!dbBlock, block.txCount)) {
     return { title: 'Block Not Found', ...NOT_FOUND_METADATA }
   }
   // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
@@ -70,13 +83,11 @@ export async function blockMetadata(blockNumber: number, page: number | null): P
 export async function BlockView({ blockNumber, page }: { blockNumber: number; page: number | null }) {
   if (isNaN(blockNumber) || blockNumber < 0 || !Number.isInteger(blockNumber) || page === null) notFound()
 
-  const { dbBlock, rpcBlock } = await getBlock(blockNumber)
+  const { dbBlock, rpcBlock } = await lookupBlock(blockNumber, page)
   const block = dbBlock ?? rpcBlock
-  if (!block) notFound()
+  if (!block || !pageExists(page, !!dbBlock, block.txCount)) notFound()
 
   const fromRpc = !dbBlock && !!rpcBlock
-  // Later pages page through our own rows: an RPC block has none, and a page past the end is nothing.
-  if (page > 1 && (fromRpc || page > txsPageCount(block.txCount))) notFound()
 
   // Ordered by position in the block so a page boundary is the same on every render.
   const txs = fromRpc
@@ -218,7 +229,7 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
       ) : (
         <p className="text-mut">{page > 1 ? 'No transactions on this page.' : 'No transactions in this block.'}</p>
       )}
-      {!fromRpc && (
+      {!fromRpc && txsPageCount(block.txCount) > 1 && (
         <div className="mt-4 flex justify-end">
           <Pagination
             page={page}

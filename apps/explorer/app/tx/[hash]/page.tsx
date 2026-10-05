@@ -574,7 +574,7 @@ export default async function TxDetailPage({
             </h2>
             {!transfersAllShown && (
               <a href="#token-transfers" className="shrink-0 text-sm text-acc-ink hover:underline">
-                All {transferInfos.length}{transfersTruncated ? '+' : ''} transfers ↓
+                All {transferInfos.length}{transfersTruncated ? '+' : ''} transfers <span aria-hidden="true">↓</span>
               </a>
             )}
           </div>

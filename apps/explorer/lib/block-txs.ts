@@ -19,6 +19,14 @@ export function txsPageCount(txCount: number): number {
   return Math.max(1, Math.ceil(txCount / BLOCK_TXS_PER_PAGE))
 }
 
+/**
+ * Whether /blocks/<n>/txs/<page> is a real page. Page 1 is the block page itself; later pages page
+ * through our own rows, so they need the block in the DB (an RPC block has none) and enough transactions.
+ */
+export function pageExists(page: number, dbBlockPresent: boolean, txCount: number): boolean {
+  return page === 1 || (dbBlockPresent && page <= txsPageCount(txCount))
+}
+
 /** Page 1 is the block's canonical URL; later pages are a path segment, not `?page=`, so the route stays static. */
 export function blockTxsHref(blockNumber: number, page: number): string {
   return page === 1 ? `/blocks/${blockNumber}` : `/blocks/${blockNumber}/txs/${page}`

@@ -63,18 +63,21 @@ function Logo() {
 export function Header() {
   const [open, setOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
+  const menuPanel = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
 
   // Close mobile menu on route change
   useEffect(() => { setOpen(false) }, [pathname])
 
-  // Escape closes the mobile menu and hands focus back to the hamburger.
+  // Escape closes the open mobile menu. Focus goes back to the hamburger only if it was in the menu
+  // (or on the button), so Escape in the search box still leaves the caret there.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || e.isComposing) return
+      const t = e.target as Node
+      if (menuButton.current?.contains(t) || menuPanel.current?.contains(t)) menuButton.current?.focus()
       setOpen(false)
-      menuButton.current?.focus()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -151,7 +154,7 @@ export function Header() {
           {/* Search: the home hero owns it on `/`. Last in the row, so when xl's 1248px has no room for
               it beside the nav it wraps onto its own row (as it always does below xl) instead of the nav. */}
           {pathname !== '/' && (
-            <div className="basis-full xl:basis-auto xl:w-[20rem] xl:shrink-0">
+            <div className="basis-full xl:basis-auto xl:w-[19rem] xl:shrink-0">
               <SearchBar />
             </div>
           )}
@@ -160,7 +163,7 @@ export function Header() {
 
       {/* -- Mobile menu panel -- */}
       {open && (
-        <div className="lg:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
+        <div ref={menuPanel} className="lg:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 pt-3 pb-1">
             <NetworkSwitcher />
           </div>
