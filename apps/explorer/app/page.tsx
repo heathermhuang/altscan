@@ -10,15 +10,16 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdSlot } from '@/components/ads/AdSlot'
 import { swallow, swallowed } from '@/lib/observability'
-import { gasPct, type TapeTuple } from '@/lib/tape'
+import { encodeTape, gasPct, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
 // Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
 export const revalidate = 60
 
-// The tape fills the content column (1248px at 34px/s is ~37s of chain time): BNB 0.45s -> 85 blocks, ETH 12s -> 7.
-const TAPE_N = Math.min(100, Math.max(7, Math.ceil(38 / chainConfig.blockTime)))
+// The tape fills the content column (1248px at 34px/s, ~37s), whose left ~120px is under a fade:
+// ~34s of chain time shows it all. BNB 0.45s -> 76 blocks, ETH 12s -> 7 (the tables' minimum).
+const TAPE_N = Math.min(100, Math.max(7, Math.ceil(34 / chainConfig.blockTime)))
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -309,7 +310,7 @@ export default async function HomePage() {
         </div>
       </div>
 
-      <BlockTape tuples={tapeTuples} chainName={chainConfig.name} />
+      <BlockTape tape={encodeTape(tapeTuples)} chainName={chainConfig.name} />
 
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Stats */}

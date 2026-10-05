@@ -46,6 +46,27 @@ export function ratePerMin(tuples: TapeTuple[]): number | null {
   return ((hi[0] - lo[0]) / dt) * 60
 }
 
+/**
+ * Tuples as one compact string for the client island: "n0,t0|dn,dt,txs,gas;…", offsets from the
+ * newest block. Absolute block numbers and timestamps are ~19 high-entropy digits a block, and the
+ * homepage's HTML has to stay inside one TCP window (Lighthouse mobile LCP).
+ */
+export function encodeTape(tuples: TapeTuple[]): string {
+  if (!tuples.length) return ''
+  const [n0, t0] = tuples.reduce((a, b) => (b[0] > a[0] ? b : a))
+  return `${n0},${t0}|` + tuples.map(([n, t, txs, gas]) => `${n0 - n},${t0 - t},${txs},${gas}`).join(';')
+}
+
+export function decodeTape(s: string): TapeTuple[] {
+  if (!s) return []
+  const [head, rows] = s.split('|')
+  const [n0, t0] = head.split(',').map(Number)
+  return rows.split(';').map(r => {
+    const [dn, dt, txs, gas] = r.split(',').map(Number)
+    return [n0 - dn, t0 - dt, txs, gas]
+  })
+}
+
 type Gas = bigint | string | number | null | undefined
 
 /** Gas used as a whole percent of the limit, 0-100; 0 when the limit is zero or a value is not an integer. */

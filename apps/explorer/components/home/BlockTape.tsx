@@ -1,6 +1,6 @@
 'use client'
 import { useState, type CSSProperties, type KeyboardEvent, type SyntheticEvent } from 'react'
-import { ratePerMin, spreadSeconds, type TapeTuple } from '@/lib/tape'
+import { decodeTape, ratePerMin, spreadSeconds } from '@/lib/tape'
 
 const LEGEND = 'width = block time · fill = gas used · newest on the right'
 
@@ -19,10 +19,11 @@ const LABEL_MIN_SECONDS = 3.5
 
 /**
  * Latest blocks as tiles: width = how long the block took, fill = gas used, newest at the right.
- * `tuples` is what the page's latest-blocks query returns, newest first (any order works).
+ * `tape` is the page's latest-blocks query in `encodeTape` form (any order works).
  * Widths are pure CSS (app/globals.css, "Block tape"), so nothing here measures layout.
  */
-export function BlockTape({ tuples, chainName }: { tuples: TapeTuple[]; chainName: string }) {
+export function BlockTape({ tape, chainName }: { tape: string; chainName: string }) {
+  const tuples = decodeTape(tape)
   const blocks = spreadSeconds(tuples) // oldest first, which is also left to right
   const rate = ratePerMin(tuples)
   const newest = blocks.length ? blocks[blocks.length - 1].n : null

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gasPct, ratePerMin, spreadSeconds, type TapeTuple } from '@/lib/tape'
+import { decodeTape, encodeTape, gasPct, ratePerMin, spreadSeconds, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -54,6 +54,23 @@ describe('ratePerMin', () => {
   it('measures blocks per minute between the lowest and highest block, in any order', () => {
     // 60 blocks over 30 s = 2 blocks/s = 120/min
     expect(ratePerMin([t(160, 130), t(100, 100), t(130, 115)])).toBe(120)
+  })
+})
+
+describe('encodeTape / decodeTape', () => {
+  it('round-trips tuples in any order', () => {
+    const tuples: TapeTuple[] = [[125764193, 1791156461, 41, 18], [125764192, 1791156460, 45, 9], [125764190, 1791156459, 0, 0]]
+    expect(decodeTape(encodeTape(tuples))).toEqual(tuples)
+    expect(decodeTape(encodeTape([...tuples].reverse()))).toEqual([...tuples].reverse())
+  })
+
+  it('stores offsets from the newest block, not absolute values', () => {
+    expect(encodeTape([[100, 5000, 3, 50], [99, 4999, 2, 40]])).toBe('100,5000|0,0,3,50;1,1,2,40')
+  })
+
+  it('encodes nothing as an empty string', () => {
+    expect(encodeTape([])).toBe('')
+    expect(decodeTape('')).toEqual([])
   })
 })
 
