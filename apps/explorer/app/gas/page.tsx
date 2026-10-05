@@ -50,12 +50,15 @@ export default async function GasPage() {
           ],
         }) }}
       />
-      <h1 className="text-2xl font-bold mb-2">Gas Tracker</h1>
-      <p className="text-gray-500 text-sm mb-8">
-        Live {chainConfig.name} gas prices updated every block. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
-        {hasGasFloor && ` ${chainConfig.name} maintains a low minimum gas price of ${floorGwei} Gwei with typical confirmation in 1-3 seconds.`}
-        {chainConfig.features.hasEip1559 && ` ${chainConfig.name} gas fluctuates with network demand, using EIP-1559 base fee mechanics.`}
-      </p>
+      <div className="mb-5">
+        <p className="k">{'// '}gas</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Gas Tracker</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink2">
+          Live {chainConfig.name} gas prices updated every block. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
+          {hasGasFloor && ` ${chainConfig.name} maintains a low minimum gas price of ${floorGwei} Gwei with typical confirmation in 1-3 seconds.`}
+          {chainConfig.features.hasEip1559 && ` ${chainConfig.name} gas fluctuates with network demand, using EIP-1559 base fee mechanics.`}
+        </p>
+      </div>
 
       <AdSlot
         context="gas"
@@ -63,27 +66,27 @@ export default async function GasPage() {
         className="mb-8"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <GasCard label="Slow"     gwei={formatGwei(slow)}     est="~30s" color="green" />
-        <GasCard label="Standard" gwei={formatGwei(standard)} est="~15s" color="yellow" />
-        <GasCard label="Fast"     gwei={formatGwei(fast)}     est="~5s"  color="orange" />
-      </div>
+      <dl className="ledger [--cols:3] mb-8">
+        <Fact label="Slow"     gwei={formatGwei(slow)}     est="~30s" />
+        <Fact label="Standard" gwei={formatGwei(standard)} est="~15s" />
+        <Fact label="Fast"     gwei={formatGwei(fast)}     est="~5s" />
+      </dl>
 
-      <div className="bg-white rounded-xl border shadow-sm p-6 mb-8">
-        <h2 className="font-semibold mb-3 text-gray-700">Current Base Fee</h2>
-        <p className="text-4xl font-bold">
+      <div className="mb-8 rounded-xl border border-hair bg-card p-6">
+        <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">Current Base Fee</h2>
+        <p className="font-mono text-4xl font-semibold text-ink">
           {formatGwei(baseFee)}
-          <span className="text-xl font-normal text-gray-500 ml-2">Gwei</span>
+          <span className="ml-2 font-sans text-xl font-normal text-mut">Gwei</span>
         </p>
         {hasGasFloor && baseFee < MIN_GAS_PRICE && baseFee > 0n && (
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="mt-1 text-xs text-mut">
             Base fee is below the {floorGwei} Gwei minimum. Effective gas price = max(base fee, {floorGwei} Gwei).
           </p>
         )}
       </div>
 
-      <div className="bg-white rounded-xl border shadow-sm p-4">
-        <p className="text-sm text-gray-500">
+      <div className="rounded-xl border border-hair bg-card p-4">
+        <p className="text-sm text-ink2">
           Gas prices fetched live from {chainConfig.name} RPC.
           {hasGasFloor
             ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the base fee is lower. Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
@@ -95,22 +98,12 @@ export default async function GasPage() {
   )
 }
 
-function GasCard({ label, gwei, est, color }: {
-  label: string
-  gwei: string
-  est: string
-  color: string
-}) {
-  const colorMap: Record<string, string> = {
-    green:  'border-green-200 bg-green-50',
-    yellow: 'border-yellow-200 bg-yellow-50',
-    orange: 'border-orange-200 bg-orange-50',
-  }
+function Fact({ label, gwei, est }: { label: string; gwei: string; est: string }) {
   return (
-    <div className={`rounded-xl border p-6 text-center ${colorMap[color] ?? 'border-gray-200 bg-white'}`}>
-      <p className="text-lg font-medium mb-2">{label}</p>
-      <p className="text-3xl font-bold mb-1">{gwei}</p>
-      <p className="text-sm text-gray-500">Gwei · {est}</p>
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-xl font-semibold text-ink">{gwei}</dd>
+      <dd className="mt-0.5 text-xs text-mut">Gwei · {est}</dd>
     </div>
   )
 }
