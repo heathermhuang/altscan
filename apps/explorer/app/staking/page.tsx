@@ -65,15 +65,18 @@ export default async function StakingPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(stakingFaqJsonLd) }}
       />
-      <h1 className="text-2xl font-bold mb-2">Ethereum Staking</h1>
-      <p className="text-gray-500 text-sm mb-8">
-        Ethereum uses Proof of Stake consensus since The Merge (September 2022).
-        Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY).
-        This page shows live staking statistics derived from the ETH2 deposit contract.
-      </p>
+      <div className="mb-5">
+        <p className="k">{'// '}staking</p>
+        <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Ethereum Staking</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink2">
+          Ethereum uses Proof of Stake consensus since The Merge (September 2022).
+          Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY).
+          This page shows live staking statistics derived from the ETH2 deposit contract.
+        </p>
+      </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+      <dl className="ledger [--cols:3] mb-6">
         <StatCard
           label="Active Validators"
           value={stats?.validatorCount ? formatNumber(stats.validatorCount) : '—'}
@@ -91,7 +94,7 @@ export default async function StakingPage() {
           value="~3-4%"
           note="Varies with total staked ETH"
         />
-      </div>
+      </dl>
 
       <AdSlot
         context="staking"
@@ -101,9 +104,9 @@ export default async function StakingPage() {
       />
 
       {/* How staking works */}
-      <div className="bg-white rounded-xl border shadow-sm p-6 mb-6">
-        <h2 className="font-semibold text-gray-800 mb-4">How Ethereum Staking Works</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700">
+      <div className="mb-6 rounded-xl border border-hair bg-card p-6">
+        <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">How Ethereum Staking Works</h2>
+        <div className="grid grid-cols-1 gap-6 text-sm text-ink md:grid-cols-2">
           <div className="space-y-3">
             <Step n={1} title="Deposit 32 ETH" detail="Send 32 ETH to the deposit contract to activate a validator" />
             <Step n={2} title="Run a Validator Node" detail="Run execution + consensus clients (e.g., Geth + Lighthouse)" />
@@ -118,18 +121,18 @@ export default async function StakingPage() {
       </div>
 
       {/* Deposit contract info */}
-      <div className="bg-white rounded-xl border shadow-sm p-4">
-        <h2 className="font-semibold mb-3">ETH2 Deposit Contract</h2>
-        <div className="flex items-center gap-2 font-mono text-sm text-gray-700">
-          <span>0x00000000219ab540356cbb839cbe05303d7705fa</span>
+      <div className="rounded-xl border border-hair bg-card p-4">
+        <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">ETH2 Deposit Contract</h2>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-sm text-ink">
+          <span className="break-all">0x00000000219ab540356cbb839cbe05303d7705fa</span>
           <Link
             href="/address/0x00000000219ab540356cbb839cbe05303d7705fa"
-            className={`${chainConfig.theme.linkText} hover:underline text-xs ml-2`}
+            className="text-xs text-acc-ink hover:underline"
           >
             View →
           </Link>
         </div>
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="mt-1 text-xs text-mut">
           The canonical one-way deposit contract deployed on the Ethereum mainnet.
           All validator deposits are made here.
         </p>
@@ -144,10 +147,10 @@ function StatCard({ label, value, note }: {
   note: string
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-      <p className="text-sm text-gray-500 mb-2">{label}</p>
-      <p className="text-2xl font-bold mb-1">{value}</p>
-      <p className="text-xs text-gray-400">{note}</p>
+    <div>
+      <dt className="k">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
+      <dd className="mt-0.5 break-words text-xs text-mut">{note}</dd>
     </div>
   )
 }
@@ -155,12 +158,12 @@ function StatCard({ label, value, note }: {
 function Step({ n, title, detail }: { n: number; title: string; detail: string }) {
   return (
     <div className="flex gap-3">
-      <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600 mt-0.5">
+      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-hair2 font-mono text-xs font-semibold text-ink2">
         {n}
       </span>
       <div>
-        <p className="font-medium">{title}</p>
-        <p className="text-gray-500">{detail}</p>
+        <p className="font-medium text-ink">{title}</p>
+        <p className="text-ink2">{detail}</p>
       </div>
     </div>
   )
@@ -169,10 +172,10 @@ function Step({ n, title, detail }: { n: number; title: string; detail: string }
 function InfoRow({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="flex gap-3">
-      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-gray-300 mt-2" />
+      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-hair3" />
       <div>
-        <p className="font-medium">{title}</p>
-        <p className="text-gray-500">{detail}</p>
+        <p className="font-medium text-ink">{title}</p>
+        <p className="text-ink2">{detail}</p>
       </div>
     </div>
   )
