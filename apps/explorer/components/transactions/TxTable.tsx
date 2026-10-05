@@ -29,16 +29,18 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
   return (
     <div className="bg-card rounded-xl border border-hair overflow-hidden">
       <div className="overflow-x-auto">
-      <table className="dt">
+      {/* `.dt-tx` (app/globals.css) turns each row into a three-line card under 640px from these same
+          cells, so every column is in the DOM at every width; `compact` only drops To from 640px up. */}
+      <table className={compact ? 'dt dt-tx dt-tx-c' : 'dt dt-tx'}>
         <caption className="sr-only">{chainConfig.name} transactions</caption>
-        <thead>
+        <thead className="max-sm:sr-only">
           <tr>
             <th scope="col">Tx Hash</th>
-            <th scope="col" className="hidden sm:table-cell">Age</th>
+            <th scope="col">Age</th>
             <th scope="col">From</th>
-            {!compact && <th scope="col" className="hidden sm:table-cell">To</th>}
+            <th scope="col">To</th>
             <th scope="col">Value</th>
-            {showStatus && <th scope="col" className="hidden sm:table-cell">Status</th>}
+            {showStatus && <th scope="col">Status</th>}
           </tr>
         </thead>
         <tbody>
@@ -49,30 +51,31 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
                   {shortHash(tx.hash)}
                 </Link>
               </td>
-              <td className="text-mut hidden sm:table-cell">{timeAgo(new Date(tx.timestamp))}</td>
+              <td className="text-mut">{timeAgo(new Date(tx.timestamp))}</td>
               <td>
                 <AddressLink address={tx.fromAddress} />
               </td>
-              {!compact && (
-                <td className="hidden sm:table-cell">
-                  {tx.toAddress ? (
-                    <AddressLink address={tx.toAddress} />
-                  ) : (
-                    <span className="text-mut">Contract Creation</span>
-                  )}
-                </td>
-              )}
+              <td>
+                {tx.toAddress ? (
+                  <AddressLink address={tx.toAddress} />
+                ) : (
+                  <span className="text-mut">Contract Creation</span>
+                )}
+              </td>
               <td>{formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}</td>
               {showStatus && (
-                <td className="hidden sm:table-cell">
-                  {tx.status == null ? (
+                tx.status == null ? (
+                  <td>
                     <span className="text-mut">—</span>
-                  ) : (
+                  </td>
+                ) : (
+                  // tx-ok / tx-bad colour the phone status dot; the badge text stays as its label.
+                  <td className={tx.status ? 'tx-ok' : 'tx-bad'}>
                     <Badge variant={tx.status ? 'success' : 'fail'}>
                       {tx.status ? 'Success' : 'Failed'}
                     </Badge>
-                  )}
-                </td>
+                  </td>
+                )
               )}
             </tr>
           ))}
