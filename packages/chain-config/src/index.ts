@@ -50,6 +50,14 @@ export type ChainTheme = {
   accentTint: string
   /** Text/marks drawn on an `accentHex` fill, hex (`--acc-on`) */
   accentOn: string
+  /** `accentHex` on the dark scheme (prefers-color-scheme: dark), hex (`--acc-d`) */
+  accentHexDark: string
+  /** `accentInk` on the dark scheme: links and text on a dark surface, hex (`--acc-ink-d`) */
+  accentInkDark: string
+  /** `accentTint` on the dark scheme: tile tracks and active backgrounds, hex (`--acc-t-d`) */
+  accentTintDark: string
+  /** Text/marks drawn on an `accentHexDark` fill, hex (`--acc-on-d`) */
+  accentOnDark: string
 }
 
 export type ChainFeatures = {
@@ -308,6 +316,10 @@ export const BSC: ChainConfig = {
     accentInk: '#7a5c00',
     accentTint: '#F8E9A6',
     accentOn: '#1a1400',
+    accentHexDark: '#F2C200',
+    accentInkDark: '#f5d76e',
+    accentTintDark: '#2a2410',
+    accentOnDark: '#1a1400',
   },
   features: {
     hasValidators: true,
@@ -400,6 +412,10 @@ export const ETH: ChainConfig = {
     accentInk: '#1E3A8A',
     accentTint: '#E4E9F6',
     accentOn: '#ffffff',
+    accentHexDark: '#6f8fe8',
+    accentInkDark: '#a9bdf5',
+    accentTintDark: '#16203d',
+    accentOnDark: '#0b0b0f',
   },
   features: {
     hasValidators: false,
