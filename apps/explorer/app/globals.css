@@ -113,7 +113,9 @@
     background: var(--bg);
     border-bottom: 1px solid var(--hair);
   }
-  .dt th {
+  /* :where() keeps th/td at class specificity, so a utility on a cell (text-right, py-8) wins
+     instead of silently losing to these defaults. */
+  .dt :where(th) {
     text-align: left;
     padding: 8px 12px;
     font-size: 11px;
@@ -122,7 +124,7 @@
     letter-spacing: 0.06em;
     color: var(--mut);
   }
-  .dt td {
+  .dt :where(td) {
     padding: 8px 12px;
   }
   .dt tbody tr + tr {
@@ -135,8 +137,7 @@
     background: var(--bg);
   }
   @media (min-width: 640px) {
-    .dt th,
-    .dt td {
+    .dt :where(th, td) {
       padding-inline: 16px;
     }
   }
