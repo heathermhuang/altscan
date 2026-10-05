@@ -144,6 +144,17 @@ describe('flag polarity', () => {
     expect(read({ TOKEN_HEAL_INTERVAL_MIN: '5x' }).config.tokenHeal.intervalMin).toBe(10)
   })
 
+  it('TOKEN_HEAL_INTERVAL_MIN tops out at a day, so setInterval can never exceed 2^31-1 ms', () => {
+    expect(read({ TOKEN_HEAL_INTERVAL_MIN: '1440' }).config.tokenHeal.intervalMin).toBe(1440)
+    // Past 2^31-1 ms Node fires the timer every 1 ms; 35,792 min is the first such value.
+    for (const raw of ['1441', '35792', '99999999999']) {
+      const { intervalMin } = read({ TOKEN_HEAL_INTERVAL_MIN: raw }).config.tokenHeal
+      expect(intervalMin).toBe(10)
+      expect(intervalMin * 60_000).toBeLessThanOrEqual(2 ** 31 - 1)
+    }
+    expect(1440 * 60_000).toBeLessThanOrEqual(2 ** 31 - 1)
+  })
+
   it('GAP_HEAL_ENABLED turns on only for exactly "1"', () => {
     expect(read({ GAP_HEAL_ENABLED: '1' }).config.gapHeal.enabled).toBe(true)
   })

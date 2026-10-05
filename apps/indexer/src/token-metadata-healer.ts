@@ -37,6 +37,10 @@ const MAX_SKIPPED = 2_000
 // Address -> when it was last tried. In memory on purpose: a deploy retries the
 // top of the list once, which is harmless, and no schema change is needed.
 const tried = new Map<string, number>()
+// Address -> runs it has failed for a transport reason (see decideHeal). Cleared
+// wholesale past this size rather than aged: entries are one number per address.
+const strikes = new Map<string, number>()
+const MAX_STRIKE_ENTRIES = 5_000
 let running = false
 let providerCursor = 0
 
@@ -48,6 +52,7 @@ async function runOnce(providers: readonly JsonRpcProvider[], batchSize: number)
   const started = Date.now()
   try {
     pruneTried(tried, started)
+    if (strikes.size > MAX_STRIKE_ENTRIES) strikes.clear()
     const db = getMaintenanceDb()
     // Candidates come back in holder order; the already-tried ones are skipped in
     // JS (a NOT IN list that long would also overflow drizzle's recursive sql.join).
@@ -86,8 +91,10 @@ async function runOnce(providers: readonly JsonRpcProvider[], batchSize: number)
         TOKEN_TIMEOUT_MS,
         'token-heal fetch',
       ).catch(() => null) // a hung endpoint: no answer, so a transport failure
-      const step = decideHeal(row, meta, streak)
+      const step = decideHeal(row, meta, streak, strikes.get(row.address) ?? 0)
       streak = step.streak
+      if (step.strikes > 0) strikes.set(row.address, step.strikes)
+      else strikes.delete(row.address)
       if (step.transportFailed) transportErrors++
       if (step.patch) {
         await db.update(schema.tokens).set(step.patch).where(eq(schema.tokens.address, row.address))

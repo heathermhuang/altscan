@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Interface, JsonRpcProvider, Network, encodeBytes32String } from 'ethers'
 import {
-  HEAL_RETRY_MS, TRANSPORT_STREAK_LIMIT, UNKNOWN_NAME, UNKNOWN_SYMBOL,
+  HEAL_RETRY_MS, TRANSPORT_STREAK_LIMIT, TRANSPORT_STRIKE_LIMIT, UNKNOWN_NAME, UNKNOWN_SYMBOL,
   decideHeal, fetchTokenMetadata, isTransportError, planHeal, pruneTried, selectHealBatch,
   type CallRunner, type FetchedTokenMetadata, type HealRow, type TokenMetadata,
 } from './token-metadata'
@@ -261,6 +261,11 @@ describe('isTransportError', () => {
   })
 
   it.each([
+    ['JSON-RPC -32007', { code: 'CALL_EXCEPTION', info: { error: { code: -32007, message: 'denied' } } }],
+    ['JSON-RPC -32029', { code: 'CALL_EXCEPTION', info: { error: { code: -32029, message: 'denied' } } }],
+    ['"Request limit reached"', { code: 'CALL_EXCEPTION', info: { error: { code: -32000, message: 'Request limit reached' } } }],
+    ['a "limit reached" message', { code: 'UNKNOWN_ERROR', message: 'daily limit reached for this key' }],
+    ['a "request limit" message', { code: 'UNKNOWN_ERROR', message: 'exceeded the request limit' }],
     ['a rate-limit message under another code', { code: 'UNKNOWN_ERROR', message: 'method eth_call in batch triggered rate limit' }],
     ['"Too Many Requests"', { code: 'CALL_EXCEPTION', info: { error: { code: -32000, message: 'Too Many Requests' } } }],
     ['HTTP 429', { code: 'SERVER_ERROR', message: 'bad response (status=429, ...)' }],
@@ -289,6 +294,14 @@ describe('isTransportError', () => {
       code: 'CALL_EXCEPTION',
       message: 'execution reverted: rate limit exceeded',
       info: { error: { code: 3, message: 'execution reverted: rate limit exceeded', data: '0x08c379a0aa' } },
+    })).toBe(false)
+  })
+
+  it('does not let a revert reason that says "limit reached" count as transport', () => {
+    expect(isTransportError({
+      code: 'CALL_EXCEPTION',
+      message: 'execution reverted: supply limit reached',
+      info: { error: { code: -32000, message: 'execution reverted: supply limit reached' } },
     })).toBe(false)
   })
 
@@ -376,5 +389,45 @@ describe('decideHeal', () => {
     const answered = decideHeal(row(), fetched({ ...dark }), 2)
     expect(answered).toMatchObject({ streak: 0, stop: false })
     expect(decideHeal(row(), failing, answered.streak).stop).toBe(false)
+  })
+})
+
+describe('decideHeal transport strikes', () => {
+  const failing: FetchedTokenMetadata = { ...meta(), name: null, symbol: null, decimals: null, totalSupply: null, transportFailed: true }
+  const answered: FetchedTokenMetadata = { ...failing, transportFailed: false }
+
+  it('keeps retrying a token after the first and second transport failures', () => {
+    expect(decideHeal(row(), failing, 0, 0)).toMatchObject({ markTried: false, strikes: 1 })
+    expect(decideHeal(row(), failing, 0, 1)).toMatchObject({ markTried: false, strikes: 2 })
+  })
+
+  it('marks it tried like a revert after the strike limit, and starts the next window clean', () => {
+    expect(TRANSPORT_STRIKE_LIMIT).toBe(3)
+    const step = decideHeal(row(), failing, 0, TRANSPORT_STRIKE_LIMIT - 1)
+    expect(step).toMatchObject({ markTried: true, transportFailed: true, strikes: 0 })
+  })
+
+  it('counts a timed-out fetch as a strike', () => {
+    expect(decideHeal(row(), null, 0, 2)).toMatchObject({ markTried: true, strikes: 0 })
+    expect(decideHeal(row(), null, 0, 0)).toMatchObject({ markTried: false, strikes: 1 })
+  })
+
+  it('forgets the strikes once the token is fetched without a transport failure', () => {
+    expect(decideHeal(row(), answered, 0, 2)).toMatchObject({ markTried: true, strikes: 0 })
+    expect(decideHeal(row(), { ...meta(), transportFailed: false }, 0, 2)).toMatchObject({ markTried: true, strikes: 0 })
+  })
+
+  it('still lets a poisoned token stop the run only until its strikes run out', () => {
+    // Three runs fail on the same head token: the third marks it tried, so the fourth skips it.
+    let strikes = 0
+    const tried = new Map<string, number>()
+    for (let run = 0; run < TRANSPORT_STRIKE_LIMIT; run++) {
+      const picked = selectHealBatch([row()], tried, 1, 40)
+      expect(picked).toHaveLength(1)
+      const step = decideHeal(picked[0], failing, 0, strikes)
+      strikes = step.strikes
+      if (step.markTried) tried.set(row().address, 1)
+    }
+    expect(selectHealBatch([row()], tried, 2, 40)).toEqual([])
   })
 })

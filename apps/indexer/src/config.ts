@@ -316,7 +316,8 @@ export function readIndexerConfig(
   const tokenHeal = {
     /** ON unless '0'. Re-fetches token metadata a one-shot first-sight fetch left as a placeholder. */
     enabled: r.enabledUnlessZero('TOKEN_HEAL_ENABLED'),
-    intervalMin: r.int('TOKEN_HEAL_INTERVAL_MIN', 10, { min: 1 }),
+    /** Capped at a day: past 2^31-1 ms (~35,791 min) Node clamps a timer to 1 ms and the healer would fire every millisecond. */
+    intervalMin: r.int('TOKEN_HEAL_INTERVAL_MIN', 10, { min: 1, max: 1440 }),
     /** Tokens tried per run; each costs ~4 sequential eth_calls, so the ceiling is deliberate. */
     batch: r.int('TOKEN_HEAL_BATCH', 40, { min: 1, max: 200 }),
   }
