@@ -36,8 +36,9 @@ export async function Footer() {
 
   return (
     <footer className="bg-card border-t border-hair text-mut text-sm mt-auto">
-      {/* The footer ad variant is styled for a dark surface (translucent gray-950). */}
-      <div className="bg-ink">
+      {/* The footer ad variant is styled for a dark surface (translucent gray-950): --band stays dark
+          in both schemes, where --ink turns near-white in dark. */}
+      <div className="bg-band">
         <AdReserve
           context="footer"
           placement="footer_strip"

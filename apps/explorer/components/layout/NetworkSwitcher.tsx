@@ -86,8 +86,13 @@ export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | '
             const href = isCurrent ? null : `${PEER_URL}${pathname}`
             const mark = (
               <span
-                className="w-7 h-7 rounded-[3px] flex items-center justify-center shrink-0"
-                style={{ backgroundColor: net.theme.accentHex, color: net.theme.accentOn }}
+                className="net-mark w-7 h-7 rounded-[3px] flex items-center justify-center shrink-0"
+                style={{
+                  '--nm-l': net.theme.accentHex,
+                  '--nm-on-l': net.theme.accentOn,
+                  '--nm-d': net.theme.accentHexDark,
+                  '--nm-on-d': net.theme.accentOnDark,
+                } as React.CSSProperties}
               >
                 {net.icon}
               </span>

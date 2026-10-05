@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import localFont from 'next/font/local'
 import Script from 'next/script'
@@ -50,16 +50,32 @@ export const metadata: Metadata = {
   },
 }
 
+// Follows the OS scheme (no toggle): the browser chrome and form controls switch with it, and the
+// theme-color of the address bar matches the page background in each scheme.
+export const viewport: Viewport = {
+  colorScheme: 'light dark',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fbfbfc' },
+    { media: '(prefers-color-scheme: dark)', color: '#0b0b0f' },
+  ],
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable}`}
       style={{
-        '--acc': chainConfig.theme.accentHex,
-        '--acc-ink': chainConfig.theme.accentInk,
-        '--acc-t': chainConfig.theme.accentTint,
-        '--acc-on': chainConfig.theme.accentOn,
+        // Both schemes' accents, as -l (light) and -d (dark). globals.css maps --acc* to one
+        // set per prefers-color-scheme: an inline --acc would beat any stylesheet rule.
+        '--acc-l': chainConfig.theme.accentHex,
+        '--acc-ink-l': chainConfig.theme.accentInk,
+        '--acc-t-l': chainConfig.theme.accentTint,
+        '--acc-on-l': chainConfig.theme.accentOn,
+        '--acc-d': chainConfig.theme.accentHexDark,
+        '--acc-ink-d': chainConfig.theme.accentInkDark,
+        '--acc-t-d': chainConfig.theme.accentTintDark,
+        '--acc-on-d': chainConfig.theme.accentOnDark,
       } as React.CSSProperties}
     >
       <body className="bg-canvas text-ink font-sans min-h-screen flex flex-col">
