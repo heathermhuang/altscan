@@ -84,12 +84,11 @@ export const fetchTxPage = createPageCache(
 export const fetchBlockPage = createPageCache(
   'blocks',
   BLOCKS_REVALIDATE_SECONDS,
-  // `limit` is for page 1 only (the tape wants more rows than a table page); the offset stays PER_PAGE-based.
-  async (page: number, limit: number = PER_PAGE): Promise<ListPage<CachedBlock>> => {
+  async (page: number): Promise<ListPage<CachedBlock>> => {
     const [rows, totalResult] = await Promise.all([
       db.select().from(schema.blocks)
         .orderBy(desc(schema.blocks.number))
-        .limit(limit)
+        .limit(PER_PAGE)
         .offset((page - 1) * PER_PAGE),
       db.execute(sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'blocks'`),
     ])
