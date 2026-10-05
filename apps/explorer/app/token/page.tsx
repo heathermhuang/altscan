@@ -2,6 +2,7 @@ import { db, schema } from '@/lib/db'
 import { desc, eq, sql } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
+import { shortenAddress } from '@/lib/address-display'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
@@ -144,7 +145,7 @@ export default async function TokenListPage({
                 <td className="text-mut">{i + 1}</td>
                 <td>
                   <Link href={`/token/${t.address}`} className="text-acc-ink font-medium hover:underline">
-                    {tokenTextOr(t.name, '—')}
+                    {tokenTextOr(t.name, shortenAddress(t.address))}
                   </Link>
                 </td>
                 <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>

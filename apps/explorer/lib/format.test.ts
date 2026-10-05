@@ -16,6 +16,7 @@ import {
   formatHolders,
   formatEstimate,
   hasSupply,
+  formatUtcClock,
 } from './format'
 import { shortenAddress } from './address-display'
 
@@ -194,6 +195,17 @@ describe('formatUtc', () => {
   })
 })
 
+describe('formatUtcClock', () => {
+  it('is the HH:MM of the UTC time, whatever the host timezone', () => {
+    expect(formatUtcClock(new Date('2026-10-04T23:04:41Z'))).toBe('23:04 UTC')
+    expect(formatUtcClock(new Date('2026-01-02T03:04:05Z'))).toBe('03:04 UTC')
+  })
+
+  it('renders an invalid date as an em dash', () => {
+    expect(formatUtcClock(new Date('nope'))).toBe('—')
+  })
+})
+
 describe('sanitizeSymbolOr placeholders', () => {
   it("treats the indexer's '???' / 'Unknown' placeholders as missing", () => {
     expect(sanitizeSymbolOr('???', UNKNOWN_TOKEN)).toBe('Unknown token')
@@ -238,6 +250,7 @@ describe('"—" instead of a number we do not have', () => {
   it('tokenTextOr with "—" reads the indexer placeholders as unknown, never "Unknown" or "???"', () => {
     expect(tokenTextOr('Unknown', '—')).toBe('—')
     expect(tokenTextOr('???', '—')).toBe('—')
+    expect(tokenTextOr('Unknown Token', '—')).toBe('—') // the page's live RPC lookup, for a token with no name()
     expect(tokenTextOr(null, '—')).toBe('—')
     expect(tokenTextOr('', '—')).toBe('—')
     expect(tokenTextOr('Tether USD', '—')).toBe('Tether USD')

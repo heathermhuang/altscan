@@ -36,6 +36,11 @@ describe('TxTable cell contract', () => {
     expect(unknown.attrs).not.toMatch(/tx-ok|tx-bad/)
   })
 
+  it('puts no full-address title on the row links: the homepage is held to one TCP window', () => {
+    expect(html({ compact: true })).not.toContain('title=')
+    expect(html()).not.toContain('title=')
+  })
+
   it('keeps a To cell for a contract creation', () => {
     expect(cells(bodyRows(html())[1])[3].inner).toContain('Contract Creation')
   })

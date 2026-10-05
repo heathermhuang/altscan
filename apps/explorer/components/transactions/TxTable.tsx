@@ -53,11 +53,11 @@ export function TxTable({ txs, compact = false, showStatus = true }: {
               </td>
               <td className="text-mut">{timeAgo(new Date(tx.timestamp))}</td>
               <td>
-                <AddressLink address={tx.fromAddress} />
+                <AddressLink address={tx.fromAddress} title={false} />
               </td>
               <td>
                 {tx.toAddress ? (
-                  <AddressLink address={tx.toAddress} />
+                  <AddressLink address={tx.toAddress} title={false} />
                 ) : (
                   <span className="text-mut">Contract Creation</span>
                 )}

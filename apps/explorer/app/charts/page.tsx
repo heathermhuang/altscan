@@ -2,7 +2,7 @@ import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
-import { formatGwei } from '@/lib/format'
+import { formatGwei, formatUtcClock } from '@/lib/format'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { BlockTape } from '@/components/home/BlockTape'
 import { swallow } from '@/lib/observability'
@@ -148,9 +148,10 @@ export default async function ChartsPage() {
           {header}
           <h2 className="k mb-3"><span aria-hidden="true">{'// '}</span>recent blocks</h2>
         </div>
-        <BlockTape tape={tape} chainName={chainConfig.name} />
+        {/* This page is cached for up to 5 minutes, so the tape says when it was drawn, not "latest". */}
+        <BlockTape tape={tape} chainName={chainConfig.name} heading={`as of ${formatUtcClock(new Date())}`} />
         <div className="max-w-7xl mx-auto px-4 pb-8 pt-4">
-          <p className="text-sm text-mut">Daily transaction, gas and block charts appear once 3 days of blocks are indexed.</p>
+          <p className="text-sm text-mut">Daily charts aren&apos;t available yet.</p>
         </div>
       </>
     )

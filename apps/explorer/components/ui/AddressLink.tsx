@@ -12,12 +12,18 @@ import { getAddressLabel } from '@/lib/known-addresses'
  *
  * A known label replaces the hex entirely (as Etherscan does), with the full
  * checksummed address kept in `title` so it is still readable on hover.
+ *
+ * `title={false}` leaves the `title` off, for list tables that render this twice a row:
+ * the checksummed address is ~40 high-entropy characters, and the page ships it again in
+ * its RSC payload, so it counts against the homepage's one-TCP-window budget. The href
+ * still carries the full address.
  */
 export function AddressLink({
   address,
   short = true,
   showLabel = true,
   self = false,
+  title = true,
   className = '',
 }: {
   address: string
@@ -28,6 +34,8 @@ export function AddressLink({
    *  rather than an action-coloured link, so a row does not look like it links
    *  somewhere new. */
   self?: boolean
+  /** Put the full checksummed address in a `title` (hover text). Default true. */
+  title?: boolean
   className?: string
 }) {
   const checksummed = toChecksumAddress(address)
@@ -37,7 +45,7 @@ export function AddressLink({
   return (
     <Link
       href={`/address/${address.toLowerCase()}`}
-      title={checksummed}
+      title={title ? checksummed : undefined}
       className={`${self ? 'text-ink font-semibold' : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
     >
       {text}

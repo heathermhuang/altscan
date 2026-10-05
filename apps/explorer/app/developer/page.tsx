@@ -100,9 +100,11 @@ curl -X POST ${BASE_URL}/api/v1/keys \\
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Use Your Key</h3>
-              <CodeBlock label="Use Your Key">{`# Pass your key via the X-API-Key header
-curl ${BASE_URL}/api/v1/blocks \\
-  -H "X-API-Key: bnbs_abc123..."
+              <CodeBlock label="Use Your Key">{`# Pass your key via the X-API-Key header (the query endpoint counts it)
+curl -X POST ${BASE_URL}/api/v1/query \\
+  -H "X-API-Key: bnbs_abc123..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"entity": "blocks", "limit": 5}'
 
 # List your keys
 curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>

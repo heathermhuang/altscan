@@ -131,11 +131,12 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${token.name} (${token.symbol})`,
-    description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}. ${token.holderCount.toLocaleString()} holders.`,
+    // A holder count of 0 is a lagging reading (the Holders card shows "—"), so it is not stated.
+    description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${token.holderCount.toLocaleString()} holders.` : ''}`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
-      description: `${token.type} · ${token.holderCount.toLocaleString()} holders`,
+      description: token.holderCount > 0 ? `${token.type} · ${token.holderCount.toLocaleString()} holders` : token.type,
     },
   }
 }

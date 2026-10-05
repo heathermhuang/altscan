@@ -81,7 +81,7 @@ export default async function DexPage({
 
       {/* Stats row */}
       <dl className="ledger [--cols:3] mb-6">
-        <Fact label="Total Trades" value={totalTrades.toLocaleString()} />
+        <Fact label="Total trades (est.)" value={formatEstimate(totalTrades)} />
         <Fact label="Unique traders (est.)" value={formatEstimate(uniqueMakers)} />
         <Fact label="DEXes Found" value={topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'} />
       </dl>

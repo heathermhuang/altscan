@@ -51,13 +51,7 @@ export function BlockTable({ blocks, compact = false, gasBar = false }: {
               )}
               {!compact && (
                 <td className="text-mut hidden sm:table-cell">
-                  {b.gasUsed ? formatNumber(Number(b.gasUsed)) : '—'}
-                  {gasBar && b.gasUsed && (
-                    <>
-                      {' '}({gasPct(b.gasUsed, b.gasLimit)}%)
-                      <span className="gbar" style={{ '--g': `${gasPct(b.gasUsed, b.gasLimit)}%` } as CSSProperties} />
-                    </>
-                  )}
+                  <GasUsed block={b} bar={gasBar} />
                 </td>
               )}
             </tr>
@@ -66,5 +60,22 @@ export function BlockTable({ blocks, compact = false, gasBar = false }: {
       </table>
       </div>
     </div>
+  )
+}
+
+/** Gas Used cell. No gas figure (null, or 0n for an empty block) reads "—", with no bar. */
+function GasUsed({ block, bar }: { block: BlockRow; bar: boolean }) {
+  if (!block.gasUsed) return <>—</>
+  const pct = gasPct(block.gasUsed, block.gasLimit)
+  return (
+    <>
+      {formatNumber(Number(block.gasUsed))}
+      {bar && (
+        <>
+          {' '}({pct}%)
+          <span className="gbar" style={{ '--g': `${pct}%` } as CSSProperties} />
+        </>
+      )}
+    </>
   )
 }
