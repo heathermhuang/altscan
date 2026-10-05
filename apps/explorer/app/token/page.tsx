@@ -155,7 +155,7 @@ export default async function TokenListPage({
               </tr>
             ))}
             {tokens.length === 0 && (
-              <tr><td colSpan={5} className="py-8 text-center text-mut">No tokens indexed yet.</td></tr>
+              <tr><td colSpan={5} className="py-8 text-center font-sans text-mut">No tokens indexed yet.</td></tr>
             )}
           </tbody>
         </table>

@@ -256,7 +256,7 @@ export default async function TokenDetailPage({
       <div className="mb-5">
         <p className="k">{'// '}token</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="mr-1 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
+          <h1 className="mr-1 min-w-0 [overflow-wrap:anywhere] text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
             {token.name} <span className="font-mono font-semibold text-ink2">{token.symbol}</span>
           </h1>
           <Badge variant="default">{token.type}</Badge>
@@ -429,7 +429,7 @@ export default async function TokenDetailPage({
               })()
               return (
                 <tr key={`${t.txHash}-${t.logIndex}`}>
-                  <td>
+                  <td className="whitespace-nowrap">
                     <Link
                       href={`/tx/${t.txHash}`}
                       className="text-acc-ink hover:underline"

@@ -110,7 +110,7 @@ export default async function ChartsPage() {
       <div className="mb-6">
         <p className="k">{'// '}charts</p>
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Charts</h1>
-        <p className="mt-2 text-sm text-ink2">{chainConfig.name} network activity over the last 30 days.</p>
+        <p className="mt-2 text-sm text-ink2">{chainConfig.name} network activity from the blocks this explorer has indexed.</p>
       </div>
 
       <div className="space-y-8">

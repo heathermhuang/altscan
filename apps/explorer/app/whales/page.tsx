@@ -133,7 +133,7 @@ export default async function WhalesPage({
                   <td className="text-mut whitespace-nowrap hidden sm:table-cell">
                     {timeAgo(w.timestamp)}
                   </td>
-                  <td>
+                  <td className="whitespace-nowrap">
                     <Link href={`/tx/${w.hash}`} className="text-acc-ink hover:underline">
                       {shortHash(w.hash)}
                     </Link>

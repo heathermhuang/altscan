@@ -139,7 +139,9 @@ export function HoldersLazy({
               <tr key={holder.addr}>
                 <td className="text-mut">{i + 1}</td>
                 <td>
-                  <AddressLink address={holder.addr} short={false} />
+                  {/* Full address from sm up; the short form below it so Balance and % stay on screen on phones. */}
+                  <span className="sm:hidden"><AddressLink address={holder.addr} /></span>
+                  <span className="hidden sm:inline"><AddressLink address={holder.addr} short={false} /></span>
                 </td>
                 <td>
                   {holderAmount} {symbol}

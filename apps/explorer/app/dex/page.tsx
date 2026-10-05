@@ -157,7 +157,7 @@ export default async function DexPage({
               const outSymbol = tokenSymbolMap.get(t.tokenOut?.toLowerCase() ?? '') ?? ''
               return (
                 <tr key={t.id}>
-                  <td>
+                  <td className="whitespace-nowrap">
                     <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
                       {shortHash(t.txHash)}
                     </Link>
