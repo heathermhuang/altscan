@@ -297,6 +297,24 @@ describe('isTransportError', () => {
     })).toBe(false)
   })
 
+  it('does not take textual error.data for revert data: a gateway timeout stays transport', () => {
+    expect(isTransportError({
+      code: 'CALL_EXCEPTION',
+      info: { error: { code: -32000, message: 'request timed out', data: 'upstream timeout' } },
+    })).toBe(true)
+    expect(isTransportError({ code: 'UNKNOWN_ERROR', message: 'bad gateway', data: 'upstream connect error' })).toBe(true)
+  })
+
+  it('takes hex-encoded error.data as a real revert payload: the contract answered', () => {
+    const payload = '0x08c379a0' + '00'.repeat(31) + '20' + '00'.repeat(31) + '04' + '6e6f7065' + '00'.repeat(28)
+    // Even with transport-sounding text, a hex revert payload means the contract replied.
+    expect(isTransportError({
+      code: 'CALL_EXCEPTION',
+      info: { error: { code: 3, message: 'timeout while executing', data: payload } },
+    })).toBe(false)
+    expect(isTransportError({ code: 'CALL_EXCEPTION', message: 'timeout', data: '0x08c379a0' })).toBe(false)
+  })
+
   it('does not let a revert reason that says "limit reached" count as transport', () => {
     expect(isTransportError({
       code: 'CALL_EXCEPTION',

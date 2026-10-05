@@ -73,7 +73,8 @@ export function isTransportError(err: unknown): boolean {
   if (typeof rpc?.code === 'number' && TRANSPORT_RPC_CODES.has(rpc.code)) return true
   const text = [e.shortMessage, e.message, rpc?.message].filter((x): x is string => typeof x === 'string').join(' ')
   // A revert is the contract answering, whatever its reason string happens to say.
-  const revertData = [rpc?.data, e.data].some(d => typeof d === 'string' && d.length > 2)
+  // Only hex bytes are revert data: a gateway can send textual `data` ("upstream timeout") with a throttle.
+  const revertData = [rpc?.data, e.data].some(d => typeof d === 'string' && d.length > 2 && /^0x[0-9a-fA-F]*$/.test(d))
   if (revertData || /execution reverted/i.test(text)) return false
   if (typeof e.code === 'string' && TRANSPORT_ETHERS_CODES.has(e.code)) return true
   return TRANSPORT_TEXT.test(text)
