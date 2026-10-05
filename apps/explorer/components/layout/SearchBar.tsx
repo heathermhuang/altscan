@@ -25,6 +25,7 @@ export function SearchBar({ size = 'md' }: { size?: 'lg' | 'md' }) {
         onChange={e => setQuery(e.target.value)}
         placeholder={lg ? PLACEHOLDER : PLACEHOLDER_SHORT}
         aria-label="Search by address, tx hash, block number, or token name"
+        aria-keyshortcuts="/"
         className={`flex-1 min-w-0 rounded-[9px] border border-hair bg-card font-mono text-ink placeholder:text-mut hover:border-hair3 ${
           lg ? 'h-12 px-4 text-[15px]' : 'h-9 px-3 text-[13px]'
         }`}

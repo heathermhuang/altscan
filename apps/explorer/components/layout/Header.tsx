@@ -1,35 +1,24 @@
 'use client'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { SearchBar } from './SearchBar'
 import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain-client'
 
+// One list for the desktop nav and the mobile menu (the mobile menu groups it by `group`).
+// `glyph` is decoration only: the same ☆ WatchlistButton uses, hidden from assistive tech.
 const NAV_LINKS = [
-  { href: '/blocks',     label: 'Blocks',            group: 'Explore' },
-  { href: '/txs',        label: 'Transactions',      group: 'Explore' },
-  { href: '/charts',     label: 'Charts',            group: 'Analytics' },
-  { href: '/gas',        label: 'Gas Tracker',       group: 'Analytics' },
+  { href: '/blocks',     label: 'Blocks',        group: 'Explore' },
+  { href: '/txs',        label: 'Transactions',  group: 'Explore' },
+  { href: '/charts',     label: 'Charts',        group: 'Analytics' },
+  { href: '/gas',        label: 'Gas',           group: 'Analytics' },
   ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators', group: 'Analytics' }] : []),
   ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking', group: 'Analytics' }] : []),
-  { href: '/watchlist',  label: '⭐ Watchlist',      group: 'Tools' },
-  { href: '/api-docs',   label: 'API Docs',          group: 'Developers' },
-  { href: '/developer',  label: 'Developer Portal',  group: 'Developers' },
-  { href: '/verify',     label: 'Verify Contract',   group: 'Developers' },
-]
-
-const DESKTOP_NAV = [
-  { href: '/blocks',     label: 'Blocks' },
-  { href: '/txs',        label: 'Txns' },
-  { href: '/charts',     label: 'Charts' },
-  { href: '/gas',        label: 'Gas' },
-  ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators' }] : []),
-  ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking' }] : []),
-  { href: '/watchlist',  label: 'Watch' },
-  { href: '/api-docs',   label: 'API' },
-  { href: '/developer',  label: 'Dev' },
-  { href: '/verify',     label: 'Verify' },
+  { href: '/watchlist',  label: 'Watchlist',     group: 'Tools', glyph: '☆' },
+  { href: '/api-docs',   label: 'API',           group: 'Developers' },
+  { href: '/developer',  label: 'Developers',    group: 'Developers' },
+  { href: '/verify',     label: 'Verify',        group: 'Developers' },
 ]
 
 function BnbLogo() {
@@ -73,17 +62,45 @@ function Logo() {
 
 export function Header() {
   const [open, setOpen] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
   const pathname = usePathname()
 
   // Close mobile menu on route change
   useEffect(() => { setOpen(false) }, [pathname])
+
+  // Escape closes the mobile menu and hands focus back to the hamburger.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      menuButton.current?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+
+  // `/` jumps to search (the header's, or the hero's on `/`), unless the user is typing somewhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement
+      if (t.closest('input, textarea, select') || t.isContentEditable) return
+      const input = document.querySelector<HTMLInputElement>('form[role="search"] input')
+      if (!input) return
+      e.preventDefault()
+      input.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   const groups = [...new Set(NAV_LINKS.map(l => l.group))]
 
   return (
     <header className="sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md">
 
-      {/* -- Top bar: logo + switcher + search (xl) + desktop nav + hamburger -- */}
+      {/* -- Top bar: logo + switcher + desktop nav (lg) or hamburger, then search on its own row -- */}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
 
@@ -103,46 +120,46 @@ export function Header() {
           {/* Network switcher */}
           <NetworkSwitcher />
 
-          {/* Search: the home hero owns it on `/`. Own row below xl, inline from xl. */}
-          {pathname !== '/' && (
-            <div className="order-last basis-full xl:order-none xl:basis-auto xl:w-[22rem] xl:shrink-0">
-              <SearchBar />
-            </div>
-          )}
-
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end">
-            {DESKTOP_NAV.map(({ href, label }) => (
+          <nav className="hidden lg:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end">
+            {NAV_LINKS.map(({ href, label, glyph }) => (
               <Link
                 key={href}
                 href={href}
-                title={label === '⭐' ? 'Watchlist' : undefined}
                 aria-current={pathname === href ? 'page' : undefined}
-                className={`px-1.5 lg:px-2.5 py-2 border-b-2 transition-colors whitespace-nowrap ${
+                className={`px-2 py-2 border-b-2 transition-colors whitespace-nowrap ${
                   pathname === href ? 'text-acc-ink border-acc font-semibold' : 'text-ink2 hover:text-ink border-transparent'
                 }`}
               >
-                {label}
+                {glyph && <span aria-hidden="true">{glyph} </span>}{label}
               </Link>
             ))}
           </nav>
 
-          {/* Hamburger -- mobile only */}
+          {/* Hamburger -- below lg, where the full-word nav no longer fits beside the logo */}
           <button
+            ref={menuButton}
             onClick={() => setOpen(!open)}
             aria-label={open ? 'Close menu' : 'Open menu'}
-            className="md:hidden ml-auto flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-[9px] border border-hair bg-card hover:border-hair3 transition-colors"
+            className="lg:hidden ml-auto flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-[9px] border border-hair bg-card hover:border-hair3 transition-colors"
           >
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? 'rotate-45 translate-y-2' : ''}`} />
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 ${open ? 'opacity-0 scale-x-0' : ''}`} />
             <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? '-rotate-45 -translate-y-2' : ''}`} />
           </button>
+
+          {/* Search: the home hero owns it on `/`. Always its own row; the full-word nav has no room beside it. */}
+          {pathname !== '/' && (
+            <div className="basis-full">
+              <SearchBar />
+            </div>
+          )}
         </div>
       </div>
 
       {/* -- Mobile menu panel -- */}
       {open && (
-        <div className="md:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
+        <div className="lg:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 pt-3 pb-1">
             <NetworkSwitcher />
           </div>
@@ -164,7 +181,7 @@ export function Header() {
                           : 'border-l-transparent text-ink2 hover:text-ink'
                       }`}
                     >
-                      {link.label}
+                      {link.glyph && <span aria-hidden="true">{link.glyph} </span>}{link.label}
                     </Link>
                   ))}
                 </div>
