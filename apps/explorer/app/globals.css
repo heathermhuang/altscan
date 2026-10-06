@@ -425,6 +425,15 @@
     border-radius: 9999px;
     background: linear-gradient(var(--acc), var(--acc)) 0 0 / var(--g, 0%) 100% no-repeat, var(--acc-t);
   }
+  /* Forced colours: the fill is the bar's whole meaning, so it is redrawn in system colours (Highlight
+     on Canvas, CanvasText outline, as the block tape's tiles are). */
+  @media (forced-colors: active) {
+    .gbar {
+      forced-color-adjust: none;
+      background: linear-gradient(Highlight, Highlight) 0 0 / var(--g, 0%) 100% no-repeat, Canvas;
+      outline: 1px solid CanvasText;
+    }
+  }
 }
 
 /* Transaction rows on phones (components/transactions/TxTable). Under 640px each row is a
@@ -660,6 +669,28 @@
     bottom: 0;
     height: var(--g);
     background: var(--acc);
+  }
+  /* Forced colours (Windows High Contrast) drop background colours, and the tile fill is the data
+     (fill = gas used, width = block time), so the whole tape would vanish. Each tile gets a
+     CanvasText outline from ::after (absolute, so no layout change and the label's container query
+     is untouched) and its fill becomes a Highlight block inside it: empty vs full still reads, and
+     the hover / aria-current outline above (a thicker, offset outline) is left as it is. The ghost
+     lead-in tiles are decoration, and their pale tint would read as phantom empty tiles. */
+  @media (forced-colors: active) {
+    .bt-row a::before {
+      forced-color-adjust: none;
+      background: Highlight;
+    }
+    .bt-row a::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid CanvasText;
+      border-radius: inherit;
+    }
+    .bt-row > .bt-ghost {
+      background: none;
+    }
   }
   .bt-row span {
     position: absolute;
