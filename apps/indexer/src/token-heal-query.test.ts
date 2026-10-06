@@ -3,7 +3,7 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { schema } from './db'
 import { buildConcurrentIndexList } from './ensure-schema'
-import { healCandidateOrder, healCandidatePredicate, healCandidateWhere } from './token-heal-query'
+import { ETH_ZERO_SUPPLY_MIN_HOLDERS, healCandidateOrder, healCandidatePredicate, healCandidateWhere } from './token-heal-query'
 import { UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 
 const dialect = new PgDialect()
@@ -28,16 +28,19 @@ describe('healCandidatePredicate', () => {
   })
 
   // 0/33 healable among placeholder+zero-supply rows on ETH, 10/33 among placeholders
-  // with a non-zero supply (2026-10-06): zero supply is excluded outright there, and
-  // the BEP20-zero-supply clause that exists for BNB is gone too.
-  it('requires a non-zero supply on ETH and has no zero-supply-only clause', () => {
+  // with a non-zero supply (2026-10-06): zero supply is excluded there, and the
+  // BEP20-zero-supply clause that exists for BNB is gone too. Except with holders:
+  // a throttled first fetch also stores supply 0 for a real token, so a zero-supply
+  // placeholder with >= 2 holders stays a candidate (only 4 such rows in production).
+  it('requires a non-zero supply or at least 2 holders on ETH, with no zero-supply-only clause', () => {
+    expect(ETH_ZERO_SUPPLY_MIN_HOLDERS).toBe(2)
     expect(render(healCandidatePredicate('eth'))).toEqual({
-      sql: '(("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4)) and "tokens"."total_supply" <> $5)',
-      params: ['Unknown', '', '???', '', '0'],
+      sql: '(("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4)) and ("tokens"."total_supply" <> $5 or "tokens"."holder_count" >= $6))',
+      params: ['Unknown', '', '???', '', '0', 2],
     })
   })
 
-  it('differs between the chains, and only by the supply rule', () => {
+  it('differs between the chains, and ETH has no type clause', () => {
     expect(render(healCandidatePredicate('eth')).sql).not.toEqual(render(healCandidatePredicate('bnb')).sql)
     expect(render(healCandidatePredicate('eth')).sql).not.toContain('"type"')
   })
@@ -64,7 +67,8 @@ describe('healCandidateWhere', () => {
         `(${predicate.sql} and ("tokens"."holder_count", "tokens"."address") < ($${n + 1}, $${n + 2}))`,
       )
       expect(q.params).toEqual([...predicate.params, 0, '0x12ab34cd56ef'])
-      expect(q.sql).not.toMatch(/\bor\b[^()]*"holder_count"/)
+      // The OR spelling's signature is an equality on holder_count (the ETH predicate only uses >=).
+      expect(q.sql).not.toMatch(/"holder_count" = \$/)
     }
   })
 })
