@@ -37,6 +37,9 @@ export default async function SearchPage({
   if (query && query.length >= 2) {
     // Escape SQL LIKE wildcards in user input
     const safeQuery = query.replace(/[%_\\]/g, '\\$&')
+    // redirect() works by THROWING, so it must be called outside the try — the catch below would
+    // swallow it and a single-token match would fall through to "No results found".
+    let singleMatch: string | null = null
     try {
       const tokenMatches = await db.select().from(schema.tokens)
         .where(
@@ -47,9 +50,7 @@ export default async function SearchPage({
         )
         .limit(5)
 
-      if (tokenMatches.length === 1) {
-        redirect(`/token/${tokenMatches[0].address}`)
-      }
+      if (tokenMatches.length === 1) singleMatch = tokenMatches[0].address
 
       if (tokenMatches.length > 1) {
         return (
@@ -108,6 +109,7 @@ export default async function SearchPage({
         )
       }
     } catch (e) { swallow('search/query', e) }  // DB error
+    if (singleMatch) redirect(`/token/${singleMatch}`)
   }
 
   return (
