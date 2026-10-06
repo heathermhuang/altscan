@@ -13,7 +13,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 // file for weights 400-600 instead of Google's 32 KB latin file, which sat on the critical path
 // behind the CSS and cost ~450ms of Lighthouse mobile LCP. No ligatures, so hashes render as typed.
 // Not preloaded and `optional`: a second preloaded font made the first frame land before React's
-// reveal of the streamed page (app/loading.tsx), deferring it ~300ms (late LCP + footer shift),
+// reveal of the streamed page (a segment loading.tsx), deferring it ~300ms (late LCP + footer shift),
 // and a swap re-wraps long hashes. A cold first visit may show the fallback mono.
 const jetbrainsMono = localFont({
   src: './fonts/JetBrainsMono-subset.woff2',
