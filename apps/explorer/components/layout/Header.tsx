@@ -68,12 +68,15 @@ function Logo() {
   return <ChainLogo />
 }
 
-// The desktop nav's overflow: a disclosure (button + list of links) in the NetworkSwitcher's
-// mould. Escape closes it and puts focus back on the button; a click, or Tab, outside closes it.
+// The desktop nav's overflow: a native <details>, so it opens without JavaScript, the links are in the
+// server HTML (/validators, /staking and /watchlist have no other site-wide inbound link) and the
+// summary announces its own expanded state. State is layered on top: `open` is controlled from
+// `open` below, onToggle keeps it in step with the browser's own toggling, and Escape (focus back to the
+// summary), a click or Tab outside, a link click and a route change close it, as the NetworkSwitcher does.
 function MoreNav({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
-  const button = useRef<HTMLButtonElement>(null)
+  const box = useRef<HTMLDetailsElement>(null)
+  const summary = useRef<HTMLElement>(null)
 
   useEffect(() => { setOpen(false) }, [pathname])
 
@@ -84,7 +87,7 @@ function MoreNav({ pathname }: { pathname: string }) {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.isComposing) return
-      if (box.current?.contains(e.target as Node)) button.current?.focus()
+      if (box.current?.contains(e.target as Node)) summary.current?.focus()
       setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
@@ -96,35 +99,24 @@ function MoreNav({ pathname }: { pathname: string }) {
   }, [open])
 
   return (
-    <div
+    <details
       ref={box}
       className="nav-m"
+      open={open}
+      onToggle={e => setOpen(e.currentTarget.open)}
       // Tab past the last link closes it. Only when focus lands somewhere: clicking blank space
       // (no relatedTarget) is the mousedown handler's.
       onBlur={e => {
         if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false)
       }}
     >
-      <button
-        ref={button}
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        aria-controls="nav-more"
-        data-on={MORE_LINKS.some(l => l.href === pathname) || undefined}
-      >
+      <summary ref={summary} data-on={MORE_LINKS.some(l => l.href === pathname) || undefined}>
         More
-        <svg
-          className={open ? 'rotate-180' : undefined}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"
-        >
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
-      </button>
-      {/* Always rendered, `hidden` while closed: these links are in the server HTML for crawlers and
-          no-JS visitors (/validators, /staking and /watchlist have no other site-wide inbound link),
-          and aria-controls always names an element. */}
-      <ul id="nav-more" className="nav-p" hidden={!open}>
+      </summary>
+      <ul className="nav-p">
         {MORE_LINKS.map(({ href, label, glyph }) => (
           <li key={href}>
             <Link
@@ -137,7 +129,7 @@ function MoreNav({ pathname }: { pathname: string }) {
           </li>
         ))}
       </ul>
-    </div>
+    </details>
   )
 }
 

@@ -207,22 +207,29 @@
     @apply hidden lg:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end;
   }
   .nav > a,
-  .nav-m > button {
+  .nav-m > summary {
     @apply px-2 py-2 border-b-2 transition-colors whitespace-nowrap text-ink2 hover:text-ink border-transparent;
   }
   .nav > a[aria-current],
-  .nav-m > button[data-on] {
+  .nav-m > summary[data-on] {
     @apply text-acc-ink border-acc font-semibold;
   }
-  /* More: the nav's disclosure. Its button is active when the current page is one of its links. */
+  /* More: the nav's <details>. Its summary is styled as the nav's other items, with the marker
+     hidden, and is active when the current page is one of its links. */
   .nav-m {
     @apply relative;
   }
-  .nav-m > button {
-    @apply flex items-center gap-1;
+  .nav-m > summary {
+    @apply flex items-center gap-1 list-none cursor-pointer select-none;
   }
-  .nav-m > button > svg {
+  .nav-m > summary::-webkit-details-marker {
+    display: none;
+  }
+  .nav-m > summary > svg {
     @apply w-3 h-3 text-mut transition-transform duration-150;
+  }
+  .nav-m[open] > summary > svg {
+    @apply rotate-180;
   }
   .nav-p {
     @apply absolute right-0 top-full mt-2 w-48 py-1 rounded-xl border border-hair bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50;
