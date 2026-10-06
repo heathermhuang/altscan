@@ -17,7 +17,7 @@ const BASE_URL = `https://${chainConfig.domain}`
 
 export default function DeveloperPage() {
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 *:max-w-5xl">
       <BreadcrumbJsonLd items={[{ name: 'Developer Platform' }]} />
       <div className="mb-8">
         <p className="k">{'// '}developer</p>

@@ -319,7 +319,7 @@ const endpoints: Endpoint[] = [
 
 export default function ApiDocsPage() {
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 *:max-w-5xl">
       <BreadcrumbJsonLd items={[{ name: 'API Documentation' }]} />
       <div className="mb-8">
         <p className="k">{'// '}api</p>

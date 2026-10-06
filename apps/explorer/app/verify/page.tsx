@@ -55,7 +55,7 @@ export default function VerifyPage() {
   const field = 'w-full rounded-[9px] border border-hair bg-card px-3 py-2 text-sm text-ink placeholder:text-mut hover:border-hair3'
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 *:max-w-3xl">
       <div className="mb-5">
         <p className="k">{'// '}verify</p>
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Verify Contract Source Code</h1>
