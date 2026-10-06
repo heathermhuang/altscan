@@ -121,21 +121,22 @@ function MoreNav({ pathname }: { pathname: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      {open && (
-        <ul id="nav-more" className="nav-p">
-          {MORE_LINKS.map(({ href, label, glyph }) => (
-            <li key={href}>
-              <Link
-                href={href}
-                aria-current={pathname === href ? 'page' : undefined}
-                onClick={() => setOpen(false)}
-              >
-                {glyph && <span aria-hidden="true">{glyph} </span>}{label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* Always rendered, `hidden` while closed: these links are in the server HTML for crawlers and
+          no-JS visitors (/validators, /staking and /watchlist have no other site-wide inbound link),
+          and aria-controls always names an element. */}
+      <ul id="nav-more" className="nav-p" hidden={!open}>
+        {MORE_LINKS.map(({ href, label, glyph }) => (
+          <li key={href}>
+            <Link
+              href={href}
+              aria-current={pathname === href ? 'page' : undefined}
+              onClick={() => setOpen(false)}
+            >
+              {glyph && <span aria-hidden="true">{glyph} </span>}{label}
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
