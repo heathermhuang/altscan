@@ -47,6 +47,25 @@ describe('foldConfusables', () => {
     expect(foldConfusables('\u0407')).toBe('I') // Cyrillic Yi: Cyrillic I + diaeresis
   })
 
+  it('folds a lowercase letter whose UPPERCASE is the homoglyph', () => {
+    expect(foldConfusables('USD\u0442')).toBe('USDT') // Cyrillic small te
+    expect(foldConfusables('DA\u03B9')).toBe('DAI') // Greek small iota
+    expect(foldConfusables('USD\u03C4')).toBe('USDT') // Greek small tau
+    expect(foldConfusables('BTC\u0432')).toBe('BTCB') // Cyrillic small ve
+    expect(foldConfusables('BTC\u043A')).toBe('BTCK') // Cyrillic small ka reads as K, not B
+    expect(foldConfusables('\u0432\u043C\u043D')).toBe('BMH') // small ve em en
+    expect(foldConfusables('\u03B1\u03C1\u03B5\u03BA\u03C5\u03C7')).toBe('APEKYX') // small alpha rho epsilon kappa upsilon chi
+    expect(foldConfusables('\u03BD')).toBe('V') // Greek small nu keeps reading as v
+  })
+
+  it('strips blank filler letters and folds the palochka to I', () => {
+    for (const filler of ['\u3164', '\uFFA0', '\u115F', '\u1160', '\u2800']) {
+      expect(foldConfusables(`US${filler}DT`), filler.charCodeAt(0).toString(16)).toBe('USDT')
+    }
+    expect(foldConfusables('DA\u04CF')).toBe('DAI') // Cyrillic small palochka
+    expect(foldConfusables('DA\u04C0')).toBe('DAI') // Cyrillic capital palochka
+  })
+
   it('leaves an ordinary symbol readable', () => {
     expect(foldConfusables('CAKE')).toBe('CAKE')
     expect(foldConfusables('')).toBe('')
@@ -76,6 +95,23 @@ describe('lookalikeOf: flags', () => {
     for (const symbol of ['\u00DASDT', 'USD\u0164', 'U\u0301SDT']) {
       expect(lookalikeOf({ address: SPAM, symbol, name: 'x' }, 'bnb'), symbol).toEqual(usdtBnb)
     }
+  })
+
+  it('flags a clone whose homoglyph is lowercase', () => {
+    for (const symbol of ['USD\u0442', 'USD\u03C4']) {
+      expect(lookalikeOf({ address: SPAM, symbol, name: 'x' }, 'bnb'), symbol).toEqual(usdtBnb)
+    }
+    expect(lookalikeOf({ address: SPAM, symbol: 'DA\u03B9', name: 'x' }, 'bnb'))
+      .toEqual({ symbol: 'DAI', canonical: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3' })
+    expect(lookalikeOf({ address: SPAM, symbol: 'BTC\u0432', name: 'x' }, 'bnb'))
+      .toEqual({ symbol: 'BTCB', canonical: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' })
+  })
+
+  it('flags a clone padded with an invisible filler or a palochka', () => {
+    for (const symbol of ['US\u3164DT', 'US\u2800DT', 'US\uFFA0DT', 'US\u115FDT', 'US\u1160DT']) {
+      expect(lookalikeOf({ address: SPAM, symbol, name: 'x' }, 'bnb'), symbol).toEqual(usdtBnb)
+    }
+    expect(lookalikeOf({ address: SPAM, symbol: 'DA\u04CF', name: 'x' }, 'bnb')?.symbol).toBe('DAI')
   })
 
   it('flags DAl (lowercase L) as DAI', () => {
@@ -132,6 +168,16 @@ describe('lookalikeOf: does not flag', () => {
   it('an unrelated token', () => {
     expect(lookalikeOf({ address: SPAM, symbol: 'CAKE', name: 'PancakeSwap Token' }, 'bnb')).toBeNull()
     expect(lookalikeOf({ address: SPAM, symbol: 'USDT0', name: 'USDT Zero' }, 'bnb')).toBeNull()
+    // Real tokens one character from a well-known one.
+    for (const [symbol, name] of [
+      ['USD1', 'World Liberty Financial USD'],
+      ['USDe', 'USDe'],
+      ['stETH', 'Liquid staked Ether 2.0'],
+      ['ETHW', 'EthereumPoW'],
+      ['sDAI', 'Savings Dai'],
+    ]) {
+      expect(lookalikeOf({ address: SPAM, symbol, name }, 'bnb'), symbol).toBeNull()
+    }
   })
 
   it('a missing, empty or placeholder symbol and name', () => {

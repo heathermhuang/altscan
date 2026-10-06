@@ -258,7 +258,8 @@ export default async function TokenDetailPage({
     ? [{ label: 'Lookalike', ok: false, severity: 'danger', description: lookalikeNote(lookalike) }, ...riskSignals]
     : riskSignals
 
-  const tokenReferralContext = isStablecoinToken(token.symbol, token.name)
+  // A flagged lookalike must not read as a stablecoin: that would put the stablecoin referral CTA on a scam token.
+  const tokenReferralContext = !lookalike && isStablecoinToken(token.symbol, token.name)
     ? 'stablecoin'
     : 'token_research'
 

@@ -51,13 +51,13 @@ export const WELL_KNOWN: Record<ChainKey, readonly WellKnown[]> = {
 // these glyphs are visually identical to ASCII, so a literal character here would be unreadable in
 // review. Each comment lists the Latin letters its row stands in for.
 const HOMOGLYPHS: Record<string, string> = {
-  // Cyrillic capitals, looking like: A B C E H I J K M O P S T X Y
+  // Cyrillic capitals, looking like: A B C E H I J K M O P S T X Y (the last I is the palochka)
   '\u0410': 'A', '\u0412': 'B', '\u0421': 'C', '\u0415': 'E', '\u041D': 'H', '\u0406': 'I',
   '\u0408': 'J', '\u041A': 'K', '\u041C': 'M', '\u041E': 'O', '\u0420': 'P', '\u0405': 'S',
-  '\u0422': 'T', '\u0425': 'X', '\u0423': 'Y',
-  // Cyrillic lowercase, looking like: a c e i j o p s x y
+  '\u0422': 'T', '\u0425': 'X', '\u0423': 'Y', '\u04C0': 'I',
+  // Cyrillic lowercase, looking like: a c e i j o p s x y (and I, the lowercase palochka)
   '\u0430': 'a', '\u0441': 'c', '\u0435': 'e', '\u0456': 'i', '\u0458': 'j', '\u043E': 'o',
-  '\u0440': 'p', '\u0455': 's', '\u0445': 'x', '\u0443': 'y',
+  '\u0440': 'p', '\u0455': 's', '\u0445': 'x', '\u0443': 'y', '\u04CF': 'I',
   // Greek capitals, looking like: A B E Z H I K M N O P T Y X
   '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I',
   '\u039A': 'K', '\u039C': 'M', '\u039D': 'N', '\u039F': 'O', '\u03A1': 'P', '\u03A4': 'T',
@@ -66,17 +66,27 @@ const HOMOGLYPHS: Record<string, string> = {
   '\u03BF': 'o', '\u03BD': 'v',
 }
 
+// Combining marks, format characters (zero-width joiners, bidi marks), whitespace, and the blank
+// "filler" letters that render as nothing: Hangul fillers U+115F U+1160 U+3164 U+FFA0, braille blank U+2800.
+const INVISIBLE = /[\p{M}\p{Cf}\s\u115F\u1160\u3164\uFFA0\u2800]/gu
+
+function mapGlyphs(s: string): string {
+  let out = ''
+  for (const ch of s) out += HOMOGLYPHS[ch] ?? ch
+  return out
+}
+
 /**
  * What a symbol or name LOOKS like, as plain uppercase ASCII, so lookalikes compare equal.
  * NFKD first (fullwidth to ASCII, and accented letters split into base + combining mark), then
- * drop the combining marks, invisible format characters (zero-width joiners, bidi marks) and
- * whitespace, then fold Cyrillic/Greek homoglyphs, then the digit/letter swaps that read alike
- * in a sans font: l | 1 to I, 0 to O, 5 to S.
+ * drop everything invisible, then fold Cyrillic/Greek homoglyphs, then the digit/letter swaps that
+ * read alike in a sans font: l | 1 to I, 0 to O, 5 to S. The glyph fold runs again after
+ * toUpperCase: a lowercase letter whose UPPERCASE is the mapped one (Cyrillic te, Greek iota) only
+ * becomes one there, and would otherwise slip through as a non-ASCII T or I.
  */
 export function foldConfusables(s: string): string {
-  let out = ''
-  for (const ch of s.normalize('NFKD').replace(/[\p{M}\p{Cf}\s]/gu, '')) out += HOMOGLYPHS[ch] ?? ch
-  return out.replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase()
+  const visible = s.normalize('NFKD').replace(INVISIBLE, '')
+  return mapGlyphs(mapGlyphs(visible).replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase())
 }
 
 // Folded once at load: a list page calls lookalikeOf per row.
