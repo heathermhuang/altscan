@@ -3,6 +3,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
 import { shortenAddress } from '@/lib/address-display'
+import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
@@ -140,21 +141,35 @@ export default async function TokenListPage({
             </tr>
           </thead>
           <tbody>
-            {tokens.map((t, i) => (
-              <tr key={t.address}>
-                <td className="text-mut">{i + 1}</td>
-                <td>
-                  <Link href={`/token/${t.address}`} className="text-acc-ink font-medium hover:underline">
-                    {tokenTextOr(t.name, shortenAddress(t.address))}
-                  </Link>
-                </td>
-                <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>
-                <td>{formatHolders(t.holderCount)}</td>
-                <td className="text-mut">
-                  {hasSupply(t.totalSupply) ? formatSupply(t.totalSupply, t.decimals) : '—'}
-                </td>
-              </tr>
-            ))}
+            {tokens.map((t, i) => {
+              const nameLink = (
+                <Link href={`/token/${t.address}`} className="text-acc-ink font-medium hover:underline">
+                  {tokenTextOr(t.name, shortenAddress(t.address))}
+                </Link>
+              )
+              // Flagged rows only: an unflagged row's cell is the bare link, with no extra node in the HTML or the flight payload.
+              const lookalike = lookalikeOf(t, chainConfig.key)
+              return (
+                <tr key={t.address}>
+                  <td className="text-mut">{i + 1}</td>
+                  <td>
+                    {lookalike ? (
+                      <>
+                        {nameLink}
+                        <span className="badge badge-bad ml-2" title={lookalikeNote(lookalike)}>
+                          lookalike<span className="sr-only"> of {lookalike.symbol}</span>
+                        </span>
+                      </>
+                    ) : nameLink}
+                  </td>
+                  <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>
+                  <td>{formatHolders(t.holderCount)}</td>
+                  <td className="text-mut">
+                    {hasSupply(t.totalSupply) ? formatSupply(t.totalSupply, t.decimals) : '—'}
+                  </td>
+                </tr>
+              )
+            })}
             {tokens.length === 0 && (
               <tr><td colSpan={5} className="py-8 text-center font-sans text-mut">No tokens indexed yet.</td></tr>
             )}

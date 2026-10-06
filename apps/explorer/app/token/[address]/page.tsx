@@ -12,6 +12,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
+import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { Contract } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
@@ -251,7 +252,14 @@ export default async function TokenDetailPage({
   const nameText = tokenTextOr(token.name, '—')
   const symbolText = tokenTextOr(token.symbol, '—')
 
-  const tokenReferralContext = isStablecoinToken(token.symbol, token.name)
+  // Pure string check, so it holds on the live (RPC-only) path too, where analyzeTokenRisk is skipped.
+  const lookalike = lookalikeOf({ address: addr, symbol: token.symbol, name: token.name }, chainConfig.key)
+  const signals: RiskSignal[] = lookalike
+    ? [{ label: 'Lookalike', ok: false, severity: 'danger', description: lookalikeNote(lookalike) }, ...riskSignals]
+    : riskSignals
+
+  // A flagged lookalike must not read as a stablecoin: that would put the stablecoin referral CTA on a scam token.
+  const tokenReferralContext = !lookalike && isStablecoinToken(token.symbol, token.name)
     ? 'stablecoin'
     : 'token_research'
 
@@ -267,6 +275,12 @@ export default async function TokenDetailPage({
             {nameText}
             {symbolText !== '—' && <>{' '}<span className="font-mono font-semibold text-ink2">{symbolText}</span></>}
           </h1>
+          {/* Beside the h1, not in it: inside, "lookalike of USDT" would become part of the page's heading name. */}
+          {lookalike && (
+            <span className="badge badge-bad" title={lookalikeNote(lookalike)}>
+              lookalike<span className="sr-only"> of {lookalike.symbol}</span>
+            </span>
+          )}
           <Badge variant="default">{token.type}</Badge>
           <a
             href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
@@ -375,13 +389,13 @@ export default async function TokenDetailPage({
       )}
 
       {/* Risk Signals */}
-      {riskSignals.length > 0 && (
+      {signals.length > 0 && (
         <div className="mb-6">
           <h2 className="mb-3 flex items-center gap-2 font-semibold tracking-[-0.02em] text-ink">
             <Icon name="shield" className="h-4 w-4 text-mut" />Risk Signals
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {riskSignals.map((s, i) => (
+            {signals.map((s, i) => (
               <div key={i} className={`flex items-start gap-2 rounded-xl border border-hair border-l-[3px] px-3 py-2 text-sm
                 ${s.severity === 'danger' ? 'border-l-warn bg-warn-t' : s.severity === 'warn' ? 'border-l-warn bg-card' : 'border-l-acc bg-card'}`}>
                 <Icon
