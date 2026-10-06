@@ -218,6 +218,8 @@ export function Header() {
             ref={menuButton}
             onClick={() => setOpen(!open)}
             aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            aria-controls="mobile-menu"
             className="burger"
           >
             <span className={open ? 'rotate-45 translate-y-2' : undefined} />
@@ -237,7 +239,7 @@ export function Header() {
 
       {/* -- Mobile menu panel -- */}
       {open && (
-        <div ref={menuPanel} className="lg:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
+        <div ref={menuPanel} id="mobile-menu" className="lg:hidden border-t border-hair bg-card max-h-[calc(100dvh-7rem)] overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 pt-3 pb-1">
             <NetworkSwitcher />
           </div>
