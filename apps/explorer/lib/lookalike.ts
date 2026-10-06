@@ -77,6 +77,15 @@ const HOMOGLYPHS: Record<string, string> = {
   '\u03A5': 'Y', '\u03A7': 'X',
   // Greek lowercase, looking like: o v
   '\u03BF': 'o', '\u03BD': 'v',
+  // Lisu letters (U+A4D0..A4FF), looking like: A B C D E F G H J K L M N O P R S T U V W X Y Z.
+  // Every Lisu entry in Unicode's confusables.txt (UTS #39, Version 18.0.0, dated 2026-08-06) whose
+  // prototype is one Latin capital letter A-Z, plus the two it gives as small letters: l (the fold
+  // reads l as I) and d.
+  '\uA4EE': 'A', '\uA4D0': 'B', '\uA4DA': 'C', '\uA4D3': 'D', '\uA4F0': 'E', '\uA4DD': 'F',
+  '\uA4D6': 'G', '\uA4E7': 'H', '\uA4D9': 'J', '\uA4D7': 'K', '\uA4E1': 'L', '\uA4DF': 'M',
+  '\uA4E0': 'N', '\uA4F3': 'O', '\uA4D1': 'P', '\uA4E3': 'R', '\uA4E2': 'S', '\uA4D4': 'T',
+  '\uA4F4': 'U', '\uA4E6': 'V', '\uA4EA': 'W', '\uA4EB': 'X', '\uA4EC': 'Y', '\uA4DC': 'Z',
+  '\uA4F2': 'l', '\uA4D2': 'd',
 }
 
 // Combining marks, format characters (zero-width joiners, bidi marks), whitespace, and the blank

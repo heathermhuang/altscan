@@ -66,6 +66,19 @@ describe('foldConfusables', () => {
     expect(foldConfusables('DA\u04C0')).toBe('DAI') // Cyrillic capital palochka
   })
 
+  // Unicode confusables.txt (2026-08-06): Lisu letters whose prototype is one Latin capital letter.
+  it('folds every Lisu letter the confusables table maps to a Latin capital', () => {
+    const lisu: [number, string][] = [
+      [0xA4EE, 'A'], [0xA4D0, 'B'], [0xA4DA, 'C'], [0xA4D3, 'D'], [0xA4F0, 'E'], [0xA4DD, 'F'],
+      [0xA4D6, 'G'], [0xA4E7, 'H'], [0xA4D9, 'J'], [0xA4D7, 'K'], [0xA4E1, 'L'], [0xA4DF, 'M'],
+      [0xA4E0, 'N'], [0xA4F3, 'O'], [0xA4D1, 'P'], [0xA4E3, 'R'], [0xA4E2, 'S'], [0xA4D4, 'T'],
+      [0xA4F4, 'U'], [0xA4E6, 'V'], [0xA4EA, 'W'], [0xA4EB, 'X'], [0xA4EC, 'Y'], [0xA4DC, 'Z'],
+    ]
+    for (const [cp, letter] of lisu) expect(foldConfusables(String.fromCodePoint(cp)), cp.toString(16)).toBe(letter)
+    expect(foldConfusables('DA\uA4F2')).toBe('DAI') // Lisu letter I: the table gives small l
+    expect(foldConfusables('\uA4D2')).toBe('D') // Lisu letter Pha: the table gives small d
+  })
+
   it('leaves an ordinary symbol readable', () => {
     expect(foldConfusables('CAKE')).toBe('CAKE')
     expect(foldConfusables('')).toBe('')
@@ -186,6 +199,32 @@ describe('lookalikeOf: real spam seen in production', () => {
 
   it('does not flag a Binance-Peg token that is not a well-known one', () => {
     expect(lookalikeOf({ address: SPAM, symbol: 'XRP', name: 'Binance-Peg XRP Token' }, 'bnb')).toBeNull()
+  })
+})
+
+// Real spam in the local index: U+206F (format character) between letters, and a Lisu letter for a Latin one.
+describe('lookalikeOf: format characters and Lisu letters', () => {
+  const NOMINAL_DIGITS = '\u206F'
+  const spaced = (...letters: string[]) => letters.join(NOMINAL_DIGITS)
+  it('flags U+206F-spaced USDC with a Lisu Ca, as the BNB spam token', () => {
+    const spam = spaced('U', 'S', 'D\uA4DA')
+    expect(lookalikeOf({ address: '0x086e8e227df3e7497b9d517bb86ad1c240ace190', symbol: spam, name: spam }, 'bnb'))
+      .toEqual({ symbol: 'USDC', canonical: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' })
+  })
+
+  it('flags U+206F-spaced USDT with a Greek Tau', () => {
+    const spam = spaced('U', 'S', 'D\u03A4')
+    expect(lookalikeOf({ address: SPAM, symbol: spam, name: spam }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it('flags U+206F-spaced BNB as the native coin', () => {
+    const spam = spaced('B', 'N', 'B')
+    expect(lookalikeOf({ address: SPAM, symbol: spam, name: spam }, 'bnb')).toEqual({ symbol: 'BNB', canonical: null })
+  })
+
+  it('flags a spelling made only of Lisu letters (U, S, D, T)', () => {
+    const spam = '\uA4F4\uA4E2\uA4D3\uA4D4'
+    expect(lookalikeOf({ address: SPAM, symbol: spam, name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
   })
 })
 
