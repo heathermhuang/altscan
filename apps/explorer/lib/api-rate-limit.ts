@@ -2,7 +2,6 @@
  * Rate limiter for BNBScan API routes.
  * Delegates to @altscan/explorer-core for the shared, security-hardened implementation.
  *
- * SECURITY: The shared implementation takes the LAST IP from X-Forwarded-For.
- * Render's LB appends the real client IP last — the first entries are attacker-controlled.
+ * SECURITY: key on clientIpFromHeaders() — see the note in explorer-core's rate-limit.ts.
  */
-export { checkRateLimit, checkIpRateLimit, extractClientIp } from '@altscan/explorer-core'
+export { checkRateLimit, checkIpRateLimit, clientIpFromHeaders } from '@altscan/explorer-core'

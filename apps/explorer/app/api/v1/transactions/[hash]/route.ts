@@ -10,7 +10,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ hash: string }> },
 ) {
-  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
+  if (!(await checkIpRateLimit(request.headers))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 
