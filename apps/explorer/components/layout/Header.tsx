@@ -7,19 +7,27 @@ import { NetworkSwitcher } from './NetworkSwitcher'
 import { chainConfig } from '@/lib/chain-client'
 
 // One list for the desktop nav and the mobile menu (the mobile menu groups it by `group`).
-// `glyph` is decoration only: the same ☆ WatchlistButton uses, hidden from assistive tech.
-const NAV_LINKS = [
+// `more` links sit behind the desktop nav's More disclosure. `glyph` is decoration only: the same
+// ☆ WatchlistButton uses, hidden from assistive tech.
+type NavLink = { href: string; label: string; group: string; more?: boolean; glyph?: string }
+
+const NAV_LINKS: NavLink[] = [
   { href: '/blocks',     label: 'Blocks',        group: 'Explore' },
   { href: '/txs',        label: 'Transactions',  group: 'Explore' },
+  { href: '/token',      label: 'Tokens',        group: 'Explore' },
+  { href: '/dex',        label: 'DEX',           group: 'Markets' },
+  { href: '/whales',     label: 'Whales',        group: 'Markets' },
   { href: '/charts',     label: 'Charts',        group: 'Analytics' },
   { href: '/gas',        label: 'Gas',           group: 'Analytics' },
-  ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators', group: 'Analytics' }] : []),
-  ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking', group: 'Analytics' }] : []),
-  { href: '/watchlist',  label: 'Watchlist',     group: 'Tools', glyph: '☆' },
-  { href: '/api-docs',   label: 'API',           group: 'Developers' },
-  { href: '/developer',  label: 'Developers',    group: 'Developers' },
-  { href: '/verify',     label: 'Verify',        group: 'Developers' },
+  ...(chainConfig.features.hasValidators ? [{ href: '/validators', label: 'Validators', group: 'Analytics', more: true }] : []),
+  ...(chainConfig.features.hasStaking ? [{ href: '/staking', label: 'Staking', group: 'Analytics', more: true }] : []),
+  { href: '/watchlist',  label: 'Watchlist',     group: 'Tools', more: true, glyph: '☆' },
+  { href: '/api-docs',   label: 'API',           group: 'Developers', more: true },
+  { href: '/developer',  label: 'Developers',    group: 'Developers', more: true },
+  { href: '/verify',     label: 'Verify',        group: 'Developers', more: true },
 ]
+const MAIN_LINKS = NAV_LINKS.filter(l => !l.more)
+const MORE_LINKS = NAV_LINKS.filter(l => l.more)
 
 function BnbLogo() {
   return (
@@ -58,6 +66,78 @@ function Logo() {
   // silent fall-through to BNB's mark.
   const ChainLogo = LOGOS[chainConfig.key]
   return <ChainLogo />
+}
+
+// The desktop nav's overflow: a disclosure (button + list of links) in the NetworkSwitcher's
+// mould. Escape closes it and puts focus back on the button; a click, or Tab, outside closes it.
+function MoreNav({ pathname }: { pathname: string }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => { setOpen(false) }, [pathname])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.isComposing) return
+      if (box.current?.contains(e.target as Node)) button.current?.focus()
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div
+      ref={box}
+      className="nav-m"
+      // Tab past the last link closes it. Only when focus lands somewhere: clicking blank space
+      // (no relatedTarget) is the mousedown handler's.
+      onBlur={e => {
+        if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false)
+      }}
+    >
+      <button
+        ref={button}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-controls="nav-more"
+        data-on={MORE_LINKS.some(l => l.href === pathname) || undefined}
+      >
+        More
+        <svg
+          className={open ? 'rotate-180' : undefined}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <ul id="nav-more" className="nav-p">
+          {MORE_LINKS.map(({ href, label, glyph }) => (
+            <li key={href}>
+              <Link
+                href={href}
+                aria-current={pathname === href ? 'page' : undefined}
+                onClick={() => setOpen(false)}
+              >
+                {glyph && <span aria-hidden="true">{glyph} </span>}{label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export function Header() {
@@ -125,11 +205,12 @@ export function Header() {
 
           {/* Desktop nav */}
           <nav className="nav">
-            {NAV_LINKS.map(({ href, label, glyph }) => (
+            {MAIN_LINKS.map(({ href, label }) => (
               <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined}>
-                {glyph && <span aria-hidden="true">{glyph} </span>}{label}
+                {label}
               </Link>
             ))}
+            <MoreNav pathname={pathname} />
           </nav>
 
           {/* Hamburger -- below lg, where the full-word nav no longer fits beside the logo */}
