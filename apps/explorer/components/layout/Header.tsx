@@ -73,6 +73,8 @@ function Logo() {
 // summary announces its own expanded state. State is layered on top: `open` is controlled from
 // `open` below, onToggle keeps it in step with the browser's own toggling, and Escape (focus back to the
 // summary), a click or Tab outside, a link click and a route change close it, as the NetworkSwitcher does.
+// Arrow keys (JS only) move focus through the open list: Down from the summary enters it, Up/Down wrap,
+// Home/End jump to the ends. The links stay ordinary Tab stops.
 function MoreNav({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDetailsElement>(null)
@@ -108,6 +110,19 @@ function MoreNav({ pathname }: { pathname: string }) {
       // (no relatedTarget) is the mousedown handler's.
       onBlur={e => {
         if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false)
+      }}
+      onKeyDown={e => {
+        if (!e.currentTarget.open || e.nativeEvent.isComposing || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return
+        const links = Array.from(e.currentTarget.querySelectorAll<HTMLAnchorElement>('ul a'))
+        const at = links.indexOf(e.target as HTMLAnchorElement) // -1: focus is on the summary
+        let to = -1
+        if (e.key === 'ArrowDown') to = (at + 1) % links.length
+        else if (e.key === 'ArrowUp') to = at < 0 ? links.length - 1 : (at - 1 + links.length) % links.length
+        else if (at >= 0 && e.key === 'Home') to = 0
+        else if (at >= 0 && e.key === 'End') to = links.length - 1
+        if (to < 0) return
+        e.preventDefault()
+        links[to].focus()
       }}
     >
       <summary ref={summary} data-on={MORE_LINKS.some(l => l.href === pathname) || undefined}>
