@@ -62,17 +62,17 @@ export default async function GasPage() {
         </p>
       </div>
 
-      <AdReserve
-        context="gas"
-        placement="gas_top"
-        className="mb-8"
-      />
-
       <dl className="ledger [--cols:3] mb-8">
         <Fact label="Slow"     gwei={formatGwei(slow)}     basis={basis.slow} />
         <Fact label="Standard" gwei={formatGwei(standard)} basis={basis.standard} />
         <Fact label="Fast"     gwei={formatGwei(fast)}     basis={basis.fast} />
       </dl>
+
+      <AdReserve
+        context="gas"
+        placement="gas_top"
+        className="mb-8"
+      />
 
       <div className="mb-8 rounded-xl border border-hair bg-card p-6">
         <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">Current Base Fee</h2>

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { TxTable } from '@/components/transactions/TxTable'
 import { formatGwei, formatNumber, formatUtc, timeAgo } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { Icon } from '@/components/ui/Icon'
 import { Pagination } from '@/components/ui/Pagination'
 import type { Metadata } from 'next'
 import { fetchBlockFromRpc, type RpcBlock } from '@/lib/rpc-fallback'
@@ -210,7 +211,7 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
 
       {fromRpc && (
         <div className="mb-6 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
-          <span>⚡</span>
+          <Icon name="bolt" className="h-4 w-4 text-acc-ink" />
           <span>Block fetched live from {chainConfig.name} — it is outside our local retention window.</span>
         </div>
       )}

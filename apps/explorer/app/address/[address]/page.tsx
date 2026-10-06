@@ -6,6 +6,7 @@ import { headers } from 'next/headers'
 import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { Icon } from '@/components/ui/Icon'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
@@ -242,7 +243,7 @@ export default async function AddressPage({
       {/* GoPlus risk warning */}
       {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3">
-          <span className="text-lg mt-0.5">🚨</span>
+          <Icon name="danger" className="mt-0.5 h-5 w-5 text-warn" />
           <div>
             <p className="font-semibold text-ink text-sm">Security Risk Detected</p>
             <ul className="mt-1 space-y-0.5">
@@ -262,7 +263,9 @@ export default async function AddressPage({
           <h1 className="mr-1 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Address</h1>
           {resolvedName && (
             <Badge variant="default">
-              <span>🪪</span> {resolvedName}
+              <span className="inline-flex items-center gap-1">
+                <Icon name="tag" className="h-3.5 w-3.5" />{resolvedName}
+              </span>
             </Badge>
           )}
           {contractStatus.isContract && <Badge variant="default">Contract</Badge>}
@@ -308,15 +311,6 @@ export default async function AddressPage({
           value={contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'}
         />
       </dl>
-
-      {gasReferralContext && (
-        <AdReserve
-          context={gasReferralContext}
-          placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
-          variant="compact"
-          className="mb-6"
-        />
-      )}
 
       {/* Contract section */}
       {contractStatus.isContract && (
@@ -391,6 +385,17 @@ export default async function AddressPage({
           label="NFTs"
         />
       </div>
+
+      {/* Between the tab bar and the tab content, not after the content: the lazy tabs swap a ~210px
+          skeleton for a short message, and an ad below them would jump with it. */}
+      {gasReferralContext && (
+        <AdReserve
+          context={gasReferralContext}
+          placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
+          variant="compact"
+          className="mb-6"
+        />
+      )}
 
       {/* Tab content */}
       {activeTab === 'txns' && (

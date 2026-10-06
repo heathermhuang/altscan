@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { formatHolders, formatNumber } from '@/lib/format'
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { Icon } from '@/components/ui/Icon'
 
 /**
  * Client-side holders enhancement. SSR renders the labeled local net-flow estimate (0 Moralis
@@ -96,8 +97,9 @@ export function HoldersLazy({
         </span>
       </div>
       {data.source === 'local' && (
-        <div className="px-4 py-2 bg-warn-t text-ink2 text-xs border-b border-hair border-l-[3px] border-l-warn">
-          ⚠️ Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.
+        <div className="flex items-start gap-2 px-4 py-2 bg-warn-t text-ink2 text-xs border-b border-hair border-l-[3px] border-l-warn">
+          <Icon name="warn" className="mt-px h-3.5 w-3.5 text-warn" />
+          <span>Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.</span>
         </div>
       )}
       <div className="overflow-x-auto">

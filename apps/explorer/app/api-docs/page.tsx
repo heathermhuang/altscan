@@ -319,7 +319,7 @@ const endpoints: Endpoint[] = [
 
 export default function ApiDocsPage() {
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 *:max-w-5xl">
       <BreadcrumbJsonLd items={[{ name: 'API Documentation' }]} />
       <div className="mb-8">
         <p className="k">{'// '}api</p>
@@ -376,7 +376,7 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
               tabIndex={0}
               role="region"
               aria-label={`Parameters for ${endpoint.method} ${endpoint.path}`}
-              className="overflow-x-auto rounded-lg border border-hair"
+              className="dt-x fade-r overflow-x-auto rounded-lg border border-hair"
             >
             <table className="dt min-w-[36rem]">
               <caption className="sr-only">Parameters for {endpoint.method} {endpoint.path}</caption>

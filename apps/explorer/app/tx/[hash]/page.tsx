@@ -7,11 +7,12 @@ import { formatNativeToken, formatGwei, formatNumber, formatUtc, timeAgo, safeBi
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { decodeTx } from '@/lib/tx-decoder'
+import { decodeTx, type DecodedTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -198,6 +199,16 @@ const KNOWN_SIGNATURES: Record<string, string> = {
   '0xbaa2abde': 'removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)',
   '0xd0e30db0': 'deposit()',
   '0x2e1a7d4d': 'withdraw(uint256)',
+}
+
+// The decoded-summary card's icon, by what the decoder made of the transaction.
+const DECODED_ICON: Record<DecodedTx['type'], IconName> = {
+  transfer: 'arrow',
+  swap: 'swap',
+  approval: 'check',
+  contract_deploy: 'code',
+  contract_call: 'code',
+  other: 'info',
 }
 
 const TX_TYPE_LABELS: Record<number, string> = {
@@ -536,27 +547,27 @@ export default async function TxDetailPage({
 
       {fromRpc && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
-          <span>⚡</span>
+          <Icon name="bolt" className="h-4 w-4 text-acc-ink" />
           <span>Fetched live from {chainConfig.name} — this transaction is outside our local retention window.</span>
         </div>
       )}
 
       {bodyPruned && !bodyUnavailable && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
-          <span>⚡</span>
+          <Icon name="bolt" className="h-4 w-4 text-acc-ink" />
           <span>Input data &amp; event logs fetched live from {chainConfig.name} — this transaction is older than our local body-retention window.</span>
         </div>
       )}
       {bodyUnavailable && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
-          <span>⏳</span>
+          <Icon name="clock" className="h-4 w-4 text-warn" />
           <span>Input data &amp; event logs are temporarily unavailable — try again shortly. The transaction summary below is unaffected.</span>
         </div>
       )}
 
       {decoded && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3">
-          <span className="text-2xl">{decoded.emoji}</span>
+          <Icon name={DECODED_ICON[decoded.type]} className="h-6 w-6 text-acc-ink" />
           <p className="text-sm text-ink2">{decoded.summary}</p>
         </div>
       )}
@@ -649,7 +660,7 @@ export default async function TxDetailPage({
               mono
             />
             <RowShell label="Burnt Fees" mono>
-              🔥 {formatNativeToken(gasBreakdown.burnt, 8)} {chainConfig.currency}
+              <Icon name="flame" className="mr-1 inline h-4 w-4 align-[-3px] text-warn" />{formatNativeToken(gasBreakdown.burnt, 8)} {chainConfig.currency}
               <span className="ml-2 text-xs text-mut">
                 validator received {formatNativeToken(gasBreakdown.priorityTip, 8)} {chainConfig.currency}
               </span>
