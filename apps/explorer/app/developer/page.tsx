@@ -195,10 +195,12 @@ function verifyWebhook(body, signature, secret) {
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Manage Webhooks</h3>
               <CodeBlock label="Manage Webhooks">{`# List your webhooks
-curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress"
+curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress" \\
+  -H "X-API-Key: bnbs_abc123..."
 
 # Delete a webhook
-curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
+curl -X DELETE ${BASE_URL}/api/v1/webhooks/42 \\
+  -H "X-API-Key: bnbs_abc123..."`}</CodeBlock>
             </div>
           </div>
         </div>
