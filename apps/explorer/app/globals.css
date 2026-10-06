@@ -137,7 +137,9 @@
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
   }
-  /* Keyboard focus on an item in the fade zone would otherwise be dimmed. */
+  /* Keyboard focus on an item in the fade zone would otherwise be dimmed, and on the scroller
+     itself (a focusable region) the mask would clip its focus ring. */
+  .fade-r:focus-visible,
   .fade-r:has(:focus-visible) {
     -webkit-mask-image: none;
     mask-image: none;
@@ -371,6 +373,22 @@
   }
   .dt-a :where(a):hover {
     text-decoration-line: underline;
+  }
+  /* `dt-x` (with `fade-r`, on the scrolling box around a `dt` with a min-width: the API
+     parameter tables): the right-edge fade hints at the clipped column only below the width where the
+     table scrolls (it is 36rem, so ~650px; above that the table fits and the fade would just dim
+     its last column), and the last column keeps as much padding as the fade is wide, so at the
+     end of the scroll nothing sits in it. */
+  @media (min-width: 651px) {
+    .dt-x {
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
+  @media (max-width: 650.98px) {
+    .dt-x .dt :where(th, td):last-child {
+      padding-right: 24px;
+    }
   }
 }
 

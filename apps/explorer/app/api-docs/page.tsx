@@ -376,7 +376,7 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
               tabIndex={0}
               role="region"
               aria-label={`Parameters for ${endpoint.method} ${endpoint.path}`}
-              className="overflow-x-auto rounded-lg border border-hair"
+              className="dt-x fade-r overflow-x-auto rounded-lg border border-hair"
             >
             <table className="dt min-w-[36rem]">
               <caption className="sr-only">Parameters for {endpoint.method} {endpoint.path}</caption>
