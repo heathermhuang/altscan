@@ -18,7 +18,10 @@ import { HEAD_LIMIT, healCandidateOrder, healCandidateWhere, healHeadWhere } fro
  * The queries are the healer's own builders, run through the same drizzle -> postgres.js
  * path the healer uses (unnamed statements, planned with the bound values). The index is
  * the exact statement ensure-schema.ts runs at boot, and only that one: the full-table
- * index it replaced is not created.
+ * index it replaced is not created, so there is no safety net behind a failed proof.
+ * The proof is also checked under force_generic_plan, where the bound values are NOT
+ * visible to the planner: the same builders' SQL, PREPAREd and EXECUTEd, so a `$1`
+ * standing in for a placeholder would show up as a fallback to tokens_holder_count_idx.
  *
  * Gated on TOKEN_HEAL_TEST_PG_URL. Everything lives in its own schema on ONE
  * non-recycled connection, so the suite cannot collide with another sharing the database.
@@ -135,6 +138,31 @@ describe.skipIf(!PG_URL)('token-metadata healer: head + keyset SQL — against a
     return flatten((res[0]['QUERY PLAN'] as Array<{ Plan: PlanNode }>)[0].Plan)
   }
 
+  /**
+   * The statement planned GENERICALLY: PREPAREd from the builders' own SQL text and run with
+   * plan_cache_mode = force_generic_plan, so the planner sees `$n`, not the values. (The
+   * client itself sends unnamed statements, which are planned with their values; this is the
+   * plan a named or prepared statement would settle on.) EXPLAIN alone would bind the values.
+   */
+  async function genericPlan(query: { toSQL(): { sql: string; params: unknown[] } }): Promise<PlanNode[]> {
+    const q = query.toSQL()
+    const literal = (v: unknown) => (typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`)
+    await conn.unsafe('SET plan_cache_mode = force_generic_plan')
+    try {
+      await conn.unsafe(`PREPARE heal_generic AS ${q.sql}`)
+      try {
+        const res = await conn.unsafe(
+          `EXPLAIN (ANALYZE, FORMAT JSON) EXECUTE heal_generic(${q.params.map(literal).join(', ')})`,
+        )
+        return flatten((res[0]['QUERY PLAN'] as Array<{ Plan: PlanNode }>)[0].Plan)
+      } finally {
+        await conn.unsafe('DEALLOCATE heal_generic')
+      }
+    } finally {
+      await conn.unsafe('RESET plan_cache_mode')
+    }
+  }
+
   beforeAll(async () => {
     if (!/test/i.test(new URL(PG_URL as string).pathname)) {
       throw new Error(`${ENV} must name a disposable database (its name must contain "test")`)
@@ -237,6 +265,26 @@ describe.skipIf(!PG_URL)('token-metadata healer: head + keyset SQL — against a
           // ETH's is narrower than the union, so it may filter some.
           if (chain === 'bnb') expect(scans[0]['Rows Removed by Filter'] ?? 0, `${chain} ${label}`).toBe(0)
         }
+      })
+
+      // The same statements planned generically (see genericPlan). The placeholder terms are
+      // literals precisely so this holds: with `name in ($1, $2)` Postgres cannot prove the
+      // WHERE implies the partial index, and with the full-table index gone the scan became
+      // a sorted walk of tokens_holder_count_idx (125 ms on 1M rows, ~400x the indexed page).
+      it('still uses the partial index under a generic plan — deep keyset page and head', async () => {
+        const deep = { holderCount: 0, address: '0x8' + '0'.repeat(39) }
+        const keysetNodes = await genericPlan(keyset(chain, deep, 80))
+        const keysetShape = keysetNodes.map(n => n['Node Type'] + (n['Index Name'] ? `(${n['Index Name']})` : '')).join(' > ')
+        const scans = keysetNodes.filter(n => n['Index Name'] !== undefined)
+        expect(scans.map(n => n['Index Name']), `${chain} generic keyset: ${keysetShape}`).toEqual([TOKENS_HEAL_IDX])
+        expect(keysetNodes.some(n => /Sort/.test(n['Node Type'])), `${chain} generic keyset: ${keysetShape}`).toBe(false)
+        // Bound operands, and still the scan's start: this is what proves the plan really is generic.
+        expect(scans[0]['Index Cond'], `${chain} generic keyset`).toMatch(/ROW\(holder_count, \(address\)::text\) < ROW\(\$\d+, \$\d+\)/)
+
+        const headNodes = await genericPlan(head(chain))
+        const headShape = headNodes.map(n => n['Node Type'] + (n['Index Name'] ? `(${n['Index Name']})` : '')).join(' > ')
+        expect(headNodes.filter(n => n['Index Name'] !== undefined).map(n => n['Index Name']), `${chain} generic head: ${headShape}`)
+          .toEqual([TOKENS_HEAL_IDX])
       })
 
       // The head is a range on the leading column. On a table this small the planner may

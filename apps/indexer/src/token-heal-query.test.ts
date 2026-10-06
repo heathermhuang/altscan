@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
-import { schema } from './db'
-import { buildConcurrentIndexList, TOKENS_HEAL_IDX } from './ensure-schema'
+import { sql, type SQL } from 'drizzle-orm'
+import { buildConcurrentIndexList, TOKENS_HEAL_IDX, TOKENS_HEAL_PREDICATE } from './ensure-schema'
 import {
   ETH_ZERO_SUPPLY_MIN_HOLDERS, HEAD_LIMIT, HEAD_MIN_HOLDERS,
-  healCandidateOrder, healCandidatePredicate, healCandidateWhere, healHeadWhere,
+  healCandidateOrder, healCandidatePredicate, healCandidateWhere, healHeadWhere, sqlLiteral,
 } from './token-heal-query'
 import { UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 
@@ -14,20 +13,30 @@ const render = (q: SQL) => {
   const { sql: text, params } = dialect.sqlToQuery(q)
   return { sql: text, params }
 }
-const { tokens } = schema
 
 describe('healCandidatePredicate', () => {
-  it('keeps the BNB predicate byte-for-byte what it was before the ETH split', () => {
-    const before = or(
-      inArray(tokens.name, [UNKNOWN_NAME, '']),
-      inArray(tokens.symbol, [UNKNOWN_SYMBOL, '']),
-      and(eq(tokens.totalSupply, '0'), eq(tokens.type, 'BEP20')),
-    )!
-    expect(render(healCandidatePredicate('bnb'))).toEqual(render(before))
+  // The placeholder, zero-supply and BEP20 terms are literals, not parameters: they are what
+  // tokens_heal_candidates_idx is partial over, and a bound `$1` cannot prove a partial
+  // index applicable under a generic plan (token-heal.pg.test.ts runs that case).
+  it('renders the BNB predicate with its placeholder terms as literals, no parameters', () => {
     expect(render(healCandidatePredicate('bnb'))).toEqual({
-      sql: '("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4) or ("tokens"."total_supply" = $5 and "tokens"."type" = $6))',
-      params: ['Unknown', '', '???', '', '0', 'BEP20'],
+      sql: `("tokens"."name" in ('Unknown', '') or "tokens"."symbol" in ('???', '') or ("tokens"."total_supply" = 0 and "tokens"."type" = 'BEP20'))`,
+      params: [],
     })
+  })
+
+  // BNB's predicate IS the index's: same text once qualification, case and spacing go.
+  it('is, for BNB, the very predicate tokens_heal_candidates_idx is partial over', () => {
+    const bare = render(healCandidatePredicate('bnb')).sql
+      .replace(/"tokens"\./g, '').replace(/"/g, '')
+      .replace(/ (in|or|and) /g, m => m.toUpperCase()).replace(/, /g, ',')
+    expect(bare).toBe(TOKENS_HEAL_PREDICATE)
+  })
+
+  it('quotes the literals it renders, so a value with a quote in it cannot break out of the SQL', () => {
+    expect(render(sqlLiteral(UNKNOWN_SYMBOL)).sql).toBe(`'???'`)
+    expect(render(sqlLiteral('')).sql).toBe(`''`)
+    expect(render(sqlLiteral(`O'Brien`)).sql).toBe(`'O''Brien'`)
   })
 
   // 0/33 healable among placeholder+zero-supply rows on ETH, 10/33 among placeholders
@@ -38,8 +47,8 @@ describe('healCandidatePredicate', () => {
   it('requires a non-zero supply or at least 2 holders on ETH, with no zero-supply-only clause', () => {
     expect(ETH_ZERO_SUPPLY_MIN_HOLDERS).toBe(2)
     expect(render(healCandidatePredicate('eth'))).toEqual({
-      sql: '(("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4)) and ("tokens"."total_supply" <> $5 or "tokens"."holder_count" >= $6))',
-      params: ['Unknown', '', '???', '', '0', 2],
+      sql: `(("tokens"."name" in ('Unknown', '') or "tokens"."symbol" in ('???', '')) and ("tokens"."total_supply" <> $1 or "tokens"."holder_count" >= $2))`,
+      params: ['0', 2],
     })
   })
 
@@ -88,12 +97,12 @@ describe('healHeadWhere', () => {
 
   it('is the chain predicate and a lower bound on holder_count, with no cursor', () => {
     expect(render(healHeadWhere('bnb'))).toEqual({
-      sql: '(("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4) or ("tokens"."total_supply" = $5 and "tokens"."type" = $6)) and "tokens"."holder_count" >= $7)',
-      params: ['Unknown', '', '???', '', '0', 'BEP20', 2],
+      sql: `(("tokens"."name" in ('Unknown', '') or "tokens"."symbol" in ('???', '') or ("tokens"."total_supply" = 0 and "tokens"."type" = 'BEP20')) and "tokens"."holder_count" >= $1)`,
+      params: [2],
     })
     expect(render(healHeadWhere('eth'))).toEqual({
-      sql: '((("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4)) and ("tokens"."total_supply" <> $5 or "tokens"."holder_count" >= $6)) and "tokens"."holder_count" >= $7)',
-      params: ['Unknown', '', '???', '', '0', 2, 2],
+      sql: `((("tokens"."name" in ('Unknown', '') or "tokens"."symbol" in ('???', '')) and ("tokens"."total_supply" <> $1 or "tokens"."holder_count" >= $2)) and "tokens"."holder_count" >= $3)`,
+      params: ['0', 2, 2],
     })
   })
 
