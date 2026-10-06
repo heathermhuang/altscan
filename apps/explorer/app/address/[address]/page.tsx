@@ -239,7 +239,7 @@ export default async function AddressPage({
         : null
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 ad-col">
       {/* GoPlus risk warning */}
       {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3">
@@ -317,7 +317,7 @@ export default async function AddressPage({
           context={gasReferralContext}
           placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
           variant="compact"
-          className="mb-6"
+          className="mb-6 ad-end"
         />
       )}
 

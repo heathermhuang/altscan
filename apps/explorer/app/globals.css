@@ -771,3 +771,26 @@
     margin: 0;
   }
 }
+
+/* Phones: the ad leaves the top of the page for after its data (gas, DEX, whales, address). The page's
+   container is a flex column below 640px, so the same one AdReserve moves with `order` instead of
+   being rendered twice (a hidden twin would still fetch and log an impression). From 640px nothing
+   here applies and the ad sits where the markup puts it. Outside @layer so it beats the page's own
+   margin utilities: `ad-end` is the last item (margin above, none below), `ad-mid` follows the first
+   data block with its margins as written, and `ad-aft` marks what stays below it. */
+@media (max-width: 639.98px) {
+  .ad-col {
+    display: flex;
+    flex-direction: column;
+  }
+  .ad-end {
+    order: 1;
+    margin: 24px 0 0;
+  }
+  .ad-mid {
+    order: 1;
+  }
+  .ad-aft {
+    order: 2;
+  }
+}

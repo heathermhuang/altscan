@@ -58,7 +58,7 @@ export default async function DexPage({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 ad-col">
       <BreadcrumbJsonLd items={[{ name: 'DEX Trades' }]} />
       <script
         type="application/ld+json"
@@ -90,7 +90,7 @@ export default async function DexPage({
         context="dex"
         placement="dex_after_stats"
         variant="compact"
-        className="mb-6"
+        className="mb-6 ad-end"
       />
 
       {/* Top Pairs */}

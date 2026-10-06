@@ -38,7 +38,7 @@ export default async function GasPage() {
   const basis    = gasTierBasis(baseFee, MIN_GAS_PRICE)
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 ad-col">
       <BreadcrumbJsonLd items={[{ name: 'Gas Tracker' }]} />
       <script
         type="application/ld+json"
@@ -65,7 +65,7 @@ export default async function GasPage() {
       <AdReserve
         context="gas"
         placement="gas_top"
-        className="mb-8"
+        className="mb-8 ad-mid"
       />
 
       <dl className="ledger [--cols:3] mb-8">
@@ -74,7 +74,7 @@ export default async function GasPage() {
         <Fact label="Fast"     gwei={formatGwei(fast)}     basis={basis.fast} />
       </dl>
 
-      <div className="mb-8 rounded-xl border border-hair bg-card p-6">
+      <div className="mb-8 rounded-xl border border-hair bg-card p-6 ad-aft">
         <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">Current Base Fee</h2>
         <p className="font-mono text-4xl font-semibold text-ink">
           {formatGwei(baseFee)}
@@ -87,7 +87,7 @@ export default async function GasPage() {
         )}
       </div>
 
-      <div className="rounded-xl border border-hair bg-card p-4">
+      <div className="rounded-xl border border-hair bg-card p-4 ad-aft">
         <p className="text-sm text-ink2">
           Gas prices fetched live from {chainConfig.name} RPC.
           {hasGasFloor
