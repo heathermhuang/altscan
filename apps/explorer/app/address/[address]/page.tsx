@@ -239,7 +239,7 @@ export default async function AddressPage({
         : null
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 ad-col">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       {/* GoPlus risk warning */}
       {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3">
@@ -311,15 +311,6 @@ export default async function AddressPage({
           value={contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'}
         />
       </dl>
-
-      {gasReferralContext && (
-        <AdReserve
-          context={gasReferralContext}
-          placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
-          variant="compact"
-          className="mb-6 ad-mid"
-        />
-      )}
 
       {/* Contract section */}
       {contractStatus.isContract && (
@@ -395,17 +386,25 @@ export default async function AddressPage({
         />
       </div>
 
-      {/* Tab content. On phones the ad (ad-mid) sits between the tab bar and this, not after it: the
-          lazy tabs swap a ~210px skeleton for a short message, and an ad below them would jump with it. */}
-      <div className="ad-aft">
-        {activeTab === 'txns' && (
-          <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
-        )}
-        {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
-        {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
-        {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
-        {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
-      </div>
+      {/* Between the tab bar and the tab content, not after the content: the lazy tabs swap a ~210px
+          skeleton for a short message, and an ad below them would jump with it. */}
+      {gasReferralContext && (
+        <AdReserve
+          context={gasReferralContext}
+          placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
+          variant="compact"
+          className="mb-6"
+        />
+      )}
+
+      {/* Tab content */}
+      {activeTab === 'txns' && (
+        <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
+      )}
+      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
+      {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
+      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
+      {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
     </div>
   )
 }

@@ -59,7 +59,7 @@ export default async function WhalesPage({
   const { rows: whales, degraded } = await fetchWhales(period, nativeMinWei, tokenFilters)
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 ad-col">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Whale Tracker' }]} />
       <div className="mb-5">
         <p className="k">{'// '}whales</p>
@@ -96,7 +96,7 @@ export default async function WhalesPage({
         context="whales"
         placement="whales_before_table"
         variant="compact"
-        className="mb-6 ad-end"
+        className="mb-6"
       />
 
       {degraded && whales.length > 0 && (
