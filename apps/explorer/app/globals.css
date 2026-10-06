@@ -303,7 +303,7 @@
 /* Footer (components/layout/Footer): the same, for the links row. */
 @layer components {
   .ft-in {
-    @apply max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4;
+    @apply max-w-7xl mx-auto px-4 py-5 flex flex-col md:flex-row md:flex-wrap items-start md:items-center justify-between gap-4;
   }
   .ft-b {
     @apply font-mono text-ink font-semibold text-[15px] leading-tight;
@@ -315,7 +315,7 @@
     @apply font-mono text-acc-ink hover:underline text-xs font-medium mt-1.5 block;
   }
   .ft-l {
-    @apply flex flex-wrap gap-x-4 gap-y-1 font-mono text-[12.5px];
+    @apply flex flex-wrap gap-x-3 gap-y-1 font-mono text-[12.5px];
   }
   .ft-l a {
     @apply text-mut hover:text-ink transition-colors py-2;
