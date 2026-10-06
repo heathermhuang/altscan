@@ -132,6 +132,9 @@ export const tokens = pgTable('tokens', {
   // Top-N by holders (sitemap top-5000, token directory ranking).
   // ensure-schema.ts is the runtime DDL authority (declared holder_count DESC there).
   holderCountIdx: index('tokens_holder_count_idx').on(t.holderCount),
+  // The token-metadata healer's keyset paging (apps/indexer token-heal-query.ts): a row
+  // comparison is an Index Cond only when every column runs the same direction.
+  holderCountAddressIdx: index('tokens_holder_count_address_idx').on(t.holderCount.desc(), t.address.desc()),
 }))
 
 export const logs = pgTable('logs', {

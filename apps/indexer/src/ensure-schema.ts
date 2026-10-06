@@ -823,6 +823,12 @@ export function buildConcurrentIndexList(
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
     // Top-N tokens by holders (explorer sitemap top-5000, token directory)
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
+    // The token-metadata healer pages through its candidates by keyset, resuming at
+    // a (holder_count, address) cursor. That is an Index Cond only as a row
+    // comparison, and a row comparison needs every column in ONE direction — so
+    // address is DESC to match holder_count, and the healer's ORDER BY says the same
+    // (token-heal-query.ts; pinned by token-heal-query.test.ts).
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_address_idx ON tokens(holder_count DESC, address DESC)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]

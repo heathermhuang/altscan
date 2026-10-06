@@ -10,6 +10,8 @@ import {
 } from './ensure-schema'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
 import { getChainConfig, type ChainKey } from '@altscan/chain-config'
+import { getTableConfig } from 'drizzle-orm/pg-core'
+import { schema } from './db'
 
 const FLOOR = '1000000000000000000'
 
@@ -85,6 +87,40 @@ describe('buildConcurrentIndexList', () => {
       expect(normalized).toContain('ON transactions(block_number)')
       expect(normalized.endsWith(`WHERE ${inputOp!.flagColumn} = false`)).toBe(true)
     }
+  })
+})
+
+// The token-metadata healer's keyset paging. Its ORDER BY and row comparison are
+// pinned against this column list in token-heal-query.test.ts; here the index
+// itself: built in both modes, alongside the older single-column index (which the
+// explorer's top-N queries use and nothing here retires).
+describe('tokens_holder_count_address_idx', () => {
+  it('is built once in both partition modes, with every column descending', () => {
+    for (const ttPartitioned of [false, true]) {
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
+        .filter(s => s.includes('tokens_holder_count_address_idx'))
+      expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
+      // One direction across the columns is what makes the healer's row comparison an Index Cond.
+      expect(stmts[0]).toMatch(/ON tokens\(holder_count DESC, address DESC\)$/)
+    }
+  })
+
+  // packages/db/schema.ts is the schema source of truth: it has to say what the
+  // runtime DDL builds, columns and directions both.
+  it('is declared in the drizzle schema exactly as the runtime DDL builds it', () => {
+    const declared = getTableConfig(schema.tokens).indexes
+      .find(i => i.config.name === 'tokens_holder_count_address_idx')
+    expect(declared).toBeDefined()
+    const columns = declared!.config.columns
+      .map(c => `${(c as { name: string }).name} ${String((c as { indexConfig?: { order?: string } }).indexConfig?.order).toUpperCase()}`)
+      .join(', ')
+    const ddl = buildConcurrentIndexList(false, FLOOR).find(s => s.includes('tokens_holder_count_address_idx'))!
+    expect(ddl).toMatch(new RegExp(` ON tokens\\(${columns}\\)$`))
+  })
+
+  it('does not replace tokens_holder_count_idx', () => {
+    const stmts = buildConcurrentIndexList(false, FLOOR).filter(s => s.includes('ON tokens('))
+    expect(stmts.some(s => /tokens_holder_count_idx\s+ON tokens\(holder_count DESC\)$/.test(s))).toBe(true)
   })
 })
 
