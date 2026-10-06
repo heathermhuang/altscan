@@ -16,6 +16,9 @@ type WellKnown = {
   name: string
   /** Canonical contract, or null for the chain's native coin (it has no contract). */
   address: string | null
+  /** Other symbols and names a copy passes under: the label the explorer itself shows for the real token. */
+  symbols?: readonly string[]
+  names?: readonly string[]
 }
 
 // Canonical contracts: on-chain symbol() and name() read via eth_call on 2026-10-06 against
@@ -24,15 +27,25 @@ type WellKnown = {
 //   https://bscscan.com/token/<address>    https://etherscan.io/token/<address>
 // The native coins (BNB on BNB Chain, ETH on Ethereum) have no contract, so ANY token claiming
 // one is a lookalike. Do not add an entry from memory: an address nobody verified is a wrong label.
+//
+// BNB Chain aliases: BscScan shows a Binance-Peg token as "Binance-Peg <name>" and the real USDT as
+// "Binance-Peg BSC-USD (BSC-USD)", and spam copies the label it sees there (a 22k-holder
+// "Binance-Peg BSC-USD" / "BSC-USD" token did, in the 2026-10 tokens table). So every BNB Chain
+// contract also answers to "Binance-Peg <its on-chain name>", and USDT to BSC-USD. The BSC-USD label
+// is read off production data; the "Binance-Peg <name>" form is that convention applied to each
+// token, and WBNB's is by the same rule rather than a label seen on BscScan.
 export const WELL_KNOWN: Record<ChainKey, readonly WellKnown[]> = {
   bnb: [
-    { symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955' },
-    { symbol: 'USDC', name: 'USD Coin', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },
-    { symbol: 'BUSD', name: 'BUSD Token', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56' },
-    { symbol: 'DAI', name: 'Dai Token', address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3' },
-    { symbol: 'WBNB', name: 'Wrapped BNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' },
-    { symbol: 'ETH', name: 'Ethereum Token', address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' },
-    { symbol: 'BTCB', name: 'BTCB Token', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c' },
+    {
+      symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955',
+      symbols: ['BSC-USD'], names: ['Binance-Peg BSC-USD', 'Binance-Peg Tether USD'],
+    },
+    { symbol: 'USDC', name: 'USD Coin', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', names: ['Binance-Peg USD Coin'] },
+    { symbol: 'BUSD', name: 'BUSD Token', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', names: ['Binance-Peg BUSD Token'] },
+    { symbol: 'DAI', name: 'Dai Token', address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', names: ['Binance-Peg Dai Token'] },
+    { symbol: 'WBNB', name: 'Wrapped BNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', names: ['Binance-Peg Wrapped BNB'] },
+    { symbol: 'ETH', name: 'Ethereum Token', address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', names: ['Binance-Peg Ethereum Token'] },
+    { symbol: 'BTCB', name: 'BTCB Token', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', names: ['Binance-Peg BTCB Token'] },
     { symbol: 'BNB', name: 'BNB', address: null },
   ],
   eth: [
@@ -90,11 +103,15 @@ export function foldConfusables(s: string): string {
 }
 
 // Folded once at load: a list page calls lookalikeOf per row.
-type Folded = WellKnown & { foldedSymbol: string; foldedName: string }
+type Folded = WellKnown & { foldedSymbols: string[]; foldedNames: string[] }
 const FOLDED = Object.fromEntries(
   Object.entries(WELL_KNOWN).map(([chain, list]) => [
     chain,
-    list.map((w) => ({ ...w, foldedSymbol: foldConfusables(w.symbol), foldedName: foldConfusables(w.name) })),
+    list.map((w) => ({
+      ...w,
+      foldedSymbols: [w.symbol, ...(w.symbols ?? [])].map(foldConfusables),
+      foldedNames: [w.name, ...(w.names ?? [])].map(foldConfusables),
+    })),
   ]),
 ) as Record<ChainKey, Folded[]>
 
@@ -107,8 +124,9 @@ export type Lookalike = {
 
 /**
  * The well-known token this one impersonates, else null. A token matches when its folded
- * symbol equals a well-known symbol, or its folded name equals that token's canonical name,
- * AND it is not the canonical contract. Address compare ignores case.
+ * symbol equals a well-known symbol, or its folded name equals that token's canonical name
+ * (either also counting the token's aliases), AND it is not the canonical contract. Address
+ * compare ignores case.
  */
 export function lookalikeOf(
   token: { address: string; symbol?: string | null; name?: string | null },
@@ -119,7 +137,7 @@ export function lookalikeOf(
   if (!symbol && !name) return null
   const address = token.address.toLowerCase()
   for (const w of FOLDED[chain]) {
-    if (!(symbol === w.foldedSymbol || name === w.foldedName)) continue
+    if (!(w.foldedSymbols.includes(symbol) || w.foldedNames.includes(name))) continue
     if (w.address && w.address.toLowerCase() === address) return null
     return { symbol: w.symbol, canonical: w.address }
   }

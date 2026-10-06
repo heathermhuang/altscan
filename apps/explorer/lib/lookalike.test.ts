@@ -147,6 +147,48 @@ describe('lookalikeOf: flags', () => {
   })
 })
 
+// Real spam from the 2026-10 tokens tables, byte for byte (U+0358 combining dot above right, U+1E6C T with
+// dot below, U+1E0C D with dot below, U+1EA0 A with dot below, U+00DA U acute, U+0405 Cyrillic Dze).
+describe('lookalikeOf: real spam seen in production', () => {
+  const canon = (chain: 'bnb' | 'eth', symbol: string) => WELL_KNOWN[chain].find((w) => w.symbol === symbol)?.address
+  it.each([
+    ['BNB Binance-Peg BSC-USD, 22k holders', 'bnb', '0xacfcace43b613c3ab3f71fab72c0b58e35c76dff', 'BSC-USD', 'Binance-Peg BSC-USD', 'USDT'],
+    ['BNB Binance-Peg Ethereum Token with marks', 'bnb', '0xea858f4b8d915d35b25f5f63d35ab50f8e505230', 'E\u1E6CH', 'Bi\u0358nance-Peg Ethereum \u1E6Coken', 'ETH'],
+    ['BNB USD Coin with marks', 'bnb', '0xc6b811aa7d4a0ed9031ba25d2de538d4cc89a536', 'US\u1E0CC', 'USD Coi\u0358n', 'USDC'],
+    ['ETH USDT with marks', 'eth', '0xfbfeec01ab2e14e8fad50265f00c7cb7b094f9a2', 'USD\u0358T\u0358', 'USD\u0358T\u0358', 'USDT'],
+    ['ETH USDC with acute U and Cyrillic Dze', 'eth', '0x2b13366e28eef0c6dbee008091c9cfa4140ec64d', '\u00DA\u0405DC', '\u00DA\u0405D Coin', 'USDC'],
+    ['ETH ERC20:USDT', 'eth', '0x062a1a272656ae25e2a0d75a39501053ae03db44', 'USDT', 'ERC20:USDT', 'USDT'],
+    ['ETH DAI with dot below', 'eth', '0x4c0c5733107a48ea0e741aad768d12bca5c61ae7', 'D\u1EA0I', 'D\u1EA0I', 'DAI'],
+  ] as const)('%s', (_label, chain, address, symbol, name, target) => {
+    expect(lookalikeOf({ address, symbol, name }, chain)).toEqual({ symbol: target, canonical: canon(chain, target) })
+  })
+
+  it('catches the BscScan label of the real USDT on either field alone', () => {
+    const usdt = { symbol: 'USDT', canonical: BNB_USDT }
+    expect(lookalikeOf({ address: SPAM, symbol: 'BSC-USD', name: 'x' }, 'bnb')).toEqual(usdt)
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'Binance-Peg BSC-USD' }, 'bnb')).toEqual(usdt)
+  })
+
+  it('catches "Binance-Peg <name>" for every BNB Chain contract, by name alone', () => {
+    for (const w of WELL_KNOWN.bnb) {
+      if (!w.address) continue
+      expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: `Binance-Peg ${w.name}` }, 'bnb')?.symbol, w.symbol).toBe(w.symbol)
+    }
+  })
+
+  it('catches a marked-up "Binance-Peg" name by name alone', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'Bi\u0358nance-Peg Ethereum \u1E6Coken' }, 'bnb')?.symbol).toBe('ETH')
+  })
+
+  it('does not apply BscScan\'s peg labels on Ethereum', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'Binance-Peg BSC-USD' }, 'eth')).toBeNull()
+  })
+
+  it('does not flag a Binance-Peg token that is not a well-known one', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XRP', name: 'Binance-Peg XRP Token' }, 'bnb')).toBeNull()
+  })
+})
+
 describe('lookalikeOf: does not flag', () => {
   it('the canonical contract itself, in any address casing', () => {
     for (const a of [BNB_USDT, BNB_USDT.toLowerCase(), BNB_USDT.toUpperCase().replace('0X', '0x')]) {
