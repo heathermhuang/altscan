@@ -53,12 +53,20 @@ export function healCandidatePredicate(chain: ChainKey): SQL {
  *
  * A ROW comparison, not `holder_count < h OR (holder_count = h AND address < a)`:
  * Postgres turns a row comparison into an Index Cond on
- * tokens_holder_count_address_idx (holder_count DESC, address DESC), so the scan
- * starts AT the cursor. The OR spelling cannot be an index bound; measured on PG16
- * it walked tokens_holder_count_idx from the top of the table, discarded every row
- * before the cursor through a heap Filter, and finished with a sort. A row
- * comparison only works when every column runs the same direction, which is why
- * the index and healCandidateOrder are both DESC on address.
+ * tokens_heal_candidates_idx (holder_count DESC, address DESC, partial over the
+ * candidates of both chains), so the scan starts AT the cursor. The OR spelling
+ * cannot be an index bound; measured on PG16 it walked tokens_holder_count_idx from
+ * the top of the table, discarded every row before the cursor through a heap Filter,
+ * and finished with a sort. A row comparison only works when every column runs the
+ * same direction, which is why the index and healCandidateOrder are both DESC on
+ * address.
+ *
+ * The index is partial, so Postgres uses it only when it can prove this WHERE implies
+ * the index predicate (ensure-schema.ts's TOKENS_HEAL_PREDICATE). It can, because the
+ * server plans each statement with its bound values (the client sends unnamed
+ * statements: custom plans). Under force_generic_plan the proof fails and the scan
+ * falls back to tokens_holder_count_idx — pinned against a real Postgres by
+ * token-heal.pg.test.ts.
  */
 export function healCandidateWhere(chain: ChainKey, cursor: HealCursor | null): SQL {
   const predicate = healCandidatePredicate(chain)

@@ -635,6 +635,14 @@ export async function ensureSchema(): Promise<void> {
     } catch (err) {
       console.warn('[indexer] Could not retire dex_tx_log_unique:', dbErrorMessage(err))
     }
+    try {
+      for (const stmt of retireOldTokensHealIndexSql(await plainIndexIsValid(TOKENS_HEAL_IDX))) {
+        await db.execute(sql.raw(stmt))
+        console.log(`[indexer] Retired the full healer index: ${stmt}`)
+      }
+    } catch (err) {
+      console.warn('[indexer] Could not retire tokens_holder_count_address_idx:', dbErrorMessage(err))
+    }
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
 }
@@ -685,6 +693,32 @@ export const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
 
 export function retireOldDexKeySql(replacementValid: boolean): string[] {
   return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS dex_tx_log_unique'] : []
+}
+
+/**
+ * The token-metadata healer's keyset index, partial over its candidates.
+ *
+ * TOKENS_HEAL_PREDICATE is the UNION of both chains' healCandidatePredicate
+ * (token-heal-query.ts): BNB's is exactly this; ETH's is `(name placeholder OR symbol
+ * placeholder) AND (...)`, which implies the first two arms. Postgres only uses a
+ * partial index when it can prove the query's WHERE implies the index predicate, so
+ * the spelling here has to stay one the planner can prove against the healer's
+ * parameterised predicates — pinned against a real Postgres by token-heal.pg.test.ts.
+ * The placeholders are token-metadata.ts's UNKNOWN_NAME / UNKNOWN_SYMBOL (a test pins
+ * them), written out because DDL cannot take a bound parameter.
+ */
+export const TOKENS_HEAL_IDX = 'tokens_heal_candidates_idx'
+export const TOKENS_HEAL_PREDICATE =
+  `(name IN ('Unknown','') OR symbol IN ('???','') OR (total_supply = 0 AND type = 'BEP20'))`
+
+/**
+ * The healer's first index, over every token. It goes once its partial replacement is
+ * VALID: an unfinished or failed build keeps it in place, so the healer's keyset never
+ * runs without one (deploy generations overlap, and the outgoing binary pages through
+ * the same candidates).
+ */
+export function retireOldTokensHealIndexSql(replacementValid: boolean): string[] {
+  return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS tokens_holder_count_address_idx'] : []
 }
 
 export const TT_TOKEN_TS_IDX = 'tt_token_ts_idx'
@@ -828,7 +862,14 @@ export function buildConcurrentIndexList(
     // comparison, and a row comparison needs every column in ONE direction — so
     // address is DESC to match holder_count, and the healer's ORDER BY says the same
     // (token-heal-query.ts; pinned by token-heal-query.test.ts).
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_address_idx ON tokens(holder_count DESC, address DESC)',
+    //
+    // PARTIAL, over the union of both chains' candidate predicates (see
+    // TOKENS_HEAL_PREDICATE). The first spelling indexed every token: a deep page still
+    // heap-fetched and filtered every non-candidate in its way (measured 2026-10-06:
+    // 3,327 rows / 2.76 s per page on BNB, 17,904 / 2.58 s on ETH, candidates being ~2%
+    // and ~0.4% of the 0-holder region), and the index was 296 MB on BNB. Over the
+    // candidates alone a BNB page reads no non-candidate at all.
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${TOKENS_HEAL_IDX} ON tokens(holder_count DESC, address DESC) WHERE ${TOKENS_HEAL_PREDICATE}`,
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS webhooks_owner_idx      ON webhooks(owner_address)',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS api_keys_owner_idx      ON api_keys(owner_address)',
   ]

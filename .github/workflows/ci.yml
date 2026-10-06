@@ -124,6 +124,16 @@ jobs:
           DB_CLIENT_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run packages/db/client.pg.test.ts
 
+      # The token-metadata healer's head + keyset SQL: the walk is one ORDER BY with no
+      # skip or repeat across thousands of rows tied on holder_count, and Postgres can
+      # prove the healer's parameterised WHERE implies the partial index (a failed proof
+      # is a silent fallback to a sorted walk of tokens_holder_count_idx, not an error).
+      # Everything lives in its own schema, so it shares worker_test.
+      - name: PG-gated indexer suite (token healer keyset + partial index)
+        env:
+          TOKEN_HEAL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/indexer/src/token-heal.pg.test.ts
+
       # POST /api/v1/query's filter.address: an OR across from/to ordered by
       # block_number walked the whole table and hit the web statement_timeout
       # ~95x/hour on BNB. Asserts rows read, not wall time. Its tables are TEMP,

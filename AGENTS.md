@@ -27,7 +27,7 @@ pnpm test    # vitest run (root config, all workspaces)
 ## Testing gotchas
 
 - **PG-gated suites are silently SKIPPED by a bare `pnpm test`.** Each is gated on its own
-  env var, and CI runs only five of the seven by name:
+  env var, and CI runs only six of the eight by name:
   | Suite | Gate | In CI? |
   |---|---|---|
   | `apps/indexer/src/backfill-worker.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes |
@@ -35,6 +35,7 @@ pnpm test    # vitest run (root config, all workspaces)
   | `apps/explorer/lib/backfill-serve.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes (separate DB) |
   | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` | yes |
   | `apps/explorer/lib/address-query.pg.test.ts` | `ADDRESS_QUERY_TEST_PG_URL` | yes |
+  | `apps/indexer/src/token-heal.pg.test.ts` | `TOKEN_HEAL_TEST_PG_URL` | yes |
   | `apps/indexer/src/retention-partition-drop.pg.test.ts` | `BACKFILL_TEST_PG_URL` | **no** |
   | `apps/indexer/src/retention-boundary-partition.pg.test.ts` | `BOUNDARY_TEST_PG_URL` | **no** |
   The last two run nowhere unless you run them by hand — do that before touching retention.

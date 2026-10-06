@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { schema } from './db'
-import { buildConcurrentIndexList } from './ensure-schema'
+import { buildConcurrentIndexList, TOKENS_HEAL_IDX } from './ensure-schema'
 import {
   ETH_ZERO_SUPPLY_MIN_HOLDERS, HEAD_LIMIT, HEAD_MIN_HOLDERS,
   healCandidateOrder, healCandidatePredicate, healCandidateWhere, healHeadWhere,
@@ -59,7 +59,7 @@ describe('healCandidateWhere', () => {
   })
 
   // A row comparison, never `holder_count < h OR (holder_count = h AND address < a)`:
-  // only the row comparison is an Index Cond on tokens_holder_count_address_idx. The
+  // only the row comparison is an Index Cond on tokens_heal_candidates_idx. The
   // OR spelling measured as a walk from the top of the table behind a heap Filter.
   it('resumes with one row comparison on the sort key, after the predicate, on both chains', () => {
     for (const chain of ['bnb', 'eth'] as const) {
@@ -117,9 +117,9 @@ describe('healCandidateOrder', () => {
   it('is the column list of the index ensure-schema builds for it', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned, '1000000000000000000')
-        .filter(s => s.includes('tokens_holder_count_address_idx'))
+        .filter(s => s.includes(TOKENS_HEAL_IDX))
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
-      const columns = stmts[0].match(/ ON tokens\((.+)\)$/)?.[1]
+      const columns = stmts[0].match(/ ON tokens\((.+)\) WHERE /)?.[1]
       const ordering = rendered().replace(/"tokens"\./g, '').replace(/"/g, '').replace(/ (asc|desc)\b/g, m => m.toUpperCase())
       expect(columns).toBe(ordering)
     }
