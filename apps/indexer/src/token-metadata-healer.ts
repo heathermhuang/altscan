@@ -14,9 +14,9 @@ import { getChainConfig } from '@altscan/chain-config'
 import { getMaintenanceDb, schema, dbErrorMessage } from './db'
 import { indexerConfig } from './config-instance'
 import { withTimeout } from './rpc-failover'
-import { healCandidateOrder, healCandidateWhere } from './token-heal-query'
+import { HEAD_LIMIT, healCandidateOrder, healCandidateWhere, healHeadWhere } from './token-heal-query'
 import {
-  decideHeal, describeHealCursor, fetchTokenMetadata, pruneTried, resumeHealCursor, scanHealCandidates,
+  collectHealRun, decideHeal, describeHealCursor, fetchTokenMetadata, pruneTried, resumeHealCursor,
   type HealCursor,
 } from './token-metadata'
 
@@ -55,28 +55,37 @@ async function runOnce(providers: readonly JsonRpcProvider[], batchSize: number)
     pruneTried(tried, started)
     if (strikes.size > MAX_STRIKE_ENTRIES) strikes.clear()
     const db = getMaintenanceDb()
-    // Keyset paging in holder order: each page resumes at the cursor, so the walk
-    // reaches the whole list; rows tried within 24h are skipped in JS (a NOT IN
-    // list that long would also overflow drizzle's recursive sql.join).
+    // The head (high-holder candidates, re-listed from the top every run) comes first,
+    // then keyset paging in holder order fills the rest: each page resumes at the
+    // cursor, so the walk reaches the whole list. Rows tried within 24h are skipped in
+    // JS (a NOT IN list that long would also overflow drizzle's recursive sql.join).
     const pageSize = batchSize * 2
-    const scan = await scanHealCandidates(
+    const healColumns = {
+      address: schema.tokens.address,
+      name: schema.tokens.name,
+      symbol: schema.tokens.symbol,
+      decimals: schema.tokens.decimals,
+      totalSupply: schema.tokens.totalSupply,
+      type: schema.tokens.type,
+      holderCount: schema.tokens.holderCount,
+    }
+    const run = await collectHealRun(
+      async () => db
+        .select(healColumns)
+        .from(schema.tokens)
+        .where(healHeadWhere(chainKey))
+        .orderBy(...healCandidateOrder)
+        .limit(HEAD_LIMIT),
       async (after, limit) => db
-        .select({
-          address: schema.tokens.address,
-          name: schema.tokens.name,
-          symbol: schema.tokens.symbol,
-          decimals: schema.tokens.decimals,
-          totalSupply: schema.tokens.totalSupply,
-          type: schema.tokens.type,
-          holderCount: schema.tokens.holderCount,
-        })
+        .select(healColumns)
         .from(schema.tokens)
         .where(healCandidateWhere(chainKey, after))
         .orderBy(...healCandidateOrder)
         .limit(limit),
       healCursor, tried, started, { batchSize, pageSize },
     )
-    const batch = scan.taken.map(t => t.row)
+    const scan = run.scan
+    const batch = [...run.head, ...scan.taken.map(t => t.row)]
 
     let attempted = 0
     let healed = 0
@@ -110,10 +119,11 @@ async function runOnce(providers: readonly JsonRpcProvider[], batchSize: number)
       await sleep(DELAY_BETWEEN_TOKENS_MS)
     }
     // Only now, so an error that aborts the run (a DB error above) leaves the cursor where it was.
+    // The tail scan only: head rows that were not settled come back through the head.
     const resume = resumeHealCursor(scan, row => tried.has(row.address))
     healCursor = resume.cursor
     if (stoppedEarly) console.warn(`${TAG} stopped early: ${transportErrors} transport errors`)
-    console.log(`${TAG} tried ${attempted}, healed ${healed}, still-unresolved ${attempted - healed} (top holder ${topUnresolvedHolders}), transport errors ${transportErrors}, cursor ${describeHealCursor(resume)}`)
+    console.log(`${TAG} tried ${attempted}, healed ${healed}, still-unresolved ${attempted - healed} (top holder ${topUnresolvedHolders}), transport errors ${transportErrors}, head ${Math.min(attempted, run.head.length)}, cursor ${describeHealCursor(resume)}`)
   } catch (err) {
     console.error(`${TAG} error:`, dbErrorMessage(err))
   } finally {

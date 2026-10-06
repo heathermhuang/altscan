@@ -66,5 +66,21 @@ export function healCandidateWhere(chain: ChainKey, cursor: HealCursor | null): 
   return and(predicate, sql`(${tokens.holderCount}, ${tokens.address}) < (${cursor.holderCount}, ${cursor.address})`)!
 }
 
+/**
+ * The HEAD: candidates with at least HEAD_MIN_HOLDERS holders, listed from the top
+ * every run (no cursor), at most HEAD_LIMIT of them. holder_count is recomputed every
+ * 15 minutes, so a candidate can climb above the keyset cursor after it has passed;
+ * the head is how the healer still sees it next run (see collectHealRun). It is a
+ * range on the leading index column, in index order, so it is cheap: measured on
+ * production 2026-10-06 (read-only EXPLAIN ANALYZE), BNB has 31,049 tokens with >= 2
+ * holders and 19 of them are candidates (head query 23.6 ms); ETH 10,085 and 9 (6.7 ms).
+ */
+export const HEAD_MIN_HOLDERS = 2
+export const HEAD_LIMIT = 500
+
+export function healHeadWhere(chain: ChainKey): SQL {
+  return and(healCandidatePredicate(chain), gte(tokens.holderCount, HEAD_MIN_HOLDERS))!
+}
+
 /** The order the keyset above and the index agree on. */
 export const healCandidateOrder = [desc(tokens.holderCount), desc(tokens.address)] as const

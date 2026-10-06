@@ -3,7 +3,10 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { schema } from './db'
 import { buildConcurrentIndexList } from './ensure-schema'
-import { ETH_ZERO_SUPPLY_MIN_HOLDERS, healCandidateOrder, healCandidatePredicate, healCandidateWhere } from './token-heal-query'
+import {
+  ETH_ZERO_SUPPLY_MIN_HOLDERS, HEAD_LIMIT, HEAD_MIN_HOLDERS,
+  healCandidateOrder, healCandidatePredicate, healCandidateWhere, healHeadWhere,
+} from './token-heal-query'
 import { UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 
 const dialect = new PgDialect()
@@ -69,6 +72,34 @@ describe('healCandidateWhere', () => {
       expect(q.params).toEqual([...predicate.params, 0, '0x12ab34cd56ef'])
       // The OR spelling's signature is an equality on holder_count (the ETH predicate only uses >=).
       expect(q.sql).not.toMatch(/"holder_count" = \$/)
+    }
+  })
+})
+
+// The head is re-listed from the top every run so a candidate that climbs above the
+// keyset cursor (holder_count is recomputed every 15 minutes) is seen next run, not a
+// lap later. Prod 2026-10-06: BNB 31,049 tokens with >= 2 holders / 19 candidates /
+// 23.6 ms; ETH 10,085 / 9 / 6.7 ms.
+describe('healHeadWhere', () => {
+  it('is 500 rows at most, from 2 holders up', () => {
+    expect(HEAD_MIN_HOLDERS).toBe(2)
+    expect(HEAD_LIMIT).toBe(500)
+  })
+
+  it('is the chain predicate and a lower bound on holder_count, with no cursor', () => {
+    expect(render(healHeadWhere('bnb'))).toEqual({
+      sql: '(("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4) or ("tokens"."total_supply" = $5 and "tokens"."type" = $6)) and "tokens"."holder_count" >= $7)',
+      params: ['Unknown', '', '???', '', '0', 'BEP20', 2],
+    })
+    expect(render(healHeadWhere('eth'))).toEqual({
+      sql: '((("tokens"."name" in ($1, $2) or "tokens"."symbol" in ($3, $4)) and ("tokens"."total_supply" <> $5 or "tokens"."holder_count" >= $6)) and "tokens"."holder_count" >= $7)',
+      params: ['Unknown', '', '???', '', '0', 2, 2],
+    })
+  })
+
+  it('never carries the keyset row comparison', () => {
+    for (const chain of ['bnb', 'eth'] as const) {
+      expect(render(healHeadWhere(chain)).sql).not.toMatch(/\) < \(/)
     }
   })
 })

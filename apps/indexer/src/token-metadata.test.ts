@@ -3,7 +3,7 @@ import { Interface, JsonRpcProvider, Network, encodeBytes32String } from 'ethers
 import {
   HEAL_MAX_PAGES, HEAL_RETRY_MS, TRANSPORT_STREAK_LIMIT, TRANSPORT_STRIKE_LIMIT, UNKNOWN_NAME, UNKNOWN_SYMBOL,
   decideHeal, describeHealCursor, fetchTokenMetadata, isTransportError, planHeal, pruneTried, resumeHealCursor,
-  scanHealCandidates,
+  scanHealCandidates, collectHealRun, selectHeadBatch,
   type CallRunner, type FetchedTokenMetadata, type HealCursor, type HealPageSource, type HealRow, type TokenMetadata,
 } from './token-metadata'
 
@@ -189,7 +189,13 @@ function pageSourceOf(rows: HealRow[]) {
         || (r.holderCount === after.holderCount && r.address < after.address))
       .slice(0, limit)
   }
-  return { fetchPage, calls }
+  // The head: candidates with >= 2 holders from the top, no cursor (token-heal-query.ts healHeadWhere).
+  const headCalls: number[] = []
+  const fetchHead = async () => {
+    headCalls.push(headCalls.length)
+    return sorted.filter(r => r.holderCount >= 2).slice(0, 500)
+  }
+  return { fetchPage, fetchHead, calls, headCalls }
 }
 const cand = (holderCount: number, address: string) => row({ holderCount, address })
 const addrs = (scan: { taken: Array<{ row: HealRow }> }) => scan.taken.map(t => t.row.address)
@@ -360,6 +366,123 @@ describe('scanHealCandidates', () => {
     // A day later the list is open again, from the top.
     const again = await scanHealCandidates(fetchPage, at, tried, NOW + HEAL_RETRY_MS, { batchSize: 40, pageSize: 80 })
     expect(addrs(again)[0]).toBe(rows[0].address)
+  })
+})
+
+describe('selectHeadBatch', () => {
+  const NOW = 10 * HEAL_RETRY_MS
+  const rows = [cand(9, '0xa'), cand(8, '0xb'), cand(7, '0xc')]
+
+  it('skips rows tried inside the window, keeps list order, and stops at the batch size', () => {
+    const tried = new Map([['0xa', NOW - 1]])
+    expect(selectHeadBatch(rows, tried, NOW, 5).map(r => r.address)).toEqual(['0xb', '0xc'])
+    expect(selectHeadBatch(rows, new Map(), NOW, 2).map(r => r.address)).toEqual(['0xa', '0xb'])
+  })
+
+  it('offers a row again once its window has passed', () => {
+    const tried = new Map([['0xa', NOW - HEAL_RETRY_MS]])
+    expect(selectHeadBatch(rows, tried, NOW, 1).map(r => r.address)).toEqual(['0xa'])
+  })
+})
+
+describe('collectHealRun — head first, keyset tail after', () => {
+  const NOW = 10 * HEAL_RETRY_MS
+  const none = new Map<string, number>()
+  const opts = { batchSize: 5, pageSize: 10 }
+  // Two climbers (5 and 3 holders) above ten 0-holder rows '0xj'..'0xa'.
+  const climbers = [cand(5, '0xp'), cand(3, '0xq')]
+  const stock = 'abcdefghij'.split('').map(c => cand(0, `0x${c}`))
+  const all = [...climbers, ...stock]
+  const order = (run: { head: HealRow[]; scan: { taken: Array<{ row: HealRow }> } }) =>
+    [...run.head, ...run.scan.taken.map(t => t.row)].map(r => r.address)
+
+  it('attempts the head first, then fills the rest of the batch from the cursor', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const start = { holderCount: 0, address: '0xf' } // the tail has already passed 0xj..0xf
+    const run = await collectHealRun(fetchHead, fetchPage, start, none, NOW, opts)
+    expect(run.head.map(r => r.address)).toEqual(['0xp', '0xq'])
+    expect(order(run)).toEqual(['0xp', '0xq', '0xe', '0xd', '0xc'])
+  })
+
+  it('picks up a candidate that climbed above a cursor that already passed it, next run', async () => {
+    // The tail is deep in the 0-holder rows; '0xa' then gains holders. A cursor-only walk would
+    // not see it until the lap wrapped; the head lists it from the top on the very next run.
+    const { fetchPage, fetchHead } = pageSourceOf([...stock.filter(r => r.address !== '0xa'), cand(4, '0xa')])
+    const run = await collectHealRun(fetchHead, fetchPage, { holderCount: 0, address: '0xc' }, none, NOW, opts)
+    expect(run.head.map(r => r.address)).toEqual(['0xa'])
+  })
+
+  it('never takes a row twice: the tail passes over rows the head took, even from the top', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const run = await collectHealRun(fetchHead, fetchPage, null, none, NOW, opts)
+    // From the top the tail meets 0xp and 0xq first; they are the head's, so it skips them.
+    expect(order(run)).toEqual(['0xp', '0xq', '0xj', '0xi', '0xh'])
+    expect(new Set(order(run)).size).toBe(order(run).length)
+    expect(run.scan.after).toEqual({ holderCount: 0, address: '0xh' })
+  })
+
+  it('leaves the cursor to the tail: head rows neither move it nor hold it', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const start = { holderCount: 0, address: '0xf' }
+    const run = await collectHealRun(fetchHead, fetchPage, start, none, NOW, opts)
+    // Same cursor a head-less run would reach: just past the last TAIL row examined.
+    const tailOnly = await scanHealCandidates(fetchPage, start, none, NOW, { batchSize: 3, pageSize: 10 })
+    expect(run.scan.after).toEqual(tailOnly.after)
+    expect(run.scan.after).toEqual({ holderCount: 0, address: '0xc' })
+    expect(run.scan.taken.map(t => t.row.address)).toEqual(['0xe', '0xd', '0xc'])
+    // The first tail row resumes from `start`, not from a head row.
+    expect(run.scan.taken[0].prev).toEqual(start)
+    // Every head row settled or not, the cursor is the tail's: all tail rows settled -> past them.
+    expect(resumeHealCursor(run.scan, () => true).cursor).toEqual({ holderCount: 0, address: '0xc' })
+  })
+
+  it('does not read the tail at all when the head fills the batch', async () => {
+    const heads = Array.from({ length: 7 }, (_, i) => cand(50 - i, `0x${i}`))
+    const { fetchPage, fetchHead, calls } = pageSourceOf([...heads, ...stock])
+    const start = { holderCount: 0, address: '0xf' }
+    const run = await collectHealRun(fetchHead, fetchPage, start, none, NOW, opts)
+    expect(run.head).toHaveLength(5)
+    expect(calls).toEqual([])
+    expect(run.scan).toEqual({ taken: [], after: start, ended: false, pages: 0 })
+  })
+
+  it('lets the tail fill the whole batch when the head is exhausted (tried, or empty)', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const tried = new Map(climbers.map(r => [r.address, NOW - 1] as [string, number]))
+    const run = await collectHealRun(fetchHead, fetchPage, { holderCount: 0, address: '0xf' }, tried, NOW, opts)
+    expect(run.head).toEqual([])
+    expect(order(run)).toEqual(['0xe', '0xd', '0xc', '0xb', '0xa'])
+
+    const none2 = pageSourceOf(stock)
+    const empty = await collectHealRun(none2.fetchHead, none2.fetchPage, null, none, NOW, opts)
+    expect(empty.head).toEqual([])
+    expect(order(empty)).toEqual(['0xj', '0xi', '0xh', '0xg', '0xf'])
+  })
+
+  // A transport failure is not an answer. A tail row is held by the cursor; a head row
+  // has no cursor to hold it, and does not need one: the head re-lists it every run.
+  it('brings a head row that failed for a transport reason back next run, via the head', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const tried = new Map<string, number>()
+    const start = { holderCount: 0, address: '0xf' }
+    const run1 = await collectHealRun(fetchHead, fetchPage, start, tried, NOW, opts)
+    // Run 1: 0xp fails on transport (not marked tried); 0xq and every tail row get answers.
+    for (const r of order(run1)) if (r !== '0xp') tried.set(r, NOW)
+    const resume = resumeHealCursor(run1.scan, r => tried.has(r.address))
+    // The cursor goes past the whole tail: 0xp, being a head row, does not hold it back.
+    expect(resume).toEqual({ cursor: { holderCount: 0, address: '0xc' }, wrapped: false })
+
+    const run2 = await collectHealRun(fetchHead, fetchPage, resume.cursor, tried, NOW + 1, opts)
+    expect(run2.head.map(r => r.address)).toEqual(['0xp'])            // back through the head
+    expect(run2.scan.taken.map(t => t.row.address)).toEqual(['0xb', '0xa']) // tail continues from its own cursor
+  })
+
+  it('still holds the cursor for an unsettled TAIL row in the same run', async () => {
+    const { fetchPage, fetchHead } = pageSourceOf(all)
+    const start = { holderCount: 0, address: '0xf' }
+    const run = await collectHealRun(fetchHead, fetchPage, start, none, NOW, opts)
+    // 0xd failed on transport: the cursor stops just before it.
+    expect(resumeHealCursor(run.scan, r => r.address !== '0xd').cursor).toEqual({ holderCount: 0, address: '0xe' })
   })
 })
 

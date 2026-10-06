@@ -10,6 +10,8 @@ import {
 } from './ensure-schema'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
 import { getChainConfig, type ChainKey } from '@altscan/chain-config'
+import { getTableConfig } from 'drizzle-orm/pg-core'
+import { schema } from './db'
 
 const FLOOR = '1000000000000000000'
 
@@ -101,6 +103,19 @@ describe('tokens_holder_count_address_idx', () => {
       // One direction across the columns is what makes the healer's row comparison an Index Cond.
       expect(stmts[0]).toMatch(/ON tokens\(holder_count DESC, address DESC\)$/)
     }
+  })
+
+  // packages/db/schema.ts is the schema source of truth: it has to say what the
+  // runtime DDL builds, columns and directions both.
+  it('is declared in the drizzle schema exactly as the runtime DDL builds it', () => {
+    const declared = getTableConfig(schema.tokens).indexes
+      .find(i => i.config.name === 'tokens_holder_count_address_idx')
+    expect(declared).toBeDefined()
+    const columns = declared!.config.columns
+      .map(c => `${(c as { name: string }).name} ${String((c as { indexConfig?: { order?: string } }).indexConfig?.order).toUpperCase()}`)
+      .join(', ')
+    const ddl = buildConcurrentIndexList(false, FLOOR).find(s => s.includes('tokens_holder_count_address_idx'))!
+    expect(ddl).toMatch(new RegExp(` ON tokens\\(${columns}\\)$`))
   })
 
   it('does not replace tokens_holder_count_idx', () => {

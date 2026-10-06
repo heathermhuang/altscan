@@ -311,6 +311,11 @@ export type HealScan = {
 
 const keyOf = (row: HealRow): HealCursor => ({ holderCount: row.holderCount, address: row.address })
 
+const triedRecently = (tried: ReadonlyMap<string, number>, address: string, now: number, ttlMs: number) => {
+  const at = tried.get(address)
+  return at !== undefined && now - at < ttlMs
+}
+
 /**
  * Walks the candidate list from `start` until `batchSize` rows not tried within
  * `ttlMs` are found, the list ends, or `maxPages` pages have been read.
@@ -321,16 +326,17 @@ const keyOf = (row: HealRow): HealCursor => ({ holderCount: row.holderCount, add
  * filled the batch, not at the end of that page, so the rest of the page is read
  * again next time rather than skipped. A short page is the end of the list, and
  * a run does not wrap on its own: `ended` tells the caller to start from the top
- * next time.
+ * next time. `exclude` are rows already in this run's batch from elsewhere: they
+ * are examined and passed over, like tried ones.
  */
 export async function scanHealCandidates(
   fetchPage: HealPageSource,
   start: HealCursor | null,
   tried: ReadonlyMap<string, number>,
   now: number,
-  opts: { batchSize: number; pageSize: number; maxPages?: number; ttlMs?: number },
+  opts: { batchSize: number; pageSize: number; maxPages?: number; ttlMs?: number; exclude?: ReadonlySet<string> },
 ): Promise<HealScan> {
-  const { batchSize, pageSize, maxPages = HEAL_MAX_PAGES, ttlMs = HEAL_RETRY_MS } = opts
+  const { batchSize, pageSize, maxPages = HEAL_MAX_PAGES, ttlMs = HEAL_RETRY_MS, exclude } = opts
   const taken: HealScan['taken'] = []
   let at = start
   let pages = 0
@@ -338,14 +344,59 @@ export async function scanHealCandidates(
     const page = await fetchPage(at, pageSize)
     pages++
     for (const row of page) {
-      const triedAt = tried.get(row.address)
-      if (triedAt === undefined || now - triedAt >= ttlMs) taken.push({ row, prev: at })
+      if (!exclude?.has(row.address) && !triedRecently(tried, row.address, now, ttlMs)) taken.push({ row, prev: at })
       at = keyOf(row)
       if (taken.length >= batchSize) return { taken, after: at, ended: false, pages }
     }
     if (page.length < pageSize) return { taken, after: null, ended: true, pages }
   }
   return { taken, after: at, ended: false, pages }
+}
+
+/** The first `batchSize` rows (in the order given) not tried within `ttlMs`. */
+export function selectHeadBatch(
+  rows: readonly HealRow[],
+  tried: ReadonlyMap<string, number>,
+  now: number,
+  batchSize: number,
+  ttlMs: number = HEAL_RETRY_MS,
+): HealRow[] {
+  const out: HealRow[] = []
+  for (const row of rows) {
+    if (triedRecently(tried, row.address, now, ttlMs)) continue
+    out.push(row)
+    if (out.length >= batchSize) break
+  }
+  return out
+}
+
+/**
+ * One run's work: the HEAD first, then the keyset tail.
+ *
+ * holder_count is recomputed every 15 minutes, so a candidate can climb above a
+ * cursor that has already passed it; a pure cursor walk would not see it again
+ * until the lap wraps (BNB: weeks). The head is re-listed from the top EVERY run —
+ * `fetchHead` returns the high-holder candidates in list order — so a climber is
+ * picked up next run, and a head row that failed for a transport reason (not tried)
+ * comes back through the head, not through the cursor. Head rows do not move the
+ * cursor: the tail resumes exactly where it was and fills what the head left,
+ * passing over any row the head already took (and any head row tried within `ttlMs`
+ * is skipped by `tried`, as everywhere). If the head alone fills the batch the tail
+ * is not read at all.
+ */
+export async function collectHealRun(
+  fetchHead: () => Promise<HealRow[]>,
+  fetchPage: HealPageSource,
+  start: HealCursor | null,
+  tried: ReadonlyMap<string, number>,
+  now: number,
+  opts: { batchSize: number; pageSize: number; maxPages?: number; ttlMs?: number },
+): Promise<{ head: HealRow[]; scan: HealScan }> {
+  const head = selectHeadBatch(await fetchHead(), tried, now, opts.batchSize, opts.ttlMs)
+  const remaining = opts.batchSize - head.length
+  if (remaining <= 0) return { head, scan: { taken: [], after: start, ended: false, pages: 0 } }
+  const exclude = new Set(head.map(r => r.address))
+  return { head, scan: await scanHealCandidates(fetchPage, start, tried, now, { ...opts, batchSize: remaining, exclude }) }
 }
 
 /**
@@ -355,7 +406,8 @@ export async function scanHealCandidates(
  * first next time, exactly as it was when the list was re-queried from the top. So
  * the cursor stops just before the first such row. `settled` is "the healer
  * recorded an answer for it" (marked tried). A scan that reached the end with
- * everything settled wraps to the top.
+ * everything settled wraps to the top. Takes the TAIL scan only: head rows are
+ * re-listed from the top every run, so they never need the cursor to hold for them.
  */
 export function resumeHealCursor(
   scan: HealScan,
