@@ -59,7 +59,7 @@ export default function DeveloperPage() {
           <div className="px-6 py-5 space-y-4">
             <p className="text-ink2">
               Requests are limited to <strong>100 req/min per IP</strong>. On the endpoints that take a key
-              (query, keys, webhook creation, contract call), a request with a valid API key counts against
+              (query, keys, webhooks, contract call), a request with a valid API key counts against
               that key&apos;s own <strong>100 req/min</strong> instead of your IP&apos;s.
             </p>
 
