@@ -71,7 +71,8 @@ describe('formatNativeToken', () => {
 describe('formatGwei', () => {
   it('shows sub-Gwei BNB gas prices instead of collapsing to "0.00"', () => {
     // Regression: toFixed(2) rendered all sub-0.01 Gwei values as "0.00".
-    expect(formatGwei(100_000_000n)).toBe('0.1')   // 0.1 Gwei (BNB network minimum)
+    expect(formatGwei(50_000_000n)).toBe('0.05')   // 0.05 Gwei (BNB network minimum)
+    expect(formatGwei(100_000_000n)).toBe('0.1')   // 0.1 Gwei
     expect(formatGwei(120_000_000n)).toBe('0.12')  // 0.12 Gwei
     expect(formatGwei(5_000_000n)).toBe('0.005')   // 0.005 Gwei — was "0.00"
     expect(formatGwei(1_000_000n)).toBe('0.001')   // 0.001 Gwei — was "0.00"

@@ -60,7 +60,7 @@ export const formatETH = formatNativeToken
 export function formatGwei(wei: bigint | string): string {
   const gwei = Number(formatUnits(safeBigInt(wei), 'gwei'))
   if (gwei === 0) return '0'
-  // BNB Chain runs sub-Gwei gas (~0.1 Gwei). toFixed(2) collapsed these to "0.00".
+  // BNB Chain runs sub-Gwei gas (~0.05 Gwei). toFixed(2) collapsed these to "0.00".
   // Use adaptive precision and trim trailing zeros so 0.1 shows as "0.1", not "0.10".
   const decimals = gwei < 0.01 ? 6 : gwei < 1 ? 4 : 2
   return gwei.toFixed(decimals).replace(/\.?0+$/, '')
