@@ -59,7 +59,7 @@ export default function DeveloperPage() {
           <div className="px-6 py-5 space-y-4">
             <p className="text-ink2">
               Requests are limited to <strong>100 req/min per IP</strong>. On the endpoints that take a key
-              (query, keys, webhook creation, contract call), a request with a valid API key counts against
+              (query, keys, webhooks, contract call), a request with a valid API key counts against
               that key&apos;s own <strong>100 req/min</strong> instead of your IP&apos;s.
             </p>
 
@@ -107,7 +107,8 @@ curl -X POST ${BASE_URL}/api/v1/query \\
   -d '{"entity": "blocks", "limit": 5}'
 
 # List your keys
-curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
+curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
+  -H "X-API-Key: bnbs_abc123..."`}</CodeBlock>
             </div>
 
             <dl className="ledger [--cols:2]">
@@ -139,6 +140,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Register a Webhook</h3>
               <CodeBlock label="Register a Webhook">{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
+  -H "X-API-Key: bnbs_abc123..." \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -195,10 +197,12 @@ function verifyWebhook(body, signature, secret) {
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Manage Webhooks</h3>
               <CodeBlock label="Manage Webhooks">{`# List your webhooks
-curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress"
+curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress" \\
+  -H "X-API-Key: bnbs_abc123..."
 
 # Delete a webhook
-curl -X DELETE ${BASE_URL}/api/v1/webhooks/42`}</CodeBlock>
+curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
+  -H "X-API-Key: bnbs_abc123..."`}</CodeBlock>
             </div>
           </div>
         </div>

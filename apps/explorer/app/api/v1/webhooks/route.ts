@@ -8,6 +8,9 @@ export const dynamic = 'force-dynamic'
 
 // GET: list webhooks for an owner — requires X-API-Key matching ownerAddress
 export async function GET(request: Request) {
+  const auth = await authRequest(request)
+  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
   if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {

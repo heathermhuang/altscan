@@ -93,6 +93,11 @@ export async function authRequest(request: Request): Promise<AuthResult> {
 
     // Key provided but not found or inactive — log for brute-force detection
     console.warn(`[api-auth] Invalid API key attempt: prefix=${apiKey.slice(0, 8)}... ip=${extractClientIp(request.headers.get('x-forwarded-for'))}`)
+    // Count the attempt against the IP bucket (same budget as key-less requests); otherwise
+    // any bogus X-API-Key would skip every limiter on this route.
+    if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
+      return { ok: false, limited: true, reason: 'rate_limit' }
+    }
     return { ok: false, limited: true, reason: 'invalid_key' }
   }
 
