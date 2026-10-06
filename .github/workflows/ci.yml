@@ -84,6 +84,13 @@ jobs:
       - name: Typecheck indexer
         run: pnpm --filter @altscan/db build && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/indexer exec tsc --noEmit
 
+      # The admin console's deploy (astro build) never runs tsc, so its type
+      # errors surfaced nowhere until #181 cleared them. No build or astro sync
+      # first: the tsconfig maps chain-config to source and includes only src/,
+      # not .astro/. Covers .ts/.tsx only — .astro files would need astro check.
+      - name: Typecheck admin
+        run: pnpm --filter @altscan/admin exec tsc --noEmit -p .
+
       - name: Create seam-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
 
