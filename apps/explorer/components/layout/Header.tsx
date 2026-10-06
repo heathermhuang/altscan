@@ -101,7 +101,7 @@ export function Header() {
   const groups = [...new Set(NAV_LINKS.map(l => l.group))]
 
   return (
-    <header>
+    <header className="hd">
 
       {/* -- Top bar: logo + switcher + desktop nav (lg) or hamburger + search (inline from xl, else its own row) -- */}
       <div className="max-w-7xl mx-auto px-4">

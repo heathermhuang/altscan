@@ -69,17 +69,6 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  /* The page landmarks are styled by element, so their markup carries no classes: one <main>,
-     <header> and <footer> per page (app/layout.tsx, components/layout). */
-  main {
-    @apply flex-1 scroll-mt-32 focus:outline-none;
-  }
-  header {
-    @apply sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md;
-  }
-  footer {
-    @apply bg-card border-t border-hair text-mut text-sm mt-auto;
-  }
   /* Accessible focus ring for keyboard navigation */
   *:focus-visible {
     outline: 2px solid var(--acc-ink);
@@ -162,6 +151,17 @@
    Not the same trick: joining visible `{a} {b}` text into one template string drops React's `<!-- -->`
    separators but moves glyphs by 1/64px (text widths are summed per text node), so it is not pixel-identical. */
 @layer components {
+  /* The site chrome: the one <main>, <header> and <footer> of the page shell. Classes, not element
+     rules, so a <header> or <footer> inside a page section does not inherit them. */
+  .mn {
+    @apply flex-1 scroll-mt-32 focus:outline-none;
+  }
+  .hd {
+    @apply sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md;
+  }
+  .ft {
+    @apply bg-card border-t border-hair text-mut text-sm mt-auto;
+  }
   .card {
     @apply bg-card rounded-xl border border-hair overflow-hidden;
   }

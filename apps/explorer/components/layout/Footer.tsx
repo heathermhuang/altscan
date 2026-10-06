@@ -35,7 +35,7 @@ export async function Footer() {
   const { tagline, notAffiliatedWith } = resolveFooterText(footerOverride, chainConfig)
 
   return (
-    <footer>
+    <footer className="ft">
       {/* The footer ad variant is styled for a dark surface (translucent gray-950): --band stays dark
           in both schemes, where --ink turns near-white in dark. */}
       <div className="bg-band">

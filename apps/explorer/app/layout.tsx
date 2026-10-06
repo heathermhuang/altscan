@@ -95,7 +95,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
         <Header />
-        <main id="main" tabIndex={-1}>{children}</main>
+        <main id="main" tabIndex={-1} className="mn">{children}</main>
         <Footer />
         <WebMcpProvider />
       </body>
