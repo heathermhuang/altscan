@@ -1,7 +1,8 @@
 /**
  * Rate limiter — Redis sliding window with in-memory fallback.
  *
- * Primary: Redis INCR + PEXPIRE sliding window (correct across multiple instances).
+ * Primary: Redis fixed window — INCR + PEXPIRE in one atomic Lua script (correct across
+ * multiple instances; a counter can never exist without a TTL).
  * Fallback: in-memory Map (used when REDIS_URL is absent or Redis is unreachable).
  *
  * SECURITY: key on clientIpFromHeaders(), never on a leading X-Forwarded-For entry — those
@@ -16,7 +17,21 @@ import { getRedis, isRedisUnavailable } from './redis-client'
 const DEFAULT_MAX_REQUESTS = 100
 const WINDOW_MS = 60 * 1000
 
-// ── Redis sliding window ──────────────────────────────────────────────────────
+// ── Redis fixed window ────────────────────────────────────────────────────────
+
+// INCR and the expiry run as ONE script (one round trip, atomic), so a crash or error between
+// the two can no longer leave a counter with no TTL — that would pin the bucket over its limit
+// forever. The expiry is set whenever the key has none (PTTL == -1): on the first request of a
+// window (the window starts there, as before) and on a key some earlier bug left without one
+// (self-healing). Plain EVAL needs no Redis version beyond 2.6; `PEXPIRE ... NX` would need 7.0
+// and, on an older server, would error after the INCR had already applied.
+const INCR_WITH_EXPIRY = `
+local n = redis.call('INCR', KEYS[1])
+if redis.call('PTTL', KEYS[1]) == -1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return n
+`
 
 async function checkRateLimitRedis(key: string, maxRequests: number): Promise<boolean> {
   const r = getRedis()
@@ -24,11 +39,7 @@ async function checkRateLimitRedis(key: string, maxRequests: number): Promise<bo
 
   const redisKey = `rl:${key}`
   try {
-    const count = await r.incr(redisKey)
-    if (count === 1) {
-      // First request in this window — set the expiry
-      await r.pexpire(redisKey, WINDOW_MS)
-    }
+    const count = Number(await r.eval(INCR_WITH_EXPIRY, 1, redisKey, WINDOW_MS))
     return count <= maxRequests
   } catch {
     // Redis blip — fall through to in-memory
