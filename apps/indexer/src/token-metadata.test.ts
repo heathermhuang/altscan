@@ -83,6 +83,36 @@ describe('fetchTokenMetadata', () => {
     expect((await fetchTokenMetadata(runner, TOKEN)).name).toBe(full)
   })
 
+  // Uniswap V1 exchanges (Vyper) answer name() "Uniswap V1" and symbol() "UNI-V1" with the
+  // bytes32 followed by the rest of a zeroed 4,096-byte buffer. Neither the string ABI nor a
+  // strict 32-byte decode accepts that, so every one of them stayed Unknown / ??? for good —
+  // 4 of 33 randomly sampled ETH placeholder rows with a non-zero supply (2026-10-07).
+  it('reads a bytes32 followed by a zeroed buffer (Uniswap V1 exchanges)', async () => {
+    const padded = (text: string) => '0x' + Buffer.from(text).toString('hex').padEnd(4096 * 2, '0')
+    const { runner } = mockRunner({
+      name: padded('Uniswap V1'),
+      symbol: padded('UNI-V1'),
+      decimals: encode('decimals', 18),
+      totalSupply: encode('totalSupply', 7n),
+    })
+    const meta = await fetchTokenMetadata(runner, TOKEN)
+    expect(meta.name).toBe('Uniswap V1')
+    expect(meta.symbol).toBe('UNI-V1')
+  })
+
+  it('does not guess at an oversized return with data after the first 32 bytes', async () => {
+    const text = Buffer.from('Uniswap V1').toString('hex').padEnd(64, '0')
+    const { runner } = mockRunner({
+      name: '0x' + text + '00'.repeat(63) + '01',
+      symbol: '0x00' + text.slice(2) + '00'.repeat(64), // leading NUL: a number, not text
+      decimals: encode('decimals', 18),
+      totalSupply: encode('totalSupply', 7n),
+    })
+    const meta = await fetchTokenMetadata(runner, TOKEN)
+    expect(meta.name).toBeNull()
+    expect(meta.symbol).toBeNull()
+  })
+
   it('leaves a bytes32 that is not UTF-8 unresolved instead of storing garbage', async () => {
     const { runner } = mockRunner({
       name: '0xff' + 'fe'.repeat(31),
