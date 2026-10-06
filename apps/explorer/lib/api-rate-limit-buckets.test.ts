@@ -40,8 +40,12 @@ afterEach(() => { vi.resetModules() })
 async function load(backend: 'redis' | 'memory') {
   vi.resetModules()
   h.useRedis = backend === 'redis'
-  // No DB, no verifier, no chain config: none of these are reached on the paths under test.
-  vi.doMock('@/lib/db', () => ({ db: {}, schema: {} }))
+  // No real DB: the API-key lookup (only reached when a request sends X-API-Key) finds no row,
+  // i.e. every key is bogus. The verifier and chain config are not reached on the paths under test.
+  vi.doMock('@/lib/db', () => ({
+    db: { select: () => ({ from: () => ({ where: async () => [] }) }) },
+    schema: { apiKeys: { id: 'id', active: 'active', requestsPerMinute: 'rpm', keyHash: 'key_hash' } },
+  }))
   vi.doMock('@/lib/chain', () => ({ chainConfig: { domain: 'x.test' } }))
   vi.doMock('@/lib/verifier', () => ({
     triggerSourcifyVerification: vi.fn(async () => ({ success: false, error: 'not verified' })),
@@ -102,7 +106,35 @@ describe.each(['redis', 'memory'] as const)('webhooks GET / DELETE are rate-limi
   })
 })
 
+describe.each(['redis', 'memory'] as const)('a bogus X-API-Key does not skip the IP limit (%s)', (backend) => {
+  const bogus = { 'x-api-key': 'bnbs_not_a_real_key' }
+
+  it('is 401 while under budget, then 429 on the 101st attempt from one IP', async () => {
+    const api = await load(backend)
+    for (let i = 0; i < 100; i++) {
+      const res = await api.listWebhooks(bogus)
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ error: 'Invalid or inactive API key' })
+    }
+    const res = await api.listWebhooks(bogus)
+    expect(res.status).toBe(429)
+    expect(await res.json()).toEqual({ error: 'Rate limit exceeded' })
+  })
+
+  it('draws on the same per-IP budget as key-less requests', async () => {
+    const api = await load(backend)
+    await api.exhaustOrdinary()
+    expect((await api.listWebhooks(bogus)).status).toBe(429)
+  })
+})
+
 describe('Redis key format (what live counters depend on)', () => {
+  it('a bogus X-API-Key increments rl:<ip> (and nothing else)', async () => {
+    const api = await load('redis')
+    expect((await api.listWebhooks({ 'x-api-key': 'bnbs_not_a_real_key' })).status).toBe(401)
+    expect([...h.counters]).toEqual([[`rl:${IP}`, 1]])
+  })
+
   it('webhooks GET/DELETE count into the shared per-IP key, exactly like POST', async () => {
     const api = await load('redis')
     await api.listWebhooks()

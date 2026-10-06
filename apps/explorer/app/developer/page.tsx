@@ -107,7 +107,8 @@ curl -X POST ${BASE_URL}/api/v1/query \\
   -d '{"entity": "blocks", "limit": 5}'
 
 # List your keys
-curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
+curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
+  -H "X-API-Key: bnbs_abc123..."`}</CodeBlock>
             </div>
 
             <dl className="ledger [--cols:2]">
