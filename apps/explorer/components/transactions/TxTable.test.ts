@@ -41,6 +41,13 @@ describe('TxTable cell contract', () => {
     expect(html()).not.toContain('title=')
   })
 
+  it('colours its links from the table (dt-a), not per link: the class lists are per-row bytes', () => {
+    const h = html({ compact: true })
+    expect(h).toContain('dt-a')
+    expect(h).not.toMatch(/text-acc-ink|hover:underline|font-mono/)
+    expect(h).toContain('href="/address/')
+  })
+
   it('keeps a To cell for a contract creation', () => {
     expect(cells(bodyRows(html())[1])[3].inner).toContain('Contract Creation')
   })

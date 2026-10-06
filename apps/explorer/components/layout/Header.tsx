@@ -101,20 +101,20 @@ export function Header() {
   const groups = [...new Set(NAV_LINKS.map(l => l.group))]
 
   return (
-    <header className="sticky top-0 z-50 border-t-[3px] border-t-acc border-b border-b-hair bg-card/90 backdrop-blur-md">
+    <header className="hd">
 
       {/* -- Top bar: logo + switcher + desktop nav (lg) or hamburger + search (inline from xl, else its own row) -- */}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] bg-acc text-acc-on">
+          <Link href="/" className="brand">
+            <span className="mark">
               <Logo />
             </span>
             <div className="leading-tight">
-              <span className="font-mono font-semibold text-[15px] tracking-tight block">{chainConfig.brandDomain}</span>
-              <span className="text-[11px] text-mut hidden sm:block leading-none mt-0.5">
+              <span className="brand-n">{chainConfig.brandDomain}</span>
+              <span className="brand-t">
                 by Measurable Data Token
               </span>
             </div>
@@ -124,16 +124,9 @@ export function Header() {
           <NetworkSwitcher />
 
           {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-0.5 text-[13px] font-medium flex-1 justify-end">
+          <nav className="nav">
             {NAV_LINKS.map(({ href, label, glyph }) => (
-              <Link
-                key={href}
-                href={href}
-                aria-current={pathname === href ? 'page' : undefined}
-                className={`px-2 py-2 border-b-2 transition-colors whitespace-nowrap ${
-                  pathname === href ? 'text-acc-ink border-acc font-semibold' : 'text-ink2 hover:text-ink border-transparent'
-                }`}
-              >
+              <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined}>
                 {glyph && <span aria-hidden="true">{glyph} </span>}{label}
               </Link>
             ))}
@@ -144,17 +137,17 @@ export function Header() {
             ref={menuButton}
             onClick={() => setOpen(!open)}
             aria-label={open ? 'Close menu' : 'Open menu'}
-            className="lg:hidden ml-auto flex flex-col justify-center items-center w-9 h-9 gap-1.5 rounded-[9px] border border-hair bg-card hover:border-hair3 transition-colors"
+            className="burger"
           >
-            <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? 'rotate-45 translate-y-2' : ''}`} />
-            <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 ${open ? 'opacity-0 scale-x-0' : ''}`} />
-            <span className={`block h-0.5 w-5 bg-current rounded transition-all duration-200 origin-center ${open ? '-rotate-45 -translate-y-2' : ''}`} />
+            <span className={open ? 'rotate-45 translate-y-2' : undefined} />
+            <span className={open ? 'opacity-0 scale-x-0' : undefined} />
+            <span className={open ? '-rotate-45 -translate-y-2' : undefined} />
           </button>
 
           {/* Search: the home hero owns it on `/`. Last in the row, so when xl's 1248px has no room for
               it beside the nav it wraps onto its own row (as it always does below xl) instead of the nav. */}
           {pathname !== '/' && (
-            <div className="basis-full xl:basis-auto xl:w-[19rem] xl:shrink-0">
+            <div className="hdr-s">
               <SearchBar />
             </div>
           )}

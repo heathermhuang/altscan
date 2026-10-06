@@ -21,10 +21,10 @@ export function BlockTable({ blocks, compact = false, gasBar = false }: {
   gasBar?: boolean
 }) {
   return (
-    <div className="bg-card rounded-xl border border-hair overflow-hidden">
+    <div className="card">
       <div className="overflow-x-auto">
-      <table className="dt">
-        <caption className="sr-only">Recent blocks on {chainConfig.name}</caption>
+      <table className="dt dt-a">
+        <caption className="sr-only">{`Recent blocks on ${chainConfig.name}`}</caption>
         <thead>
           <tr>
             <th scope="col">Block</th>
@@ -38,7 +38,7 @@ export function BlockTable({ blocks, compact = false, gasBar = false }: {
           {blocks.map(b => (
             <tr key={b.number}>
               <td>
-                <Link href={`/blocks/${b.number}`} className="text-acc-ink font-medium hover:underline">
+                <Link href={`/blocks/${b.number}`} className="font-medium">
                   {formatNumber(b.number)}
                 </Link>
               </td>

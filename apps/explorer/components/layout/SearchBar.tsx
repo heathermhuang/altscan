@@ -18,7 +18,7 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
   }
 
   return (
-    <form onSubmit={handleSearch} role="search" aria-label={label} className="w-full flex gap-2">
+    <form onSubmit={handleSearch} role="search" aria-label={label} className={lg ? 'sb sb-lg' : 'sb'}>
       <input
         type="text"
         value={query}
@@ -26,19 +26,9 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
         placeholder={lg ? PLACEHOLDER : PLACEHOLDER_SHORT}
         aria-label="Search by address, tx hash, block number, or token name"
         aria-keyshortcuts="/"
-        className={`flex-1 min-w-0 rounded-[9px] border border-hair bg-card font-mono text-ink placeholder:text-mut hover:border-hair3 ${
-          lg ? 'h-12 px-4 text-[15px]' : 'h-9 px-3 text-[13px]'
-        }`}
         suppressHydrationWarning
       />
-      <button
-        type="submit"
-        className={`shrink-0 rounded-[9px] bg-ink text-card font-semibold hover:opacity-90 transition-opacity ${
-          lg ? 'h-12 px-6 text-[15px]' : 'h-9 px-4 text-[13px]'
-        }`}
-      >
-        Search
-      </button>
+      <button type="submit">Search</button>
     </form>
   )
 }
