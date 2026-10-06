@@ -274,6 +274,12 @@ export default async function TokenDetailPage({
             {nameText}
             {symbolText !== '—' && <>{' '}<span className="font-mono font-semibold text-ink2">{symbolText}</span></>}
           </h1>
+          {/* Beside the h1, not in it: inside, "lookalike of USDT" would become part of the page's heading name. */}
+          {lookalike && (
+            <span className="badge badge-bad" title={lookalikeNote(lookalike)}>
+              lookalike<span className="sr-only"> of {lookalike.symbol}</span>
+            </span>
+          )}
           <Badge variant="default">{token.type}</Badge>
           <a
             href={`${chainConfig.externalExplorerUrl}/token/${addr}`}

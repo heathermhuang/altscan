@@ -68,13 +68,14 @@ const HOMOGLYPHS: Record<string, string> = {
 
 /**
  * What a symbol or name LOOKS like, as plain uppercase ASCII, so lookalikes compare equal.
- * NFKC first (fullwidth to ASCII), then drop invisible format characters (zero-width joiners,
- * bidi marks) and whitespace, then fold Cyrillic/Greek homoglyphs, then the digit/letter swaps
- * that read alike in a sans font: l | 1 to I, 0 to O, 5 to S.
+ * NFKD first (fullwidth to ASCII, and accented letters split into base + combining mark), then
+ * drop the combining marks, invisible format characters (zero-width joiners, bidi marks) and
+ * whitespace, then fold Cyrillic/Greek homoglyphs, then the digit/letter swaps that read alike
+ * in a sans font: l | 1 to I, 0 to O, 5 to S.
  */
 export function foldConfusables(s: string): string {
   let out = ''
-  for (const ch of s.normalize('NFKC').replace(/[\p{Cf}\s]/gu, '')) out += HOMOGLYPHS[ch] ?? ch
+  for (const ch of s.normalize('NFKD').replace(/[\p{M}\p{Cf}\s]/gu, '')) out += HOMOGLYPHS[ch] ?? ch
   return out.replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase()
 }
 

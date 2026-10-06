@@ -39,6 +39,14 @@ describe('foldConfusables', () => {
     expect(foldConfusables('\u202EUSDT')).toBe('USDT') // right-to-left override
   })
 
+  it('strips diacritics: accented letters and bare combining marks', () => {
+    expect(foldConfusables('\u00DASDT')).toBe('USDT') // U with acute
+    expect(foldConfusables('USD\u0164')).toBe('USDT') // T with caron
+    expect(foldConfusables('U\u0301SDT')).toBe('USDT') // U + combining acute
+    expect(foldConfusables('\u00DA\u0160D\u0164')).toBe('USDT')
+    expect(foldConfusables('\u0407')).toBe('I') // Cyrillic Yi: Cyrillic I + diaeresis
+  })
+
   it('leaves an ordinary symbol readable', () => {
     expect(foldConfusables('CAKE')).toBe('CAKE')
     expect(foldConfusables('')).toBe('')
@@ -62,6 +70,12 @@ describe('lookalikeOf: flags', () => {
   it('flags a WBNB impostor on bnb', () => {
     expect(lookalikeOf({ address: SPAM, symbol: 'WBNB', name: 'x' }, 'bnb'))
       .toEqual({ symbol: 'WBNB', canonical: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' })
+  })
+
+  it('flags accented USDT clones', () => {
+    for (const symbol of ['\u00DASDT', 'USD\u0164', 'U\u0301SDT']) {
+      expect(lookalikeOf({ address: SPAM, symbol, name: 'x' }, 'bnb'), symbol).toEqual(usdtBnb)
+    }
   })
 
   it('flags DAl (lowercase L) as DAI', () => {
