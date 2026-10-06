@@ -369,13 +369,6 @@ export default async function TokenDetailPage({
         </div>
       )}
 
-      <AdReserve
-        context={tokenReferralContext}
-        placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
-        variant="compact"
-        className="mb-6"
-      />
-
       {/* Top Holders — SSR shows the local net-flow estimate (0 Moralis CU, crawler/no-JS safe);
           HoldersLazy enhances to accurate Moralis balances client-side for real browsers. */}
       {!isLive && (
@@ -387,6 +380,17 @@ export default async function TokenDetailPage({
           initial={holdersResult}
         />
       )}
+
+      {/* After the data, not between the facts and the holders: on a phone the ad sat in the first
+          viewport, so its description (mounted once the client config fetch lands) became the LCP
+          element at ~4.8s. Moved in the DOM, never with CSS order. Without HoldersLazy (live/RPC
+          path) it follows the market block, so it still renders exactly once. */}
+      <AdReserve
+        context={tokenReferralContext}
+        placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
+        variant="compact"
+        className="mb-6"
+      />
 
       {/* Risk Signals */}
       {signals.length > 0 && (
