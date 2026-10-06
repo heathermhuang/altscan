@@ -281,22 +281,96 @@ export function decideHeal(row: HealRow, meta: FetchedTokenMetadata | null, stre
   }
 }
 
-/** The first `batchSize` rows (in the order given) not tried within `ttlMs`. */
-export function selectHealBatch<T extends { address: string }>(
-  rows: readonly T[],
+/**
+ * A position in the candidate list: the sort key of one row. The list is ordered
+ * (holder_count DESC, address DESC) and a cursor means "continue strictly after
+ * this row", so a keyset query resumes there without re-reading what came before
+ * and without caring that thousands of rows share a holder count (address breaks
+ * the tie). `null` is the top of the list.
+ */
+export type HealCursor = { holderCount: number; address: string }
+
+/** Pages one run may read looking for `batchSize` untried rows, so a stretch of tried rows costs a few queries, not a scan. */
+export const HEAL_MAX_PAGES = 5
+
+/** One page of the candidate list strictly after `after`, in list order, at most `limit` rows. */
+export type HealPageSource = (after: HealCursor | null, limit: number) => Promise<HealRow[]>
+
+export type HealScan = {
+  /**
+   * Untried rows to attempt, in list order. `prev` is the position just before the
+   * row — where a run has to resume for the row to be seen again.
+   */
+  taken: Array<{ row: HealRow; prev: HealCursor | null }>
+  /** Just past the last row examined (taken or skipped as tried); null once the list ended. */
+  after: HealCursor | null
+  /** A page came back short: no candidate lies beyond what was read. */
+  ended: boolean
+  pages: number
+}
+
+const keyOf = (row: HealRow): HealCursor => ({ holderCount: row.holderCount, address: row.address })
+
+/**
+ * Walks the candidate list from `start` until `batchSize` rows not tried within
+ * `ttlMs` are found, the list ends, or `maxPages` pages have been read.
+ *
+ * The cursor advances over every row EXAMINED, not just attempted: rows skipped
+ * because they were tried recently still count as progress, which is what stops
+ * a run from re-reading the same tried prefix forever. It stops at the row that
+ * filled the batch, not at the end of that page, so the rest of the page is read
+ * again next time rather than skipped. A short page is the end of the list, and
+ * a run does not wrap on its own: `ended` tells the caller to start from the top
+ * next time.
+ */
+export async function scanHealCandidates(
+  fetchPage: HealPageSource,
+  start: HealCursor | null,
   tried: ReadonlyMap<string, number>,
   now: number,
-  batchSize: number,
-  ttlMs: number = HEAL_RETRY_MS,
-): T[] {
-  const out: T[] = []
-  for (const row of rows) {
-    const at = tried.get(row.address)
-    if (at !== undefined && now - at < ttlMs) continue
-    out.push(row)
-    if (out.length >= batchSize) break
+  opts: { batchSize: number; pageSize: number; maxPages?: number; ttlMs?: number },
+): Promise<HealScan> {
+  const { batchSize, pageSize, maxPages = HEAL_MAX_PAGES, ttlMs = HEAL_RETRY_MS } = opts
+  const taken: HealScan['taken'] = []
+  let at = start
+  let pages = 0
+  while (pages < maxPages) {
+    const page = await fetchPage(at, pageSize)
+    pages++
+    for (const row of page) {
+      const triedAt = tried.get(row.address)
+      if (triedAt === undefined || now - triedAt >= ttlMs) taken.push({ row, prev: at })
+      at = keyOf(row)
+      if (taken.length >= batchSize) return { taken, after: at, ended: false, pages }
+    }
+    if (page.length < pageSize) return { taken, after: null, ended: true, pages }
   }
-  return out
+  return { taken, after: at, ended: false, pages }
+}
+
+/**
+ * Where the next run starts. Normally just past everything this run examined; but a
+ * row that was taken and is not settled (a transport failure is not an answer, and
+ * a run that stops early leaves the rest of its batch unattempted) must be seen
+ * first next time, exactly as it was when the list was re-queried from the top. So
+ * the cursor stops just before the first such row. `settled` is "the healer
+ * recorded an answer for it" (marked tried). A scan that reached the end with
+ * everything settled wraps to the top.
+ */
+export function resumeHealCursor(
+  scan: HealScan,
+  settled: (row: HealRow) => boolean,
+): { cursor: HealCursor | null; wrapped: boolean } {
+  const stuck = scan.taken.find(t => !settled(t.row))
+  if (stuck) return { cursor: stuck.prev, wrapped: false }
+  return { cursor: scan.after, wrapped: scan.ended }
+}
+
+/** For the log line: `wrapped`, `top`, or `(holders, 0x12ab…)`. */
+export function describeHealCursor(resume: { cursor: HealCursor | null; wrapped: boolean }): string {
+  if (resume.wrapped) return 'wrapped'
+  if (resume.cursor === null) return 'top'
+  return `(${resume.cursor.holderCount}, ${resume.cursor.address.slice(0, 6)}…)`
 }
 
 /** Drop entries older than `ttlMs`, so the map is bounded by one window of runs. */
