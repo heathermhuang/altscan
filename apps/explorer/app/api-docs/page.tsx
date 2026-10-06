@@ -200,7 +200,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/webhooks',
     description: 'List all webhooks registered to an owner address.',
     params: [
-      { name: 'owner', type: 'string', required: true, description: 'Owner BNB address (0x-prefixed)' },
+      { name: 'owner', type: 'string', required: true, description: 'Owner address (0x-prefixed)' },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -226,7 +226,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/webhooks',
     description: `Register a new webhook. Returns a one-time secret for verifying incoming webhook signatures (HMAC-SHA256). ${chainConfig.brandName} will POST events to your URL with an X-BNBScan-Signature header.`,
     params: [
-      { name: 'ownerAddress', type: 'string', required: true, description: 'Your BNB address (0x-prefixed)' },
+      { name: 'ownerAddress', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
       { name: 'url', type: 'string', required: true, description: 'Your HTTPS endpoint to receive events' },
       { name: 'watchAddress', type: 'string', required: false, description: 'Address to watch for events' },
       { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types: ["tx", "token_transfer"] (default: ["tx"])' },
@@ -246,7 +246,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/keys',
     description: 'List API keys for an owner address. Key hashes are never returned — only the prefix for identification.',
     params: [
-      { name: 'owner', type: 'string', required: true, description: 'Owner BNB address (0x-prefixed)' },
+      { name: 'owner', type: 'string', required: true, description: 'Owner address (0x-prefixed)' },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -270,9 +270,9 @@ const endpoints: Endpoint[] = [
   {
     method: 'POST',
     path: '/api/v1/keys',
-    description: 'Generate a new API key linked to your BNB address. The full key is shown once — save it immediately. Use the X-API-Key header to authenticate requests.',
+    description: 'Generate a new API key linked to your address. The full key is shown once — save it immediately. Use the X-API-Key header to authenticate requests.',
     params: [
-      { name: 'ownerAddress', type: 'string', required: true, description: 'Your BNB address (0x-prefixed)' },
+      { name: 'ownerAddress', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
       { name: 'label', type: 'string', required: false, description: 'Human-readable label for this key' },
     ],
     exampleResponse: JSON.stringify(

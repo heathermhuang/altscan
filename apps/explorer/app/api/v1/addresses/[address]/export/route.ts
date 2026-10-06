@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,7 @@ export async function GET(
     return new Response('Database error', { status: 500 })
   }
 
-  const header = 'Tx Hash,Block,Timestamp,From,To,Value (BNB),Gas Used,Gas Price (Gwei),Status,Method\n'
+  const header = `Tx Hash,Block,Timestamp,From,To,Value (${chainConfig.currency}),Gas Used,Gas Price (Gwei),Status,Method\n`
   const rows = txs.map(tx => {
     const intPart = (tx.value ?? '0').split('.')[0] || '0'
     const value = Number(BigInt(intPart)) / 1e18
