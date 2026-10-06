@@ -7,10 +7,14 @@ import {
   INVALID_INDEX_SWEEP_SQL,
   partitionRangesToCreate,
   retireOldDexKeySql,
+  retireOldTokensHealIndexSql,
+  TOKENS_HEAL_IDX,
+  TOKENS_HEAL_PREDICATE,
 } from './ensure-schema'
+import { UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { BODY_PRUNE_OPS, type PruneOp } from './retention-policy'
 import { getChainConfig, type ChainKey } from '@altscan/chain-config'
-import { getTableConfig } from 'drizzle-orm/pg-core'
+import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core'
 import { schema } from './db'
 
 const FLOOR = '1000000000000000000'
@@ -93,34 +97,68 @@ describe('buildConcurrentIndexList', () => {
 // The token-metadata healer's keyset paging. Its ORDER BY and row comparison are
 // pinned against this column list in token-heal-query.test.ts; here the index
 // itself: built in both modes, alongside the older single-column index (which the
-// explorer's top-N queries use and nothing here retires).
-describe('tokens_holder_count_address_idx', () => {
-  it('is built once in both partition modes, with every column descending', () => {
+// explorer's top-N queries use and nothing here retires). That the planner really
+// uses it for each chain's queries is token-heal.pg.test.ts's job.
+describe('tokens_heal_candidates_idx', () => {
+  const heal = (ttPartitioned: boolean) =>
+    buildConcurrentIndexList(ttPartitioned, FLOOR).filter(s => s.includes(TOKENS_HEAL_IDX))
+
+  it('is built once in both partition modes, every column descending, partial over the heal candidates', () => {
     for (const ttPartitioned of [false, true]) {
-      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
-        .filter(s => s.includes('tokens_holder_count_address_idx'))
+      const stmts = heal(ttPartitioned)
       expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
       // One direction across the columns is what makes the healer's row comparison an Index Cond.
-      expect(stmts[0]).toMatch(/ON tokens\(holder_count DESC, address DESC\)$/)
+      expect(stmts[0]).toMatch(/ ON tokens\(holder_count DESC, address DESC\) WHERE /)
+      expect(stmts[0].endsWith(` WHERE ${TOKENS_HEAL_PREDICATE}`)).toBe(true)
     }
   })
 
+  // The predicate is DDL, so it cannot take the healer's bound parameters: pin it to
+  // the constants the healer binds, or a rename would leave the index empty of the
+  // rows the healer asks for while every test stayed green.
+  it('names the same placeholders the healer binds', () => {
+    expect(TOKENS_HEAL_PREDICATE).toContain(`name IN ('${UNKNOWN_NAME}','')`)
+    expect(TOKENS_HEAL_PREDICATE).toContain(`symbol IN ('${UNKNOWN_SYMBOL}','')`)
+    expect(TOKENS_HEAL_PREDICATE).toContain(`total_supply = 0 AND type = 'BEP20'`)
+  })
+
   // packages/db/schema.ts is the schema source of truth: it has to say what the
-  // runtime DDL builds, columns and directions both.
+  // runtime DDL builds, columns, directions and WHERE clause all.
   it('is declared in the drizzle schema exactly as the runtime DDL builds it', () => {
     const declared = getTableConfig(schema.tokens).indexes
-      .find(i => i.config.name === 'tokens_holder_count_address_idx')
+      .find(i => i.config.name === TOKENS_HEAL_IDX)
     expect(declared).toBeDefined()
     const columns = declared!.config.columns
       .map(c => `${(c as { name: string }).name} ${String((c as { indexConfig?: { order?: string } }).indexConfig?.order).toUpperCase()}`)
       .join(', ')
-    const ddl = buildConcurrentIndexList(false, FLOOR).find(s => s.includes('tokens_holder_count_address_idx'))!
-    expect(ddl).toMatch(new RegExp(` ON tokens\\(${columns}\\)$`))
+    const where = new PgDialect().sqlToQuery(declared!.config.where!).sql
+    expect(heal(false)[0]).toBe(
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${TOKENS_HEAL_IDX} ON tokens(${columns}) WHERE ${where}`,
+    )
+  })
+
+  it('replaces the full-table index rather than sitting beside it', () => {
+    for (const ttPartitioned of [false, true]) {
+      expect(buildConcurrentIndexList(ttPartitioned, FLOOR).filter(s => s.includes('tokens_holder_count_address_idx'))).toEqual([])
+    }
+    expect(getTableConfig(schema.tokens).indexes.map(i => i.config.name)).not.toContain('tokens_holder_count_address_idx')
   })
 
   it('does not replace tokens_holder_count_idx', () => {
     const stmts = buildConcurrentIndexList(false, FLOOR).filter(s => s.includes('ON tokens('))
     expect(stmts.some(s => /tokens_holder_count_idx\s+ON tokens\(holder_count DESC\)$/.test(s))).toBe(true)
+  })
+})
+
+describe('retireOldTokensHealIndexSql', () => {
+  // The outgoing deploy generation pages through the same candidates, so some index
+  // for them has to exist at every moment: the full one stays until the partial is valid.
+  it('retires nothing until the replacement index is valid', () => {
+    expect(retireOldTokensHealIndexSql(false)).toEqual([])
+  })
+
+  it('then drops the full index without blocking writes', () => {
+    expect(retireOldTokensHealIndexSql(true)).toEqual(['DROP INDEX CONCURRENTLY IF EXISTS tokens_holder_count_address_idx'])
   })
 })
 

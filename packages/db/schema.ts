@@ -134,7 +134,12 @@ export const tokens = pgTable('tokens', {
   holderCountIdx: index('tokens_holder_count_idx').on(t.holderCount),
   // The token-metadata healer's keyset paging (apps/indexer token-heal-query.ts): a row
   // comparison is an Index Cond only when every column runs the same direction.
-  holderCountAddressIdx: index('tokens_holder_count_address_idx').on(t.holderCount.desc(), t.address.desc()),
+  // PARTIAL over the union of both chains' heal candidates, so a page reads no
+  // non-candidate. The predicate must stay character-identical to ensure-schema.ts's
+  // TOKENS_HEAL_PREDICATE (pinned by ensure-schema.test.ts), which builds it CONCURRENTLY.
+  healCandidatesIdx: index('tokens_heal_candidates_idx')
+                  .on(t.holderCount.desc(), t.address.desc())
+                  .where(sql`(name IN ('Unknown','') OR symbol IN ('???','') OR (total_supply = 0 AND type = 'BEP20'))`),
 }))
 
 export const logs = pgTable('logs', {

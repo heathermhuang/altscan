@@ -93,19 +93,22 @@ async function callRaw(runner: CallRunner, to: string, fn: Fn, probe: Probe): Pr
   }
 }
 
-/** The return data of a `returns (bytes32)` name()/symbol(): exactly 32 bytes of
- *  text, left-aligned and NUL-padded on the right. Tolerates a name that fills all
- *  32 bytes (no terminator, which decodeBytes32String rejects); anything that is not
- *  valid UTF-8 is unresolved rather than stored as replacement characters. */
+/** The return data of a `returns (bytes32)` name()/symbol(): 32 bytes of text,
+ *  left-aligned and NUL-padded on the right. Tolerates a name that fills all 32
+ *  bytes (no terminator, which decodeBytes32String rejects), and a bytes32 followed
+ *  by nothing but zeros: Uniswap V1's Vyper exchanges return "Uniswap V1" / "UNI-V1"
+ *  at the front of a zeroed 4,096-byte buffer. Anything that is not valid UTF-8 is
+ *  unresolved rather than stored as replacement characters. */
 function decodeBytes32Text(raw: string): string | null {
   try {
     return decodeBytes32String(raw)
   } catch { /* fall through to the lenient trim */ }
   try {
     const bytes = getBytes(raw)
-    // A leading NUL is a number or hash, not left-aligned text.
-    if (bytes.length !== 32 || bytes[0] === 0) return null
-    let end = bytes.length
+    // A leading NUL is a number or hash, not left-aligned text. Data after the first
+    // 32 bytes means this is not a bytes32 at all, so it is not guessed at.
+    if (bytes.length < 32 || bytes[0] === 0 || bytes.slice(32).some(b => b !== 0)) return null
+    let end = 32
     while (end > 0 && bytes[end - 1] === 0) end--
     return toUtf8String(bytes.slice(0, end))
   } catch {
