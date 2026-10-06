@@ -17,9 +17,11 @@
   --hair: #e7e7ee;
   --hair2: #f0f0f5;
   --hair3: #cfcfd8;
-  /* Border of the three floating panels (More, NetworkSwitcher, the copy popover): the page hairline
-     in light, the stronger one in dark, where --card on --card with --hair is ~1.2:1. */
-  --pop-line: var(--hair);
+  /* Border of the three floating panels (More, NetworkSwitcher, the copy popover). WCAG 1.4.11 wants
+     3:1 for a component boundary; no existing token sits between 3:1 and 4:1 (--hair3 1.55, --faint
+     2.05, --mut 5.19), so this is its own literal: #8d8d99 is 3.28:1 on --card (#fff) and 3.17:1 on
+     --bg (#fbfbfc). The old --hair edge was 1.23:1. */
+  --pop-line: #8d8d99;
   --live: #15803d;
   --liveT: #eaf6ee;
   --warn: #9a4a32;
@@ -43,7 +45,8 @@
     --hair: #23232c;
     --hair2: #1b1b22;
     --hair3: #34343f;
-    --pop-line: var(--hair3);
+    /* #646470: 3.20:1 on --card (#121218), 3.37:1 on --bg (#0b0b0f); the old --hair3 edge was 1.52:1. */
+    --pop-line: #646470;
     --live: #34c46a;
     --liveT: #12261a;
     --warn: #f0a58c;
@@ -99,6 +102,13 @@
     .net-mark {
       background: var(--nm-d);
       color: var(--nm-on-d);
+    }
+  }
+  /* Forced colours (Windows High Contrast) drop the swatch fill, so only the bare icon would be left.
+     A border survives, in a system colour; the icon keeps its forced text colour inside it. */
+  @media (forced-colors: active) {
+    .net-mark {
+      border: 1px solid CanvasText;
     }
   }
   /* Hairline divider (<hr class="rule"> or an empty <div class="rule">). */
@@ -541,6 +551,15 @@
   }
   .bt-dot {
     @apply mr-2 w-[9px] h-[9px] shrink-0 rounded-[2px] bg-acc;
+  }
+  /* Forced colours drop the accent fill, so the dot would vanish. It has no state (one accent dot,
+     decorative, beside the chain name), so opt it out of the override and fill it with a system
+     colour. */
+  @media (forced-colors: active) {
+    .bt-dot {
+      forced-color-adjust: none;
+      background-color: CanvasText;
+    }
   }
   .bt-stats {
     @apply flex gap-3 whitespace-nowrap;
