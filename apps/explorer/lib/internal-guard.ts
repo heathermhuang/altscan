@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, extractClientIp } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
 
@@ -24,13 +24,8 @@ export async function guardInternalAddress(
   if (!ADDR.test(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400, headers })
   }
-  // Prefer Cloudflare's client IP (bnbscan.com/ethscan.io sit behind CF); fall
-  // back to the last X-Forwarded-For hop (what Render's LB appends). Namespaced
-  // bucket so it doesn't collide with the /api/v1 IP limiter.
-  const ip =
-    req.headers.get('cf-connecting-ip')?.trim() ||
-    extractClientIp(req.headers.get('x-forwarded-for'))
-  if (!(await checkRateLimit(`internal:${ip}`, maxPerMin))) {
+  // Namespaced bucket so it doesn't collide with the /api/v1 IP limiter.
+  if (!(await checkRateLimit(`internal:${clientIpFromHeaders(req.headers)}`, maxPerMin))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers })
   }
   return null

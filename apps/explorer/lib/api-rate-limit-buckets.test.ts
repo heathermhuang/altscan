@@ -58,8 +58,8 @@ async function load(backend: 'redis' | 'memory') {
   const xff = { 'x-forwarded-for': IP }
   return {
     /** What every ordinary route does: the shared 100/min per-IP bucket. */
-    ordinaryHit: () => checkIpRateLimit(IP),
-    exhaustOrdinary: async () => { for (let i = 0; i < 100; i++) await checkIpRateLimit(IP) },
+    ordinaryHit: () => checkIpRateLimit(new Headers(xff)),
+    exhaustOrdinary: async () => { for (let i = 0; i < 100; i++) await checkIpRateLimit(new Headers(xff)) },
     listWebhooks: (init: Record<string, string> = {}) =>
       webhooks.GET(new Request(`${ORIGIN}/api/v1/webhooks`, { headers: { ...xff, ...init } })),
     createWebhook: () =>

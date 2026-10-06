@@ -10,7 +10,7 @@
  */
 import { db, schema } from '@/lib/db'
 import { eq, and, sql } from 'drizzle-orm'
-import { checkIpRateLimit, checkRateLimit, extractClientIp } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
 import crypto from 'crypto'
 
 export type OwnerAuthResult =
@@ -92,19 +92,18 @@ export async function authRequest(request: Request): Promise<AuthResult> {
     }
 
     // Key provided but not found or inactive — log for brute-force detection
-    console.warn(`[api-auth] Invalid API key attempt: prefix=${apiKey.slice(0, 8)}... ip=${extractClientIp(request.headers.get('x-forwarded-for'))}`)
+    console.warn(`[api-auth] Invalid API key attempt: prefix=${apiKey.slice(0, 8)}... ip=${clientIpFromHeaders(request.headers)}`)
     // Count the attempt against the IP bucket (same budget as key-less requests); otherwise
     // any bogus X-API-Key would skip every limiter on this route.
-    if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
+    if (!(await checkIpRateLimit(request.headers))) {
       return { ok: false, limited: true, reason: 'rate_limit' }
     }
     return { ok: false, limited: true, reason: 'invalid_key' }
   }
 
   // No API key — IP-based rate limit
-  const xForwardedFor = request.headers.get('x-forwarded-for')
-  if (!(await checkIpRateLimit(xForwardedFor))) {
-    console.warn(`[api-auth] IP rate limit exceeded: ${extractClientIp(xForwardedFor)}`)
+  if (!(await checkIpRateLimit(request.headers))) {
+    console.warn(`[api-auth] IP rate limit exceeded: ${clientIpFromHeaders(request.headers)}`)
     return { ok: false, limited: true, reason: 'rate_limit' }
   }
   return { ok: true, limited: false }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { checkRateLimit, extractClientIp } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
 import { triggerSourcifyVerification } from '@/lib/verifier'
 import { chainConfig } from '@/lib/chain'
 
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   // Tighter rate limit for write operations — 10 per minute per IP. Own `verify:`
   // bucket (Redis `rl:verify:<ip>`): the bare `<ip>` bucket is the 100/min budget
   // every other route increments, so sharing it let 11 ordinary calls 429 a verify.
-  if (!(await checkRateLimit(`verify:${extractClientIp(request.headers.get('x-forwarded-for'))}`, 10))) {
+  if (!(await checkRateLimit(`verify:${clientIpFromHeaders(request.headers)}`, 10))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

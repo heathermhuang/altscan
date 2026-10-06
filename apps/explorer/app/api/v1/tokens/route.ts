@@ -6,7 +6,7 @@ import { checkIpRateLimit } from '@/lib/api-rate-limit'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  if (!(await checkIpRateLimit(request.headers.get('x-forwarded-for')))) {
+  if (!(await checkIpRateLimit(request.headers))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 

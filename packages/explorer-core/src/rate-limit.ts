@@ -4,11 +4,13 @@
  * Primary: Redis INCR + PEXPIRE sliding window (correct across multiple instances).
  * Fallback: in-memory Map (used when REDIS_URL is absent or Redis is unreachable).
  *
- * SECURITY: always extract the real client IP from the LAST entry in X-Forwarded-For.
- * Render's load balancer appends the real IP last. The first entries are attacker-controlled
- * and must not be trusted for rate limiting.
+ * SECURITY: key on clientIpFromHeaders(), never on a leading X-Forwarded-For entry — those
+ * are attacker-controlled. Render's load balancer appends its connecting peer LAST, and that
+ * peer is a Cloudflare edge (bnbscan.com/ethscan.io and Render's own onrender.com hostnames
+ * are all Cloudflare-fronted), so the last hop alone lumps every visitor on one edge together.
  */
 
+import { BlockList, isIP } from 'net'
 import { getRedis, isRedisUnavailable } from './redis-client'
 
 const DEFAULT_MAX_REQUESTS = 100
@@ -76,13 +78,49 @@ function checkRateLimitMemory(key: string, maxRequests: number): boolean {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Extract the real client IP from an X-Forwarded-For header.
- * Render's LB appends the real client IP last — use that one.
+ * The connecting peer: the LAST X-Forwarded-For hop, which Render's LB appends.
+ * Behind Cloudflare this is the Cloudflare edge, not the visitor — use
+ * clientIpFromHeaders() for rate-limit keys.
  */
 export function extractClientIp(xForwardedFor: string | null): string {
   if (!xForwardedFor) return 'unknown'
   const parts = xForwardedFor.split(',')
   return parts[parts.length - 1].trim() || 'unknown'
+}
+
+// https://www.cloudflare.com/ips/ (fetched 2026-10-06). If Cloudflare adds a range
+// and this goes stale, requests from it fall back to the peer IP — never spoofable.
+const CLOUDFLARE_RANGES = [
+  '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+  '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+  '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+  '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+  '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
+  '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+]
+
+const cloudflare = new BlockList()
+for (const range of CLOUDFLARE_RANGES) {
+  const [net, bits] = range.split('/')
+  cloudflare.addSubnet(net, Number(bits), isIP(net) === 6 ? 'ipv6' : 'ipv4')
+}
+
+function isCloudflareIp(ip: string): boolean {
+  const family = isIP(ip)
+  return family !== 0 && cloudflare.check(ip, family === 6 ? 'ipv6' : 'ipv4')
+}
+
+/**
+ * The visitor's IP, for rate-limit keys.
+ *
+ * Trusts cf-connecting-ip only when the connecting peer is a Cloudflare edge:
+ * Cloudflare sets that header itself and refuses a client-supplied one (error
+ * 1000). From any other peer a cf-connecting-ip may be forged, so the peer is used.
+ */
+export function clientIpFromHeaders(headers: { get(name: string): string | null }): string {
+  const peer = extractClientIp(headers.get('x-forwarded-for'))
+  const cf = headers.get('cf-connecting-ip')?.trim()
+  return cf && isCloudflareIp(peer) ? cf : peer
 }
 
 /**
@@ -96,8 +134,11 @@ export async function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQU
 /**
  * Convenience wrapper: extract IP and check rate limit.
  */
-export async function checkIpRateLimit(xForwardedFor: string | null, maxRequests = DEFAULT_MAX_REQUESTS): Promise<boolean> {
-  return checkRateLimit(extractClientIp(xForwardedFor), maxRequests)
+export async function checkIpRateLimit(
+  headers: { get(name: string): string | null },
+  maxRequests = DEFAULT_MAX_REQUESTS,
+): Promise<boolean> {
+  return checkRateLimit(clientIpFromHeaders(headers), maxRequests)
 }
 
 /** Expose in-memory rate limit map size for monitoring */
