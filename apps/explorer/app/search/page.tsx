@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
 import { or, ilike } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
+import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
@@ -81,22 +82,36 @@ export default async function SearchPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {tokenMatches.map(token => (
-                    <tr key={token.address}>
-                      <td>
-                        <Link href={`/token/${token.address}`} className="text-acc-ink font-medium hover:underline">
-                          {token.name}
-                        </Link>
-                      </td>
-                      <td className="text-ink">{token.symbol}</td>
-                      <td className="text-mut">{token.type}</td>
-                      <td>
-                        <Link href={`/token/${token.address}`} className="text-acc-ink hover:underline">
-                          {token.address.slice(0, 14)}…
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {tokenMatches.map(token => {
+                    const nameLink = (
+                      <Link href={`/token/${token.address}`} className="text-acc-ink font-medium hover:underline">
+                        {token.name}
+                      </Link>
+                    )
+                    // Same badge as the /token list, on flagged rows only: an unflagged row's cell is the bare link.
+                    const lookalike = lookalikeOf(token, chainConfig.key)
+                    return (
+                      <tr key={token.address}>
+                        <td>
+                          {lookalike ? (
+                            <>
+                              {nameLink}
+                              <span className="badge badge-bad ml-2" title={lookalikeNote(lookalike)}>
+                                lookalike<span className="sr-only"> of {lookalike.symbol}</span>
+                              </span>
+                            </>
+                          ) : nameLink}
+                        </td>
+                        <td className="text-ink">{token.symbol}</td>
+                        <td className="text-mut">{token.type}</td>
+                        <td>
+                          <Link href={`/token/${token.address}`} className="text-acc-ink hover:underline">
+                            {token.address.slice(0, 14)}…
+                          </Link>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
               </div>

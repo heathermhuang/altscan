@@ -163,7 +163,7 @@ describe('lookalikeOf: flags', () => {
 // Real spam from the 2026-10 tokens tables, byte for byte (U+0358 combining dot above right, U+1E6C T with
 // dot below, U+1E0C D with dot below, U+1EA0 A with dot below, U+00DA U acute, U+0405 Cyrillic Dze).
 describe('lookalikeOf: real spam seen in production', () => {
-  const canon = (chain: 'bnb' | 'eth', symbol: string) => WELL_KNOWN[chain].find((w) => w.symbol === symbol)?.address
+  const canon = (chain: 'bnb' | 'eth', symbol: string) => WELL_KNOWN[chain].find((w) => w.symbol === symbol)?.addresses[0] ?? null
   it.each([
     ['BNB Binance-Peg BSC-USD, 22k holders', 'bnb', '0xacfcace43b613c3ab3f71fab72c0b58e35c76dff', 'BSC-USD', 'Binance-Peg BSC-USD', 'USDT'],
     ['BNB Binance-Peg Ethereum Token with marks', 'bnb', '0xea858f4b8d915d35b25f5f63d35ab50f8e505230', 'E\u1E6CH', 'Bi\u0358nance-Peg Ethereum \u1E6Coken', 'ETH'],
@@ -184,7 +184,7 @@ describe('lookalikeOf: real spam seen in production', () => {
 
   it('catches "Binance-Peg <name>" for every BNB Chain contract, by name alone', () => {
     for (const w of WELL_KNOWN.bnb) {
-      if (!w.address) continue
+      if (!w.addresses.length) continue
       expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: `Binance-Peg ${w.name}` }, 'bnb')?.symbol, w.symbol).toBe(w.symbol)
     }
   })
@@ -228,32 +228,102 @@ describe('lookalikeOf: format characters and Lisu letters', () => {
   })
 })
 
-// The glyph table is generated from Unicode's confusables.txt (UTS #39 v18.0.0, 2026-08-06).
+// The glyph table is generated from Unicode's confusables.txt (UTS #39 v18.0.0, 2026-08-06): every entry whose
+// source is one code point and whose prototype is one Latin letter, minus what the fold read as a Latin letter
+// before the table grew. Families are in the source's order, and an entry counts toward the FIRST family whose
+// ranges hold it, so a later, wider family is "the rest" of its ranges.
 describe('HOMOGLYPHS', () => {
-  const BLOCKS = [
-    { name: 'Greek and Coptic', lo: 0x370, hi: 0x3ff, count: 32 },
-    { name: 'Cyrillic', lo: 0x400, hi: 0x4ff, count: 38 },
-    { name: 'Lisu', lo: 0xa4d0, hi: 0xa4ff, count: 26 },
+  const FAMILIES: { name: string; ranges: [number, number][]; count: number }[] = [
+    { name: 'Warang Citi', ranges: [[0x118a0, 0x118ff]], count: 27 },
+    { name: 'Canadian Syllabics', ranges: [[0x1400, 0x167f], [0x11ab0, 0x11abf]], count: 22 },
+    {
+      name: 'Latin and IPA', count: 60,
+      ranges: [[0x80, 0x2af], [0x1d00, 0x1eff], [0x2c60, 0x2c7f], [0xa720, 0xa7ff], [0xab30, 0xab6f], [0x1df00, 0x1dfff]],
+    },
+    { name: 'Greek and Coptic', ranges: [[0x370, 0x3ff]], count: 32 },
+    { name: 'Cyrillic', ranges: [[0x400, 0x4ff]], count: 38 },
+    { name: 'Cyrillic Supplement and Extended-B', ranges: [[0x500, 0x52f], [0xa640, 0xa69f]], count: 7 },
+    { name: 'Armenian', ranges: [[0x530, 0x58f]], count: 15 },
+    {
+      name: 'Hebrew, Arabic, NKo and Mandaic', count: 42,
+      ranges: [[0x590, 0x8ff], [0xfb50, 0xfdff], [0xfe70, 0xfeff], [0x1ee00, 0x1eeff]],
+    },
+    { name: 'Indic scripts', ranges: [[0x900, 0xdff], [0x1cd0, 0x1cff], [0xa830, 0xa8df], [0x11000, 0x11fff]], count: 39 },
+    { name: 'Southeast Asian scripts', ranges: [[0xe00, 0x109f], [0x1700, 0x1bff], [0xaa00, 0xaa5f]], count: 15 },
+    { name: 'Georgian', ranges: [[0x10a0, 0x10ff], [0x1c90, 0x1cbf], [0x2d00, 0x2d2f]], count: 9 },
+    { name: 'Hangul Jamo and Ethiopic', ranges: [[0x1100, 0x137f]], count: 4 },
+    { name: 'Cherokee', ranges: [[0x13a0, 0x13ff], [0xab70, 0xabbf]], count: 36 },
+    { name: 'Runic', ranges: [[0x16a0, 0x16ff]], count: 5 },
+    { name: 'Coptic', ranges: [[0x2c80, 0x2cff]], count: 24 },
+    { name: 'Tifinagh', ranges: [[0x2d30, 0x2d7f]], count: 7 },
+    { name: 'Lisu', ranges: [[0xa4d0, 0xa4ff]], count: 26 },
+    { name: 'Vai and Bamum', ranges: [[0xa500, 0xa63f], [0xa6a0, 0xa6ff], [0x16800, 0x16a3f]], count: 8 },
+    { name: 'CJK, Bopomofo and Hangul compatibility', ranges: [[0x3100, 0x9fff]], count: 5 },
+    {
+      name: 'Symbols, punctuation and numerals', count: 42,
+      ranges: [
+        [0x2100, 0x2bff], [0x3000, 0x303f], [0xfe30, 0xfe4f], [0xff00, 0xffef], [0x10140, 0x1018f],
+        [0x102e0, 0x102ff], [0x1cec0, 0x1ceff], [0x1d100, 0x1d3ff], [0x1ed00, 0x1ed4f], [0x1f700, 0x1f7ff],
+      ],
+    },
+    { name: 'Historic scripts', ranges: [[0x10000, 0x10fff]], count: 65 },
+    { name: 'Other supplementary-plane scripts', ranges: [[0x10000, 0x1ffff]], count: 20 },
   ]
+  const familyOf = (cp: number) => FAMILIES.find((f) => f.ranges.some(([lo, hi]) => cp >= lo && cp <= hi))
   const entries = Object.entries(HOMOGLYPHS).map(([ch, letter]) => ({ ch, letter, cp: ch.codePointAt(0) as number }))
+  const hexOf = (cp: number) => `U+${cp.toString(16).toUpperCase()}`
 
-  it('holds 96 entries: single characters in the three blocks, each valued one uppercase Latin letter', () => {
-    expect(entries).toHaveLength(96)
-    for (const b of BLOCKS) {
-      expect(entries.filter((e) => e.cp >= b.lo && e.cp <= b.hi).length, b.name).toBe(b.count)
-    }
+  it('holds 548 entries: single non-ASCII characters, each valued one uppercase Latin letter', () => {
+    expect(entries).toHaveLength(548)
+    expect(FAMILIES.reduce((n, f) => n + f.count, 0)).toBe(548)
     for (const e of entries) {
-      expect([...e.ch], e.cp.toString(16)).toHaveLength(1)
-      expect(e.letter, e.cp.toString(16)).toMatch(/^[A-Z]$/)
-      expect(BLOCKS.some((b) => e.cp >= b.lo && e.cp <= b.hi), e.cp.toString(16)).toBe(true)
+      expect([...e.ch], hexOf(e.cp)).toHaveLength(1)
+      expect(e.cp, hexOf(e.cp)).toBeGreaterThan(0x7f)
+      expect(e.letter, hexOf(e.cp)).toMatch(/^[A-Z]$/)
+      expect(familyOf(e.cp), hexOf(e.cp)).toBeDefined()
+    }
+  })
+
+  it('pins the count per script family (Greek and Coptic, Cyrillic and Lisu are #196\'s 32, 38 and 26)', () => {
+    for (const f of FAMILIES) {
+      expect(entries.filter((e) => familyOf(e.cp) === f).length, f.name).toBe(f.count)
     }
   })
 
   it('folds every entry to its prototype through the whole pipeline (NFKD included)', () => {
     for (const e of entries) {
-      expect(foldConfusables(e.ch), `U+${e.cp.toString(16).toUpperCase()}`).toBe(e.letter)
-      expect(foldConfusables(`US${e.ch}`), `US + U+${e.cp.toString(16).toUpperCase()}`).toBe(`US${e.letter}`)
+      expect(foldConfusables(e.ch), hexOf(e.cp)).toBe(e.letter)
+      expect(foldConfusables(`US${e.ch}`), `US + ${hexOf(e.cp)}`).toBe(`US${e.letter}`)
     }
+  })
+
+  // The ordering bug class: NFKD rewrites these sources (a presentation form to the plain letter it
+  // is a form of, a halfwidth form to its jamo or box line) into something the table does not hold, so
+  // the table has to see the raw text first. The count is pinned so a refresh re-checks the list.
+  it('folds the entries NFKD would rewrite before the table sees them', () => {
+    const rewritten = entries.filter((e) => e.ch.normalize('NFKD') !== e.ch)
+    expect(rewritten).toHaveLength(27)
+    for (const e of rewritten) {
+      expect(foldConfusables(e.ch), hexOf(e.cp)).toBe(e.letter)
+    }
+    expect(foldConfusables('\uFE8D')).toBe('I') // Arabic isolated alef: NFKD makes it U+0627, which the table lacks
+    expect(foldConfusables('\u3147')).toBe('O') // Hangul ieung: NFKD makes it the jamo U+110B
+  })
+
+  it('leaves out what the fold already reads as a Latin letter: no entry, same answer', () => {
+    for (const [ch, letter] of [
+      ['\uFF21', 'A'], // fullwidth A
+      ['\u{1D400}', 'A'], // mathematical bold A
+      ['\u{1D6A8}', 'A'], // mathematical bold Alpha: NFKD makes it Greek Alpha, #196's table does the rest
+      ['\u0131', 'I'], // dotless i: uppercases to I
+      ['\u2160', 'I'], // roman numeral one
+      ['\u00DA', 'U'], // U with acute
+      ['\u017F', 'S'], // long s: NFKD reads s where UTS #39 says f, and the entry would change the answer
+    ] as const) {
+      expect(HOMOGLYPHS[ch], hexOf(ch.codePointAt(0) as number)).toBeUndefined()
+      expect(foldConfusables(ch), hexOf(ch.codePointAt(0) as number)).toBe(letter)
+    }
+    expect(lookalikeOf({ address: SPAM, symbol: 'U\u017FDT', name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
   })
 
   it('reads Greek small upsilon as U, and flags it as USDT', () => {
@@ -277,6 +347,105 @@ describe('HOMOGLYPHS', () => {
   })
 })
 
+// A token NAMED "USDT" is shown as "USDT" whatever its symbol says, so a name equal to a well-known SYMBOL
+// (or to one of its aliases) is flagged like a name equal to its full name.
+describe('lookalikeOf: name equals a well-known symbol', () => {
+  const usdtBnb = { symbol: 'USDT', canonical: BNB_USDT }
+
+  it.each([
+    ['plain', 'USDT'],
+    ['lowercase', 'usdt'],
+    ['Cyrillic Te and digit five', `U5D${CYR_TE}`],
+    ['zero-width joined', `US${ZWSP}DT`],
+    ['BscScan symbol alias', 'BSC-USD'],
+  ])('flags a token named %s as USDT on bnb, whatever its symbol', (_label, name) => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name }, 'bnb')).toEqual(usdtBnb)
+  })
+
+  it('flags a name that is the symbol of a token with an alias-only match, on the right chain', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'DAI' }, 'eth'))
+      .toEqual({ symbol: 'DAI', canonical: '0x6B175474E89094C44Da98b954EedeAC495271d0F' })
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'WBTC' }, 'eth'))
+      .toEqual({ symbol: 'WBTC', canonical: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' })
+  })
+
+  it("flags a name that is the native coin's symbol, with no canonical contract", () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'BNB' }, 'bnb')).toEqual({ symbol: 'BNB', canonical: null })
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'ETH' }, 'eth')).toEqual({ symbol: 'ETH', canonical: null })
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'ETH' }, 'bnb'))
+      .toEqual({ symbol: 'ETH', canonical: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' })
+  })
+
+  it('does not flag a name that is only a symbol on the OTHER chain', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'WBTC' }, 'bnb')).toBeNull()
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'BTCB' }, 'eth')).toBeNull()
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'BSC-USD' }, 'eth')).toBeNull()
+  })
+
+  it('does not flag a name that merely contains or extends a symbol', () => {
+    for (const [symbol, name] of [
+      ['stETH', 'ETH Staking'],
+      ['ETH2', 'ETH 2.0'],
+      ['USDT0', 'USDT Zero'],
+      ['sDAI', 'Savings DAI'],
+      ['WBNB2', 'WBNB v2'],
+      ['XYZ', 'My BNB'],
+    ]) {
+      expect(lookalikeOf({ address: SPAM, symbol, name }, 'bnb'), name).toBeNull()
+      expect(lookalikeOf({ address: SPAM, symbol, name }, 'eth'), name).toBeNull()
+    }
+  })
+
+  it('does not flag the canonical contract itself, even with the name set to the symbol', () => {
+    expect(lookalikeOf({ address: BNB_USDT, symbol: 'USDT', name: 'USDT' }, 'bnb')).toBeNull()
+    expect(lookalikeOf({ address: ETH_USDT, symbol: 'XYZ', name: 'USDT' }, 'eth')).toBeNull()
+  })
+})
+
+// Spellings in the scripts #196 did not cover. Each is a symbol or name a spammer could paste, written as
+// \u escapes: a letter from Cherokee, Armenian, the Cyrillic Supplement, Canadian Syllabics, Warang Citi,
+// the phonetic small capitals or Coptic, in place of the Latin one.
+describe('lookalikeOf: scripts beyond Greek, Cyrillic and Lisu', () => {
+  const bnb = (symbol: string) => WELL_KNOWN.bnb.find((w) => w.symbol === symbol)?.addresses[0] ?? null
+  const eth = (symbol: string) => WELL_KNOWN.eth.find((w) => w.symbol === symbol)?.addresses[0] ?? null
+  it.each([
+    ['Cherokee Gv, I, Mi (ETH, all Cherokee)', '\u13AC\u13A2\u13BB', 'ETH'],
+    ['Cherokee A, Go, V (DAI, all Cherokee)', '\u13A0\u13AA\u13A5', 'DAI'],
+    ['Armenian Seh, Cherokee Du, A, I (USDT)', '\u054D\u13DA\u13A0\u13A2', 'USDT'],
+    ['Cherokee Yv, Armenian small Vo, Cherokee Yv (BNB)', '\u13F4\u0578\u13F4', 'BNB'],
+    ['Cherokee Supplement small Du and Tli for the S and C of USDC', 'U\uABAAD\uABAF', 'USDC'],
+    ['Armenian Tiwn for the S of USDT', 'U\u054FDT', 'USDT'],
+    ['Cyrillic Komi De for the D of BUSD', 'BUS\u0501', 'BUSD'],
+    ['Cyrillic Komi De for the D of DAI', '\u0501AI', 'DAI'],
+    ['Canadian Syllabics Te, Latin S, Carrier Pe, Latin T (USDT)', '\u144CS\u15EAT', 'USDT'],
+    ['Canadian Syllabics Carrier Khe, Te, Latin S, Carrier Pe (BUSD)', '\u15F7\u144CS\u15EA', 'BUSD'],
+    ['Warang Citi Pu, Warang Citi small A, Latin D, Warang Citi Har (USDT)', '\u{118B8}\u{118C1}D\u{118BC}', 'USDT'],
+    ['phonetic small capital U and S (USDT)', '\u1D1C\uA731DT', 'USDT'],
+    ['Coptic Sima for the C of USDC', 'USD\u2CA4', 'USDC'],
+    ['Coptic Tau for the T of USDT', 'USD\u2CA6', 'USDT'],
+  ])('reads %s as the well-known token', (_label, symbol, target) => {
+    const canonical = bnb(target)
+    expect(lookalikeOf({ address: SPAM, symbol, name: 'x' }, 'bnb'), symbol).toEqual({ symbol: target, canonical })
+  })
+
+  it('reads the same spellings by NAME alone, and on the Ethereum table', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: 'USD C\u0555in' }, 'bnb')) // Armenian Oh for the o of Coin
+      .toEqual({ symbol: 'USDC', canonical: bnb('USDC') })
+    expect(lookalikeOf({ address: SPAM, symbol: 'XYZ', name: '\u13AC\u13A2\u13BB' }, 'eth'))
+      .toEqual({ symbol: 'ETH', canonical: null })
+    expect(lookalikeOf({ address: SPAM, symbol: '\u054D\u13DA\u13A0\u13A2', name: 'x' }, 'eth'))
+      .toEqual({ symbol: 'USDT', canonical: eth('USDT') })
+  })
+
+  it('does not flag a word in one of these scripts that folds to something else', () => {
+    // Cherokee, Armenian and Canadian Syllabics words: all fold to Latin letters, none to a well-known symbol.
+    for (const word of ['\u13A0\u13A2\u13A3', '\u054D\u0561\u0566', '\u144C\u15EA\u15EA']) {
+      expect(lookalikeOf({ address: SPAM, symbol: word, name: word }, 'bnb'), word).toBeNull()
+      expect(lookalikeOf({ address: SPAM, symbol: word, name: word }, 'eth'), word).toBeNull()
+    }
+  })
+})
+
 describe('lookalikeOf: does not flag', () => {
   it('the canonical contract itself, in any address casing', () => {
     for (const a of [BNB_USDT, BNB_USDT.toLowerCase(), BNB_USDT.toUpperCase().replace('0X', '0x')]) {
@@ -288,9 +457,10 @@ describe('lookalikeOf: does not flag', () => {
   it('every canonical token, as the chain itself reports it', () => {
     for (const chain of ['bnb', 'eth'] as const) {
       for (const w of WELL_KNOWN[chain]) {
-        if (!w.address) continue
-        expect(lookalikeOf({ address: w.address, symbol: w.symbol, name: w.name }, chain), `${chain} ${w.symbol}`).toBeNull()
-        expect(lookalikeOf({ address: w.address.toLowerCase(), symbol: w.symbol, name: w.name }, chain)).toBeNull()
+        for (const address of w.addresses) {
+          expect(lookalikeOf({ address, symbol: w.symbol, name: w.name }, chain), `${chain} ${w.symbol}`).toBeNull()
+          expect(lookalikeOf({ address: address.toLowerCase(), symbol: w.symbol, name: w.name }, chain)).toBeNull()
+        }
       }
     }
   })
@@ -319,12 +489,47 @@ describe('lookalikeOf: does not flag', () => {
 })
 
 describe('WELL_KNOWN', () => {
-  it('holds only valid EIP-55 checksummed addresses', () => {
+  it('holds only valid EIP-55 checksummed addresses, none twice on a chain', () => {
     for (const chain of ['bnb', 'eth'] as const) {
+      const seen = new Set<string>()
       for (const w of WELL_KNOWN[chain]) {
-        if (w.address) expect(getAddress(w.address), `${chain} ${w.symbol}`).toBe(w.address)
+        for (const address of w.addresses) {
+          expect(getAddress(address), `${chain} ${w.symbol}`).toBe(address)
+          expect(seen.has(address.toLowerCase()), `${chain} ${address} listed twice`).toBe(false)
+          seen.add(address.toLowerCase())
+        }
       }
     }
+  })
+
+  it('gives the native coin no address and every other token at least one', () => {
+    for (const chain of ['bnb', 'eth'] as const) {
+      const native = chain === 'bnb' ? 'BNB' : 'ETH'
+      for (const w of WELL_KNOWN[chain]) {
+        if (w.symbol === native && w.addresses.length === 0) continue
+        expect(w.addresses.length, `${chain} ${w.symbol}`).toBeGreaterThan(0)
+      }
+      expect(WELL_KNOWN[chain].filter((w) => w.addresses.length === 0).map((w) => w.symbol)).toEqual([native])
+    }
+  })
+
+  it('compares a token against EVERY address of the well-known token it reads as', () => {
+    // FOLDED copies the entry with a spread, so it shares this addresses array: pushing one in
+    // here is what a second real deployment in the table would look like. Restored in finally.
+    const usdt = WELL_KNOWN.bnb[0]
+    const second = '0x00000000000000000000000000000000C0ffee01'
+    const token = { address: second, symbol: 'USDT', name: 'Tether USD' }
+    expect(lookalikeOf(token, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+    ;(usdt.addresses as string[]).push(second)
+    try {
+      expect(lookalikeOf(token, 'bnb')).toBeNull()
+      expect(lookalikeOf({ ...token, address: second.toLowerCase() }, 'bnb')).toBeNull()
+      expect(lookalikeOf({ ...token, address: BNB_USDT }, 'bnb')).toBeNull() // the first still counts
+      expect(lookalikeOf({ ...token, address: SPAM }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT }) // canonical stays the primary
+    } finally {
+      ;(usdt.addresses as string[]).pop()
+    }
+    expect(lookalikeOf(token, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
   })
 })
 
