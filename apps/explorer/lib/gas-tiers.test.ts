@@ -20,8 +20,9 @@ describe('gasTierBasis', () => {
     expect(gasTierBasis(0n, GWEI / 10n)).toEqual(floored)
   })
 
-  it('a gas price exactly at the minimum is the gas price', () => {
+  it('a gas price exactly at the minimum is the gas price (BNB: eth_gasPrice == 0.05 Gwei floor)', () => {
     expect(gasTierBasis(GWEI / 10n, GWEI / 10n).slow).toBe('gas price')
+    expect(gasTierBasis(GWEI / 20n, GWEI / 20n)).toEqual({ slow: 'gas price', standard: 'gas price + 10%', fast: 'gas price + 30%' })
   })
 
   it('a chain with no minimum is never "network minimum", even with no reading', () => {

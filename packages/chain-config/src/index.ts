@@ -225,7 +225,7 @@ export type ChainConfig = {
     others: string
   }
   /** Network-enforced minimum gas price in wei, as a decimal string; '0' = none.
-   *  BNB Chain enforces 0.1 Gwei; Ethereum has no floor. */
+   *  BNB Chain's is 0.05 Gwei; Ethereum has no floor. */
   minGasPriceWei: string
   /** Native balance below which the page offers a gas top-up, in wei as a
    *  decimal string. Chain-specific because it is priced in native units. */
@@ -276,7 +276,7 @@ export const BSC: ChainConfig = {
     primary: 'PancakeSwap',
     others: 'PancakeSwap, BiSwap, and other BNB Chain AMMs',
   },
-  minGasPriceWei: '100000000', // 0.1 Gwei
+  minGasPriceWei: '50000000', // 0.05 Gwei — measured 2026-10-06: most included txs pay exactly 0.05 Gwei, and eth_gasPrice returns it
   lowGasBalanceWei: '10000000000000000', // 0.01 BNB
   whales: {
     nativeIndexFloorWei: '1000000000000000000', // 1 BNB

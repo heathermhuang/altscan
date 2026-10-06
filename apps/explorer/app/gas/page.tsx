@@ -94,7 +94,7 @@ export default async function GasPage() {
         <p className="text-sm text-ink2">
           Gas prices fetched live from {chainConfig.name} RPC.
           {hasGasFloor
-            ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the gas price is lower. Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
+            ? ` ${chainConfig.name} has a low network minimum gas price of ${floorGwei} Gwei — validators will not include transactions below this threshold even if the quoted gas price is lower. Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
             : ` Transactions are typically confirmed within 1-3 blocks (${confirmationWindow(chainConfig.blockTime)}).`
           }
         </p>
