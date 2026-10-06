@@ -657,10 +657,10 @@
   }
 }
 
-/* Loading skeleton (app/loading.tsx). A handful of elements whose bars and row lines are drawn
-   with gradients, so the markup (shipped twice per page: Suspense fallback + RSC payload) stays
-   tiny. Heights match a detail page's first screen: header, 4-cell .ledger, 18 .dt rows (38px
-   from 640px, 56px below) ~1000px in all, so the footer starts below the fold. */
+/* Loading skeleton (components/ui/DetailSkeleton.tsx). A handful of elements whose bars and row
+   lines are drawn with gradients, so the markup (shipped twice per page: Suspense fallback + RSC
+   payload) stays tiny. Heights match a detail page's first screen: header, 4-cell .ledger, 18 .dt
+   rows (38px from 640px, 56px below) ~1000px in all, so the footer starts below the fold. */
 @layer components {
   .skel-head,
   .skel-f > i,
