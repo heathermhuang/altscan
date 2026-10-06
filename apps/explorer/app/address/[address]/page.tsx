@@ -317,7 +317,7 @@ export default async function AddressPage({
           context={gasReferralContext}
           placement={gasReferralContext === 'address_zero_balance' ? 'address_zero_balance' : 'address_low_balance'}
           variant="compact"
-          className="mb-6 ad-end"
+          className="mb-6 ad-mid"
         />
       )}
 
@@ -395,14 +395,17 @@ export default async function AddressPage({
         />
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'txns' && (
-        <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
-      )}
-      {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
-      {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
-      {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
-      {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
+      {/* Tab content. On phones the ad (ad-mid) sits between the tab bar and this, not after it: the
+          lazy tabs swap a ~210px skeleton for a short message, and an ad below them would jump with it. */}
+      <div className="ad-aft">
+        {activeTab === 'txns' && (
+          <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
+        )}
+        {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
+        {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
+        {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
+        {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
+      </div>
     </div>
   )
 }
