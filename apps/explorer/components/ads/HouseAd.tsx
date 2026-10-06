@@ -60,7 +60,7 @@ export function HouseAd({
 
   if (variant === 'popover') {
     return (
-      <div className={`w-64 rounded-lg border border-hair bg-card p-3 text-left shadow-lg ${className}`}>
+      <div className={`w-64 rounded-lg border border-pop-line bg-card p-3 text-left shadow-lg ${className}`}>
         <p className="mb-1 text-[10px] font-semibold uppercase text-mut">Sponsored</p>
         <p className="text-sm font-semibold text-ink">{creative.headline}</p>
         {creative.body && <p className="mt-1 text-xs leading-5 text-mut">{creative.body}</p>}

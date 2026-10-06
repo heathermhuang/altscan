@@ -17,6 +17,9 @@
   --hair: #e7e7ee;
   --hair2: #f0f0f5;
   --hair3: #cfcfd8;
+  /* Border of the three floating panels (More, NetworkSwitcher, the copy popover): the page hairline
+     in light, the stronger one in dark, where --card on --card with --hair is ~1.2:1. */
+  --pop-line: var(--hair);
   --live: #15803d;
   --liveT: #eaf6ee;
   --warn: #9a4a32;
@@ -40,6 +43,7 @@
     --hair: #23232c;
     --hair2: #1b1b22;
     --hair3: #34343f;
+    --pop-line: var(--hair3);
     --live: #34c46a;
     --liveT: #12261a;
     --warn: #f0a58c;
@@ -210,7 +214,7 @@
   .nav-m > summary {
     @apply px-2 py-2 border-b-2 transition-colors whitespace-nowrap text-ink2 hover:text-ink border-transparent;
   }
-  .nav > a[aria-current],
+  .nav > a[aria-current="page"],
   .nav-m > summary[data-on] {
     @apply text-acc-ink border-acc font-semibold;
   }
@@ -232,12 +236,12 @@
     @apply rotate-180;
   }
   .nav-p {
-    @apply absolute right-0 top-full mt-2 w-48 py-1 rounded-xl border border-hair bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50;
+    @apply absolute right-0 top-full mt-2 w-48 py-1 rounded-xl border border-pop-line bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50;
   }
   .nav-p a {
     @apply block px-3 py-2.5 border-l-2 border-l-transparent text-ink2 hover:text-ink hover:bg-hair2 transition-colors;
   }
-  .nav-p a[aria-current] {
+  .nav-p a[aria-current="page"] {
     @apply border-l-acc text-acc-ink font-semibold;
   }
   .burger {
@@ -501,6 +505,18 @@
     .dt-tx td.tx-bad:nth-child(6)::before {
       background: none;
       box-shadow: inset 0 0 0 2px currentColor;
+    }
+    /* Forced colours (Windows High Contrast) drop background-colour fills and box-shadows, so the dot
+       would vanish. A border survives, in a system colour: 5px on the 10px box is a solid disc
+       (success), 2px is a ring (failure), keeping the shape difference. */
+    @media (forced-colors: active) {
+      .dt-tx td:nth-child(6)::before {
+        box-sizing: border-box;
+        border: 5px solid CanvasText;
+      }
+      .dt-tx td.tx-bad:nth-child(6)::before {
+        border-width: 2px;
+      }
     }
     .dt-tx td:nth-child(6) > * {
       position: absolute;

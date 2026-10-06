@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { getAddressLabel } from '@/lib/known-addresses'
 
+const SELF = 'text-ink font-semibold'
+
 /**
  * The single place an address becomes visible text.
  *
@@ -19,7 +21,8 @@ import { getAddressLabel } from '@/lib/known-addresses'
  * still carries the full address.
  *
  * `plain` drops the link's own colour, hover and mono classes, for a container that supplies
- * them (a `dt-a` table: its links are accent links in the table's mono face).
+ * them (a `dt-a` table: its links are accent links in the table's mono face). `self` still applies
+ * there: its colour and weight are the one thing the container's accent must not decide.
  */
 export function AddressLink({
   address,
@@ -40,7 +43,7 @@ export function AddressLink({
   self?: boolean
   /** Put the full checksummed address in a `title` (hover text). Default true. */
   title?: boolean
-  /** The container styles the link (see above): no colour, hover or font classes of its own. */
+  /** The container styles the link (see above): no colour, hover or font classes of its own, except `self`'s emphasis. */
   plain?: boolean
   className?: string
 }) {
@@ -52,7 +55,7 @@ export function AddressLink({
     <Link
       href={`/address/${address.toLowerCase()}`}
       title={title ? checksummed : undefined}
-      className={plain ? className || undefined : `${self ? 'text-ink font-semibold' : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
+      className={plain ? `${self ? SELF : ''} ${className}`.trim() || undefined : `${self ? SELF : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
     >
       {text}
     </Link>

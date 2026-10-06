@@ -74,7 +74,7 @@ export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | '
       </button>
 
       {open && (
-        <div className={`absolute left-0 w-56 rounded-xl border border-hair bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50 ${
+        <div className={`absolute left-0 w-56 rounded-xl border border-pop-line bg-card shadow-[0_10px_30px_rgba(16,16,20,0.12)] overflow-hidden z-50 ${
           direction === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
         }`}>
           <p className="k text-[11px] px-3 pt-2.5 pb-1.5">

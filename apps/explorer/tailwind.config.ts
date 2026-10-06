@@ -46,6 +46,7 @@ const config: Config = {
         hair: token('hair'),
         hair2: token('hair2'),
         hair3: token('hair3'),
+        'pop-line': token('pop-line'),
         live: token('live'),
         'live-t': token('liveT'),
         warn: token('warn'),
