@@ -7,7 +7,6 @@ import { safeBigInt, formatTokenAmount } from './format'
 export interface DecodedTx {
   summary: string
   type: 'transfer' | 'swap' | 'approval' | 'contract_deploy' | 'contract_call' | 'other'
-  emoji: string
 }
 
 export interface TxTransferInfo {
@@ -49,7 +48,7 @@ export function decodeTx(tx: {
 }, transfers: TxTransferInfo[], nativeCurrency = 'BNB'): DecodedTx {
   // Contract deployment
   if (!tx.toAddress) {
-    return { summary: 'Deployed a new smart contract', type: 'contract_deploy', emoji: '🏗️' }
+    return { summary: 'Deployed a new smart contract', type: 'contract_deploy' }
   }
 
   const nativeValue = Number(safeBigInt(tx.value)) / 1e18
@@ -72,10 +71,9 @@ export function decodeTx(tx: {
       return {
         summary: `Sent ${nativeStr} ${nativeCurrency} to ${to}`,
         type: 'transfer',
-        emoji: '💸',
       }
     }
-    return { summary: 'Contract interaction (no data)', type: 'other', emoji: '📋' }
+    return { summary: 'Contract interaction (no data)', type: 'other' }
   }
 
   const methodType = METHOD_TYPES[tx.methodId] ?? tx.methodName ?? null
@@ -83,7 +81,7 @@ export function decodeTx(tx: {
   // Token approval
   if (tx.methodId === '0x095ea7b3') {
     const spenderLabel = toLabel ?? `${tx.toAddress.slice(0, 12)}…`
-    return { summary: `Approved ${spenderLabel} to spend tokens`, type: 'approval', emoji: '✅' }
+    return { summary: `Approved ${spenderLabel} to spend tokens`, type: 'approval' }
   }
 
   // Swap detection.
@@ -117,10 +115,9 @@ export function decodeTx(tx: {
       return {
         summary: `Swapped ${inAmt} ${inSym} for ${outAmt} ${outSym} on ${dexLabel}`,
         type: 'swap',
-        emoji: '🔄',
       }
     }
-    return { summary: `Swapped tokens on ${dexLabel}`, type: 'swap', emoji: '🔄' }
+    return { summary: `Swapped tokens on ${dexLabel}`, type: 'swap' }
   }
 
   // Many transfers that are not a swap: state what is actually observable
@@ -132,7 +129,6 @@ export function decodeTx(tx: {
     return {
       summary: `${transfers.length} token transfers${what} to ${recipients} recipient${recipients === 1 ? '' : 's'}`,
       type: 'transfer',
-      emoji: '💱',
     }
   }
 
@@ -145,7 +141,7 @@ export function decodeTx(tx: {
         ? (Number(BigInt(t.value ?? '0')) / Math.pow(10, t.tokenDecimals)).toFixed(2)
         : '?'
       const to = getAddressLabel(t.toAddress) ?? `${t.toAddress.slice(0, 12)}…`
-      return { summary: `Transferred ${amt} ${sym} to ${to}`, type: 'transfer', emoji: '💱' }
+      return { summary: `Transferred ${amt} ${sym} to ${to}`, type: 'transfer' }
     }
   }
 
@@ -155,6 +151,5 @@ export function decodeTx(tx: {
   return {
     summary: `Called ${contract}${method}`,
     type: 'contract_call',
-    emoji: '📝',
   }
 }
