@@ -139,6 +139,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress"`}</CodeBlock>
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Register a Webhook</h3>
               <CodeBlock label="Register a Webhook">{`curl -X POST ${BASE_URL}/api/v1/webhooks \\
+  -H "X-API-Key: bnbs_abc123..." \\
   -H "Content-Type: application/json" \\
   -d '{
     "ownerAddress": "0xYourAddress",
@@ -199,7 +200,7 @@ curl "${BASE_URL}/api/v1/webhooks?owner=0xYourAddress" \\
   -H "X-API-Key: bnbs_abc123..."
 
 # Delete a webhook
-curl -X DELETE ${BASE_URL}/api/v1/webhooks/42 \\
+curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
   -H "X-API-Key: bnbs_abc123..."`}</CodeBlock>
             </div>
           </div>
