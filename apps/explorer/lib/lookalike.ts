@@ -60,32 +60,36 @@ export const WELL_KNOWN: Record<ChainKey, readonly WellKnown[]> = {
   ],
 }
 
-// Cyrillic and Greek letters that render like a Latin one, keyed by code point. Explicit \u escapes:
-// these glyphs are visually identical to ASCII, so a literal character here would be unreadable in
-// review. Each comment lists the Latin letters its row stands in for.
-const HOMOGLYPHS: Record<string, string> = {
-  // Cyrillic capitals, looking like: A B C E H I J K M O P S T X Y (the last I is the palochka)
-  '\u0410': 'A', '\u0412': 'B', '\u0421': 'C', '\u0415': 'E', '\u041D': 'H', '\u0406': 'I',
-  '\u0408': 'J', '\u041A': 'K', '\u041C': 'M', '\u041E': 'O', '\u0420': 'P', '\u0405': 'S',
-  '\u0422': 'T', '\u0425': 'X', '\u0423': 'Y', '\u04C0': 'I',
-  // Cyrillic lowercase, looking like: a c e i j o p s x y (and I, the lowercase palochka)
-  '\u0430': 'a', '\u0441': 'c', '\u0435': 'e', '\u0456': 'i', '\u0458': 'j', '\u043E': 'o',
-  '\u0440': 'p', '\u0455': 's', '\u0445': 'x', '\u0443': 'y', '\u04CF': 'I',
-  // Greek capitals, looking like: A B E Z H I K M N O P T Y X
-  '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I',
-  '\u039A': 'K', '\u039C': 'M', '\u039D': 'N', '\u039F': 'O', '\u03A1': 'P', '\u03A4': 'T',
-  '\u03A5': 'Y', '\u03A7': 'X',
-  // Greek lowercase, looking like: o v
-  '\u03BF': 'o', '\u03BD': 'v',
-  // Lisu letters (U+A4D0..A4FF), looking like: A B C D E F G H J K L M N O P R S T U V W X Y Z.
-  // Every Lisu entry in Unicode's confusables.txt (UTS #39, Version 18.0.0, dated 2026-08-06) whose
-  // prototype is one Latin capital letter A-Z, plus the two it gives as small letters: l (the fold
-  // reads l as I) and d.
-  '\uA4EE': 'A', '\uA4D0': 'B', '\uA4DA': 'C', '\uA4D3': 'D', '\uA4F0': 'E', '\uA4DD': 'F',
-  '\uA4D6': 'G', '\uA4E7': 'H', '\uA4D9': 'J', '\uA4D7': 'K', '\uA4E1': 'L', '\uA4DF': 'M',
-  '\uA4E0': 'N', '\uA4F3': 'O', '\uA4D1': 'P', '\uA4E3': 'R', '\uA4E2': 'S', '\uA4D4': 'T',
-  '\uA4F4': 'U', '\uA4E6': 'V', '\uA4EA': 'W', '\uA4EB': 'X', '\uA4EC': 'Y', '\uA4DC': 'Z',
-  '\uA4F2': 'l', '\uA4D2': 'd',
+// Cyrillic, Greek and Lisu letters that render like a Latin one: code point to the uppercase Latin
+// letter. Explicit \u escapes, because these glyphs are visually identical to ASCII and a literal
+// character here would be unreadable in review. GENERATED, not hand-written: from Unicode's
+// confusables.txt (UTS #39 Version 18.0.0, dated 2026-08-06,
+// https://www.unicode.org/Public/security/latest/confusables.txt), taking every entry whose source is in
+// U+0370..03FF, U+0400..04FF or U+A4D0..A4FF and whose prototype is a single Latin letter, uppercased
+// (the table spells a capital I as `l`, and the fold reads l as I). To refresh, redo that selection and
+// replace this block; there is no runtime fetch.
+export const HOMOGLYPHS: Record<string, string> = {
+  // Greek and Coptic, U+0370..03FF (32)
+  '\u037F': 'J', '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H',
+  '\u0399': 'I', '\u039A': 'K', '\u039C': 'M', '\u039D': 'N', '\u039F': 'O', '\u03A1': 'P',
+  '\u03A4': 'T', '\u03A5': 'Y', '\u03A7': 'X', '\u03B1': 'A', '\u03B3': 'Y', '\u03B9': 'I',
+  '\u03BD': 'V', '\u03BF': 'O', '\u03C1': 'P', '\u03C3': 'O', '\u03C5': 'U', '\u03D2': 'Y',
+  '\u03DC': 'F', '\u03ED': 'O', '\u03F1': 'P', '\u03F2': 'C', '\u03F3': 'J', '\u03F8': 'P',
+  '\u03F9': 'C', '\u03FA': 'M',
+  // Cyrillic, U+0400..04FF (38)
+  '\u0405': 'S', '\u0406': 'I', '\u0408': 'J', '\u0410': 'A', '\u0412': 'B', '\u0415': 'E',
+  '\u041A': 'K', '\u041C': 'M', '\u041D': 'H', '\u041E': 'O', '\u0420': 'P', '\u0421': 'C',
+  '\u0422': 'T', '\u0423': 'Y', '\u0425': 'X', '\u042C': 'B', '\u0430': 'A', '\u0433': 'R',
+  '\u0435': 'E', '\u043E': 'O', '\u0440': 'P', '\u0441': 'C', '\u0443': 'Y', '\u0445': 'X',
+  '\u0448': 'W', '\u0455': 'S', '\u0456': 'I', '\u0458': 'J', '\u0461': 'W', '\u0474': 'V',
+  '\u0475': 'V', '\u04AE': 'Y', '\u04AF': 'Y', '\u04BA': 'H', '\u04BB': 'H', '\u04BD': 'E',
+  '\u04C0': 'I', '\u04CF': 'I',
+  // Lisu, U+A4D0..A4FF (26)
+  '\uA4D0': 'B', '\uA4D1': 'P', '\uA4D2': 'D', '\uA4D3': 'D', '\uA4D4': 'T', '\uA4D6': 'G',
+  '\uA4D7': 'K', '\uA4D9': 'J', '\uA4DA': 'C', '\uA4DC': 'Z', '\uA4DD': 'F', '\uA4DF': 'M',
+  '\uA4E0': 'N', '\uA4E1': 'L', '\uA4E2': 'S', '\uA4E3': 'R', '\uA4E6': 'V', '\uA4E7': 'H',
+  '\uA4EA': 'W', '\uA4EB': 'X', '\uA4EC': 'Y', '\uA4EE': 'A', '\uA4F0': 'E', '\uA4F2': 'I',
+  '\uA4F3': 'O', '\uA4F4': 'U',
 }
 
 // Combining marks, format characters (zero-width joiners, bidi marks), whitespace, and the blank
@@ -100,15 +104,17 @@ function mapGlyphs(s: string): string {
 
 /**
  * What a symbol or name LOOKS like, as plain uppercase ASCII, so lookalikes compare equal.
- * NFKD first (fullwidth to ASCII, and accented letters split into base + combining mark), then
- * drop everything invisible, then fold Cyrillic/Greek homoglyphs, then the digit/letter swaps that
- * read alike in a sans font: l | 1 to I, 0 to O, 5 to S. The glyph fold runs again after
- * toUpperCase: a lowercase letter whose UPPERCASE is the mapped one (Cyrillic te, Greek iota) only
- * becomes one there, and would otherwise slip through as a non-ASCII T or I.
+ * The glyph table first, on the raw text: NFKD would turn the lunate sigmas (U+03F2 and U+03F9, which read as C)
+ * into ordinary sigmas before the table saw them. Then NFKD (fullwidth to ASCII, accented letters
+ * split into base + combining mark), then drop everything invisible, then the table again for what
+ * NFKD exposed, then the digit/letter swaps that read alike in a sans font: l | 1 to I, 0 to O,
+ * 5 to S. The table runs a last time after toUpperCase: a lowercase letter that is not in the
+ * table but whose UPPERCASE is (Cyrillic te, Greek tau) only becomes one there, and would
+ * otherwise slip through as a non-ASCII T.
  */
 export function foldConfusables(s: string): string {
-  const visible = s.normalize('NFKD').replace(INVISIBLE, '')
-  return mapGlyphs(mapGlyphs(visible).replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase())
+  const visible = mapGlyphs(mapGlyphs(s).normalize('NFKD').replace(INVISIBLE, ''))
+  return mapGlyphs(visible.replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase())
 }
 
 // Folded once at load: a list page calls lookalikeOf per row.

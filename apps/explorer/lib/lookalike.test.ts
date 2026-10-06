@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { getAddress } from 'ethers'
-import { foldConfusables, lookalikeOf, lookalikeNote, WELL_KNOWN } from './lookalike'
+import { foldConfusables, lookalikeOf, lookalikeNote, HOMOGLYPHS, WELL_KNOWN } from './lookalike'
 
 // Confusable characters are written as \u escapes: they are visually identical to ASCII, so a
 // literal one in this file would be unreadable in review (and look like a no-op test).
@@ -54,7 +54,7 @@ describe('foldConfusables', () => {
     expect(foldConfusables('BTC\u0432')).toBe('BTCB') // Cyrillic small ve
     expect(foldConfusables('BTC\u043A')).toBe('BTCK') // Cyrillic small ka reads as K, not B
     expect(foldConfusables('\u0432\u043C\u043D')).toBe('BMH') // small ve em en
-    expect(foldConfusables('\u03B1\u03C1\u03B5\u03BA\u03C5\u03C7')).toBe('APEKYX') // small alpha rho epsilon kappa upsilon chi
+    expect(foldConfusables('\u03B1\u03C1\u03B5\u03BA\u03C5\u03C7')).toBe('APEKUX') // small alpha rho epsilon kappa upsilon chi: the table reads small upsilon as u
     expect(foldConfusables('\u03BD')).toBe('V') // Greek small nu keeps reading as v
   })
 
@@ -225,6 +225,55 @@ describe('lookalikeOf: format characters and Lisu letters', () => {
   it('flags a spelling made only of Lisu letters (U, S, D, T)', () => {
     const spam = '\uA4F4\uA4E2\uA4D3\uA4D4'
     expect(lookalikeOf({ address: SPAM, symbol: spam, name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+})
+
+// The glyph table is generated from Unicode's confusables.txt (UTS #39 v18.0.0, 2026-08-06).
+describe('HOMOGLYPHS', () => {
+  const BLOCKS = [
+    { name: 'Greek and Coptic', lo: 0x370, hi: 0x3ff, count: 32 },
+    { name: 'Cyrillic', lo: 0x400, hi: 0x4ff, count: 38 },
+    { name: 'Lisu', lo: 0xa4d0, hi: 0xa4ff, count: 26 },
+  ]
+  const entries = Object.entries(HOMOGLYPHS).map(([ch, letter]) => ({ ch, letter, cp: ch.codePointAt(0) as number }))
+
+  it('holds 96 entries: single characters in the three blocks, each valued one uppercase Latin letter', () => {
+    expect(entries).toHaveLength(96)
+    for (const b of BLOCKS) {
+      expect(entries.filter((e) => e.cp >= b.lo && e.cp <= b.hi).length, b.name).toBe(b.count)
+    }
+    for (const e of entries) {
+      expect([...e.ch], e.cp.toString(16)).toHaveLength(1)
+      expect(e.letter, e.cp.toString(16)).toMatch(/^[A-Z]$/)
+      expect(BLOCKS.some((b) => e.cp >= b.lo && e.cp <= b.hi), e.cp.toString(16)).toBe(true)
+    }
+  })
+
+  it('folds every entry to its prototype through the whole pipeline (NFKD included)', () => {
+    for (const e of entries) {
+      expect(foldConfusables(e.ch), `U+${e.cp.toString(16).toUpperCase()}`).toBe(e.letter)
+      expect(foldConfusables(`US${e.ch}`), `US + U+${e.cp.toString(16).toUpperCase()}`).toBe(`US${e.letter}`)
+    }
+  })
+
+  it('reads Greek small upsilon as U, and flags it as USDT', () => {
+    expect(foldConfusables('\u03C5SDT')).toBe('USDT')
+    expect(foldConfusables('\u03A5SDT')).toBe('YSDT') // capital Upsilon still reads as Y
+    expect(lookalikeOf({ address: SPAM, symbol: '\u03C5SDT', name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it('reads the lunate sigma as C, so a lunate USDC is flagged (NFKD would turn it into a sigma)', () => {
+    expect(foldConfusables('US D\u03F9')).toBe('USDC') // capital lunate sigma
+    expect(foldConfusables('USD\u03F2')).toBe('USDC') // small lunate sigma
+    expect(lookalikeOf({ address: SPAM, symbol: 'US D\u03F9', name: 'x' }, 'bnb'))
+      .toEqual({ symbol: 'USDC', canonical: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' })
+  })
+
+  it('folds Cyrillic straight U to Y and Cyrillic shha to H', () => {
+    expect(foldConfusables('\u04AE\u04AF')).toBe('YY')
+    expect(foldConfusables('\u04BA\u04BB')).toBe('HH')
+    expect(lookalikeOf({ address: SPAM, symbol: 'ET\u04BB', name: 'x' }, 'eth')).toEqual({ symbol: 'ETH', canonical: null })
+    expect(lookalikeOf({ address: SPAM, symbol: 'ET\u04BA', name: 'x' }, 'bnb')).toEqual({ symbol: 'ETH', canonical: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8' })
   })
 })
 
