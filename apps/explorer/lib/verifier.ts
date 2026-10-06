@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { ChainConfig } from '@altscan/chain-config'
+import { swallow } from '@/lib/observability'
 
 const SOURCIFY_BASE = 'https://sourcify.dev/server'
 
@@ -10,40 +11,32 @@ const SOURCIFY_BASE = 'https://sourcify.dev/server'
  */
 export type VerifierChain = Pick<ChainConfig, 'chainId' | 'name'>
 
+/**
+ * Sourcify API v2: `GET /v2/contract/{chainId}/{address}` is 200 with `match` of
+ * `exact_match` (v1 "perfect") or `match` (v1 "partial") when the contract is verified, and
+ * 404 when it is not. The v1 `/check-by-addresses` this used to call was removed from
+ * sourcify.dev: it 404s for every address on every chain, which this function swallowed as
+ * "not verified", so /verify could not succeed on either product.
+ */
 export async function checkSourcify(address: string, chainId: number): Promise<{
   verified: boolean
   match?: 'full' | 'partial'
   source?: string
 }> {
   try {
-    const response = await axios.get(`${SOURCIFY_BASE}/check-by-addresses`, {
-      params: {
-        addresses: address,
-        chainIds: chainId,
-      },
+    const response = await axios.get(`${SOURCIFY_BASE}/v2/contract/${chainId}/${address}`, {
       timeout: 5000,
+      // 404 is Sourcify's answer for "not verified"; anything else non-200 is a real failure.
+      validateStatus: (status) => status === 200 || status === 404,
     })
+    if (response.status !== 200) return { verified: false }
 
-    const data = response.data
-    if (!Array.isArray(data) || data.length === 0) {
-      return { verified: false }
-    }
-
-    const result = data[0]
-    if (!result || !result.status) {
-      return { verified: false }
-    }
-
-    if (result.status === 'perfect') {
-      return { verified: true, match: 'full', source: 'full' }
-    }
-
-    if (result.status === 'partial') {
-      return { verified: true, match: 'partial', source: 'partial' }
-    }
-
+    const match = response.data?.match
+    if (match === 'exact_match') return { verified: true, match: 'full', source: 'full' }
+    if (match === 'match') return { verified: true, match: 'partial', source: 'partial' }
     return { verified: false }
-  } catch {
+  } catch (e) {
+    swallow('verify/sourcify', e)
     return { verified: false }
   }
 }
