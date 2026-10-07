@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { desc, eq } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from './token-transfers-query'
+import { buildLocalNetFlowQuery, LOCAL_HOLDERS_WINDOW } from './holders'
 
 /**
- * The token page's transfer list and transfer count against a REAL Postgres.
+ * The token page's transfer list, transfer count and local holders estimate against a REAL Postgres.
  *
  * `token_address = $1 ORDER BY block_number DESC LIMIT 25` has no index that
  * serves both the filter and the order, so the planner walks the block_number
@@ -29,6 +31,12 @@ const MEGA = '0x' + 'a1'.repeat(20)     // four transfers in every block
 const QUIET = '0x' + 'a2'.repeat(20)    // two a block in the OLDEST partition, none since
 const SPREAD = '0x' + 'a3'.repeat(20)   // one a block, in pairs of blocks that share a second
 const NONE = '0x' + 'a4'.repeat(20)     // none
+// Holders estimate: exactly LOCAL_HOLDERS_WINDOW transfers sit before the window (blocks 0-4999,
+// two a block) and as many inside it (blocks 5000-9999), so the cut falls on a block edge.
+const WINDOWED = '0x' + 'a5'.repeat(20)
+const OLD_WHALE = '0x' + 'b1'.repeat(20) // receives 10^24 at block 0, before the window
+const SOURCE = '0x' + 'b2'.repeat(20)    // sends every in-window "real" transfer
+const holder = (j: number) => '0x' + j.toString(16).padStart(40, '0')
 
 // 10,000 blocks of 0.75s, truncated to whole seconds as on BNB, so consecutive
 // blocks share a timestamp. Partitioned, that is 4 partitions of 2,500 blocks.
@@ -71,6 +79,20 @@ const ROWS = `
         UNION ALL SELECT '${SPREAD}', b, 0 FROM (SELECT generate_series(0, 9999, 64) AS b
                                                  UNION ALL SELECT generate_series(0, 9999, 64) + 1) s) t;
 
+  -- In the window: recipient j (= block % 20) is paid 1000 + 10j in each of its 250 blocks, so the
+  -- top ten are holders 19..10 in that order. The second transfer a block is a 1-unit pair of strangers.
+  INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, value, block_number, timestamp)
+  SELECT '0x' || md5('w' || b || ':' || i) || md5('x' || b || ':' || i), 200 + i, '${WINDOWED}',
+         CASE WHEN b >= 5000 AND i = 0 THEN '${SOURCE}' ELSE '0x' || md5('wf' || b || ':' || i) || '00000000' END,
+         CASE WHEN b = 0 AND i = 0 THEN '${OLD_WHALE}'
+              WHEN b >= 5000 AND i = 0 THEN '0x' || lpad(to_hex(b % 20), 40, '0')
+              ELSE '0x' || md5('wt' || b || ':' || i) || '00000000' END,
+         CASE WHEN b = 0 AND i = 0 THEN 1000000000000000000000000
+              WHEN b >= 5000 AND i = 0 THEN 1000 + (b % 20) * 10
+              ELSE 1 END,
+         b, ${TS}
+  FROM generate_series(0, 9999) b, generate_series(0, 1) i;
+
   CREATE INDEX ON token_transfers (token_address);
   CREATE INDEX ON token_transfers (from_address, timestamp DESC);
   CREATE INDEX ON token_transfers (to_address, timestamp DESC);
@@ -91,7 +113,8 @@ type PlanNode = {
 
 /** Heap rows the executor visited: returned by a scan, or read and discarded by its filter. */
 function rowsRead(node: PlanNode): number {
-  const scan = /Scan$/.test(node['Node Type']) && node['Node Type'] !== 'Bitmap Index Scan'
+  // A CTE Scan re-reads rows its CTE already produced; they are not heap rows.
+  const scan = /Scan$/.test(node['Node Type']) && node['Node Type'] !== 'Bitmap Index Scan' && node['Node Type'] !== 'CTE Scan'
   const own = scan
     ? (node['Actual Rows'] + (node['Rows Removed by Filter'] ?? 0) + (node['Rows Removed by Index Recheck'] ?? 0)) * node['Actual Loops']
     : 0
@@ -158,6 +181,42 @@ describe.skipIf(!PG_URL)('token page transfers — against a real Postgres', () 
             .toEqual((await byBlock(MEGA, limit, offset)).map(r => r.blockNumber))
         }
       }
+    })
+
+    const holdersQuery = (token: string) => new PgDialect().sqlToQuery(buildLocalNetFlowQuery(token))
+    const topHolders = async (token: string) => {
+      const { sql: text, params } = holdersQuery(token)
+      return (await conn.unsafe(text, params as never[]))
+        .map((r) => ({ addr: r.addr as string, balance: r.balance as string }))
+    }
+
+    // The estimate nets the token's latest LOCAL_HOLDERS_WINDOW transfers. WINDOWED has an old
+    // 10^24 receipt just outside it, which an unwindowed GROUP BY would rank first.
+    it("ranks the top holders of the token's latest transfers, ignoring a big transfer before the window", async () => {
+      const [{ n }] = await conn.unsafe(`SELECT count(*)::int AS n FROM token_transfers WHERE token_address = '${WINDOWED}'`)
+      expect(n).toBe(2 * LOCAL_HOLDERS_WINDOW)
+      const [unwindowed] = await conn.unsafe(
+        `SELECT to_address AS addr FROM token_transfers WHERE token_address = '${WINDOWED}' ORDER BY value DESC LIMIT 1`)
+      expect(unwindowed.addr).toBe(OLD_WHALE) // the fixture can tell a windowed query from an unwindowed one
+
+      const holders = await topHolders(WINDOWED)
+      expect(holders.map((h) => h.addr)).not.toContain(OLD_WHALE)
+      expect(holders).toEqual(
+        Array.from({ length: 10 }, (_, k) => 19 - k).map((j) => ({ addr: holder(j), balance: String(250 * (1000 + 10 * j)) })),
+      )
+    })
+
+    it('returns no holders for a token with no transfers', async () => {
+      expect(await topHolders(NONE)).toEqual([])
+    })
+
+    it('reads about LOCAL_HOLDERS_WINDOW rows of a token with four times as many, not all of them', async () => {
+      const { sql: text, params } = holdersQuery(MEGA)
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
+      const read = rowsRead(explained.Plan)
+      expect(read).toBeGreaterThanOrEqual(LOCAL_HOLDERS_WINDOW)
+      // Incremental sort reads whole timestamp groups, Merge Append a row ahead per partition.
+      expect(read).toBeLessThan(LOCAL_HOLDERS_WINDOW + 50)
     })
 
     it.each([

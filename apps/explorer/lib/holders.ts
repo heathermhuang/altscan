@@ -9,10 +9,9 @@
  * /erc20/{addr}/holders returns the real total count. Both reuse the shared Moralis
  * auth/limiter/KV-cache/kill-switch in ./moralis — no new vendor, no new secret.
  *
- * The local fallback aggregates token_transfers, which under ~1-day retention is only a ~24h
- * NET-FLOW window (steady holders like exchanges missing) — surfaced as source:'local' so the
- * page labels it an estimate, not real balances. It also covers Moralis being rate-limited /
- * disabled (MORALIS_DISABLED) / keyless.
+ * The local fallback nets the token's most recent LOCAL_HOLDERS_WINDOW transfers (steady holders
+ * like exchanges missing) — surfaced as source:'local' so the page labels it an estimate, not real
+ * balances. It also covers Moralis being rate-limited / disabled (MORALIS_DISABLED) / keyless.
  */
 import { db } from './db'
 import { sql } from 'drizzle-orm'
@@ -35,28 +34,52 @@ export type HoldersResult = {
 export const EMPTY_HOLDERS: HoldersResult = { holders: [], holderCount: null, source: 'local' }
 
 /**
- * Local fallback: top net-receivers from token_transfers. Under ~1-day retention this is a
- * ~24h NET-FLOW window, NOT real balances — surfaced via source:'local' so the page labels it
- * an estimate. (Moved verbatim from the old in-page fetchTopHolders.)
+ * How many of a token's most recent transfers the local estimate nets. The old query grouped
+ * EVERY retained transfer of the token with no window: >20s for USDT on both chains (BNB >5M
+ * rows, ETH 2.5M), cancelled only by the DB statement timeout, and the page's 6s withTimeout
+ * left it running on every view. Over the latest 10,000 it measured 24 ms on BNB and 249 ms
+ * cold / 20 ms warm on ETH. HoldersLazy's estimate banner states this number.
+ */
+export const LOCAL_HOLDERS_WINDOW = 10_000
+
+/**
+ * Top net-receivers over the token's most recent LOCAL_HOLDERS_WINDOW transfers.
+ *
+ * The window's ORDER BY is the token page's transfer list order (token-transfers-query.ts):
+ * `(timestamp DESC, block_number DESC)` walks `(token_address, timestamp DESC)` and stops after
+ * the limit, instead of reading every transfer of the token. The window is a literal, not a bound
+ * parameter, so the planner always sees the LIMIT it has to honor.
+ */
+export function buildLocalNetFlowQuery(tokenAddr: string) {
+  return sql`
+    WITH recent AS (
+      SELECT from_address, to_address, value::numeric AS v
+      FROM token_transfers
+      WHERE token_address = ${tokenAddr}
+      ORDER BY timestamp DESC, block_number DESC
+      LIMIT ${sql.raw(String(LOCAL_HOLDERS_WINDOW))}
+    ),
+    flows AS (
+      SELECT to_address AS addr, v FROM recent
+      UNION ALL
+      SELECT from_address AS addr, -v FROM recent
+    )
+    SELECT addr, SUM(v)::text AS balance
+    FROM flows
+    GROUP BY addr
+    HAVING SUM(v) > 0
+    ORDER BY SUM(v) DESC
+    LIMIT 10
+  `
+}
+
+/**
+ * Local fallback: top net-receivers from the token's latest transfers — a net-flow window, NOT
+ * real balances — surfaced via source:'local' so the page labels it an estimate.
  */
 async function fetchLocalNetFlowHolders(tokenAddr: string): Promise<HoldersResult> {
   try {
-    const result = await db.execute(sql`
-      WITH inflows AS (
-        SELECT to_address as addr, SUM(value::numeric) as total
-        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
-      ),
-      outflows AS (
-        SELECT from_address as addr, SUM(value::numeric) as total
-        FROM token_transfers WHERE token_address = ${tokenAddr} GROUP BY 1
-      )
-      SELECT i.addr, (COALESCE(i.total, 0) - COALESCE(o.total, 0))::text as balance
-      FROM inflows i
-      LEFT JOIN outflows o ON i.addr = o.addr
-      WHERE (COALESCE(i.total, 0) - COALESCE(o.total, 0)) > 0
-      ORDER BY balance DESC
-      LIMIT 10
-    `)
+    const result = await db.execute(buildLocalNetFlowQuery(tokenAddr))
     const holders = Array.from(result).map((row) => ({
       addr: String((row as Record<string, unknown>).addr),
       balance: String((row as Record<string, unknown>).balance),
