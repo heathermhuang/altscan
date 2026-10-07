@@ -167,7 +167,7 @@ const endpoints: Endpoint[] = [
     params: [
       { name: 'address', type: 'string', required: true, description: 'Contract address to verify (0x-prefixed)' },
       { name: 'sourceCode', type: 'string', required: true, description: 'Full Solidity source code' },
-      { name: 'compilerVersion', type: 'string', required: true, description: 'Solidity compiler version (e.g. 0.8.19)' },
+      { name: 'compilerVersion', type: 'string', required: false, description: 'Accepted for compatibility but ignored: the compiler version recorded for a verified contract is the one Sourcify reports, never a value from the request.' },
       { name: 'license', type: 'string', required: false, description: 'SPDX license identifier (e.g. MIT, Apache-2.0)' },
     ],
     exampleResponse: JSON.stringify(

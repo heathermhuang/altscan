@@ -25,20 +25,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 })
   }
 
-  let body: { address?: string; compilerVersion?: string }
+  let body: { address?: string }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { address, compilerVersion = '' } = body
+  // The body may still carry `compilerVersion` (older clients and the /verify form send one),
+  // but it is deliberately never read: this route persists whatever Sourcify reports for the
+  // contract, so a caller cannot stamp an arbitrary compiler string onto a verified contract.
+  const { address } = body
 
   if (!address || !ADDRESS_REGEX.test(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 
-  const result = await triggerSourcifyVerification(address, compilerVersion, chainConfig)
+  const result = await triggerSourcifyVerification(address, chainConfig)
 
   if (result.success) {
     try {
@@ -52,14 +55,14 @@ export async function POST(request: Request) {
           address: address.toLowerCase(),
           bytecode: '0x',
           verifySource: 'sourcify',
-          compilerVersion: compilerVersion || null,
+          compilerVersion: result.compilerVersion ?? null,
           verifiedAt: new Date(),
         })
         .onConflictDoUpdate({
           target: schema.contracts.address,
           set: {
             verifySource: 'sourcify',
-            compilerVersion: compilerVersion || null,
+            compilerVersion: result.compilerVersion ?? null,
             verifiedAt: new Date(),
           },
         })

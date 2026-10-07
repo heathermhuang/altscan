@@ -22,9 +22,14 @@ const CHAINS = [
   { chainId: 56, name: 'BNB Chain' },
 ] as const
 
-const verified = (match: 'match' | 'exact_match', chainId: number) => ({
+const COMPILER = '0.4.18+commit.9cf6e910' // what Sourcify reports for USDT, as `fields=compilation` returns it
+const NO_COMPILATION = Symbol('no compilation block')
+const verified = (match: 'match' | 'exact_match', chainId: number, compilation: unknown = { compilerVersion: COMPILER, language: 'Solidity' }) => ({
   status: 200,
-  data: { match, creationMatch: match, runtimeMatch: match, chainId: String(chainId), address: ETH_USDT },
+  data: {
+    match, creationMatch: match, runtimeMatch: match, chainId: String(chainId), address: ETH_USDT,
+    ...(compilation === NO_COMPILATION ? {} : { compilation }),
+  },
 })
 const notVerified = { status: 404, data: { match: null, creationMatch: null, runtimeMatch: null } }
 
@@ -43,9 +48,30 @@ describe('checkSourcify', () => {
 
   it('maps exact_match to full and match to partial', async () => {
     get.mockResolvedValueOnce(verified('exact_match', 1))
-    await expect(checkSourcify(ETH_USDT, 1)).resolves.toEqual({ verified: true, match: 'full', source: 'full' })
+    await expect(checkSourcify(ETH_USDT, 1)).resolves.toEqual({ verified: true, match: 'full', source: 'full', compilerVersion: COMPILER })
     get.mockResolvedValueOnce(verified('match', 1))
-    await expect(checkSourcify(ETH_USDT, 1)).resolves.toEqual({ verified: true, match: 'partial', source: 'partial' })
+    await expect(checkSourcify(ETH_USDT, 1)).resolves.toEqual({ verified: true, match: 'partial', source: 'partial', compilerVersion: COMPILER })
+  })
+
+  it('asks Sourcify for the compilation block, the only source of the compiler version', async () => {
+    get.mockResolvedValue(verified('match', 1))
+    await checkSourcify(ETH_USDT, 1)
+    expect(get.mock.calls[0][1].params).toEqual({ fields: 'compilation' })
+  })
+
+  it('returns compilerVersion exactly as Sourcify reports it', async () => {
+    get.mockResolvedValue(verified('match', 1, { compilerVersion: '0.8.26+commit.8a97fa7a', language: 'Solidity' }))
+    expect((await checkSourcify(ETH_USDT, 1)).compilerVersion).toBe('0.8.26+commit.8a97fa7a')
+  })
+
+  it.each([
+    ['no compilation block', NO_COMPILATION],
+    ['no compilerVersion in it', { language: 'Solidity' }],
+    ['an empty compilerVersion', { compilerVersion: '' }],
+    ['a non-string compilerVersion', { compilerVersion: 8 }],
+  ])('compilerVersion is null (still verified) with %s', async (_label, compilation) => {
+    get.mockResolvedValue(verified('match', 1, compilation))
+    await expect(checkSourcify(ETH_USDT, 1)).resolves.toMatchObject({ verified: true, compilerVersion: null })
   })
 
   it('treats 404 as not verified, quietly', async () => {
@@ -69,15 +95,20 @@ describe('checkSourcify', () => {
 })
 
 describe('triggerSourcifyVerification', () => {
+  it('succeeds with compilerVersion null when Sourcify reports none', async () => {
+    get.mockResolvedValue(verified('match', 1, NO_COMPILATION))
+    await expect(triggerSourcifyVerification(ETH_USDT, CHAINS[0])).resolves.toEqual({ success: true, compilerVersion: null })
+  })
+
   it.each(CHAINS)('looks up chain $chainId and succeeds when Sourcify has the contract', async (chain) => {
     get.mockResolvedValue(verified('match', chain.chainId))
-    await expect(triggerSourcifyVerification(ETH_USDT, '', chain)).resolves.toEqual({ success: true })
+    await expect(triggerSourcifyVerification(ETH_USDT, chain)).resolves.toEqual({ success: true, compilerVersion: COMPILER })
     expect(get.mock.calls[0][0]).toContain(`/v2/contract/${chain.chainId}/`)
   })
 
   it.each(CHAINS)('names $name (chain ID $chainId) in the not-found error, never another chain', async (chain) => {
     get.mockResolvedValue(notVerified)
-    const result = await triggerSourcifyVerification(ETH_USDT, '', chain)
+    const result = await triggerSourcifyVerification(ETH_USDT, chain)
     expect(result.success).toBe(false)
     expect(result.error).toContain(`Sourcify for ${chain.name} (chain ID ${chain.chainId})`)
     for (const other of CHAINS.filter((c) => c.chainId !== chain.chainId)) {
