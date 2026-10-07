@@ -39,6 +39,7 @@ export async function getDataProviderHealth(): Promise<Record<string, unknown>> 
   return getMoralisHealthState()
 }
 
+export { TOKEN_HOLDERS_PAGE_SIZE } from './types'
 export type {
   AddressHistoryPage,
   ProviderAdapter,

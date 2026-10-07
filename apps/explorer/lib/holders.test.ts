@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { buildLocalNetFlowQuery, holdersFromProvider, LOCAL_HOLDERS_WINDOW } from './holders'
+import { TOKEN_HOLDERS_PAGE_SIZE } from '@altscan/providers'
+import { buildLocalNetFlowQuery, holdersFromProvider, LOCAL_HOLDERS_LIMIT, LOCAL_HOLDERS_WINDOW } from './holders'
 import type { ProviderResult, TokenHoldersPage } from './providers'
 
 const page = (holders: TokenHoldersPage['holders']): ProviderResult<TokenHoldersPage> =>
@@ -48,8 +49,15 @@ describe('buildLocalNetFlowQuery', () => {
     expect(params).toEqual([TOKEN])
   })
 
-  it('nets inflows against outflows and ranks numerically, top 10 with a positive balance', () => {
+  it('nets inflows against outflows and ranks numerically, top 25 with a positive balance', () => {
     expect(flat).toContain('SELECT to_address AS addr, v FROM recent UNION ALL SELECT from_address AS addr, -v FROM recent')
-    expect(flat).toContain('GROUP BY addr HAVING SUM(v) > 0 ORDER BY SUM(v) DESC LIMIT 10')
+    expect(flat).toContain('GROUP BY addr HAVING SUM(v) > 0 ORDER BY SUM(v) DESC LIMIT 25')
+  })
+
+  it("returns as many rows as the provider's page, so the estimate -> live swap does not change the table's height", () => {
+    // HoldersLazy swaps this estimate for the provider's holders after mount; LIMIT 10 against 25
+    // rows was a 15-row layout shift (CLS 0.19 on USDT). Both read TOKEN_HOLDERS_PAGE_SIZE.
+    expect(LOCAL_HOLDERS_LIMIT).toBe(TOKEN_HOLDERS_PAGE_SIZE)
+    expect(TOKEN_HOLDERS_PAGE_SIZE).toBe(25)
   })
 })

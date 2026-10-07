@@ -44,6 +44,7 @@ import type {
   TokenHoldersPage,
   TokenTransfersPage,
 } from './types'
+import { TOKEN_HOLDERS_PAGE_SIZE } from './types'
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2'
 
@@ -1137,7 +1138,7 @@ export function createMoralisAdapter(
       try {
         const url = new URL(`${BASE}/erc20/${tokenAddress}/owners`)
         url.searchParams.set('chain', CHAIN)
-        url.searchParams.set('limit', '25')
+        url.searchParams.set('limit', String(TOKEN_HOLDERS_PAGE_SIZE))
         const res = await fetch(url.toString(), {
           headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000),
         } as RequestInit)

@@ -123,6 +123,11 @@ export type AddressHistoryPage = { txs: ProviderTx[]; cursor: string | null; tot
 export type TokenTransfersPage = { transfers: ProviderTokenTransfer[]; cursor: string | null }
 export type TokenHoldersPage = { holders: ProviderHolder[]; totalSupply: string | null }
 
+/** How many holders getTokenHolders asks the vendor for. The explorer's local net-flow estimate
+ *  returns the same number of rows, so the token page's estimate -> live swap changes values, not
+ *  the table's height (a layout shift otherwise). */
+export const TOKEN_HOLDERS_PAGE_SIZE = 25
+
 /** One historical-data provider (Moralis today; Covalent/Alchemy failover later).
  *  getInternalTxns joins in Track A5. */
 export interface ProviderAdapter {

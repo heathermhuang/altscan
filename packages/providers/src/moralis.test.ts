@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMoralisAdapter } from './moralis'
+import { TOKEN_HOLDERS_PAGE_SIZE } from './types'
 
 const CFG = { kind: 'moralis' as const, moralisChain: '0x38' }
 
@@ -94,6 +95,8 @@ describe('createMoralisAdapter — success mapping', () => {
     vi.stubGlobal('fetch', fetchMock)
     const a = createMoralisAdapter(CFG)
     const r1 = await a.getTokenHolders('0xa4a-token1')
+    // The explorer's local estimate returns this many rows too (no layout shift on the swap).
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('limit')).toBe(String(TOKEN_HOLDERS_PAGE_SIZE))
     expect(r1.ok).toBe(true)
     if (r1.ok) {
       expect(r1.data.totalSupply).toBe('5000')
