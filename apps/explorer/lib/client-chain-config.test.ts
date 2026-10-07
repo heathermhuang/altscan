@@ -139,3 +139,12 @@ describe('client components use the build-safe chain config', () => {
     expect(bundleOffenders).toEqual([])
   })
 })
+
+// lib/lookalike.ts carries a ~550-entry glyph table. The token lists and the token page flag lookalikes
+// on the server, so a client component reaching it would ship the table to every browser.
+describe('the lookalike glyph table stays out of the client bundle', () => {
+  it("no module reachable from a 'use client' component is lib/lookalike.ts", () => {
+    const LOOKALIKE = join(EXPLORER_ROOT, 'lib', 'lookalike.ts')
+    expect(clientReachable(SCAN_DIRS.flatMap(walk)).has(LOOKALIKE)).toBe(false)
+  })
+})
