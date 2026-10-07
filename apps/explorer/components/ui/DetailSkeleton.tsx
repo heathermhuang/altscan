@@ -4,10 +4,11 @@
 // without moving anything visible (a shorter skeleton left the footer on screen and it jumped).
 // React ships this tree twice per page (Suspense fallback and RSC payload), so it is 8 elements
 // and the bars and row lines are drawn by the .skel-* gradients in globals.css, not by markup.
-// Only tx/address/block/token get a loading.tsx (each re-exports this): they can wait on RPC
-// fallbacks, so they keep feedback. A root one wrapped the list pages too, where the shell paints
-// before the content's $RC script and React 19.2's reveal throttle held it to $RT + 300ms (late
-// LCP).
+// Only tx/[hash] and blocks/[number] get a loading.tsx (each re-exports this): they are cached
+// SSG/ISR pages that can wait on RPC on a cold miss, so they keep feedback. Any boundary on a
+// dynamic page paints the shell before the content's $RC script, and React 19.2's reveal throttle
+// then holds the reveal to $RT + 300ms (late LCP). So no root one (list pages), and token/address
+// dropped theirs: their renders measure 0.3-1.2s, not worth the throttle.
 export function DetailSkeleton() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 animate-pulse">
