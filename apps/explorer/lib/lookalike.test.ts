@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { getAddress } from 'ethers'
 import { foldConfusables, lookalikeOf, lookalikeNote, HOMOGLYPHS, WELL_KNOWN } from './lookalike'
 
@@ -229,20 +229,21 @@ describe('lookalikeOf: format characters and Lisu letters', () => {
 })
 
 // The glyph table is generated from Unicode's confusables.txt (UTS #39 v18.0.0, 2026-08-06): every entry whose
-// source is one code point and whose prototype is one Latin letter, minus what the fold read as a Latin letter
-// before the table grew. Families are in the source's order, and an entry counts toward the FIRST family whose
+// source is one non-ASCII code point and whose prototype is one Latin letter, except long s (U+017F). NFKD folding
+// an entry does NOT keep it out: the repo pins no Node version, and an older runtime's Unicode data lacks the
+// newest characters. Families are in the source's order, and an entry counts toward the FIRST family whose
 // ranges hold it, so a later, wider family is "the rest" of its ranges.
 describe('HOMOGLYPHS', () => {
   const FAMILIES: { name: string; ranges: [number, number][]; count: number }[] = [
     { name: 'Warang Citi', ranges: [[0x118a0, 0x118ff]], count: 27 },
     { name: 'Canadian Syllabics', ranges: [[0x1400, 0x167f], [0x11ab0, 0x11abf]], count: 22 },
     {
-      name: 'Latin and IPA', count: 60,
+      name: 'Latin and IPA', count: 61,
       ranges: [[0x80, 0x2af], [0x1d00, 0x1eff], [0x2c60, 0x2c7f], [0xa720, 0xa7ff], [0xab30, 0xab6f], [0x1df00, 0x1dfff]],
     },
     { name: 'Greek and Coptic', ranges: [[0x370, 0x3ff]], count: 32 },
     { name: 'Cyrillic', ranges: [[0x400, 0x4ff]], count: 38 },
-    { name: 'Cyrillic Supplement and Extended-B', ranges: [[0x500, 0x52f], [0xa640, 0xa69f]], count: 7 },
+    { name: 'Cyrillic Supplement and Extended', ranges: [[0x500, 0x52f], [0x1c80, 0x1c8f], [0xa640, 0xa69f]], count: 9 },
     { name: 'Armenian', ranges: [[0x530, 0x58f]], count: 15 },
     {
       name: 'Hebrew, Arabic, NKo and Mandaic', count: 42,
@@ -259,23 +260,27 @@ describe('HOMOGLYPHS', () => {
     { name: 'Lisu', ranges: [[0xa4d0, 0xa4ff]], count: 26 },
     { name: 'Vai and Bamum', ranges: [[0xa500, 0xa63f], [0xa6a0, 0xa6ff], [0x16800, 0x16a3f]], count: 8 },
     { name: 'CJK, Bopomofo and Hangul compatibility', ranges: [[0x3100, 0x9fff]], count: 5 },
+    { name: 'Letterlike symbols and number forms', ranges: [[0x2100, 0x218f]], count: 46 },
+    { name: 'Fullwidth and halfwidth forms', ranges: [[0xff00, 0xffef]], count: 56 },
+    { name: 'Outlined and segmented letters and digits', ranges: [[0x1cc00, 0x1cebf], [0x1fb00, 0x1fbff]], count: 30 },
     {
-      name: 'Symbols, punctuation and numerals', count: 42,
+      name: 'Symbols, punctuation and numerals', count: 39,
       ranges: [
-        [0x2100, 0x2bff], [0x3000, 0x303f], [0xfe30, 0xfe4f], [0xff00, 0xffef], [0x10140, 0x1018f],
-        [0x102e0, 0x102ff], [0x1cec0, 0x1ceff], [0x1d100, 0x1d3ff], [0x1ed00, 0x1ed4f], [0x1f700, 0x1f7ff],
+        [0x2190, 0x2bff], [0x3000, 0x303f], [0xfe30, 0xfe4f], [0x10140, 0x1018f], [0x102e0, 0x102ff],
+        [0x1cec0, 0x1ceff], [0x1d100, 0x1d3ff], [0x1ed00, 0x1ed4f], [0x1f700, 0x1f7ff],
       ],
     },
     { name: 'Historic scripts', ranges: [[0x10000, 0x10fff]], count: 65 },
-    { name: 'Other supplementary-plane scripts', ranges: [[0x10000, 0x1ffff]], count: 20 },
+    { name: 'Mathematical alphanumerics', ranges: [[0x1d400, 0x1d7ff]], count: 767 },
+    { name: 'Other supplementary-plane scripts', ranges: [[0x10000, 0x1ffff]], count: 19 },
   ]
   const familyOf = (cp: number) => FAMILIES.find((f) => f.ranges.some(([lo, hi]) => cp >= lo && cp <= hi))
   const entries = Object.entries(HOMOGLYPHS).map(([ch, letter]) => ({ ch, letter, cp: ch.codePointAt(0) as number }))
   const hexOf = (cp: number) => `U+${cp.toString(16).toUpperCase()}`
 
-  it('holds 548 entries: single non-ASCII characters, each valued one uppercase Latin letter', () => {
-    expect(entries).toHaveLength(548)
-    expect(FAMILIES.reduce((n, f) => n + f.count, 0)).toBe(548)
+  it('holds 1446 entries: single non-ASCII characters, each valued one uppercase Latin letter', () => {
+    expect(entries).toHaveLength(1446)
+    expect(FAMILIES.reduce((n, f) => n + f.count, 0)).toBe(1446)
     for (const e of entries) {
       expect([...e.ch], hexOf(e.cp)).toHaveLength(1)
       expect(e.cp, hexOf(e.cp)).toBeGreaterThan(0x7f)
@@ -299,10 +304,10 @@ describe('HOMOGLYPHS', () => {
 
   // The ordering bug class: NFKD rewrites these sources (a presentation form to the plain letter it
   // is a form of, a halfwidth form to its jamo or box line) into something the table does not hold, so
-  // the table has to see the raw text first. The count is pinned so a refresh re-checks the list.
+  // the table has to see the raw text first.
   it('folds the entries NFKD would rewrite before the table sees them', () => {
     const rewritten = entries.filter((e) => e.ch.normalize('NFKD') !== e.ch)
-    expect(rewritten).toHaveLength(27)
+    expect(rewritten.length).toBeGreaterThan(0)
     for (const e of rewritten) {
       expect(foldConfusables(e.ch), hexOf(e.cp)).toBe(e.letter)
     }
@@ -310,20 +315,52 @@ describe('HOMOGLYPHS', () => {
     expect(foldConfusables('\u3147')).toBe('O') // Hangul ieung: NFKD makes it the jamo U+110B
   })
 
-  it('leaves out what the fold already reads as a Latin letter: no entry, same answer', () => {
+  // The repo pins no Node version, so the fold must not lean on the runtime's Unicode data. Replacing normalize()
+  // with the identity is the oldest runtime there could be: it knows no character that NFKD would rewrite.
+  const withoutNormalize = <T>(fn: () => T): T => {
+    const spy = vi.spyOn(String.prototype, 'normalize').mockImplementation(function (this: string) { return String(this) })
+    try { return fn() } finally { spy.mockRestore() }
+  }
+
+  it('folds every entry on its own: the same answer with a normalize() that rewrites nothing', () => {
+    const wrong = withoutNormalize(() => entries
+      .filter((e) => foldConfusables(e.ch) !== e.letter || foldConfusables(`US${e.ch}`) !== `US${e.letter}`)
+      .map((e) => hexOf(e.cp)))
+    expect(wrong).toEqual([])
+  })
+
+  it('holds the sources NFKD also folds: fullwidth, mathematical, roman numeral, outlined, dotless', () => {
     for (const [ch, letter] of [
       ['\uFF21', 'A'], // fullwidth A
       ['\u{1D400}', 'A'], // mathematical bold A
-      ['\u{1D6A8}', 'A'], // mathematical bold Alpha: NFKD makes it Greek Alpha, #196's table does the rest
-      ['\u0131', 'I'], // dotless i: uppercases to I
+      ['\u{1D6A8}', 'A'], // mathematical bold Alpha: NFKD makes it Greek Alpha
       ['\u2160', 'I'], // roman numeral one
-      ['\u00DA', 'U'], // U with acute
-      ['\u017F', 'S'], // long s: NFKD reads s where UTS #39 says f, and the entry would change the answer
+      ['\u0131', 'I'], // dotless i
+      ['\u{1CCD6}', 'A'], // outlined Latin A (Unicode 16)
+      ['\u{1CCEF}', 'Z'], // outlined Latin Z (Unicode 16)
     ] as const) {
-      expect(HOMOGLYPHS[ch], hexOf(ch.codePointAt(0) as number)).toBeUndefined()
-      expect(foldConfusables(ch), hexOf(ch.codePointAt(0) as number)).toBe(letter)
+      expect(HOMOGLYPHS[ch], hexOf(ch.codePointAt(0) as number)).toBe(letter)
     }
+  })
+
+  it('leaves out ASCII sources (the fold swaps 0, 1, I and | itself) and long s', () => {
+    for (const ch of ['0', '1', 'I', 'l', '|', '\u017F']) {
+      expect(HOMOGLYPHS[ch], ch).toBeUndefined()
+    }
+    expect(foldConfusables('\u017F')).toBe('S') // NFKD reads s where UTS #39 says f
     expect(lookalikeOf({ address: SPAM, symbol: 'U\u017FDT', name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  // Outlined Latin letters are Unicode 16: a Node whose ICU is newer folds them with NFKD, an older one (Node 18) does not.
+  it('flags outlined-letter USDT on a runtime that does not know them, and on one that does', () => {
+    const outlined = '\u{1CCEA}\u{1CCE8}\u{1CCD9}\u{1CCE9}' // outlined Latin U S D T
+    const token = { address: SPAM, symbol: outlined, name: 'x' }
+    expect(foldConfusables(outlined)).toBe('USDT')
+    expect(lookalikeOf(token, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+    expect(withoutNormalize(() => foldConfusables(outlined))).toBe('USDT')
+    expect(withoutNormalize(() => lookalikeOf(token, 'bnb'))).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+    expect(withoutNormalize(() => lookalikeOf({ address: SPAM, symbol: 'XYZ', name: outlined }, 'eth')))
+      .toEqual({ symbol: 'USDT', canonical: '0xdAC17F958D2ee523a2206206994597C13D831ec7' })
   })
 
   it('reads Greek small upsilon as U, and flags it as USDT', () => {
