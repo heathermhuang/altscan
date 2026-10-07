@@ -5,7 +5,6 @@ type Status = 'idle' | 'loading' | 'success' | 'error'
 
 export function VerifyForm() {
   const [address,  setAddress]  = useState('')
-  const [compiler, setCompiler] = useState('v0.8.19+commit.7dd6d404')
   const [status,   setStatus]   = useState<Status>('idle')
   const [message,  setMessage]  = useState('')
 
@@ -24,7 +23,7 @@ export function VerifyForm() {
       const res = await fetch('/api/v1/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: trimmed, compilerVersion: compiler }),
+        body: JSON.stringify({ address: trimmed }),
       })
       const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
       if (!res.ok) {
@@ -66,17 +65,6 @@ export function VerifyForm() {
           className={`${field} font-mono`}
           required
         />
-      </div>
-
-      <div>
-        <label htmlFor="verify-compiler" className="mb-1 block text-sm font-medium text-ink">Compiler Version</label>
-        <input
-          id="verify-compiler"
-          value={compiler}
-          onChange={e => setCompiler(e.target.value)}
-          className={field}
-        />
-        <p className="mt-1 text-xs text-mut">e.g. v0.8.19+commit.7dd6d404</p>
       </div>
 
       {status !== 'idle' && (
