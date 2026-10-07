@@ -163,22 +163,33 @@ const endpoints: Endpoint[] = [
   {
     method: 'POST',
     path: '/api/v1/verify',
-    description: 'Submit a smart contract for source code verification. The contract bytecode must already be indexed. Supports compiler version specification and license type.',
+    description:
+      `Checks whether a contract is verified on Sourcify for ${chainConfig.name} (chain ID ${chainConfig.chainId}) and, if it is, marks it verified here. ` +
+      'This endpoint does not accept source code: verify the contract on sourcify.dev first, then call this with its address. ' +
+      'The compiler version recorded is the one Sourcify reports. ' +
+      `It is meant for the verification form on ${chainConfig.domain}: the request must carry an Origin or Referer from that site, otherwise it answers 403. ` +
+      'Other errors: 400 for invalid JSON or an invalid address, 429 over the separate 10 requests/minute per-IP budget.',
     params: [
-      { name: 'address', type: 'string', required: true, description: 'Contract address to verify (0x-prefixed)' },
-      { name: 'sourceCode', type: 'string', required: true, description: 'Full Solidity source code' },
+      { name: 'address', type: 'string', required: true, description: 'Contract address to verify (0x-prefixed, 42 chars)' },
       { name: 'compilerVersion', type: 'string', required: false, description: 'Accepted for compatibility but ignored: the compiler version recorded for a verified contract is the one Sourcify reports, never a value from the request.' },
-      { name: 'license', type: 'string', required: false, description: 'SPDX license identifier (e.g. MIT, Apache-2.0)' },
     ],
-    exampleResponse: JSON.stringify(
-      {
-        success: true,
-        message: 'Contract verified successfully',
-        address: '0xeee...',
-      },
-      null,
-      2
-    ),
+    exampleResponse: [
+      '// 200 \u2014 Sourcify has the contract',
+      JSON.stringify({ success: true, match: 'sourcify' }, null, 2),
+      '',
+      '// 200 \u2014 verified, but saving it to the explorer database failed',
+      JSON.stringify({ success: true, match: 'sourcify', warning: 'Verified but failed to save to local DB' }, null, 2),
+      '',
+      '// 422 \u2014 Sourcify has no verified source for this address on this chain',
+      JSON.stringify(
+        {
+          success: false,
+          error: `Contract source not found on Sourcify for ${chainConfig.name} (chain ID ${chainConfig.chainId}). Upload source files to sourcify.dev first.`,
+        },
+        null,
+        2
+      ),
+    ].join('\n'),
   },
   {
     method: 'POST',
