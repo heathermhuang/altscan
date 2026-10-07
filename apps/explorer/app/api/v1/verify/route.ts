@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 
-  const result = await triggerSourcifyVerification(address, compilerVersion)
+  const result = await triggerSourcifyVerification(address, compilerVersion, chainConfig)
 
   if (result.success) {
     try {

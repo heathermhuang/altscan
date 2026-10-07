@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql } from 'drizzle-orm'
 import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
+import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +146,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     id: created.id,
     secret: rawSecret,
-    message: 'Webhook created. Keep the secret — it will not be shown again. BNBScan sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.',
+    message: `Webhook created. Keep the secret — it will not be shown again. ${chainConfig.brandName} sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.`,
   }, { status: 201 })
 }

@@ -137,7 +137,7 @@ export default async function SearchPage({
           <li>• Block number: <span className="font-mono text-ink2">12345678</span></li>
           <li>• Tx hash: <span className="font-mono text-ink2">0x + 64 hex chars</span></li>
           <li>• Address: <span className="font-mono text-ink2">0x + 40 hex chars</span></li>
-          <li>• Token name: <span className="font-mono text-ink2">USDT, BNB, CAKE…</span></li>
+          <li>• Token name: <span className="font-mono text-ink2">USDT, {chainConfig.currency}…</span></li>
         </ul>
       </div>
       <div className="mt-8">
