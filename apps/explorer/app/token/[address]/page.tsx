@@ -265,6 +265,22 @@ export default async function TokenDetailPage({
 
   const checksummedAddr = toChecksumAddress(addr)
 
+  // One ad, rendered in exactly one of two DOM spots (never CSS order). Below the holders table,
+  // so on a phone it is not in the first viewport, where its description (mounted once the client
+  // config fetch lands) was the LCP element at ~4.8s. But when SSR has no holders rows HoldersLazy
+  // renders nothing and may mount a full Moralis table later, which would push an ad below it
+  // (and everything after) down: a large CLS. Then the ad keeps its old spot above the holders.
+  // The live/RPC path has no holders section, so it also takes the old spot, after the market block.
+  const adAfterHolders = !isLive && holdersResult.holders.length > 0
+  const tokenAd = (
+    <AdReserve
+      context={tokenReferralContext}
+      placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
+      variant="compact"
+      className="mb-6"
+    />
+  )
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Tokens', href: '/token' }, { name: `${token.name} (${token.symbol})` }]} />
@@ -369,12 +385,8 @@ export default async function TokenDetailPage({
         </div>
       )}
 
-      <AdReserve
-        context={tokenReferralContext}
-        placement={tokenReferralContext === 'stablecoin' ? 'token_stablecoin' : 'token_research'}
-        variant="compact"
-        className="mb-6"
-      />
+      {/* First of the ad's two positions (see tokenAd): above holders that may mount late. */}
+      {!adAfterHolders && tokenAd}
 
       {/* Top Holders — SSR shows the local net-flow estimate (0 Moralis CU, crawler/no-JS safe);
           HoldersLazy enhances to accurate Moralis balances client-side for real browsers. */}
@@ -387,6 +399,9 @@ export default async function TokenDetailPage({
           initial={holdersResult}
         />
       )}
+
+      {/* Second of the ad's two positions (see tokenAd): below a holders table SSR already renders. */}
+      {adAfterHolders && tokenAd}
 
       {/* Risk Signals */}
       {signals.length > 0 && (

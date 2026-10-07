@@ -99,7 +99,7 @@ export function HoldersLazy({
       {data.source === 'local' && (
         <div className="flex items-start gap-2 px-4 py-2 bg-warn-t text-ink2 text-xs border-b border-hair border-l-[3px] border-l-warn">
           <Icon name="warn" className="mt-px h-3.5 w-3.5 text-warn" />
-          <span>Estimated from recent transfer net-flow (last ~24h), not full on-chain balances — large steady holders (e.g. exchanges) may be missing.</span>
+          <span>Estimated from the net flow of this token&apos;s most recent 10,000 transfers, not full on-chain balances — large steady holders (e.g. exchanges) may be missing.</span>
         </div>
       )}
       <div className="overflow-x-auto">
