@@ -16,3 +16,16 @@ export function resolveTxViewKind(dbTx: DbTxLike, rpcTx: RpcTxLike): TxViewKind 
   if (rpcTx) return 'rpc'
   return 'missing'
 }
+
+export type TxOutcome = 'success' | 'failed' | 'pending'
+
+/**
+ * What the page may say a tx did. `pending` (no receipt yet) wins over `status`: rpc-fallback has
+ * no receipt to read it from and fills it with `true`, which is a placeholder, not a result.
+ */
+export function txOutcome(tx: { status: boolean; pending?: boolean }): TxOutcome {
+  if (tx.pending) return 'pending'
+  return tx.status ? 'success' : 'failed'
+}
+
+export const TX_OUTCOME_LABEL: Record<TxOutcome, string> = { success: 'Success', failed: 'Failed', pending: 'Pending' }

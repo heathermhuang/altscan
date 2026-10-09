@@ -19,7 +19,7 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind } from '@/lib/tx-view'
+import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
@@ -178,6 +178,8 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     return { title: 'Transaction Not Found', ...NOT_FOUND_METADATA }
   }
   const val = formatNativeToken(safeBigInt(tx.value))
+  // rpcTx is only fetched when the DB has no row, so it is the only source of a pending tx.
+  const outcome = txOutcome({ status: tx.status, pending: rpcTx?.pending })
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `Tx ${hash.slice(0, 18)}…`,
@@ -185,7 +187,9 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     alternates: { canonical: `/tx/${hash}` },
     openGraph: {
       title: `Transaction ${hash.slice(0, 18)}…`,
-      description: `${val} ${chainConfig.currency} · Block #${tx.blockNumber} · ${tx.status ? 'Success' : 'Failed'}`,
+      description: outcome === 'pending'
+        ? `${val} ${chainConfig.currency} · ${TX_OUTCOME_LABEL.pending}`
+        : `${val} ${chainConfig.currency} · Block #${tx.blockNumber} · ${TX_OUTCOME_LABEL[outcome]}`,
     },
   }
 }
@@ -486,6 +490,7 @@ export default async function TxDetailPage({
   const blockShare = strip && stripPos >= 0 && stripUsed > 0
     ? formatShare((strip.txs[stripPos].gas / stripUsed) * 100)
     : null
+  const outcome = txOutcome({ status: tx.status, pending: rpcTx?.pending })
   const headline = decoded?.summary
     ? (tx.status ? decoded.summary : attemptedSummary(decoded.summary))
     : `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
@@ -516,10 +521,17 @@ export default async function TxDetailPage({
         </div>
         <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
           Sent by <AddressLink address={tx.fromAddress} />.{' '}
-          <span className="font-semibold text-ink">{tx.status ? 'Succeeded' : 'Failed'}</span>{' '}
-          {timeAgo(new Date(tx.timestamp))} and paid {formatNativeToken(fee, 8)} {chainConfig.currency} in fees.
-          {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS && (
-            <> It used {formatNumber(Number(gasUsed))} gas{blockShare && `, ${blockShare}% of its block`}.</>
+          {outcome === 'pending' ? (
+            // No receipt: the outcome, the fee and the gas are all unknown, so none is claimed.
+            <><span className="font-semibold text-ink">Pending</span>, with no receipt yet.</>
+          ) : (
+            <>
+              <span className="font-semibold text-ink">{outcome === 'success' ? 'Succeeded' : 'Failed'}</span>{' '}
+              {timeAgo(new Date(tx.timestamp))} and paid {formatNativeToken(fee, 8)} {chainConfig.currency} in fees.
+              {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS && (
+                <> It used {formatNumber(Number(gasUsed))} gas{blockShare && `, ${blockShare}% of its block`}.</>
+              )}
+            </>
           )}
         </p>
       </div>
@@ -538,8 +550,8 @@ export default async function TxDetailPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <dl className="ledger [--cols:5] mb-4">
         <Fact label="Status">
-          <Badge variant={tx.status ? 'success' : 'fail'}>
-            {tx.status ? 'Success' : 'Failed'}
+          <Badge variant={outcome === 'success' ? 'success' : outcome === 'failed' ? 'fail' : 'default'}>
+            {TX_OUTCOME_LABEL[outcome]}
           </Badge>
         </Fact>
         <Fact
