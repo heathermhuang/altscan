@@ -104,8 +104,7 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
   // The tape: this block and its neighbours by primary key (newer ones exist because the indexer
   // is ahead). Omitted for an RPC block (outside local retention), a failed query, or too few
   // neighbours to draw a tile.
-  let tape: string | null = null
-  if (!fromRpc) {
+  const loadTape = async (): Promise<string | null> => {
     const { before, after } = tapeWindow(chainConfig.blockTime)
     try {
       const near = await db
@@ -120,12 +119,19 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
         .where(between(schema.blocks.number, blockNumber - before, blockNumber + after))
         .orderBy(desc(schema.blocks.number))
       const tuples = near.map(toTapeTuple)
-      if (spreadSeconds(tuples).length > 0) tape = encodeTape(tuples)
-    } catch (e) { swallow('block/tape', e) }
+      return spreadSeconds(tuples).length > 0 ? encodeTape(tuples) : null
+    } catch (e) {
+      swallow('block/tape', e)
+      return null
+    }
   }
 
   // The zoom: this block's own transactions. Same omission rules as the tape (two indexed reads).
-  const strip = fromRpc ? null : await getBlockStrip(blockNumber)
+  // The two reads are independent, so they run together; each keeps its own failure handling.
+  const [tape, strip] = await Promise.all([
+    fromRpc ? null : loadTape(),
+    fromRpc ? null : getBlockStrip(blockNumber),
+  ])
 
   const gasUsedPct = block.gasUsed && block.gasLimit
     ? ((Number(block.gasUsed) / Number(block.gasLimit)) * 100).toFixed(2)
