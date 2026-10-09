@@ -608,7 +608,8 @@ export default async function TxDetailPage({
           <span>Input data &amp; event logs fetched live from {chainConfig.name} — this transaction is older than our local body-retention window.</span>
         </div>
       )}
-      {bodyUnavailable && (
+      {/* A pending tx has no receipt, so no logs yet: the pending banner above already says so. */}
+      {bodyUnavailable && !pending && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           <Icon name="clock" className="h-4 w-4 text-warn" />
           <span>Input data &amp; event logs are temporarily unavailable — try again shortly. The transaction summary below is unaffected.</span>
