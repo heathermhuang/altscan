@@ -173,14 +173,15 @@ export function decodeTx(tx: {
   }
 }
 
-// The outcome verbs decodeTx opens its summaries with, and the infinitive each one is.
-const OUTCOME_VERBS: Record<string, string> = {
-  Sent: 'send',
-  Swapped: 'swap',
-  Approved: 'approve',
-  Transferred: 'transfer',
-  Called: 'call',
-  Deployed: 'deploy',
+// The outcome verbs decodeTx opens its summaries with: the infinitive a failed tx "tried to" do, and the
+// present participle a pending one is doing.
+const OUTCOME_VERBS: Record<string, { base: string; ing: string }> = {
+  Sent: { base: 'send', ing: 'Sending' },
+  Swapped: { base: 'swap', ing: 'Swapping' },
+  Approved: { base: 'approve', ing: 'Approving' },
+  Transferred: { base: 'transfer', ing: 'Transferring' },
+  Called: { base: 'call', ing: 'Calling' },
+  Deployed: { base: 'deploy', ing: 'Deploying' },
 }
 
 /**
@@ -190,7 +191,18 @@ const OUTCOME_VERBS: Record<string, string> = {
  */
 export function attemptedSummary(summary: string): string {
   const sp = summary.indexOf(' ')
-  const base = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
-  if (!base) return `Failed: ${summary}`
-  return sp === -1 ? `Tried to ${base}` : `Tried to ${base}${summary.slice(sp)}`
+  const verb = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
+  if (!verb) return `Failed: ${summary}`
+  return sp === -1 ? `Tried to ${verb.base}` : `Tried to ${verb.base}${summary.slice(sp)}`
+}
+
+/**
+ * A pending tx's summary (no receipt yet, so nothing has happened): "Swapped tokens on X" reads
+ * "Swapping tokens on X". A summary that does not open with an outcome verb gets a "Pending: " prefix.
+ */
+export function pendingSummary(summary: string): string {
+  const sp = summary.indexOf(' ')
+  const verb = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
+  if (!verb) return `Pending: ${summary}`
+  return sp === -1 ? verb.ing : `${verb.ing}${summary.slice(sp)}`
 }

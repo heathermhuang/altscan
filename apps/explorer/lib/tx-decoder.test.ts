@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { attemptedSummary, decodeTx, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
+import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
 
 const base = {
   hash: '0xabc',
@@ -120,6 +120,43 @@ describe('attemptedSummary', () => {
 
   it('matches the first WORD, not a prefix of it', () => {
     expect(attemptedSummary('Sentinel contract')).toBe('Failed: Sentinel contract')
+  })
+})
+
+describe('pendingSummary', () => {
+  // decodeTx words every summary as an outcome ("Sent 0.5 BNB"); a tx with no receipt has not done
+  // anything yet, so each outcome verb becomes its present participle.
+  it.each([
+    ['Sent 0.5000 BNB to PancakeSwap: Router v2', 'Sending 0.5000 BNB to PancakeSwap: Router v2'],
+    ['Swapped 1 USDT for 2 CAKE on a DEX', 'Swapping 1 USDT for 2 CAKE on a DEX'],
+    ['Swapped tokens on PancakeSwap', 'Swapping tokens on PancakeSwap'],
+    ['Approved 0x7830c87c02… to spend tokens', 'Approving 0x7830c87c02… to spend tokens'],
+    ['Transferred 12.5 USDT to 0x1111111111…', 'Transferring 12.5 USDT to 0x1111111111…'],
+    ['Called 0xa9d1e08c77… — Mint', 'Calling 0xa9d1e08c77… — Mint'],
+    ['Deployed a new smart contract', 'Deploying a new smart contract'],
+  ])('rewrites the outcome verb of %j', (summary, expected) => {
+    expect(pendingSummary(summary)).toBe(expected)
+  })
+
+  it('prefixes a summary with no outcome verb', () => {
+    expect(pendingSummary('Contract interaction (no data)')).toBe('Pending: Contract interaction (no data)')
+    expect(pendingSummary('3 token transfers to 2 recipients')).toBe('Pending: 3 token transfers to 2 recipients')
+  })
+
+  it('matches the first WORD, not a prefix of it, and a bare verb', () => {
+    expect(pendingSummary('Sentinel contract')).toBe('Pending: Sentinel contract')
+    expect(pendingSummary('Sent')).toBe('Sending')
+  })
+
+  it('agrees with attemptedSummary on which summaries open with an outcome verb', () => {
+    for (const s of ['Sent 1 BNB', 'Swapped tokens', 'Approved x', 'Transferred 1 A', 'Called x', 'Deployed a new smart contract']) {
+      expect(attemptedSummary(s).startsWith('Tried to')).toBe(true)
+      expect(pendingSummary(s).startsWith('Pending: ')).toBe(false)
+    }
+    for (const s of ['3 token transfers', 'Contract interaction (no data)']) {
+      expect(attemptedSummary(s).startsWith('Failed: ')).toBe(true)
+      expect(pendingSummary(s).startsWith('Pending: ')).toBe(true)
+    }
   })
 })
 
