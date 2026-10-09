@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel } from '@/lib/format'
+import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -27,6 +27,8 @@ import { classifyCode, resolveContractStatusFromClass, resolveNativeBalance, typ
 import { codeClassCache } from '@/lib/code-cache'
 import { AbiReader } from '@/components/contracts/AbiReader'
 import { AdReserve } from '@/components/ads/AdReserve'
+import { AddressLedger } from '@/components/tape/AddressLedger'
+import { toLedgerRows } from '@/lib/ledger'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 
@@ -238,6 +240,14 @@ export default async function AddressPage({
         ? 'address_low_balance'
         : null
 
+  // The page leads with what the address IS: its known label, else its resolved name, else its kind
+  // and a shortened form. The kind is only claimed when the RPC answered (status.known).
+  const kind = contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'
+  // `||`, not `??`: an empty label or name is no name (it would print as a blank h1).
+  const label = addressInfo?.label || getAddressLabel(addr)
+  const named = label || resolvedName
+  const headline = named || `${kind} ${shortenAddress(checksummedAddr)}`
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       {/* GoPlus risk warning */}
@@ -258,20 +268,18 @@ export default async function AddressPage({
 
       {/* Header */}
       <div className="mb-5">
-        <p className="k">{'// '}{contractStatus.isContract ? 'contract' : 'address'}</p>
+        <p className="k">{'// address'}{kind !== 'Address' && ` · ${kind.toLowerCase()}`}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="mr-1 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Address</h1>
-          {resolvedName && (
+          <h1 className="mr-1 min-w-0 break-words text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">{headline}</h1>
+          {resolvedName && label && (
             <Badge variant="default">
               <span className="inline-flex items-center gap-1">
                 <Icon name="tag" className="h-3.5 w-3.5" />{resolvedName}
               </span>
             </Badge>
           )}
-          {contractStatus.isContract && <Badge variant="default">Contract</Badge>}
-          {(addressInfo?.label ?? getAddressLabel(addr)) && (
-            <Badge variant="default">{addressInfo?.label ?? getAddressLabel(addr)}</Badge>
-          )}
+          {/* The headline already says "Contract …" when nothing names the address. */}
+          {contractStatus.isContract && named && <Badge variant="default">Contract</Badge>}
           <WatchlistButton address={addr} />
           <a
             href={`${chainConfig.externalExplorerUrl}/address/${addr}`}
@@ -282,19 +290,27 @@ export default async function AddressPage({
             View on {chainConfig.externalExplorer} ↗
           </a>
         </div>
-        {/* The address is the page's key fact, so it is the largest thing in the header (and the
-            LCP element, rather than the client-rendered ad card below). */}
+        {/* The address is the page's key fact, so it is the largest thing in the header (and, with
+            the headline, the LCP candidate rather than the client-rendered ad card below: both are
+            server-rendered). */}
         <div className="mt-2 flex items-start font-mono text-[17px] leading-snug text-ink sm:text-xl">
           <span className="min-w-0 break-all pt-0.5">{checksummedAddr}</span>
           <CopyButton text={checksummedAddr} referralPlacement="address_copy" />
         </div>
+        {balanceKnown && (
+          <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
+            Holds <span className="font-semibold text-ink">{groupDigits(formatNativeToken(displayBalance, 2))} {chainConfig.currency}</span>
+            {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(nativeUsd)})` : ''}
+            {txCountText !== '—' && <> across {txCountText} {displayTxCount === 1 ? 'transaction' : 'transactions'}</>}.
+          </p>
+        )}
       </div>
 
       {/* Fact strip */}
       <dl className="ledger mb-6">
         <Fact
           label={`${chainConfig.currency} Balance`}
-          value={balanceKnown ? `${formatNativeToken(displayBalance, 8)} ${chainConfig.currency}` : 'Unavailable'}
+          value={balanceKnown ? `${groupDigits(formatNativeToken(displayBalance, 8))} ${chainConfig.currency}` : 'Unavailable'}
           sub={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
         />
         <Fact
@@ -308,7 +324,7 @@ export default async function AddressPage({
         />
         <Fact
           label="Type"
-          value={contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'}
+          value={kind}
         />
       </dl>
 
@@ -439,7 +455,7 @@ async function TxnsTab({
           eq(schema.transactions.toAddress, addr),
         ),
       )
-      .orderBy(desc(schema.transactions.timestamp))
+      .orderBy(desc(schema.transactions.timestamp), desc(schema.transactions.blockNumber), desc(schema.transactions.txIndex))
       .limit(PAGE_SIZE)
       .offset(offset)
   } catch (e) {
@@ -475,7 +491,8 @@ async function TxnsTab({
         </div>
       )
     }
-    return <TxnsLazy addr={addr} />
+    // A ledger needs 2 rows: exactly one known tx means none will draw, so no card is reserved.
+    return <TxnsLazy addr={addr} reserveLedger={total !== 1} />
   }
 
   return (
@@ -492,6 +509,10 @@ async function TxnsTab({
           ↓ Export CSV
         </a>
       </div>
+      <AddressLedger
+        rows={toLedgerRows(addr, txs.map(t => ({ time: t.timestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value, block: t.blockNumber, index: t.txIndex })))}
+        currency={chainConfig.currency}
+      />
       <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
