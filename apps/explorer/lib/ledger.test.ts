@@ -50,6 +50,31 @@ describe('toLedgerRows', () => {
     ])
     expect(mixed.map(r => r.dir)).toEqual(['out', 'in'])
   })
+  it('orders rows sharing a second by block, then tx index, whatever the input order', () => {
+    const same = { time: '2026-10-09T06:39:53Z', fromAddress: other, toAddress: A }
+    const rows = toLedgerRows(A, [
+      { ...same, value: '1', category: 'send', block: 100, index: 4 },           // out, solid      3rd
+      { ...same, value: '1', category: 'receive', block: '99', index: 5 },       // in, solid       1st (a string block compares as a number: 99 < 100)
+      { ...same, value: '0', category: 'token send', block: 100, index: 9 },     // out, outlined   4th
+      { ...same, value: '0', category: 'token receive', block: 100, index: 0 },  // in, outlined    2nd
+    ])
+    expect(rows.map(r => [r.dir, r.native])).toEqual([['in', true], ['in', false], ['out', true], ['out', false]])
+  })
+  it('falls back to reversed input position where block or index do not decide', () => {
+    const same = { time: '2026-10-09T06:39:53Z', fromAddress: other, toAddress: A, block: 100 }
+    // same block, no index (Moralis): newest-first input -> the later-listed row goes left
+    const noIndex = toLedgerRows(A, [
+      { ...same, value: '0', category: 'token send' },
+      { ...same, value: '0', category: 'token receive' },
+    ])
+    expect(noIndex.map(r => r.dir)).toEqual(['in', 'out'])
+    // same block and same index: the same fallback
+    const sameIndex = toLedgerRows(A, [
+      { ...same, index: 3, value: '0', category: 'token send' },
+      { ...same, index: 3, value: '0', category: 'token receive' },
+    ])
+    expect(sameIndex.map(r => r.dir)).toEqual(['in', 'out'])
+  })
   it('draws no ledger when any row has no usable time', () => {
     const ok = { time: '2026-10-09T06:39:53Z', fromAddress: A, toAddress: other, value: '0' }
     expect(toLedgerRows(A, [ok, { ...ok, time: 'not a date' }])).toEqual([])

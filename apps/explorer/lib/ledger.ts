@@ -11,15 +11,19 @@ export interface LedgerInput {
   value: string | bigint | number | null
   category?: string | null
   possibleSpam?: boolean | null
+  /** Chain position, to order rows that share a second: the block, then the index within it. */
+  block?: number | string | null
+  index?: number | null
 }
 
 const IN = /receive|deposit|airdrop|mint/
 const OUT = /send|withdraw|burn/
 
 /**
- * Normalise a page of rows for the ledger, oldest first. Both sources list newest first, so rows
- * that share a second keep chain order by sorting on time, then on REVERSED input position (the
- * later-listed, older row goes left). Direction: a provider category wins (a "token receive" row's
+ * Normalise a page of rows for the ledger, oldest first. Rows that share a second (one block, or
+ * several blocks in one second) keep chain order: sort on time, then block, then index in the block
+ * (when the source has them), then REVERSED input position, since both sources list newest first
+ * (the later-listed, older row goes left). Direction: a provider category wins (a "token receive" row's
  * from/to are the token contract's, not this address's); otherwise a row sent TO the address is in
  * and everything else is out (the address sent it, self-sends included). A row with no usable time
  * cannot be placed, and a tape never fakes data: no rows at all then.
@@ -35,6 +39,8 @@ export function toLedgerRows(addr: string, rows: LedgerInput[]): LedgerRow[] {
         : 'out'
       return {
         i,
+        block: r.block == null || r.block === '' ? NaN : Number(r.block),
+        index: r.index ?? NaN,
         t: Math.floor(new Date(r.time).getTime() / 1000),
         dir,
         native: safeBigInt(r.value ?? '0') > 0n,
@@ -42,7 +48,11 @@ export function toLedgerRows(addr: string, rows: LedgerInput[]): LedgerRow[] {
       }
     })
   if (drawn.some(r => !Number.isFinite(r.t))) return []
-  return drawn.sort((p, q) => p.t - q.t || q.i - p.i).map(({ t, dir, native, spam }) => ({ t, dir, native, spam }))
+  // A position one side lacks cannot decide (NaN compares as equal), so the next key does.
+  const by = (x: number, y: number) => (Number.isFinite(x) && Number.isFinite(y) ? x - y : 0)
+  return drawn
+    .sort((p, q) => p.t - q.t || by(p.block, q.block) || by(p.index, q.index) || q.i - p.i)
+    .map(({ t, dir, native, spam }) => ({ t, dir, native, spam }))
 }
 
 /** A tile's flex weight from the seconds since the previous row: 1 + log2(1 + gap), 2 dp. */

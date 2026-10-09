@@ -455,7 +455,7 @@ async function TxnsTab({
           eq(schema.transactions.toAddress, addr),
         ),
       )
-      .orderBy(desc(schema.transactions.timestamp))
+      .orderBy(desc(schema.transactions.timestamp), desc(schema.transactions.blockNumber), desc(schema.transactions.txIndex))
       .limit(PAGE_SIZE)
       .offset(offset)
   } catch (e) {
@@ -491,7 +491,8 @@ async function TxnsTab({
         </div>
       )
     }
-    return <TxnsLazy addr={addr} />
+    // A ledger needs 2 rows: exactly one known tx means none will draw, so no card is reserved.
+    return <TxnsLazy addr={addr} reserveLedger={total !== 1} />
   }
 
   return (
@@ -509,7 +510,7 @@ async function TxnsTab({
         </a>
       </div>
       <AddressLedger
-        rows={toLedgerRows(addr, txs.map(t => ({ time: t.timestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value })))}
+        rows={toLedgerRows(addr, txs.map(t => ({ time: t.timestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value, block: t.blockNumber, index: t.txIndex })))}
         currency={chainConfig.currency}
       />
       <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">

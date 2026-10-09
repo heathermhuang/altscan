@@ -26,7 +26,9 @@ type HistoryResponse = {
   stale?: boolean
 }
 
-export function TxnsLazy({ addr }: { addr: string }) {
+/** `reserveLedger`: whether a ledger can draw once the rows arrive (it needs 2), so the loading state
+ *  holds its card; false (an address known to have exactly one tx) leaves just the skeleton rows. */
+export function TxnsLazy({ addr, reserveLedger }: { addr: string; reserveLedger: boolean }) {
   const [data, setData] = useState<HistoryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
@@ -50,7 +52,7 @@ export function TxnsLazy({ addr }: { addr: string }) {
   if (loading) {
     return (
       <div>
-        <AddressLedgerShell currency={chainConfig.currency} />
+        {reserveLedger && <AddressLedgerShell currency={chainConfig.currency} />}
         <div className="animate-pulse space-y-2">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-9 bg-hair2 rounded" />
@@ -97,7 +99,7 @@ export function TxnsLazy({ addr }: { addr: string }) {
         </span>
       </div>
       <AddressLedger
-        rows={toLedgerRows(addr, txs.map(t => ({ time: t.blockTimestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value, category: t.category, possibleSpam: t.possibleSpam })))}
+        rows={toLedgerRows(addr, txs.map(t => ({ time: t.blockTimestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value, category: t.category, possibleSpam: t.possibleSpam, block: t.blockNumber })))}
         currency={chainConfig.currency}
       />
       <div className="bg-card rounded-xl border border-hair overflow-hidden">
