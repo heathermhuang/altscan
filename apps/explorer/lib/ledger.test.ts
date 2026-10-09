@@ -27,6 +27,35 @@ describe('toLedgerRows', () => {
     expect(r.native).toBe(true)
     expect(r.spam).toBe(true)
   })
+  it('does not call zero or missing value native', () => {
+    const rows = toLedgerRows(A, [
+      { time: new Date(1000), fromAddress: A, toAddress: other, value: '0' },
+      { time: new Date(2000), fromAddress: A, toAddress: other, value: '0.000000000000000000' },
+      { time: new Date(3000), fromAddress: A, toAddress: other, value: null },
+    ])
+    expect(rows.map(r => r.native)).toEqual([false, false, false])
+    expect(rows.map(r => r.spam)).toEqual([false, false, false])
+  })
+  it('keeps chain order for rows that share a second: newest-first input, newest on the right', () => {
+    const rows = toLedgerRows(A, [
+      { time: '2026-10-09T06:39:53Z', fromAddress: A, toAddress: other, value: '0', category: 'token send' },      // newest
+      { time: '2026-10-09T06:39:53Z', fromAddress: other, toAddress: other, value: '0', category: 'token receive' },
+      { time: '2026-10-09T06:39:53Z', fromAddress: A, toAddress: other, value: '5', category: 'send' },            // oldest
+    ])
+    expect(rows.map(r => [r.dir, r.native])).toEqual([['out', true], ['in', false], ['out', false]])
+    // and a later second still sorts after, whatever the input order
+    const mixed = toLedgerRows(A, [
+      { time: '2026-10-09T06:39:54Z', fromAddress: other, toAddress: A, value: '0' },
+      { time: '2026-10-09T06:39:53Z', fromAddress: A, toAddress: other, value: '0' },
+    ])
+    expect(mixed.map(r => r.dir)).toEqual(['out', 'in'])
+  })
+  it('draws no ledger when any row has no usable time', () => {
+    const ok = { time: '2026-10-09T06:39:53Z', fromAddress: A, toAddress: other, value: '0' }
+    expect(toLedgerRows(A, [ok, { ...ok, time: 'not a date' }])).toEqual([])
+    expect(toLedgerRows(A, [ok, { ...ok, time: new Date(NaN) }])).toEqual([])
+    expect(toLedgerRows(A, [ok, ok])).toHaveLength(2)
+  })
 })
 
 describe('ledgerWeight', () => {
@@ -47,6 +76,15 @@ describe('formatSpan', () => {
     expect(formatSpan(150)).toBe('3 minutes')
     expect(formatSpan(7_200)).toBe('2 hours')
     expect(formatSpan(3 * 86_400)).toBe('3 days')
+  })
+  it('rolls each unit over into the next cleanly at its upper edge', () => {
+    expect(formatSpan(119)).toBe('119 seconds')
+    expect(formatSpan(120)).toBe('2 minutes')
+    expect(formatSpan(7_199)).toBe('2 hours')        // not "120 minutes"
+    expect(formatSpan(7_200)).toBe('2 hours')
+    expect(formatSpan(172_799)).toBe('2 days')       // not "48 hours"
+    expect(formatSpan(172_800)).toBe('2 days')
+    expect(formatSpan(7_139)).toBe('119 minutes')
   })
 })
 

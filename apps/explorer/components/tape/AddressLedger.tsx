@@ -6,7 +6,7 @@ const legend = (currency: string) =>
 
 /**
  * A page of an address's transactions as a ledger: oldest left, newest right; width = time since
- * the previous one; above the axis = received, below = sent; solid = native value, outlined =
+ * the previous one (the first has none: it counts as 1 s); above the axis = received, below = sent; solid = native value, outlined =
  * tokens or calls. Value is deliberately not drawn (token rows carry value 0 and there are no
  * prices to compare them). Nothing for fewer than 2 rows.
  */
@@ -29,7 +29,7 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
           <i
             key={k}
             className={`${r.dir}${r.native ? '' : ' o'}${r.spam ? ' s' : ''}`}
-            style={{ '--w': ledgerWeight(k ? r.t - rows[k - 1].t : 0) } as CSSProperties}
+            style={{ '--w': ledgerWeight(k ? r.t - rows[k - 1].t : 1) } as CSSProperties}
           />
         ))}
       </div>

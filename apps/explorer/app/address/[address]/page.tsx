@@ -243,9 +243,10 @@ export default async function AddressPage({
   // The page leads with what the address IS: its known label, else its resolved name, else its kind
   // and a shortened form. The kind is only claimed when the RPC answered (status.known).
   const kind = contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'
-  const label = addressInfo?.label ?? getAddressLabel(addr)
-  const named = label ?? resolvedName
-  const headline = named ?? `${kind} ${shortenAddress(checksummedAddr)}`
+  // `||`, not `??`: an empty label or name is no name (it would print as a blank h1).
+  const label = addressInfo?.label || getAddressLabel(addr)
+  const named = label || resolvedName
+  const headline = named || `${kind} ${shortenAddress(checksummedAddr)}`
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -323,7 +324,7 @@ export default async function AddressPage({
         />
         <Fact
           label="Type"
-          value={contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'}
+          value={kind}
         />
       </dl>
 
