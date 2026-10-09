@@ -42,7 +42,7 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
 export function AddressLedgerShell({ currency }: { currency: string }) {
   return (
     <figure className="ldg animate-pulse" aria-hidden="true">
-      <div className="ldg-head"><span>&nbsp;</span></div>
+      <div className="ldg-head"><span>&nbsp;</span><span>&nbsp;</span></div>
       <div className="ldg-row" />
       <figcaption className="ldg-leg">{legend(currency)}</figcaption>
     </figure>

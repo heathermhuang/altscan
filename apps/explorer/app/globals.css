@@ -845,7 +845,9 @@
 
 /* Address ledger (components/tape/AddressLedger.tsx): a page of an address's transactions. Tiles sit
    above (received) or below (sent) a hairline axis; flex-grow = 1 + log2(1 + seconds since the
-   previous one); solid = native value, outlined (.o) = tokens or calls; .s = provider-flagged spam. */
+   previous one); solid = native value, outlined (.o) = tokens or calls; .s = provider-flagged spam.
+   On phones the head stacks its two cells (the title and the totals do not fit side by side in 256px
+   without truncating the title to a few letters); the loading shell has the same two cells. */
 @layer components {
   .ldg {
     @apply mb-4 rounded-xl border border-hair bg-card;
@@ -902,6 +904,11 @@
     @apply px-4 py-3 min-h-[60px] sm:min-h-[44px] font-mono text-xs leading-[18px] text-mut;
   }
   @media (max-width: 639px) {
+    .ldg-head {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
     .ldg-row {
       gap: 1px;
     }

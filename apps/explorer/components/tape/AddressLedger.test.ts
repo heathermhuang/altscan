@@ -36,4 +36,8 @@ describe('AddressLedger', () => {
     expect(s).toContain('solid = BNB')
     expect(s).not.toContain('<i ')
   })
+  it('gives the shell a head of two cells, like the real head, so a stacked phone head is as tall', () => {
+    const s = renderToStaticMarkup(createElement(AddressLedgerShell, { currency: 'BNB' }))
+    expect(s).toContain('<div class="ldg-head"><span>\u00a0</span><span>\u00a0</span></div>')
+  })
 })
