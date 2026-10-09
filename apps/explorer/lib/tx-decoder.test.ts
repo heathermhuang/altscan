@@ -182,6 +182,29 @@ describe('safeTransferSymbol', () => {
     expect(safeTransferSymbol(REAL_USDT_BNB, 'USDT', 'eth')).toBeUndefined()
   })
 
+  // Check what the page will SHOW, not what was stored: foldConfusables keeps a control character
+  // (U+0007) that sanitizeSymbol strips, so "US<BEL>DT" does not fold to USDT, yet displays as USDT.
+  it('judges the sanitised symbol too: a control character cannot hide a lookalike', () => {
+    expect(safeTransferSymbol(SPAM, 'US\u0007DT', 'bnb')).toBeUndefined()
+    expect(safeTransferSymbol(SPAM, 'U\u0001S\u001FDT', 'bnb')).toBeUndefined()
+    expect(safeTransferSymbol(SPAM, 'BN\u0007B', 'bnb')).toBeUndefined()   // native coin
+  })
+
+  it('a zero-width character inside a lookalike does not hide it either', () => {
+    expect(safeTransferSymbol(SPAM, 'USD\u200BT', 'bnb')).toBeUndefined()   // zero-width space
+    expect(safeTransferSymbol(SPAM, 'US\u200DDT', 'bnb')).toBeUndefined()   // zero-width joiner
+  })
+
+  it('the real contract keeps its symbol, even with a stripped character in it', () => {
+    expect(safeTransferSymbol(REAL_USDT_BNB, 'USDT', 'bnb')).toBe('USDT')
+    expect(safeTransferSymbol(REAL_USDT_BNB, 'US\u0007DT', 'bnb')).toBe('USDT')
+  })
+
+  it('a benign symbol with a stripped character that collides with nothing shows its sanitised form', () => {
+    expect(safeTransferSymbol(SPAM, 'CA\u0007KE', 'bnb')).toBe('CAKE')
+    expect(safeTransferSymbol(SPAM, 'C\u200BAKE', 'bnb')).toBe('CAKE')
+  })
+
   it('strips control and bidi characters through sanitizeSymbolOr', () => {
     expect(safeTransferSymbol(SPAM, 'AB\u0007C\u200B', 'bnb')).toBe('ABC')
   })

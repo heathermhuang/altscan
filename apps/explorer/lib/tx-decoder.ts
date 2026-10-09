@@ -26,7 +26,8 @@ export interface TxTransferInfo {
  * address-poisoning dust transfer calls itself "USDT", and a headline that says "Transferred 0
  * USDT" repeats the lie in the page's largest type. So a token that lookalikeOf flags (it reads as
  * a well-known token but is not that contract) gets no symbol, and any other symbol is sanitised
- * (control/bidi/non-ASCII stripped) and treated as missing when nothing printable survives. The
+ * (control/bidi/non-ASCII stripped) and treated as missing when nothing printable survives; the
+ * lookalike test runs on the sanitised text (what would be shown) as well as the raw. The
  * chain is a parameter: pass `chainConfig.key`.
  */
 export function safeTransferSymbol(
@@ -35,8 +36,14 @@ export function safeTransferSymbol(
   chain: ChainKey,
 ): string | undefined {
   if (!symbol) return undefined
-  if (lookalikeOf({ address, symbol }, chain)) return undefined
-  return sanitizeSymbolOr(symbol, '') || undefined
+  // Sanitise FIRST and judge what the page would show. foldConfusables keeps characters that
+  // sanitizeSymbol strips (a control character), so "US<BEL>DT" does not fold to USDT yet displays as
+  // USDT. The raw symbol is checked too: it catches the shapes only the fold sees (invisible and
+  // lookalike letters that sanitising keeps or maps differently).
+  const clean = sanitizeSymbolOr(symbol, '')
+  if (!clean) return undefined
+  if (lookalikeOf({ address, symbol: clean }, chain) || lookalikeOf({ address, symbol }, chain)) return undefined
+  return clean
 }
 
 // Known method IDs
