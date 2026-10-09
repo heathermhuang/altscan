@@ -12,7 +12,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { decodeTx } from '@/lib/tx-decoder'
+import { attemptedSummary, decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -486,7 +486,9 @@ export default async function TxDetailPage({
   const blockShare = strip && stripPos >= 0 && stripUsed > 0
     ? ((strip.txs[stripPos].gas / stripUsed) * 100).toFixed(1)
     : null
-  const headline = decoded?.summary || `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
+  const headline = decoded?.summary
+    ? (tx.status ? decoded.summary : attemptedSummary(decoded.summary))
+    : `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
 
   return (
     <>

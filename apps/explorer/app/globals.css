@@ -739,7 +739,9 @@
    transfers read as texture. The edge is 1px but never more than 45% of its tile: a phone-width
    dense block has tiles under 1px, and a fixed 1px edge would paint over them and leave a hole.
    It is a pseudo-element, not a border or inset shadow, so it adds no layout floor per tile.
-   Only the ringed (.c) and failed (.x) tiles keep a floor width. */
+   Only the ringed (.c) tile keeps a floor width (3px, so it cannot vanish). A failed (.x) tile is
+   exactly its share like any other: a floor on every failed tile would overflow a block with more
+   failed txs than content pixels (145 x 2px > 288px at 320px). */
 @layer components {
   .bs-track {
     height: 64px;
@@ -780,7 +782,6 @@
     background: var(--card);
   }
   .bs-row > i.x {
-    min-width: 2px;
     background: repeating-linear-gradient(135deg, var(--warn) 0 1.5px, transparent 1.5px 4px);
   }
   .bs-row > i.x::before {
