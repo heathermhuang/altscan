@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNativeToken, formatGwei, formatNumber, formatUtc, ordinal, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { formatNativeToken, formatGwei, formatNumber, formatUtc, formatShare, ordinal, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -484,7 +484,7 @@ export default async function TxDetailPage({
   const stripUsed = strip ? strip.txs.reduce((s, t) => s + t.gas, 0) : 0
   const stripPos = strip ? strip.txs.findIndex(t => t.i === tx.txIndex) : -1
   const blockShare = strip && stripPos >= 0 && stripUsed > 0
-    ? ((strip.txs[stripPos].gas / stripUsed) * 100).toFixed(1)
+    ? formatShare((strip.txs[stripPos].gas / stripUsed) * 100)
     : null
   const headline = decoded?.summary
     ? (tx.status ? decoded.summary : attemptedSummary(decoded.summary))

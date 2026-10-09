@@ -315,17 +315,9 @@ curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
         </div>
       </section>
 
-      {/* Footer CTA */}
-      <div className="rounded-xl border border-hair bg-card p-6 text-center">
-        <h3 className="mb-2 text-lg font-semibold tracking-[-0.02em] text-ink">Ready to build?</h3>
-        <p className="mb-4 text-ink2">Get your API key and start querying {chainConfig.name} in minutes.</p>
-        <a
-          href="/api-docs"
-          className="inline-block rounded-[9px] bg-ink px-6 py-2.5 font-semibold text-card transition-opacity hover:opacity-90"
-        >
-          View Full API Reference →
-        </a>
-      </div>
+      <p className="text-ink2">
+        Every endpoint, parameter and rate limit is in the <a href="/api-docs" className="lk-u">API reference</a>.
+      </p>
     </div>
   )
 }

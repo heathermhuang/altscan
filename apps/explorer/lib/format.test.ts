@@ -18,6 +18,7 @@ import {
   hasSupply,
   formatUtcClock,
   ordinal,
+  formatShare,
 } from './format'
 import { shortenAddress } from './address-display'
 
@@ -290,5 +291,15 @@ describe('ordinal', () => {
   it('uses st/nd/rd/th, with 11–13 as th', () => {
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112].map(ordinal))
       .toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '101st', '111th', '112th'])
+  })
+})
+
+describe('formatShare', () => {
+  it('prints one decimal, but never 0.0 for a share that is not zero', () => {
+    expect(formatShare(0.047)).toBe('<0.1')   // a 21k-gas tx in a 30M-gas block
+    expect(formatShare(0.0999)).toBe('<0.1')  // the last value below the 0.1 boundary
+    expect(formatShare(0)).toBe('0.0')
+    expect(formatShare(0.1)).toBe('0.1')
+    expect(formatShare(58.708)).toBe('58.7')
   })
 })

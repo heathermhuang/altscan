@@ -9,7 +9,7 @@ import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
-  description: `Ethereum staking dashboard — view active validators, total ETH staked, staking APY, and how Proof of Stake works on ${chainConfig.brandDomain}.`,
+  description: `Ethereum staking dashboard — view active validators, total ETH staked, and staking APY on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/staking' },
 }
 
@@ -53,9 +53,8 @@ export default async function StakingPage() {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     mainEntity: [
-      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Ethereum staking is the process of depositing 32 ETH to activate validator software. Validators are responsible for proposing and attesting to new blocks on the Ethereum beacon chain. In return, validators earn ETH rewards (currently ~3-4% APY). Staking secures the network through Proof of Stake consensus, which replaced Proof of Work after The Merge in September 2022.' } },
-      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires exactly 32 ETH. However, liquid staking protocols like Lido (stETH) and Rocket Pool (rETH) allow you to stake any amount of ETH without running your own node. These protocols pool deposits and distribute rewards proportionally.' } },
-      { '@type': 'Question', name: 'What is slashing in Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Slashing is a penalty mechanism that destroys a portion of a validator\'s staked ETH if they act maliciously or fail to perform their duties (e.g., double-signing blocks or extended downtime). Slashing ensures validators have a financial incentive to behave honestly.' } },
+      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY). Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
+      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires at least 32 ETH.' } },
     ],
   }
 
@@ -70,7 +69,7 @@ export default async function StakingPage() {
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Ethereum Staking</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink2">
           Ethereum uses Proof of Stake consensus since The Merge (September 2022).
-          Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY).
+          Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY).
           This page shows live staking statistics derived from the ETH2 deposit contract.
         </p>
       </div>
@@ -103,23 +102,6 @@ export default async function StakingPage() {
         className="mb-6"
       />
 
-      {/* How staking works */}
-      <div className="mb-6 rounded-xl border border-hair bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">How Ethereum Staking Works</h2>
-        <div className="grid grid-cols-1 gap-6 text-sm text-ink md:grid-cols-2">
-          <div className="space-y-3">
-            <Step n={1} title="Deposit 32 ETH" detail="Send 32 ETH to the deposit contract to activate a validator" />
-            <Step n={2} title="Run a Validator Node" detail="Run execution + consensus clients (e.g., Geth + Lighthouse)" />
-            <Step n={3} title="Propose & Attest Blocks" detail="Earn rewards for correctly proposing and attesting to blocks" />
-          </div>
-          <div className="space-y-3">
-            <InfoRow title="Slashing Risk" detail="Malicious or faulty validators lose part of their stake" />
-            <InfoRow title="Liquid Staking" detail="Use Lido (stETH) or Rocket Pool (rETH) to stake without 32 ETH" />
-            <InfoRow title="Withdrawals" detail="Available since the Shanghai upgrade (April 2023)" />
-          </div>
-        </div>
-      </div>
-
       {/* Deposit contract info */}
       <div className="rounded-xl border border-hair bg-card p-4">
         <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">ETH2 Deposit Contract</h2>
@@ -151,32 +133,6 @@ function StatCard({ label, value, note }: {
       <dt className="k">{label}</dt>
       <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
       <dd className="mt-0.5 break-words text-xs text-mut">{note}</dd>
-    </div>
-  )
-}
-
-function Step({ n, title, detail }: { n: number; title: string; detail: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-hair2 font-mono text-xs font-semibold text-ink2">
-        {n}
-      </span>
-      <div>
-        <p className="font-medium text-ink">{title}</p>
-        <p className="text-ink2">{detail}</p>
-      </div>
-    </div>
-  )
-}
-
-function InfoRow({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-hair3" />
-      <div>
-        <p className="font-medium text-ink">{title}</p>
-        <p className="text-ink2">{detail}</p>
-      </div>
     </div>
   )
 }

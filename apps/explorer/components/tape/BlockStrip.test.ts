@@ -40,6 +40,12 @@ describe('BlockStrip', () => {
     expect(h).toContain('this one is the 4th and used 58.7% of the block')  // 300,000 / 511,000
     expect(h).toContain('bs-has-cur')
   })
+  it('says <0.1% for a tiny tx in a dense block, never 0.0%', () => {
+    const dense: StripTx[] = [{ i: 0, gas: 21_000, price: 5e7, ok: true }, { i: 1, gas: 30_000_000, price: 5e7, ok: true }]
+    const h = renderToStaticMarkup(createElement(BlockStrip, { txs: dense, blockNumber: 7, gasLimit: 30_000_000, chainName: 'Ethereum', current: 0 }))
+    expect(h).toContain('&lt;0.1% of the block')
+    expect(h).not.toContain('0.0%')
+  })
   it('keeps the fail mark on a ringed failed tx', () => {
     expect(html(2)).toContain('class="c x"')
   })
