@@ -20,7 +20,10 @@ export type RpcTx = {
   gasPrice: string
   gasUsed: bigint
   input: string
+  /** Placeholder `true` while `pending`: there is no receipt to read it from. */
   status: boolean
+  /** No receipt yet (not in a block, or the node has not served its receipt): outcome and fee unknown. */
+  pending: boolean
   methodId: string | null
   txIndex: number
   nonce: number
@@ -124,6 +127,7 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
       gasUsed: receipt?.gasUsed ?? 0n,
       input: tx.data,
       status: receipt ? receipt.status === 1 : true,
+      pending: !receipt,
       methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
       txIndex: tx.index ?? 0,
       nonce: tx.nonce,

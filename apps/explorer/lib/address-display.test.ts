@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toChecksumAddress, shortenAddress, shortHash } from './address-display'
+import { toChecksumAddress, shortenAddress, shortHash, addressHeadline } from './address-display'
 
 describe('toChecksumAddress', () => {
   // Vectors from EIP-55 itself. These are the contract: a wallet that
@@ -82,5 +82,32 @@ describe('shortHash', () => {
     expect(shortHash(null as unknown as string)).toBe('')
     // a 40-hex address is not a hash
     expect(shortHash('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toBe('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')
+  })
+})
+
+describe('addressHeadline', () => {
+  const A = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+
+  it('a known label wins', () => {
+    expect(addressHeadline({ label: 'Binance: Hot Wallet 6', kind: 'Wallet', checksummed: A })).toBe('Binance: Hot Wallet 6')
+  })
+
+  it('no label: the kind plus the shortened checksummed address', () => {
+    expect(addressHeadline({ label: undefined, kind: 'Wallet', checksummed: A })).toBe('Wallet 0x5aAeb6…BeAed')
+    expect(addressHeadline({ label: null, kind: 'Contract', checksummed: A })).toBe('Contract 0x5aAeb6…BeAed')
+    expect(addressHeadline({ label: undefined, kind: 'Address', checksummed: A })).toBe('Address 0x5aAeb6…BeAed')
+  })
+
+  // `||` semantics: an empty label is no label (it would print as a blank h1).
+  it('an empty-string label is no label', () => {
+    expect(addressHeadline({ label: '', kind: 'Wallet', checksummed: A })).toBe('Wallet 0x5aAeb6…BeAed')
+  })
+
+  // ENS / .bnb names are self-chosen: anyone can register "binance-hot-wallet.bnb". The helper does
+  // not even accept one, so a resolved name cannot reach the headline.
+  it('takes no resolved name, so a self-chosen name cannot become the headline', () => {
+    const h = addressHeadline({ label: undefined, kind: 'Wallet', checksummed: A, resolvedName: 'binance-hot-wallet.bnb' } as never)
+    expect(h).toBe('Wallet 0x5aAeb6…BeAed')
+    expect(h).not.toContain('binance')
   })
 })

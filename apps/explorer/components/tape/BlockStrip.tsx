@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { formatShare, ordinal } from '@/lib/format'
-import { stripFills, stripWeight, type StripTx } from '@/lib/tape'
+import { stripFills, stripWeight, txShareOfBlock, type StripTx } from '@/lib/tape'
 
 const fmt = (n: number) => n.toLocaleString('en-US')
 const LEGEND = 'width = gas used · fill = gas price paid · ▨ failed · in block order'
@@ -23,9 +23,10 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
   const used = txs.reduce((s, t) => s + t.gas, 0)
   const failed = txs.filter(t => !t.ok).length
   const pct = gasLimit > 0 ? Math.round((used / gasLimit) * 100) : null
-  const curPos = current === undefined ? -1 : txs.findIndex(t => t.i === current)
-  const cur = curPos >= 0 ? txs[curPos] : undefined
-  const share = cur && used > 0 ? formatShare((cur.gas / used) * 100) : null
+  const at = current === undefined ? null : txShareOfBlock(txs, current)
+  const curPos = at ? at.pos : -1
+  const cur = at ? txs[at.pos] : undefined
+  const share = at && at.pct !== null ? formatShare(at.pct) : null
   // The chip anchors toward the middle by where the tile SITS (gas-weighted, as the flex lays it
   // out), not by its tx_index: a 2nd-of-60 tx behind a huge one is at the far right, and a
   // left-anchored chip there would run off the viewport.

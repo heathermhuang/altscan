@@ -53,6 +53,38 @@ describe('fetchTxFromRpc — a failed RPC call is not an absence', () => {
   })
 })
 
+// No receipt means the outcome is unknown. `status` has to be filled with something, so the page
+// needs the flag to avoid reading that filler as "Succeeded".
+describe('fetchTxFromRpc — pending', () => {
+  const rawTx = (h: string, blockNumber: number | null) => ({
+    hash: h, blockNumber, from: '0xF', to: null, value: 0n,
+    gasLimit: 21000n, gasPrice: 1n, data: '0x', index: 0, nonce: 0, type: 0,
+  })
+
+  it('flags a tx that is not in a block yet', async () => {
+    const h = hashOf('d')
+    provider.getTransaction.mockResolvedValue(rawTx(h, null))
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ blockNumber: 0, pending: true })
+  })
+
+  it('flags a tx its node knows a block for but has no receipt for yet', async () => {
+    const h = hashOf('e')
+    provider.getTransaction.mockResolvedValue(rawTx(h, 100))
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ blockNumber: 100, pending: true })
+  })
+
+  it('does not flag a mined tx, and keeps its real status', async () => {
+    const h = hashOf('f')
+    provider.getTransaction.mockResolvedValue(rawTx(h, 100))
+    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: 0 })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: false, status: false, gasUsed: 21000n })
+  })
+})
+
 describe('fetchBlockFromRpc — a failed RPC call is not an absence', () => {
   it('rejects when the RPC call fails', async () => {
     provider.getBlock.mockRejectedValue(batchRejected())

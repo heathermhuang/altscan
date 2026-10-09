@@ -12,14 +12,14 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { attemptedSummary, decodeTx } from '@/lib/tx-decoder'
+import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind } from '@/lib/tx-view'
+import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
@@ -27,6 +27,7 @@ import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
+import { txShareOfBlock } from '@/lib/tape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
@@ -178,6 +179,8 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     return { title: 'Transaction Not Found', ...NOT_FOUND_METADATA }
   }
   const val = formatNativeToken(safeBigInt(tx.value))
+  // rpcTx is only fetched when the DB has no row, so it is the only source of a pending tx.
+  const outcome = txOutcome({ status: tx.status, pending: rpcTx?.pending })
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `Tx ${hash.slice(0, 18)}…`,
@@ -185,7 +188,9 @@ export async function generateMetadata({ params }: { params: Promise<{ hash: str
     alternates: { canonical: `/tx/${hash}` },
     openGraph: {
       title: `Transaction ${hash.slice(0, 18)}…`,
-      description: `${val} ${chainConfig.currency} · Block #${tx.blockNumber} · ${tx.status ? 'Success' : 'Failed'}`,
+      description: outcome === 'pending'
+        ? `${val} ${chainConfig.currency} · ${TX_OUTCOME_LABEL.pending}`
+        : `${val} ${chainConfig.currency} · Block #${tx.blockNumber} · ${TX_OUTCOME_LABEL[outcome]}`,
     },
   }
 }
@@ -291,6 +296,12 @@ export default async function TxDetailPage({
 
   const fromRpc = !dbTx && !!rpcTx
   const bodyPruned = !!dbTx?.bodyPruned
+  // No receipt yet: outcome, fee and gas are unknown. `placed` is whether the node has put the tx in a
+  // block (a pending tx has none, and its block, age and position are placeholders then; a node that
+  // is behind may know the block but not yet serve the receipt, and those facts are real).
+  const outcome = txOutcome({ status: tx.status, pending: rpcTx?.pending })
+  const pending = outcome === 'pending'
+  const placed = !pending || tx.blockNumber > 0
 
   // token_transfers is compact-immortal → still local even for a pruned tx.
   // logs are a prunable body → local when present, else from the refetched body.
@@ -359,7 +370,7 @@ export default async function TxDetailPage({
   const gasUsed = BigInt(tx.gasUsed ?? 0)
   const gasLimit = BigInt(tx.gas ?? 0)
   const MAX_REASONABLE_GAS = 50_000_000n
-  const gasPercent = gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS && gasUsed < MAX_REASONABLE_GAS
+  const gasPercent = !pending && gasLimit > 0n && gasLimit < MAX_REASONABLE_GAS && gasUsed < MAX_REASONABLE_GAS
     ? Number((gasUsed * 100n) / gasLimit)
     : null
 
@@ -370,7 +381,7 @@ export default async function TxDetailPage({
   const feeUsd = nativePrice ? formatUsd(feeVal, nativePrice) : null
 
   // Confirmations
-  const confirmations = chainTip ? chainTip - tx.blockNumber : null
+  const confirmations = chainTip && placed ? chainTip - tx.blockNumber : null
 
   // Nonce + txType — prefer DB, fallback to RPC
   const nonce = tx.nonce ?? (fromRpc ? (rpcTx as RpcTx).nonce : null)
@@ -437,7 +448,7 @@ export default async function TxDetailPage({
       fromAddress: t.fromAddress,
       toAddress: t.toAddress,
       value: t.value ?? '0',
-      tokenSymbol: tok?.symbol || undefined,
+      tokenSymbol: safeTransferSymbol(t.tokenAddress, tok?.symbol, chainConfig.key),
       tokenDecimals: tok?.decimals,
     }
   })
@@ -451,7 +462,7 @@ export default async function TxDetailPage({
       try {
         const [tok] = await db.select({ symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
           .from(schema.tokens).where(eq(schema.tokens.address, tx.toAddress.toLowerCase())).limit(1)
-        if (tok) { tokenSymbol = tok.symbol; tokenDecimals = tok.decimals }
+        if (tok) { tokenSymbol = safeTransferSymbol(tx.toAddress, tok.symbol, chainConfig.key); tokenDecimals = tok.decimals }
       } catch { /* ignore */ }
       transferInfos.push({
         tokenAddress: tx.toAddress,
@@ -481,13 +492,11 @@ export default async function TxDetailPage({
   )
 
   // The block strip's view of this tx (null for an RPC tx or a block that is not fully indexed).
-  const stripUsed = strip ? strip.txs.reduce((s, t) => s + t.gas, 0) : 0
-  const stripPos = strip ? strip.txs.findIndex(t => t.i === tx.txIndex) : -1
-  const blockShare = strip && stripPos >= 0 && stripUsed > 0
-    ? formatShare((strip.txs[stripPos].gas / stripUsed) * 100)
-    : null
+  const stripAt = strip ? txShareOfBlock(strip.txs, tx.txIndex) : null
+  const stripPos = stripAt ? stripAt.pos : -1
+  const blockShare = stripAt && stripAt.pct !== null ? formatShare(stripAt.pct) : null
   const headline = decoded?.summary
-    ? (tx.status ? decoded.summary : attemptedSummary(decoded.summary))
+    ? (pending ? pendingSummary(decoded.summary) : tx.status ? decoded.summary : attemptedSummary(decoded.summary))
     : `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
 
   return (
@@ -516,10 +525,17 @@ export default async function TxDetailPage({
         </div>
         <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
           Sent by <AddressLink address={tx.fromAddress} />.{' '}
-          <span className="font-semibold text-ink">{tx.status ? 'Succeeded' : 'Failed'}</span>{' '}
-          {timeAgo(new Date(tx.timestamp))} and paid {formatNativeToken(fee, 8)} {chainConfig.currency} in fees.
-          {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS && (
-            <> It used {formatNumber(Number(gasUsed))} gas{blockShare && `, ${blockShare}% of its block`}.</>
+          {pending ? (
+            // No receipt: the outcome, the fee and the gas are all unknown, so none is claimed.
+            <><span className="font-semibold text-ink">Pending</span>, with no receipt yet.</>
+          ) : (
+            <>
+              <span className="font-semibold text-ink">{outcome === 'success' ? 'Succeeded' : 'Failed'}</span>{' '}
+              {timeAgo(new Date(tx.timestamp))} and paid {formatNativeToken(fee, 8)} {chainConfig.currency} in fees.
+              {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS && (
+                <> It used {formatNumber(Number(gasUsed))} gas{blockShare && `, ${blockShare}% of its block`}.</>
+              )}
+            </>
           )}
         </p>
       </div>
@@ -538,26 +554,28 @@ export default async function TxDetailPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <dl className="ledger [--cols:5] mb-4">
         <Fact label="Status">
-          <Badge variant={tx.status ? 'success' : 'fail'}>
-            {tx.status ? 'Success' : 'Failed'}
+          <Badge variant={outcome === 'success' ? 'success' : outcome === 'failed' ? 'fail' : 'default'}>
+            {TX_OUTCOME_LABEL[outcome]}
           </Badge>
         </Fact>
         <Fact
           label="Block"
           sub={confirmations != null && confirmations > 0 ? `${formatNumber(confirmations)} Confirmations` : undefined}
         >
-          <Link href={`/blocks/${tx.blockNumber}`} className="text-acc-ink hover:underline">
-            {formatNumber(tx.blockNumber)}
-          </Link>
+          {placed ? (
+            <Link href={`/blocks/${tx.blockNumber}`} className="text-acc-ink hover:underline">
+              {formatNumber(tx.blockNumber)}
+            </Link>
+          ) : 'Pending'}
         </Fact>
-        <Fact label="Age" sub={formatUtc(tx.timestamp)}>
-          {timeAgo(new Date(tx.timestamp))}
+        <Fact label="Age" sub={placed ? formatUtc(tx.timestamp) : undefined}>
+          {placed ? timeAgo(new Date(tx.timestamp)) : '—'}
         </Fact>
         <Fact label="Value" sub={valueUsd ?? undefined}>
           {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
         </Fact>
-        <Fact label="Fee" sub={feeUsd ?? undefined}>
-          {formatNativeToken(fee, 8)} {chainConfig.currency}
+        <Fact label="Fee" sub={pending ? undefined : feeUsd ?? undefined}>
+          {pending ? '—' : <>{formatNativeToken(fee, 8)} {chainConfig.currency}</>}
         </Fact>
       </dl>
 
@@ -576,7 +594,11 @@ export default async function TxDetailPage({
       {fromRpc && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
           <Icon name="bolt" className="h-4 w-4 text-acc-ink" />
-          <span>Fetched live from {chainConfig.name} — this transaction is outside our local retention window.</span>
+          <span>
+            {pending
+              ? <>Fetched live from {chainConfig.name} — this transaction is pending, so we have not indexed it yet.</>
+              : <>Fetched live from {chainConfig.name} — this transaction is outside our local retention window.</>}
+          </span>
         </div>
       )}
 
@@ -586,7 +608,8 @@ export default async function TxDetailPage({
           <span>Input data &amp; event logs fetched live from {chainConfig.name} — this transaction is older than our local body-retention window.</span>
         </div>
       )}
-      {bodyUnavailable && (
+      {/* A pending tx has no receipt, so no logs yet: the pending banner above already says so. */}
+      {bodyUnavailable && !pending && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           <Icon name="clock" className="h-4 w-4 text-warn" />
           <span>Input data &amp; event logs are temporarily unavailable — try again shortly. The transaction summary below is unaffected.</span>
@@ -691,7 +714,7 @@ export default async function TxDetailPage({
         {nonce != null && (
           <Row label="Nonce" value={String(nonce)} mono />
         )}
-        <Row label="Position In Block" value={String(tx.txIndex)} mono />
+        {placed && <Row label="Position In Block" value={String(tx.txIndex)} mono />}
         {txType != null && (
           <Row label="Transaction Type" value={TX_TYPE_LABELS[txType] ?? `Type ${txType}`} />
         )}

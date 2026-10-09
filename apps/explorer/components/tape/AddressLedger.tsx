@@ -21,7 +21,7 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
       <div className="ldg-head">
         <span className="flex items-center min-w-0">
           <span className="bt-dot" aria-hidden="true" />
-          <span className="text-ink truncate">These {rows.length} transactions<span className="hidden sm:inline text-mut">, as a ledger</span></span>
+          <span className="text-ink truncate">These {rows.length} transactions<span className="hidden md:inline text-mut">, as a ledger</span></span>
         </span>
         <span className="whitespace-nowrap">▲ {nin} received · ▼ {nout} sent<span className="bt-rate"> · {span}</span></span>
       </div>

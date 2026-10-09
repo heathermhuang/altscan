@@ -1,8 +1,10 @@
 // Rule-based plain-English transaction decoder
 // Turns raw tx data into human-readable descriptions
 
+import type { ChainKey } from '@altscan/chain-config'
 import { getAddressLabel } from './known-addresses'
-import { safeBigInt, formatTokenAmount } from './format'
+import { safeBigInt, formatTokenAmount, sanitizeSymbolOr } from './format'
+import { lookalikeOf } from './lookalike'
 
 export interface DecodedTx {
   summary: string
@@ -16,6 +18,32 @@ export interface TxTransferInfo {
   value: string
   tokenSymbol?: string
   tokenDecimals?: number
+}
+
+/**
+ * The symbol a transfer may be NAMED by in a headline, or undefined (decodeTx then falls back to
+ * the token address prefix). A token symbol is chosen by whoever deploys the contract: an
+ * address-poisoning dust transfer calls itself "USDT", and a headline that says "Transferred 0
+ * USDT" repeats the lie in the page's largest type. So a token that lookalikeOf flags (it reads as
+ * a well-known token but is not that contract) gets no symbol, and any other symbol is sanitised
+ * (control/bidi/non-ASCII stripped) and treated as missing when nothing printable survives; the
+ * lookalike test runs on the sanitised text (what would be shown) as well as the raw. The
+ * chain is a parameter: pass `chainConfig.key`.
+ */
+export function safeTransferSymbol(
+  address: string,
+  symbol: string | null | undefined,
+  chain: ChainKey,
+): string | undefined {
+  if (!symbol) return undefined
+  // Sanitise FIRST and judge what the page would show. foldConfusables keeps characters that
+  // sanitizeSymbol strips (a control character), so "US<BEL>DT" does not fold to USDT yet displays as
+  // USDT. The raw symbol is checked too: it catches the shapes only the fold sees (invisible and
+  // lookalike letters that sanitising keeps or maps differently).
+  const clean = sanitizeSymbolOr(symbol, '')
+  if (!clean) return undefined
+  if (lookalikeOf({ address, symbol: clean }, chain) || lookalikeOf({ address, symbol }, chain)) return undefined
+  return clean
 }
 
 // Known method IDs
@@ -137,9 +165,7 @@ export function decodeTx(tx: {
     if (transfers.length > 0) {
       const t = transfers[0]
       const sym = t.tokenSymbol ?? t.tokenAddress.slice(0, 8)
-      const amt = t.tokenDecimals
-        ? (Number(BigInt(t.value ?? '0')) / Math.pow(10, t.tokenDecimals)).toFixed(2)
-        : '?'
+      const amt = t.tokenDecimals != null ? formatTokenAmount(t.value ?? '0', t.tokenDecimals, 6) : '?'
       const to = getAddressLabel(t.toAddress) ?? `${t.toAddress.slice(0, 12)}…`
       return { summary: `Transferred ${amt} ${sym} to ${to}`, type: 'transfer' }
     }
@@ -154,14 +180,15 @@ export function decodeTx(tx: {
   }
 }
 
-// The outcome verbs decodeTx opens its summaries with, and the infinitive each one is.
-const OUTCOME_VERBS: Record<string, string> = {
-  Sent: 'send',
-  Swapped: 'swap',
-  Approved: 'approve',
-  Transferred: 'transfer',
-  Called: 'call',
-  Deployed: 'deploy',
+// The outcome verbs decodeTx opens its summaries with: the infinitive a failed tx "tried to" do, and the
+// present participle a pending one is doing.
+const OUTCOME_VERBS: Record<string, { base: string; ing: string }> = {
+  Sent: { base: 'send', ing: 'Sending' },
+  Swapped: { base: 'swap', ing: 'Swapping' },
+  Approved: { base: 'approve', ing: 'Approving' },
+  Transferred: { base: 'transfer', ing: 'Transferring' },
+  Called: { base: 'call', ing: 'Calling' },
+  Deployed: { base: 'deploy', ing: 'Deploying' },
 }
 
 /**
@@ -171,7 +198,18 @@ const OUTCOME_VERBS: Record<string, string> = {
  */
 export function attemptedSummary(summary: string): string {
   const sp = summary.indexOf(' ')
-  const base = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
-  if (!base) return `Failed: ${summary}`
-  return sp === -1 ? `Tried to ${base}` : `Tried to ${base}${summary.slice(sp)}`
+  const verb = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
+  if (!verb) return `Failed: ${summary}`
+  return sp === -1 ? `Tried to ${verb.base}` : `Tried to ${verb.base}${summary.slice(sp)}`
+}
+
+/**
+ * A pending tx's summary (no receipt yet, so nothing has happened): "Swapped tokens on X" reads
+ * "Swapping tokens on X". A summary that does not open with an outcome verb gets a "Pending: " prefix.
+ */
+export function pendingSummary(summary: string): string {
+  const sp = summary.indexOf(' ')
+  const verb = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
+  if (!verb) return `Pending: ${summary}`
+  return sp === -1 ? verb.ing : `${verb.ing}${summary.slice(sp)}`
 }
