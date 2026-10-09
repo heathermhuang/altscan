@@ -26,6 +26,12 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
   const curPos = current === undefined ? -1 : txs.findIndex(t => t.i === current)
   const cur = curPos >= 0 ? txs[curPos] : undefined
   const share = cur && used > 0 ? ((cur.gas / used) * 100).toFixed(1) : null
+  // The chip anchors toward the middle by where the tile SITS (gas-weighted, as the flex lays it
+  // out), not by its tx_index: a 2nd-of-60 tx behind a huge one is at the far right, and a
+  // left-anchored chip there would run off the viewport.
+  const weights = txs.map(t => stripWeight(t.gas))
+  const weightSum = weights.reduce((s, w) => s + w, 0)
+  const centre = curPos >= 0 ? (weights.slice(0, curPos).reduce((s, w) => s + w, 0) + weights[curPos] / 2) / weightSum : 0
   const label = `${chainName} block ${fmt(blockNumber)}: ${txs.length} transactions, ${failed} failed`
     + (cur ? `; this one is the ${ordinal(curPos + 1)} and used ${share}% of the block's gas` : '')
 
@@ -48,9 +54,9 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
           {txs.map((t, k) => {
             const cls = [k === curPos && 'c', !t.ok && 'x'].filter(Boolean).join(' ')
             return (
-              <i key={t.i} className={cls || undefined} style={{ '--w': stripWeight(t.gas), '--f': `${fills[k]}%` } as CSSProperties}>
+              <i key={t.i} className={cls || undefined} style={{ '--w': weights[k], '--f': `${fills[k]}%` } as CSSProperties}>
                 {k === curPos && (
-                  <span className={`bs-chip${curPos < txs.length / 2 ? ' l' : ''}`}>this tx · {fmt(t.gas)} gas</span>
+                  <span className={`bs-chip${centre < 0.5 ? ' l' : ''}`}>this tx · {fmt(t.gas)} gas</span>
                 )}
               </i>
             )

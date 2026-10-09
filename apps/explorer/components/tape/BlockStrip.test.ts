@@ -43,4 +43,13 @@ describe('BlockStrip', () => {
   it('keeps the fail mark on a ringed failed tx', () => {
     expect(html(2)).toContain('class="c x"')
   })
+  it('anchors the chip by where the tile sits, not by its tx_index', () => {
+    const mk = (gas: number[]): StripTx[] => gas.map((g, i) => ({ i, gas: g, price: 5e7, ok: true }))
+    const chip = (t: StripTx[], current: number) =>
+      renderToStaticMarkup(createElement(BlockStrip, { txs: t, blockNumber: 1, gasLimit: 0, chainName: 'BNB Chain', current }))
+        .match(/class="bs-chip( l)?"/)![0]
+    const small = Array(6).fill(21_000)
+    expect(chip(mk([900_000, 21_000, ...small]), 1)).toBe('class="bs-chip"')      // 2nd of 8, but 90% of the gas is before it: right edge
+    expect(chip(mk([...small, 21_000, 900_000]), 4)).toBe('class="bs-chip l"')    // 5th of 8, but 90% of the gas is after it: left edge
+  })
 })

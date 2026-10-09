@@ -735,8 +735,11 @@
 
 /* Block strip (components/tape/BlockStrip.tsx): the txs of ONE block. flex-grow = gas used in
    thousands (--w), fill = gas price (--f), no gaps and min-width 0 so the strip is exactly the
-   content width at every viewport; a 1px card-coloured inset is the separator, so dense runs of
-   21k-gas transfers read as texture. Only the ringed (.c) and failed (.x) tiles keep a floor width. */
+   content width at every viewport; a card-coloured edge is the separator, so dense runs of 21k-gas
+   transfers read as texture. The edge is 1px but never more than 45% of its tile: a phone-width
+   dense block has tiles under 1px, and a fixed 1px edge would paint over them and leave a hole.
+   It is a pseudo-element, not a border or inset shadow, so it adds no layout floor per tile.
+   Only the ringed (.c) and failed (.x) tiles keep a floor width. */
 @layer components {
   .bs-track {
     height: 64px;
@@ -757,16 +760,24 @@
     flex: var(--w) 1 0;
     min-width: 0;
     background: var(--acc-t);
-    box-shadow: inset -1px 0 var(--card);
   }
   .bs-row > i::before {
     content: "";
     position: absolute;
     left: 0;
-    right: 1px;
+    right: 0;
     bottom: 0;
     height: var(--f);
     background: var(--acc);
+  }
+  .bs-row > i::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(1px, 45%);
+    background: var(--card);
   }
   .bs-row > i.x {
     min-width: 2px;
@@ -806,15 +817,17 @@
       height: 112px;
     }
   }
-  /* Forced colours drop backgrounds and the fill IS the data: a CanvasText edge per tile, the fill
-     as Highlight, failed tiles keep a CanvasText hatch, the ring stays (outline survives). */
+  /* Forced colours drop backgrounds and the fill IS the data: a CanvasText edge per tile (the
+     ::after, so no border widens a tile past its share), the fill as Highlight, failed tiles keep a
+     CanvasText hatch, the ring stays (outline survives). */
   @media (forced-colors: active) {
-    .bs-row > i {
-      border-right: 1px solid CanvasText;
-    }
     .bs-row > i::before {
       forced-color-adjust: none;
       background: Highlight;
+    }
+    .bs-row > i::after {
+      forced-color-adjust: none;
+      background: CanvasText;
     }
     .bs-row > i.x {
       forced-color-adjust: none;
