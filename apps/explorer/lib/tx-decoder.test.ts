@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeTx, type TxTransferInfo } from './tx-decoder'
+import { attemptedSummary, decodeTx, type TxTransferInfo } from './tx-decoder'
 
 const base = {
   hash: '0xabc',
@@ -64,5 +64,28 @@ describe('decodeTx swap detection', () => {
     const out = decodeTx(base, [], 'ETH')
     expect(out.type).toBe('contract_call')
     expect(out.summary).toMatch(/^Called /)
+  })
+})
+
+describe('attemptedSummary', () => {
+  // decodeTx words every summary as an outcome ("Swapped ..."); a failed tx did not do that.
+  it.each([
+    ['Sent 0.5000 BNB to PancakeSwap: Router v2', 'Tried to send 0.5000 BNB to PancakeSwap: Router v2'],
+    ['Swapped tokens on PancakeSwap', 'Tried to swap tokens on PancakeSwap'],
+    ['Approved 0x7830c87c02… to spend tokens', 'Tried to approve 0x7830c87c02… to spend tokens'],
+    ['Transferred 12.50 USDT to 0x1111111111…', 'Tried to transfer 12.50 USDT to 0x1111111111…'],
+    ['Called 0xa9d1e08c77… — Mint', 'Tried to call 0xa9d1e08c77… — Mint'],
+    ['Deployed a new smart contract', 'Tried to deploy a new smart contract'],
+  ])('rewrites the outcome verb of %j', (summary, expected) => {
+    expect(attemptedSummary(summary)).toBe(expected)
+  })
+
+  it('prefixes a summary with no outcome verb', () => {
+    expect(attemptedSummary('Contract interaction (no data)')).toBe('Failed: Contract interaction (no data)')
+    expect(attemptedSummary('3 token transfers to 2 recipients')).toBe('Failed: 3 token transfers to 2 recipients')
+  })
+
+  it('matches the first WORD, not a prefix of it', () => {
+    expect(attemptedSummary('Sentinel contract')).toBe('Failed: Sentinel contract')
   })
 })

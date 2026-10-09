@@ -153,3 +153,25 @@ export function decodeTx(tx: {
     type: 'contract_call',
   }
 }
+
+// The outcome verbs decodeTx opens its summaries with, and the infinitive each one is.
+const OUTCOME_VERBS: Record<string, string> = {
+  Sent: 'send',
+  Swapped: 'swap',
+  Approved: 'approve',
+  Transferred: 'transfer',
+  Called: 'call',
+  Deployed: 'deploy',
+}
+
+/**
+ * A failed tx's summary. decodeTx words every summary as an outcome ("Swapped tokens on X"), which a
+ * failed tx did not do: "Tried to swap tokens on X". A summary that does not open with one of those
+ * verbs ("3 token transfers to 2 recipients") gets a "Failed: " prefix instead.
+ */
+export function attemptedSummary(summary: string): string {
+  const sp = summary.indexOf(' ')
+  const base = OUTCOME_VERBS[sp === -1 ? summary : summary.slice(0, sp)]
+  if (!base) return `Failed: ${summary}`
+  return sp === -1 ? `Tried to ${base}` : `Tried to ${base}${summary.slice(sp)}`
+}

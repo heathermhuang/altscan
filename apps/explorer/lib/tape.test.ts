@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
+import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, stripFills, stripWeight, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -144,5 +144,31 @@ describe('latestTapeCount', () => {
   it('never exceeds 100 or drops below 7', () => {
     expect(latestTapeCount(0.1)).toBe(100)
     expect(latestTapeCount(60)).toBe(7)
+  })
+})
+
+describe('stripWeight', () => {
+  it('is gas in thousands, never below 1', () => {
+    expect(stripWeight(21_000)).toBe(21)
+    expect(stripWeight(1_499)).toBe(1)
+    expect(stripWeight(0)).toBe(1)
+    expect(stripWeight(612_345)).toBe(612)
+  })
+})
+
+describe('stripFills', () => {
+  it('maps the lowest positive price to 30 and the highest to 100, on a log scale', () => {
+    const f = stripFills([1e9, 1e10, 1e11])
+    expect(f).toEqual([30, 65, 100])
+  })
+  it('gives a zero price (a system tx) no fill', () => {
+    expect(stripFills([0, 5e7, 1e9])).toEqual([0, 30, 100])
+  })
+  it('fills everything when every positive price is the same', () => {
+    expect(stripFills([5e7, 5e7, 0])).toEqual([100, 100, 0])
+  })
+  it('returns all zeros when no price is positive', () => {
+    expect(stripFills([0, 0])).toEqual([0, 0])
+    expect(stripFills([])).toEqual([])
   })
 })
