@@ -9,7 +9,7 @@ import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
-  description: `Ethereum staking dashboard — view active validators, total ETH staked, staking APY, and how Proof of Stake works on ${chainConfig.brandDomain}.`,
+  description: `Ethereum staking dashboard — view active validators, total ETH staked, and staking APY on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/staking' },
 }
 
@@ -53,9 +53,8 @@ export default async function StakingPage() {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     mainEntity: [
-      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Ethereum staking is the process of depositing 32 ETH to activate validator software. Validators are responsible for proposing and attesting to new blocks on the Ethereum beacon chain. In return, validators earn ETH rewards (currently ~3-4% APY). Staking secures the network through Proof of Stake consensus, which replaced Proof of Work after The Merge in September 2022.' } },
-      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires exactly 32 ETH. However, liquid staking protocols like Lido (stETH) and Rocket Pool (rETH) allow you to stake any amount of ETH without running your own node. These protocols pool deposits and distribute rewards proportionally.' } },
-      { '@type': 'Question', name: 'What is slashing in Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Slashing is a penalty mechanism that destroys a portion of a validator\'s staked ETH if they act maliciously or fail to perform their duties (e.g., double-signing blocks or extended downtime). Slashing ensures validators have a financial incentive to behave honestly.' } },
+      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY). Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
+      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires exactly 32 ETH.' } },
     ],
   }
 

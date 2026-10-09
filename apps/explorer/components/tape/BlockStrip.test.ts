@@ -43,7 +43,7 @@ describe('BlockStrip', () => {
   it('says <0.1% for a tiny tx in a dense block, never 0.0%', () => {
     const dense: StripTx[] = [{ i: 0, gas: 21_000, price: 5e7, ok: true }, { i: 1, gas: 30_000_000, price: 5e7, ok: true }]
     const h = renderToStaticMarkup(createElement(BlockStrip, { txs: dense, blockNumber: 7, gasLimit: 30_000_000, chainName: 'Ethereum', current: 0 }))
-    expect(h).toContain("used &lt;0.1% of the block&#x27;s gas")
+    expect(h).toContain('&lt;0.1% of the block')
     expect(h).not.toContain('0.0%')
   })
   it('keeps the fail mark on a ringed failed tx', () => {

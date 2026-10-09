@@ -297,6 +297,7 @@ describe('ordinal', () => {
 describe('formatShare', () => {
   it('prints one decimal, but never 0.0 for a share that is not zero', () => {
     expect(formatShare(0.047)).toBe('<0.1')   // a 21k-gas tx in a 30M-gas block
+    expect(formatShare(0.0999)).toBe('<0.1')  // the last value below the 0.1 boundary
     expect(formatShare(0)).toBe('0.0')
     expect(formatShare(0.1)).toBe('0.1')
     expect(formatShare(58.708)).toBe('58.7')
