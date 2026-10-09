@@ -843,6 +843,96 @@
   }
 }
 
+/* Address ledger (components/tape/AddressLedger.tsx): a page of an address's transactions. Tiles sit
+   above (received) or below (sent) a hairline axis; flex-grow = 1 + log2(1 + seconds since the
+   previous one); solid = native value, outlined (.o) = tokens or calls; .s = provider-flagged spam. */
+@layer components {
+  .ldg {
+    @apply mb-4 rounded-xl border border-hair bg-card;
+  }
+  .ldg-head {
+    @apply px-4 pt-3 flex items-center justify-between gap-4 min-h-[30px] font-mono text-xs text-mut;
+  }
+  .ldg-row {
+    position: relative;
+    display: flex;
+    gap: 2px;
+    height: 84px;
+    margin: 10px 16px 0;
+  }
+  .ldg-row::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 50%;
+    border-top: 1px solid var(--hair3);
+  }
+  .ldg-row > i {
+    position: relative;
+    flex: var(--w) 1 0;
+    min-width: 4px;
+  }
+  .ldg-row > i::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: calc(50% - 4px);
+    border-radius: 2px;
+  }
+  .ldg-row > .in::before {
+    bottom: calc(50% + 2px);
+    background: var(--acc);
+  }
+  .ldg-row > .out::before {
+    top: calc(50% + 2px);
+    background: var(--ink);
+  }
+  .ldg-row > .in.o::before {
+    background: var(--acc-t);
+    box-shadow: inset 0 0 0 1.5px var(--acc);
+  }
+  .ldg-row > .out.o::before {
+    background: var(--hair2);
+    box-shadow: inset 0 0 0 1.5px var(--ink2);
+  }
+  .ldg-row > .s {
+    opacity: 0.3;
+  }
+  .ldg-leg {
+    @apply px-4 py-3 min-h-[60px] sm:min-h-[44px] font-mono text-xs leading-[18px] text-mut;
+  }
+  @media (max-width: 639px) {
+    .ldg-row {
+      gap: 1px;
+    }
+    .ldg-row > i {
+      min-width: 2px;
+    }
+  }
+  @media (forced-colors: active) {
+    .ldg-row::after {
+      border-top-color: CanvasText;
+    }
+    .ldg-row > i::before {
+      forced-color-adjust: none;
+    }
+    .ldg-row > .in::before {
+      background: Highlight;
+    }
+    .ldg-row > .out::before {
+      background: CanvasText;
+    }
+    .ldg-row > .in.o::before {
+      background: Canvas;
+      box-shadow: inset 0 0 0 1.5px Highlight;
+    }
+    .ldg-row > .out.o::before {
+      background: Canvas;
+      box-shadow: inset 0 0 0 1.5px CanvasText;
+    }
+  }
+}
+
 /* Loading skeleton (components/ui/DetailSkeleton.tsx). A handful of elements whose bars and row
    lines are drawn with gradients, so the markup (shipped twice per page: Suspense fallback + RSC
    payload) stays tiny. Heights match a detail page's first screen: header, 4-cell .ledger, 18 .dt

@@ -248,3 +248,8 @@ export function ordinal(n: number): string {
   if (t >= 11 && t <= 13) return `${n}th`
   return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`
 }
+
+/** Thousands separators in the integer part of an already formatted decimal string ("200154.69" → "200,154.69"). */
+export function groupDigits(s: string): string {
+  return s.replace(/^(\d+)/, d => d.replace(/\B(?=(\d{3})+(?!\d))/g, ','))
+}

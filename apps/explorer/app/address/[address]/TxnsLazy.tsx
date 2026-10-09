@@ -6,6 +6,8 @@ import { chainConfig } from '@/lib/chain-client'
 import type { HistoryRow } from '@/lib/providers'
 import { formatNativeToken, formatNumber, timeAgo } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
+import { AddressLedger, AddressLedgerShell } from '@/components/tape/AddressLedger'
+import { toLedgerRows } from '@/lib/ledger'
 
 type HistoryResponse = {
   // HistoryRow, not ProviderTx: the route serves a reduced projection so a
@@ -47,10 +49,13 @@ export function TxnsLazy({ addr }: { addr: string }) {
 
   if (loading) {
     return (
-      <div className="animate-pulse space-y-2">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-9 bg-hair2 rounded" />
-        ))}
+      <div>
+        <AddressLedgerShell currency={chainConfig.currency} />
+        <div className="animate-pulse space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-9 bg-hair2 rounded" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -91,6 +96,10 @@ export function TxnsLazy({ addr }: { addr: string }) {
           {total > 0 && ` — ${formatNumber(total)} total transactions`}
         </span>
       </div>
+      <AddressLedger
+        rows={toLedgerRows(addr, txs.map(t => ({ time: t.blockTimestamp, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value, category: t.category, possibleSpam: t.possibleSpam })))}
+        currency={chainConfig.currency}
+      />
       <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
