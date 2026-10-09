@@ -821,7 +821,8 @@
   }
   /* Forced colours drop backgrounds and the fill IS the data: a CanvasText edge per tile (the
      ::after, so no border widens a tile past its share), the fill as Highlight, failed tiles keep a
-     CanvasText hatch, the ring stays (outline survives). */
+     CanvasText hatch, the ring stays (outline survives). A ringed failed tile inherits
+     forced-color-adjust: none from .x, so the UA no longer recolours its outline: say CanvasText. */
   @media (forced-colors: active) {
     .bs-row > i::before {
       forced-color-adjust: none;
@@ -834,6 +835,9 @@
     .bs-row > i.x {
       forced-color-adjust: none;
       background: repeating-linear-gradient(135deg, CanvasText 0 1.5px, Canvas 1.5px 4px);
+    }
+    .bs-row > i.c {
+      outline-color: CanvasText;
     }
     .bs-chip {
       forced-color-adjust: none;
