@@ -241,3 +241,10 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
   const frac = fracPart.replace(/0+$/, '')
   return frac ? `${grouped}.${frac}` : grouped
 }
+
+/** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th … 21st. */
+export function ordinal(n: number): string {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return `${n}th`
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`
+}

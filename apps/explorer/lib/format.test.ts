@@ -17,6 +17,7 @@ import {
   formatEstimate,
   hasSupply,
   formatUtcClock,
+  ordinal,
 } from './format'
 import { shortenAddress } from './address-display'
 
@@ -282,5 +283,12 @@ describe('"—" instead of a number we do not have', () => {
     expect(hasSupply('not a number')).toBe(false)
     expect(hasSupply('1')).toBe(true)
     expect(hasSupply('1000000000000000000000000')).toBe(true)
+  })
+})
+
+describe('ordinal', () => {
+  it('uses st/nd/rd/th, with 11–13 as th', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112].map(ordinal))
+      .toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '101st', '111th', '112th'])
   })
 })

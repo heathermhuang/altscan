@@ -119,3 +119,24 @@ export function gasPct(used: Gas, limit: Gas): number {
     return 0
   }
 }
+
+/** One transaction of a block as the block strip draws it: `i` = tx_index, `gas` = gas used, `price` = wei per gas. */
+export interface StripTx { i: number; gas: number; price: number; ok: boolean }
+
+/** A strip tile's flex weight: gas used in thousands, at least 1 (a 21k transfer is 21; nothing is 0). */
+export function stripWeight(gas: number): number {
+  return Math.max(1, Math.round(gas / 1000))
+}
+
+/**
+ * Fill percent per tx: its gas price on a log scale from the block's lowest to highest positive price,
+ * mapped to 30-100 so a floor-price tx still shows a fill. A zero price (a system tx) is 0; a block
+ * whose positive prices are all equal fills them all.
+ */
+export function stripFills(prices: number[]): number[] {
+  const pos = prices.filter(p => p > 0)
+  if (!pos.length) return prices.map(() => 0)
+  const lo = Math.log(Math.min(...pos))
+  const hi = Math.log(Math.max(...pos))
+  return prices.map(p => (p <= 0 ? 0 : hi === lo ? 100 : Math.round(30 + (70 * (Math.log(p) - lo)) / (hi - lo))))
+}

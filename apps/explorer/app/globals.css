@@ -733,6 +733,101 @@
   }
 }
 
+/* Block strip (components/tape/BlockStrip.tsx): the txs of ONE block. flex-grow = gas used in
+   thousands (--w), fill = gas price (--f), no gaps and min-width 0 so the strip is exactly the
+   content width at every viewport; a 1px card-coloured inset is the separator, so dense runs of
+   21k-gas transfers read as texture. Only the ringed (.c) and failed (.x) tiles keep a floor width. */
+@layer components {
+  .bs-track {
+    height: 64px;
+  }
+  .bs-track.bs-has-cur {
+    height: 92px;
+  }
+  .bs-row {
+    display: flex;
+    height: 100%;
+    padding: 8px 0 10px;
+  }
+  .bs-has-cur .bs-row {
+    padding-top: 34px;
+  }
+  .bs-row > i {
+    position: relative;
+    flex: var(--w) 1 0;
+    min-width: 0;
+    background: var(--acc-t);
+    box-shadow: inset -1px 0 var(--card);
+  }
+  .bs-row > i::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 1px;
+    bottom: 0;
+    height: var(--f);
+    background: var(--acc);
+  }
+  .bs-row > i.x {
+    min-width: 2px;
+    background: repeating-linear-gradient(135deg, var(--warn) 0 1.5px, transparent 1.5px 4px);
+  }
+  .bs-row > i.x::before {
+    display: none;
+  }
+  .bs-row > i.c {
+    min-width: 3px;
+    z-index: 1;
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  .bs-chip {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 7px);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--card);
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .bs-chip.l {
+    right: auto;
+    left: 0;
+  }
+  @media (min-width: 768px) {
+    .bs-track {
+      height: 84px;
+    }
+    .bs-track.bs-has-cur {
+      height: 112px;
+    }
+  }
+  /* Forced colours drop backgrounds and the fill IS the data: a CanvasText edge per tile, the fill
+     as Highlight, failed tiles keep a CanvasText hatch, the ring stays (outline survives). */
+  @media (forced-colors: active) {
+    .bs-row > i {
+      border-right: 1px solid CanvasText;
+    }
+    .bs-row > i::before {
+      forced-color-adjust: none;
+      background: Highlight;
+    }
+    .bs-row > i.x {
+      forced-color-adjust: none;
+      background: repeating-linear-gradient(135deg, CanvasText 0 1.5px, Canvas 1.5px 4px);
+    }
+    .bs-chip {
+      forced-color-adjust: none;
+      background: CanvasText;
+      color: Canvas;
+    }
+  }
+}
+
 /* Loading skeleton (components/ui/DetailSkeleton.tsx). A handful of elements whose bars and row
    lines are drawn with gradients, so the markup (shipped twice per page: Suspense fallback + RSC
    payload) stays tiny. Heights match a detail page's first screen: header, 4-cell .ledger, 18 .dt

@@ -3,16 +3,16 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNativeToken, formatGwei, formatNumber, formatUtc, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { formatNativeToken, formatGwei, formatNumber, formatUtc, ordinal, timeAgo, safeBigInt, formatTokenAmount, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { chainConfig } from '@/lib/chain'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
-import { Icon, type IconName } from '@/components/ui/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { decodeTx, type DecodedTx } from '@/lib/tx-decoder'
+import { decodeTx } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -26,6 +26,8 @@ import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfer
 import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
+import { getBlockStrip } from '@/lib/block-strip'
+import { BlockStrip } from '@/components/tape/BlockStrip'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
 // RPC/indexer lag — caches its 404 for everyone until the next revalidate.
@@ -201,16 +203,6 @@ const KNOWN_SIGNATURES: Record<string, string> = {
   '0x2e1a7d4d': 'withdraw(uint256)',
 }
 
-// The decoded-summary card's icon, by what the decoder made of the transaction.
-const DECODED_ICON: Record<DecodedTx['type'], IconName> = {
-  transfer: 'arrow',
-  swap: 'swap',
-  approval: 'check',
-  contract_deploy: 'code',
-  contract_call: 'code',
-  other: 'info',
-}
-
 const TX_TYPE_LABELS: Record<number, string> = {
   0: 'Legacy',
   1: 'EIP-2930 (Access List)',
@@ -302,7 +294,7 @@ export default async function TxDetailPage({
 
   // token_transfers is compact-immortal → still local even for a pruned tx.
   // logs are a prunable body → local when present, else from the refetched body.
-  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip] = await Promise.all([
+  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip] = await Promise.all([
     (fromRpc || bodyPruned)
       ? Promise.resolve([])
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
@@ -319,6 +311,8 @@ export default async function TxDetailPage({
       : Promise.resolve(null),
     fetchNativePrice(),
     fetchChainTip(),
+    // An RPC-path tx has no local block, so no strip.
+    fromRpc ? Promise.resolve(null) : getBlockStrip(tx.blockNumber),
   ])
 
   // Both bodyless views read the refetched body; a local tx reads the DB.
@@ -486,13 +480,25 @@ export default async function TxDetailPage({
     chainConfig.currency
   )
 
+  // The block strip's view of this tx (null for an RPC tx or a block that is not fully indexed).
+  const stripUsed = strip ? strip.txs.reduce((s, t) => s + t.gas, 0) : 0
+  const stripPos = strip ? strip.txs.findIndex(t => t.i === tx.txIndex) : -1
+  const blockShare = strip && stripPos >= 0 && stripUsed > 0
+    ? ((strip.txs[stripPos].gas / stripUsed) * 100).toFixed(1)
+    : null
+  const headline = decoded?.summary || `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
+    <div className="max-w-7xl mx-auto px-4 pt-8">
       <BreadcrumbJsonLd items={[{ name: 'Transactions', href: '/txs' }, { name: `Tx ${hash.slice(0, 18)}…` }]} />
       <div className="mb-5">
-        <p className="k">{'// '}transaction</p>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h1 className="text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Transaction Details</h1>
+        <p className="k">
+          {'// '}transaction
+          {strip && stripPos >= 0 && ` · ${ordinal(stripPos + 1)} of ${strip.txs.length} in block ${formatNumber(tx.blockNumber)}`}
+        </p>
+        <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-2">
+          <h1 className="min-w-0 break-words text-[clamp(24px,2.6vw,34px)] font-bold leading-[1.1] tracking-[-0.02em] text-ink">{headline}</h1>
           <a
             href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
             target="_blank"
@@ -506,8 +512,28 @@ export default async function TxDetailPage({
           <span className="min-w-0 break-all pt-0.5">{tx.hash}</span>
           <CopyButton text={tx.hash} />
         </div>
+        <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
+          Sent by <AddressLink address={tx.fromAddress} />.{' '}
+          <span className="font-semibold text-ink">{tx.status ? 'Succeeded' : 'Failed'}</span>{' '}
+          {timeAgo(new Date(tx.timestamp))} and paid {formatNativeToken(fee, 8)} {chainConfig.currency} in fees.
+          {gasUsed > 0n && gasUsed < MAX_REASONABLE_GAS && (
+            <> It used {formatNumber(Number(gasUsed))} gas{blockShare && `, ${blockShare}% of its block`}.</>
+          )}
+        </p>
       </div>
+    </div>
 
+    {strip && (
+      <BlockStrip
+        txs={strip.txs}
+        blockNumber={tx.blockNumber}
+        gasLimit={strip.gasLimit}
+        chainName={chainConfig.name}
+        current={tx.txIndex}
+      />
+    )}
+
+    <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <dl className="ledger [--cols:5] mb-4">
         <Fact label="Status">
           <Badge variant={tx.status ? 'success' : 'fail'}>
@@ -565,13 +591,6 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {decoded && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3">
-          <Icon name={DECODED_ICON[decoded.type]} className="h-6 w-6 text-acc-ink" />
-          <p className="text-sm text-ink2">{decoded.summary}</p>
-        </div>
-      )}
-
       {transferInfos.length > 0 && (
         // Up to TRANSFER_PREVIEW transfers are the whole list, shown once here. Past that this is a
         // preview and the full list (id="token-transfers") follows the detail table.
@@ -605,23 +624,6 @@ export default async function TxDetailPage({
       )}
 
       <dl className="mb-6 divide-y divide-hair rounded-xl border border-hair bg-card">
-        <Row label="Transaction Hash" value={tx.hash} mono copy />
-        <Row label="Status" value={tx.status ? 'Success' : 'Failed'} />
-        <RowShell label="Block">
-          <Link href={`/blocks/${tx.blockNumber}`} className="font-mono text-acc-ink hover:underline">
-            {formatNumber(tx.blockNumber)}
-          </Link>
-          {confirmations != null && confirmations > 0 && (
-            <span className="ml-2 rounded-[4px] bg-hair2 px-1.5 py-0.5 font-mono text-xs text-ink2">
-              {formatNumber(confirmations)} Confirmations
-            </span>
-          )}
-        </RowShell>
-        <Row
-          label="Timestamp"
-          value={`${timeAgo(new Date(tx.timestamp))} (${formatUtc(tx.timestamp)})`}
-          mono
-        />
         <Row
           label="From"
           value={toChecksumAddress(tx.fromAddress)}
@@ -639,14 +641,6 @@ export default async function TxDetailPage({
           addressLabel={tx.toAddress ? getAddressLabel(tx.toAddress) : null}
           copyReferralPlacement={tx.toAddress ? 'address_copy' : undefined}
         />
-        <RowShell label="Value" mono>
-          {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
-          {valueUsd && <span className="ml-1 text-mut">({valueUsd})</span>}
-        </RowShell>
-        <RowShell label="Transaction Fee" mono>
-          {formatNativeToken(fee, 8)} {chainConfig.currency}
-          {feeUsd && <span className="ml-1 text-mut">({feeUsd})</span>}
-        </RowShell>
         <Row
           label="Gas Price"
           value={`${formatGwei(BigInt(tx.gasPrice ?? 0))} Gwei`}
@@ -860,6 +854,7 @@ export default async function TxDetailPage({
         </div>
       )}
     </div>
+    </>
   )
 }
 
