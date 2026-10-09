@@ -253,3 +253,8 @@ export function ordinal(n: number): string {
 export function groupDigits(s: string): string {
   return s.replace(/^(\d+)/, d => d.replace(/\B(?=(\d{3})+(?!\d))/g, ','))
 }
+
+/** A percentage to one decimal. A non-zero share under 0.1 reads "<0.1", never a false "0.0". */
+export function formatShare(pct: number): string {
+  return pct > 0 && pct < 0.1 ? '<0.1' : pct.toFixed(1)
+}

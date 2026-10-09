@@ -112,29 +112,12 @@ export default function AboutPage() {
         ))}
       </div>
 
-      {/* Links */}
-      <div className="flex flex-wrap gap-3 text-sm">
-        <Link
-          href="/"
-          className="rounded-[9px] bg-ink px-4 py-2 font-medium text-card transition-opacity hover:opacity-90"
-        >
-          Start Exploring
-        </Link>
-        <Link
-          href="/api-docs"
-          className="rounded-[9px] border border-hair px-4 py-2 font-medium text-ink2 transition-colors hover:border-hair3"
-        >
-          API Documentation
-        </Link>
-        <a
-          href="https://github.com/heathermhuang/altscan"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-[9px] border border-hair px-4 py-2 font-medium text-ink2 transition-colors hover:border-hair3"
-        >
-          GitHub &rarr;
-        </a>
-      </div>
+      <p className="text-ink2">
+        The code is on{' '}
+        <a href="https://github.com/heathermhuang/altscan" target="_blank" rel="noopener noreferrer" className="text-acc-ink underline hover:no-underline">GitHub</a>{' '}
+        under AGPL-3.0, and every endpoint is in the{' '}
+        <Link href="/api-docs" className="text-acc-ink underline hover:no-underline">API reference</Link>.
+      </p>
     </div>
   )
 }

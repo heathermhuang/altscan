@@ -291,7 +291,7 @@ export default async function HomePage() {
       <div className="hero">
         <p className="k">{'// '}{chainConfig.name} · block explorer</p>
         <h1 className="hero-h">
-          {chainConfig.tagline}
+          Read {chainConfig.name},{' '}<span className="whitespace-nowrap">block by block.</span>
         </h1>
         <p className="hero-p">
           Maintained by{' '}

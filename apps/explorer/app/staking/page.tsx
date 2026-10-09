@@ -103,23 +103,6 @@ export default async function StakingPage() {
         className="mb-6"
       />
 
-      {/* How staking works */}
-      <div className="mb-6 rounded-xl border border-hair bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">How Ethereum Staking Works</h2>
-        <div className="grid grid-cols-1 gap-6 text-sm text-ink md:grid-cols-2">
-          <div className="space-y-3">
-            <Step n={1} title="Deposit 32 ETH" detail="Send 32 ETH to the deposit contract to activate a validator" />
-            <Step n={2} title="Run a Validator Node" detail="Run execution + consensus clients (e.g., Geth + Lighthouse)" />
-            <Step n={3} title="Propose & Attest Blocks" detail="Earn rewards for correctly proposing and attesting to blocks" />
-          </div>
-          <div className="space-y-3">
-            <InfoRow title="Slashing Risk" detail="Malicious or faulty validators lose part of their stake" />
-            <InfoRow title="Liquid Staking" detail="Use Lido (stETH) or Rocket Pool (rETH) to stake without 32 ETH" />
-            <InfoRow title="Withdrawals" detail="Available since the Shanghai upgrade (April 2023)" />
-          </div>
-        </div>
-      </div>
-
       {/* Deposit contract info */}
       <div className="rounded-xl border border-hair bg-card p-4">
         <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em] text-ink">ETH2 Deposit Contract</h2>
@@ -151,32 +134,6 @@ function StatCard({ label, value, note }: {
       <dt className="k">{label}</dt>
       <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
       <dd className="mt-0.5 break-words text-xs text-mut">{note}</dd>
-    </div>
-  )
-}
-
-function Step({ n, title, detail }: { n: number; title: string; detail: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-hair2 font-mono text-xs font-semibold text-ink2">
-        {n}
-      </span>
-      <div>
-        <p className="font-medium text-ink">{title}</p>
-        <p className="text-ink2">{detail}</p>
-      </div>
-    </div>
-  )
-}
-
-function InfoRow({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-hair3" />
-      <div>
-        <p className="font-medium text-ink">{title}</p>
-        <p className="text-ink2">{detail}</p>
-      </div>
     </div>
   )
 }
