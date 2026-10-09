@@ -123,6 +123,20 @@ export function gasPct(used: Gas, limit: Gas): number {
 /** One transaction of a block as the block strip draws it: `i` = tx_index, `gas` = gas used, `price` = wei per gas. */
 export interface StripTx { i: number; gas: number; price: number; ok: boolean }
 
+/**
+ * Where a tx sits in its block's strip and what share of the strip's gas it used: `pos` is its
+ * index in `txs` (tx_index order; found by tx_index, which can skip), `pct` its gas as a percent of
+ * the strip's total, null when that total is 0. Null when the tx is not in the strip. The one place
+ * the tx page and the strip both read "% of its block" from, so they cannot disagree. It returns the
+ * number, not text: lib/format pulls ethers, and this module is imported by a client component.
+ */
+export function txShareOfBlock(txs: StripTx[], txIndex: number): { pos: number; pct: number | null } | null {
+  const pos = txs.findIndex(t => t.i === txIndex)
+  if (pos < 0) return null
+  const used = txs.reduce((s, t) => s + t.gas, 0)
+  return { pos, pct: used > 0 ? (txs[pos].gas / used) * 100 : null }
+}
+
 /** A strip tile's flex weight: gas used in thousands, at least 1 (a 21k transfer is 21; nothing is 0). */
 export function stripWeight(gas: number): number {
   return Math.max(1, Math.round(gas / 1000))

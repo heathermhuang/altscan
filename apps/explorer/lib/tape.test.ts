@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, stripFills, stripWeight, tapeWindow, toTapeTuple, type TapeTuple } from '@/lib/tape'
+import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, stripFills, stripWeight, tapeWindow, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -170,5 +170,36 @@ describe('stripFills', () => {
   it('returns all zeros when no price is positive', () => {
     expect(stripFills([0, 0])).toEqual([0, 0])
     expect(stripFills([])).toEqual([])
+  })
+})
+
+describe('txShareOfBlock', () => {
+  const strip: StripTx[] = [
+    { i: 0, gas: 50_000, price: 0, ok: true },
+    { i: 1, gas: 21_000, price: 5e7, ok: true },
+    { i: 5, gas: 140_000, price: 1e9, ok: false },
+    { i: 7, gas: 289_000, price: 5e7, ok: true },
+  ]
+
+  it('finds a tx by its tx_index, not its position, and gives its share of the strip\'s gas', () => {
+    const r = txShareOfBlock(strip, 7)!
+    expect(r.pos).toBe(3)
+    expect(r.pct).toBeCloseTo(57.8, 6)   // 289,000 of 500,000
+  })
+
+  it('counts every tx, failed ones too (they used the gas)', () => {
+    const r = txShareOfBlock(strip, 5)!
+    expect(r.pos).toBe(2)
+    expect(r.pct).toBeCloseTo(28, 6)   // 140,000 of 500,000
+  })
+
+  it('is null when the tx is not in the strip', () => {
+    expect(txShareOfBlock(strip, 2)).toBeNull()
+    expect(txShareOfBlock([], 0)).toBeNull()
+  })
+
+  it('has a position but no share when the strip\'s gas sums to zero', () => {
+    const zero: StripTx[] = [{ i: 0, gas: 0, price: 0, ok: true }, { i: 1, gas: 0, price: 0, ok: true }]
+    expect(txShareOfBlock(zero, 1)).toEqual({ pos: 1, pct: null })
   })
 })

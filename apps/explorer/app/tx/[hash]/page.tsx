@@ -27,6 +27,7 @@ import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
+import { txShareOfBlock } from '@/lib/tape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
@@ -485,11 +486,9 @@ export default async function TxDetailPage({
   )
 
   // The block strip's view of this tx (null for an RPC tx or a block that is not fully indexed).
-  const stripUsed = strip ? strip.txs.reduce((s, t) => s + t.gas, 0) : 0
-  const stripPos = strip ? strip.txs.findIndex(t => t.i === tx.txIndex) : -1
-  const blockShare = strip && stripPos >= 0 && stripUsed > 0
-    ? formatShare((strip.txs[stripPos].gas / stripUsed) * 100)
-    : null
+  const stripAt = strip ? txShareOfBlock(strip.txs, tx.txIndex) : null
+  const stripPos = stripAt ? stripAt.pos : -1
+  const blockShare = stripAt && stripAt.pct !== null ? formatShare(stripAt.pct) : null
   const outcome = txOutcome({ status: tx.status, pending: rpcTx?.pending })
   const headline = decoded?.summary
     ? (tx.status ? decoded.summary : attemptedSummary(decoded.summary))

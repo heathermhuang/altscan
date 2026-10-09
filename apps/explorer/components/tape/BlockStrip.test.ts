@@ -65,8 +65,11 @@ describe('BlockStrip', () => {
     expect(chip(mk([...small, 21_000, 900_000]), 4)).toBe('class="bs-chip l"')    // 5th of 8, but 90% of the gas is after it: left edge
   })
   it('appends a className to the band (the block page joins it to the tape above)', () => {
-    const h = renderToStaticMarkup(createElement(BlockStrip, { txs, blockNumber: 1, gasLimit: 0, chainName: 'X', className: 'border-t-0' }))
+    const h = renderToStaticMarkup(createElement(BlockStrip, { txs, blockNumber: 1, gasLimit: 1_000_000, chainName: 'X', className: 'border-t-0' }))
     expect(h).toContain('class="bt-box border-t-0"')
-    expect(h).not.toContain('of limit')   // gasLimit 0: no percentage claimed
+  })
+  it('claims no "% of limit" when the block\'s gas limit is unknown (0)', () => {
+    const h = renderToStaticMarkup(createElement(BlockStrip, { txs, blockNumber: 1, gasLimit: 0, chainName: 'X' }))
+    expect(h).not.toContain('of limit')
   })
 })
