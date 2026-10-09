@@ -46,6 +46,12 @@ export function HoldersCountLazy({ address, fallback }: { address: string; fallb
   return <>{formatHolders(count ?? fallback)}</>
 }
 
+/** The two notes are about the same length on purpose: the slot is sized by the longer one. */
+const NOTES = {
+  local: "Estimated from the net flow of this token's most recent 10,000 transfers, not full on-chain balances — large steady holders (e.g. exchanges) may be missing.",
+  moralis: "Real on-chain balances, ranked highest first, as reported by Moralis. Results are cached and refresh periodically, so the very latest transfers may not show yet.",
+}
+
 export function HoldersLazy({
   address,
   symbol,
@@ -96,14 +102,28 @@ export function HoldersLazy({
           {data.source === 'moralis' ? 'via Moralis' : 'Estimated from recent transfers'}
         </span>
       </div>
-      {data.source === 'local' && (
-        <div className="flex items-start gap-2 px-4 py-2 bg-warn-t text-ink2 text-xs border-b border-hair border-l-[3px] border-l-warn">
-          <Icon name="warn" className="mt-px h-3.5 w-3.5 text-warn" />
-          <span>Estimated from the net flow of this token&apos;s most recent 10,000 transfers, not full on-chain balances — large steady holders (e.g. exchanges) may be missing.</span>
-        </div>
-      )}
+      {/* The note slot renders in BOTH states with the same box, and both notes sit in one grid
+          cell (the one not shown is `invisible`), so the slot is as tall as the longer note at
+          every width: the estimate -> live swap changes the note, never the rows' position. */}
+      <div
+        className={`flex items-start gap-2 px-4 py-2 text-ink2 text-xs border-b border-hair border-l-[3px] ${
+          data.source === 'local' ? 'bg-warn-t border-l-warn' : 'bg-canvas border-l-hair3'
+        }`}
+      >
+        <Icon
+          name={data.source === 'local' ? 'warn' : 'info'}
+          className={`mt-px h-3.5 w-3.5 ${data.source === 'local' ? 'text-warn' : 'text-mut'}`}
+        />
+        <span className="grid">
+          {(['local', 'moralis'] as const).map((source) => (
+            <span key={source} className={`[grid-area:1/1]${source === data.source ? '' : ' invisible'}`}>
+              {NOTES[source]}
+            </span>
+          ))}
+        </span>
+      </div>
       <div className="overflow-x-auto">
-      <table className="dt">
+      <table className="dt dt-2l">
         <caption className="sr-only">Top holders of {symbol}</caption>
         <thead>
           <tr>

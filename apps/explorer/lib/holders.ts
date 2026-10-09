@@ -16,6 +16,7 @@
 import { db } from './db'
 import { sql } from 'drizzle-orm'
 import { getDataProvider } from './providers'
+import { TOKEN_HOLDERS_PAGE_SIZE } from '@altscan/providers'
 import type { ProviderAdapter, ProviderResult, TokenHoldersPage } from './providers'
 
 export type TokenHolder = {
@@ -41,6 +42,13 @@ export const EMPTY_HOLDERS: HoldersResult = { holders: [], holderCount: null, so
  * cold / 20 ms warm on ETH. HoldersLazy's estimate banner states this number.
  */
 export const LOCAL_HOLDERS_WINDOW = 10_000
+
+/**
+ * How many rows the local estimate returns: the provider's page size, so HoldersLazy's swap from
+ * the SSR estimate to the live holders changes values, not the table's height (was LIMIT 10 against
+ * the provider's 25: a 15-row layout shift on every token page view, CLS ~0.19 on USDT).
+ */
+export const LOCAL_HOLDERS_LIMIT = TOKEN_HOLDERS_PAGE_SIZE
 
 /**
  * Top net-receivers over the token's most recent LOCAL_HOLDERS_WINDOW transfers.
@@ -69,7 +77,7 @@ export function buildLocalNetFlowQuery(tokenAddr: string) {
     GROUP BY addr
     HAVING SUM(v) > 0
     ORDER BY SUM(v) DESC
-    LIMIT 10
+    LIMIT ${sql.raw(String(LOCAL_HOLDERS_LIMIT))}
   `
 }
 

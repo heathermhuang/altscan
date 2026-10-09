@@ -386,6 +386,16 @@
       padding-inline: 16px;
     }
   }
+  /* `dt-2l` (token Top Holders): below sm every row is exactly two lines tall (the floor sits just
+     above a natural two-line row: 2 lines + 16px of padding + the collapsed border), so whether a
+     cell wraps (a balance, a short address) cannot change the row's height. The page swaps the SSR
+     estimate for the live holders over it, and their digits differ; without the floor the table
+     moved by up to a line a row. A row that wraps to three lines still grows. */
+  @media (max-width: 639.98px) {
+    .dt-2l tbody tr {
+      height: calc(2lh + 18px);
+    }
+  }
   /* `dt-a` (BlockTable, TxTable): every link in the table is an accent link, so the cells carry no
      per-link colour or hover classes. :where() keeps it at the specificity of the utilities it
      replaced, so one on a link (font-medium) still applies. */

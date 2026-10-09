@@ -4,7 +4,7 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from './token-transfers-query'
-import { buildLocalNetFlowQuery, LOCAL_HOLDERS_WINDOW } from './holders'
+import { buildLocalNetFlowQuery, LOCAL_HOLDERS_LIMIT, LOCAL_HOLDERS_WINDOW } from './holders'
 
 /**
  * The token page's transfer list, transfer count and local holders estimate against a REAL Postgres.
@@ -80,7 +80,8 @@ const ROWS = `
                                                  UNION ALL SELECT generate_series(0, 9999, 64) + 1) s) t;
 
   -- In the window: recipient j (= block % 20) is paid 1000 + 10j in each of its 250 blocks, so the
-  -- top ten are holders 19..10 in that order. The second transfer a block is a 1-unit pair of strangers.
+  -- top twenty are holders 19..0 in that order. The second transfer a block is a 1-unit pair of
+  -- strangers, 5,000 of whom end up net-positive: they fill the rest of a 25-row page.
   INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, value, block_number, timestamp)
   SELECT '0x' || md5('w' || b || ':' || i) || md5('x' || b || ':' || i), 200 + i, '${WINDOWED}',
          CASE WHEN b >= 5000 AND i = 0 THEN '${SOURCE}' ELSE '0x' || md5('wf' || b || ':' || i) || '00000000' END,
@@ -201,9 +202,12 @@ describe.skipIf(!PG_URL)('token page transfers — against a real Postgres', () 
 
       const holders = await topHolders(WINDOWED)
       expect(holders.map((h) => h.addr)).not.toContain(OLD_WHALE)
-      expect(holders).toEqual(
-        Array.from({ length: 10 }, (_, k) => 19 - k).map((j) => ({ addr: holder(j), balance: String(250 * (1000 + 10 * j)) })),
+      expect(holders).toHaveLength(LOCAL_HOLDERS_LIMIT)
+      expect(holders.slice(0, 20)).toEqual(
+        Array.from({ length: 20 }, (_, k) => 19 - k).map((j) => ({ addr: holder(j), balance: String(250 * (1000 + 10 * j)) })),
       )
+      // Past the twenty paid holders the page is filled by tied 1-unit strangers (any five of them).
+      expect(holders.slice(20).map((h) => h.balance)).toEqual(Array(LOCAL_HOLDERS_LIMIT - 20).fill('1'))
     })
 
     it('returns no holders for a token with no transfers', async () => {
