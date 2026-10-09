@@ -11,7 +11,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { toChecksumAddress, shortenAddress, shortHash } from '@/lib/address-display'
+import { toChecksumAddress, shortenAddress, shortHash, addressHeadline } from '@/lib/address-display'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/providers'
@@ -240,13 +240,13 @@ export default async function AddressPage({
         ? 'address_low_balance'
         : null
 
-  // The page leads with what the address IS: its known label, else its resolved name, else its kind
-  // and a shortened form. The kind is only claimed when the RPC answered (status.known).
+  // The page leads with what the address IS: its curated label, else its kind and a shortened form.
+  // The kind is only claimed when the RPC answered (status.known). A resolved ENS/.bnb name is
+  // self-chosen, so it is never the headline (see addressHeadline); it stays a badge below.
   const kind = contractStatus.isContract ? 'Contract' : contractStatus.known ? 'Wallet' : 'Address'
-  // `||`, not `??`: an empty label or name is no name (it would print as a blank h1).
+  // `||`, not `??`: an empty label is no label (it would print as a blank h1).
   const label = addressInfo?.label || getAddressLabel(addr)
-  const named = label || resolvedName
-  const headline = named || `${kind} ${shortenAddress(checksummedAddr)}`
+  const headline = addressHeadline({ label, kind, checksummed: checksummedAddr })
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -271,15 +271,15 @@ export default async function AddressPage({
         <p className="k">{'// address'}{kind !== 'Address' && ` · ${kind.toLowerCase()}`}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="mr-1 min-w-0 break-words text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">{headline}</h1>
-          {resolvedName && label && (
+          {resolvedName && (
             <Badge variant="default">
               <span className="inline-flex items-center gap-1">
                 <Icon name="tag" className="h-3.5 w-3.5" />{resolvedName}
               </span>
             </Badge>
           )}
-          {/* The headline already says "Contract …" when nothing names the address. */}
-          {contractStatus.isContract && named && <Badge variant="default">Contract</Badge>}
+          {/* The headline already says "Contract …" when no label names the address. */}
+          {contractStatus.isContract && label && <Badge variant="default">Contract</Badge>}
           <WatchlistButton address={addr} />
           <a
             href={`${chainConfig.externalExplorerUrl}/address/${addr}`}

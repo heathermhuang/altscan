@@ -53,3 +53,19 @@ export function shortHash(hash: string, lead = 6, tail = 5): string {
   if (!/^0x[0-9a-f]{64}$/.test(lower)) return hash ?? ''
   return `${lower.slice(0, 2 + lead)}…${lower.slice(-tail)}`
 }
+
+/**
+ * The address page's H1: the curated label when there is one, else the kind and a short
+ * form (`Wallet 0xabcd…1234`).
+ *
+ * Deliberately takes no resolved (ENS / .bnb) name. Those are self-chosen — anyone can register
+ * "binance-hot-wallet.bnb" — so promoting one to the page's headline would let an address name
+ * itself. It stays a badge. `||`, not `??`: an empty label is no label.
+ */
+export function addressHeadline(args: {
+  label: string | null | undefined
+  kind: string
+  checksummed: string
+}): string {
+  return args.label || `${args.kind} ${shortenAddress(args.checksummed)}`
+}
