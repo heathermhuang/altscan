@@ -12,7 +12,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { attemptedSummary, decodeTx } from '@/lib/tx-decoder'
+import { attemptedSummary, decodeTx, safeTransferSymbol } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -437,7 +437,7 @@ export default async function TxDetailPage({
       fromAddress: t.fromAddress,
       toAddress: t.toAddress,
       value: t.value ?? '0',
-      tokenSymbol: tok?.symbol || undefined,
+      tokenSymbol: safeTransferSymbol(t.tokenAddress, tok?.symbol, chainConfig.key),
       tokenDecimals: tok?.decimals,
     }
   })
@@ -451,7 +451,7 @@ export default async function TxDetailPage({
       try {
         const [tok] = await db.select({ symbol: schema.tokens.symbol, decimals: schema.tokens.decimals })
           .from(schema.tokens).where(eq(schema.tokens.address, tx.toAddress.toLowerCase())).limit(1)
-        if (tok) { tokenSymbol = tok.symbol; tokenDecimals = tok.decimals }
+        if (tok) { tokenSymbol = safeTransferSymbol(tx.toAddress, tok.symbol, chainConfig.key); tokenDecimals = tok.decimals }
       } catch { /* ignore */ }
       transferInfos.push({
         tokenAddress: tx.toAddress,

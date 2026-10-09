@@ -1,8 +1,10 @@
 // Rule-based plain-English transaction decoder
 // Turns raw tx data into human-readable descriptions
 
+import type { ChainKey } from '@altscan/chain-config'
 import { getAddressLabel } from './known-addresses'
-import { safeBigInt, formatTokenAmount } from './format'
+import { safeBigInt, formatTokenAmount, sanitizeSymbolOr } from './format'
+import { lookalikeOf } from './lookalike'
 
 export interface DecodedTx {
   summary: string
@@ -16,6 +18,25 @@ export interface TxTransferInfo {
   value: string
   tokenSymbol?: string
   tokenDecimals?: number
+}
+
+/**
+ * The symbol a transfer may be NAMED by in a headline, or undefined (decodeTx then falls back to
+ * the token address prefix). A token symbol is chosen by whoever deploys the contract: an
+ * address-poisoning dust transfer calls itself "USDT", and a headline that says "Transferred 0
+ * USDT" repeats the lie in the page's largest type. So a token that lookalikeOf flags (it reads as
+ * a well-known token but is not that contract) gets no symbol, and any other symbol is sanitised
+ * (control/bidi/non-ASCII stripped) and treated as missing when nothing printable survives. The
+ * chain is a parameter: pass `chainConfig.key`.
+ */
+export function safeTransferSymbol(
+  address: string,
+  symbol: string | null | undefined,
+  chain: ChainKey,
+): string | undefined {
+  if (!symbol) return undefined
+  if (lookalikeOf({ address, symbol }, chain)) return undefined
+  return sanitizeSymbolOr(symbol, '') || undefined
 }
 
 // Known method IDs
@@ -137,9 +158,7 @@ export function decodeTx(tx: {
     if (transfers.length > 0) {
       const t = transfers[0]
       const sym = t.tokenSymbol ?? t.tokenAddress.slice(0, 8)
-      const amt = t.tokenDecimals
-        ? (Number(BigInt(t.value ?? '0')) / Math.pow(10, t.tokenDecimals)).toFixed(2)
-        : '?'
+      const amt = t.tokenDecimals != null ? formatTokenAmount(t.value ?? '0', t.tokenDecimals, 6) : '?'
       const to = getAddressLabel(t.toAddress) ?? `${t.toAddress.slice(0, 12)}…`
       return { summary: `Transferred ${amt} ${sym} to ${to}`, type: 'transfer' }
     }
