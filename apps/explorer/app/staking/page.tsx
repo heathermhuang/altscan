@@ -53,8 +53,8 @@ export default async function StakingPage() {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     mainEntity: [
-      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY). Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
-      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires exactly 32 ETH.' } },
+      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY). Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
+      { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires at least 32 ETH.' } },
     ],
   }
 
@@ -69,7 +69,7 @@ export default async function StakingPage() {
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Ethereum Staking</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink2">
           Ethereum uses Proof of Stake consensus since The Merge (September 2022).
-          Validators stake 32 ETH to participate in block validation and earn rewards (~3-4% APY).
+          Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY).
           This page shows live staking statistics derived from the ETH2 deposit contract.
         </p>
       </div>
