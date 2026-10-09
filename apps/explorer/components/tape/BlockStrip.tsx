@@ -33,7 +33,7 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
   const weightSum = weights.reduce((s, w) => s + w, 0)
   const centre = curPos >= 0 ? (weights.slice(0, curPos).reduce((s, w) => s + w, 0) + weights[curPos] / 2) / weightSum : 0
   const label = `${chainName} block ${fmt(blockNumber)}: ${txs.length} transactions, ${failed} failed`
-    + (cur ? `; this one is the ${ordinal(curPos + 1)} and used ${share}% of the block's gas` : '')
+    + (cur ? `; this one is the ${ordinal(curPos + 1)}${share !== null ? ` and used ${share}% of the block's gas` : ''}` : '')
 
   return (
     <div className={`bt-box${className ? ` ${className}` : ''}`}>

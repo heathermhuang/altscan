@@ -802,6 +802,7 @@
     color: var(--card);
     font-family: var(--font-mono), ui-monospace, Menlo, monospace;
     font-size: 11px;
+    font-style: normal;
     white-space: nowrap;
     pointer-events: none;
   }

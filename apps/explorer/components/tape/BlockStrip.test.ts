@@ -43,6 +43,12 @@ describe('BlockStrip', () => {
   it('keeps the fail mark on a ringed failed tx', () => {
     expect(html(2)).toContain('class="c x"')
   })
+  it('has no "null%" in the label when the block\'s gas sums to zero', () => {
+    const zero: StripTx[] = [{ i: 0, gas: 0, price: 0, ok: true }, { i: 1, gas: 0, price: 0, ok: true }]
+    const h = renderToStaticMarkup(createElement(BlockStrip, { txs: zero, blockNumber: 7, gasLimit: 1_000_000, chainName: 'BNB Chain', current: 1 }))
+    expect(h).toContain('this one is the 2nd')
+    expect(h).not.toContain('null')
+  })
   it('anchors the chip by where the tile sits, not by its tx_index', () => {
     const mk = (gas: number[]): StripTx[] => gas.map((g, i) => ({ i, gas: g, price: 5e7, ok: true }))
     const chip = (t: StripTx[], current: number) =>
