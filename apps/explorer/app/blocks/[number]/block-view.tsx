@@ -15,6 +15,8 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { shortenAddress, toChecksumAddress } from '@/lib/address-display'
 import { swallow } from '@/lib/observability'
 import { BlockTape } from '@/components/home/BlockTape'
+import { BlockStrip } from '@/components/tape/BlockStrip'
+import { getBlockStrip } from '@/lib/block-strip'
 import { encodeTape, spreadSeconds, tapeWindow, toTapeTuple } from '@/lib/tape'
 import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, txsLabel, txsPageCount } from '@/lib/block-txs'
 
@@ -122,6 +124,9 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
     } catch (e) { swallow('block/tape', e) }
   }
 
+  // The zoom: this block's own transactions. Same omission rules as the tape (two indexed reads).
+  const strip = fromRpc ? null : await getBlockStrip(blockNumber)
+
   const gasUsedPct = block.gasUsed && block.gasLimit
     ? ((Number(block.gasUsed) / Number(block.gasLimit)) * 100).toFixed(2)
     : '0'
@@ -184,22 +189,21 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
     {tape !== null && (
       <BlockTape tape={tape} chainName={chainConfig.name} current={block.number} heading={`around #${formatNumber(block.number)}`} />
     )}
+    {strip && (
+      <BlockStrip
+        txs={strip.txs}
+        blockNumber={block.number}
+        gasLimit={strip.gasLimit}
+        chainName={chainConfig.name}
+        className={tape !== null ? 'border-t-0' : undefined}
+      />
+    )}
 
-    <div className={`max-w-7xl mx-auto px-4 pb-8${tape !== null ? ' pt-6' : ''}`}>
+    <div className={`max-w-7xl mx-auto px-4 pb-8${tape !== null || strip ? ' pt-6' : ''}`}>
       <dl className="mb-8 divide-y divide-hair rounded-xl border border-hair bg-card">
-        <DetailRow label="Block Height" value={formatNumber(block.number)} />
-        <DetailRow
-          label="Timestamp"
-          value={`${timeAgo(new Date(block.timestamp))} (${formatUtc(new Date(block.timestamp))})`}
-        />
-        <DetailRow label="Transactions" value={`${block.txCount} transactions in this block`} />
         <DetailRow label="Validator" value={toChecksumAddress(block.miner)} copy />
         <DetailRow label="Block Hash" value={block.hash} copy />
         <DetailRow label="Parent Hash" value={block.parentHash} copy />
-        <DetailRow
-          label="Gas Used"
-          value={`${formatNumber(Number(block.gasUsed ?? 0))} (${gasUsedPct}%)`}
-        />
         <DetailRow label="Gas Limit" value={formatNumber(Number(block.gasLimit ?? 0))} />
         {block.baseFeePerGas && (
           <DetailRow
