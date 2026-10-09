@@ -1,13 +1,13 @@
 import { dbErrorMessage } from '@altscan/db'
 import { schema } from '@/lib/db'
-import { fetchTxPage, parseTx, parsePageParam, PER_PAGE } from '@/lib/list-pages'
+import { fetchTxPage, parseTx, parsePageParam, PER_PAGE, TXS_REVALIDATE_SECONDS } from '@/lib/list-pages'
 import { TxTable } from '@/components/transactions/TxTable'
 import { Pagination } from '@/components/ui/Pagination'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
-import { unstable_cache } from 'next/cache'
 import { chainConfig } from '@/lib/chain'
 import { getBlockStrip } from '@/lib/block-strip'
+import { createPageCache } from '@/lib/page-cache'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 
 // Next.js statically analyses route segment config and cannot resolve an
@@ -24,10 +24,10 @@ export const metadata: Metadata = {
   alternates: { canonical: '/txs' },
 }
 
-// The newest block's strip, cached like the page's own query. Values are numbers/booleans only
-// (a BigInt in an unstable_cache value silently voids the write).
-const cachedStrip = (n: number) =>
-  unstable_cache(() => getBlockStrip(n), ['txs-strip', String(n)], { revalidate: 45 })()
+// The newest block's strip, cached like the page's own query (built once at module scope, the block
+// number is an ARGUMENT). Values are numbers/booleans only (a BigInt in an unstable_cache value
+// silently voids the write).
+const cachedStrip = createPageCache('txs-strip', TXS_REVALIDATE_SECONDS, getBlockStrip)
 
 export default async function TransactionsPage({
   searchParams,

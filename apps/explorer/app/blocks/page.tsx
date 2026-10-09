@@ -1,13 +1,15 @@
 import { dbErrorMessage } from '@altscan/db'
 import { schema } from '@/lib/db'
-import { fetchBlockPage, parseBlock, parsePageParam, PER_PAGE } from '@/lib/list-pages'
+import { BLOCKS_REVALIDATE_SECONDS, fetchBlockPage, parseBlock, parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { Pagination } from '@/components/ui/Pagination'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 import { BlockTape } from '@/components/home/BlockTape'
-import { fetchRecentTape } from '@/lib/recent-tape'
+import { queryRecentTape } from '@/lib/recent-tape'
+import { createPageCache } from '@/lib/page-cache'
+import { swallow } from '@/lib/observability'
 
 // Next.js statically analyses route segment config and cannot resolve an
 // imported identifier here — `export const revalidate = BLOCKS_REVALIDATE_SECONDS`
@@ -23,6 +25,20 @@ export const metadata: Metadata = {
   alternates: { canonical: '/blocks' },
 }
 
+// The tape rides the same cache as the table (this page reads searchParams, so the route itself is
+// dynamic and would otherwise query on every request). Built once at module scope; the failure is
+// swallowed OUTSIDE the cache, so a rejection is never stored and the next request retries.
+const cachedTape = createPageCache('blocks-tape', BLOCKS_REVALIDATE_SECONDS, queryRecentTape)
+
+async function readTape(): Promise<string | null> {
+  try {
+    return await cachedTape()
+  } catch (e) {
+    swallow('blocks/tape', e)
+    return null
+  }
+}
+
 export default async function BlocksPage({
   searchParams,
 }: {
@@ -31,8 +47,9 @@ export default async function BlocksPage({
   const params = await searchParams
   const page = parsePageParam(params.page)
 
-  // Started first so it runs beside the page query. It never rejects (failures are swallowed to null).
-  const tapeQuery = fetchRecentTape()
+  // Page 1 only: "latest #N" above an older page's table would read as a mismatch. Started first so it
+  // runs beside the page query; it never rejects (readTape swallows to null).
+  const tapeQuery = page === 1 ? readTape() : Promise.resolve(null)
 
   let blocks: typeof schema.blocks.$inferSelect[] = []
   let total = 0

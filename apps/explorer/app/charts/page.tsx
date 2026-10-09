@@ -7,6 +7,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { BlockTape } from '@/components/home/BlockTape'
 import { swallow } from '@/lib/observability'
 import { fetchRecentTape } from '@/lib/recent-tape'
+import { withTimeout } from '@/lib/with-timeout'
 
 export const revalidate = 300
 
@@ -17,17 +18,6 @@ export const metadata: Metadata = {
 }
 
 type DataPoint = { date: string; value: number }
-
-const DB_TIMEOUT_MS = 8000
-
-function withTimeout<T>(promise: Promise<T>): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('query timeout')), DB_TIMEOUT_MS)
-    ),
-  ])
-}
 
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
