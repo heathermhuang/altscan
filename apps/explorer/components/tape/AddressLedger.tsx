@@ -14,7 +14,8 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
   if (rows.length < 2) return null
   const nin = rows.filter(r => r.dir === 'in').length
   const nout = rows.length - nin
-  const span = formatSpan(rows[rows.length - 1].t - rows[0].t)
+  const gap = rows[rows.length - 1].t - rows[0].t
+  const span = gap < 1 ? 'in the same second' : `over ${formatSpan(gap)}`
   return (
     <figure className="ldg">
       <div className="ldg-head">
@@ -22,9 +23,9 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
           <span className="bt-dot" aria-hidden="true" />
           <span className="text-ink truncate">These {rows.length} transactions<span className="hidden sm:inline text-mut">, as a ledger</span></span>
         </span>
-        <span className="whitespace-nowrap">▲ {nin} received · ▼ {nout} sent<span className="bt-rate"> · over {span}</span></span>
+        <span className="whitespace-nowrap">▲ {nin} received · ▼ {nout} sent<span className="bt-rate"> · {span}</span></span>
       </div>
-      <div className="ldg-row" role="img" aria-label={`${rows.length} transactions over ${span}: ${nin} received, ${nout} sent`}>
+      <div className="ldg-row" role="img" aria-label={`${rows.length} transactions ${span}: ${nin} received, ${nout} sent`}>
         {rows.map((r, k) => (
           <i
             key={k}

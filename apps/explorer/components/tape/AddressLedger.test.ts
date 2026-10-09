@@ -41,6 +41,14 @@ describe('AddressLedger', () => {
     expect(h).toContain('aria-label="3 transactions over 4 seconds: 1 received, 2 sent"')
     expect(h).toContain('solid = BNB')
   })
+  it('says "in the same second" when every row shares one second, never "over 0 seconds"', () => {
+    const same: LedgerRow[] = Array.from({ length: 25 }, () => ({ t: 100, dir: 'in', native: true, spam: false }))
+    const h = html(same)
+    expect(h).toContain(' · in the same second')
+    expect(h).toContain('aria-label="25 transactions in the same second: 25 received, 0 sent"')
+    expect(h).not.toContain('over 0 seconds')
+    expect(h).not.toContain(' over ')
+  })
   it('draws nothing for fewer than 2 rows', () => {
     expect(html([])).toBe('')
     expect(html(rows.slice(0, 1))).toBe('')
