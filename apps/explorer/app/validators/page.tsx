@@ -9,6 +9,8 @@ import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { blocksIn24h, blocksProduced, minerCounts, type MinerCount } from '@/lib/validator-blocks'
 import { validatorDisplays } from '@/lib/validator-display'
+import { producerLegend, producerStrip, producerSummary } from '@/lib/producers'
+import { TileStrip } from '@/components/tape/TileStrip'
 
 export const metadata: Metadata = {
   title: `Validators`,
@@ -48,16 +50,41 @@ export default async function ValidatorsPage() {
     const n = blocksProduced(blockCounts, address)
     return n === null ? '—' : formatNumber(n)
   }
+  // The strip reads the same per-miner counts as the Blocks (24h) column: one reading, drawn twice.
+  const strip = producerStrip(
+    validators.map((v, i) => ({
+      address: v.address,
+      name: display[i].name,
+      power: display[i].powerUnknown ? null : safeBigInt(v.votingPower),
+    })),
+    blockCounts,
+    chainConfig.currency,
+  )
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
+    <div className="max-w-7xl mx-auto px-4 pt-8">
       <div className="mb-5">
         <p className="k">{'// '}validators</p>
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
           {chainConfig.name} Validators{validators.length > 0 ? ` (${validators.length})` : ''}
         </h1>
       </div>
+    </div>
 
+    {strip && (
+      <TileStrip
+        rowsId="validators-rows"
+        tiles={strip.tiles}
+        title="Validators"
+        stats={{ main: `${strip.producing} of ${strip.total} produced blocks`, side: 'last 24h' }}
+        label={`${chainConfig.name} validators that produced blocks in the last 24 hours, width is blocks produced${strip.fillKnown ? ', fill is voting power' : ''}`}
+        legend={producerLegend(strip.fillKnown)}
+        summary={producerSummary(strip)}
+      />
+    )}
+
+    <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       {validators.length === 0 ? (
         <div className="rounded-xl border border-hair bg-card p-12 text-center">
           <p className="mb-2 text-lg text-ink2">No validators synced yet</p>
@@ -66,7 +93,7 @@ export default async function ValidatorsPage() {
           </p>
         </div>
       ) : (
-      <div className="bg-card rounded-xl border border-hair overflow-hidden">
+      <div id="validators-rows" className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
         <table className="dt">
           <caption className="sr-only">{chainConfig.name} validators ranked by voting power</caption>
@@ -103,5 +130,6 @@ export default async function ValidatorsPage() {
       </div>
       )}
     </div>
+    </>
   )
 }
