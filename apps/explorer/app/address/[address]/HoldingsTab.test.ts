@@ -13,7 +13,6 @@ import { BSC } from '@altscan/chain-config'
 const HOLDER = '0x8894e0a0c962cb723c1976a4421c95949be2d4e3'
 const USDT = BSC.whales.stablecoins[0].address
 const USDC = BSC.whales.stablecoins[1].address
-const WBNB = BSC.whales.wrapped.address
 const E18 = 10n ** 18n
 const other = (i: number) => '0x' + i.toString(16).padStart(40, '0')
 
