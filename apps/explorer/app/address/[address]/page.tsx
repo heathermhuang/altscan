@@ -21,8 +21,8 @@ import { TxnsTable } from './TxnsTable'
 import { TransfersLazy } from './TransfersLazy'
 import { HoldingsTab, getTrackedBalances } from './HoldingsTab'
 import { NftsLazy } from './NftsLazy'
-import { TransferRow } from './TransferRow'
-import { NftRow } from './NftRow'
+import { TransferRow, type TransferTokenInfo } from './TransferRow'
+import { NftRow, type NftTransfer } from './NftRow'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
@@ -587,7 +587,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
   }
 
   // Look up token info (name/symbol/decimals) for DB transfers
-  const tokenInfoMap = new Map<string, { name: string; symbol: string; decimals: number }>()
+  const tokenInfoMap = new Map<string, TransferTokenInfo>()
   if (transfers.length > 0) {
     try {
       const uniqueAddrs = [...new Set(transfers.map(t => t.tokenAddress))]
@@ -713,16 +713,7 @@ async function AnalyticsTab({
 // ---- NFTs Tab ----
 
 async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
-  let nftTransfers: Array<{
-    txHash: string
-    tokenAddress: string
-    tokenId: string | null
-    fromAddress: string
-    toAddress: string
-    blockNumber: number
-    name?: string
-    symbol?: string
-  }> = []
+  let nftTransfers: NftTransfer[] = []
 
   try {
     const result = await db.execute(sql`

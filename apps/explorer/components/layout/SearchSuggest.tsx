@@ -149,7 +149,7 @@ export function TokenOption({ token }: { token: TokenSuggestion }) {
         {token.lookalikeOf && (
           <span className="badge badge-bad">lookalike<span className="sr-only"> of {token.lookalikeOf}</span></span>
         )}
-        {(anyLinkLike(token.symbol, token.name)) && <LinkInName />}
+        {anyLinkLike(token.symbol, token.name) && <LinkInName />}
         <span className="ml-auto text-mut" title={holders.title}>{holders.text}</span>
       </span>
       <span className="block truncate text-mut">{token.name}</span>
