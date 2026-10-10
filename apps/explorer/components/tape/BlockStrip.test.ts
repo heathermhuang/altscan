@@ -38,7 +38,7 @@ describe('BlockStrip', () => {
     expect(h).toContain('class="c"')
     expect(h).toContain('this tx · 300,000 gas')
     expect(h).toContain('this one is the 4th and used 58.7% of the block')  // 300,000 / 511,000
-    expect(h).toContain('bs-has-cur')
+    expect(h).toContain('tp-cur')
   })
   it('says <0.1% for a tiny tx in a dense block, never 0.0%', () => {
     const dense: StripTx[] = [{ i: 0, gas: 21_000, price: 5e7, ok: true }, { i: 1, gas: 30_000_000, price: 5e7, ok: true }]
@@ -59,14 +59,14 @@ describe('BlockStrip', () => {
     const mk = (gas: number[]): StripTx[] => gas.map((g, i) => ({ i, gas: g, price: 5e7, ok: true }))
     const chip = (t: StripTx[], current: number) =>
       renderToStaticMarkup(createElement(BlockStrip, { txs: t, blockNumber: 1, gasLimit: 0, chainName: 'BNB Chain', current }))
-        .match(/class="bs-chip( l)?"/)![0]
+        .match(/class="tp-chip bs-chip( l)?"/)![0]
     const small = Array(6).fill(21_000)
-    expect(chip(mk([900_000, 21_000, ...small]), 1)).toBe('class="bs-chip"')      // 2nd of 8, but 90% of the gas is before it: right edge
-    expect(chip(mk([...small, 21_000, 900_000]), 4)).toBe('class="bs-chip l"')    // 5th of 8, but 90% of the gas is after it: left edge
+    expect(chip(mk([900_000, 21_000, ...small]), 1)).toBe('class="tp-chip bs-chip"')      // 2nd of 8, but 90% of the gas is before it: right edge
+    expect(chip(mk([...small, 21_000, 900_000]), 4)).toBe('class="tp-chip bs-chip l"')    // 5th of 8, but 90% of the gas is after it: left edge
   })
   it('appends a className to the band (the block page joins it to the tape above)', () => {
     const h = renderToStaticMarkup(createElement(BlockStrip, { txs, blockNumber: 1, gasLimit: 1_000_000, chainName: 'X', className: 'border-t-0' }))
-    expect(h).toContain('class="bt-box border-t-0"')
+    expect(h).toContain('class="tp-box border-t-0"')
   })
   it('claims no "% of limit" when the block\'s gas limit is unknown (0)', () => {
     const h = renderToStaticMarkup(createElement(BlockStrip, { txs, blockNumber: 1, gasLimit: 0, chainName: 'X' }))

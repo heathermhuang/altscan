@@ -31,9 +31,9 @@ beforeEach(() => { queryRecentTape.mockReset(); swallow.mockReset(); fetchBlockP
 
 describe('/blocks tape', () => {
   it('reads through the page cache: module scope, the table\'s TTL, the throwing query', () => {
-    expect(createPageCache).toHaveBeenCalledWith('blocks-tape', 60, queryRecentTape)
+    expect(createPageCache).toHaveBeenCalledWith('blocks-tape-v2', 60, queryRecentTape)
     // once at import, never per request (list-pages builds its own two caches the same way)
-    expect(createPageCache.mock.calls.filter(c => c[0] === 'blocks-tape')).toHaveLength(1)
+    expect(createPageCache.mock.calls.filter(c => c[0] === 'blocks-tape-v2')).toHaveLength(1)
   })
 
   it('draws on page 1', async () => {

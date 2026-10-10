@@ -17,7 +17,7 @@ import { swallow } from '@/lib/observability'
 import { BlockTape } from '@/components/home/BlockTape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 import { getBlockStrip } from '@/lib/block-strip'
-import { encodeTape, spreadSeconds, tapeWindow, toTapeTuple } from '@/lib/tape'
+import { encodeTape, TAPE_AFTER, TAPE_BEFORE, toTapeTuple } from '@/lib/tape'
 import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, txsLabel, txsPageCount } from '@/lib/block-txs'
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
@@ -101,11 +101,11 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
         .limit(BLOCK_TXS_PER_PAGE)
         .offset((page - 1) * BLOCK_TXS_PER_PAGE)
 
-  // The tape: this block and its neighbours by primary key (newer ones exist because the indexer
-  // is ahead). Omitted for an RPC block (outside local retention), a failed query, or too few
-  // neighbours to draw a tile.
+  // The tape: this block, TAPE_BEFORE older and TAPE_AFTER newer neighbours by primary key (newer
+  // ones exist because the indexer is ahead). Neighbours the indexer does not have (the tip, or
+  // below the retention floor) are not drawn: every tile is a real block. Omitted for an RPC block
+  // (outside local retention), a failed query, or no neighbour at all.
   const loadTape = async (): Promise<string | null> => {
-    const { before, after } = tapeWindow(chainConfig.blockTime)
     try {
       const near = await db
         .select({
@@ -116,10 +116,10 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
           txCount: schema.blocks.txCount,
         })
         .from(schema.blocks)
-        .where(between(schema.blocks.number, blockNumber - before, blockNumber + after))
+        .where(between(schema.blocks.number, blockNumber - TAPE_BEFORE, blockNumber + TAPE_AFTER))
         .orderBy(desc(schema.blocks.number))
       const tuples = near.map(toTapeTuple)
-      return spreadSeconds(tuples).length > 0 ? encodeTape(tuples) : null
+      return tuples.length > 1 ? encodeTape(tuples) : null
     } catch (e) {
       swallow('block/tape', e)
       return null

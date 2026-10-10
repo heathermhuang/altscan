@@ -8,6 +8,7 @@ vi.mock('@/lib/db', async () => {
 vi.mock('@/lib/observability', () => ({ swallow }))
 
 import { fetchRecentTape, queryRecentTape } from './recent-tape'
+import { TAPE_LATEST } from '@/lib/tape'
 
 const row = (number: number, secs: number) => ({
   number, timestamp: new Date(secs * 1000), gasUsed: 10n, gasLimit: 100n, txCount: 3,
@@ -22,8 +23,19 @@ describe('queryRecentTape (what a cache wraps)', () => {
     expect(tape).toMatch(/^12,1000002\|/)
   })
 
-  it('is null when there is nothing to draw (one block only anchors the timeline)', async () => {
+  it('asks for the fixed latest-blocks count, the same on both chains (not a window of chain time)', async () => {
     limit.mockResolvedValue([row(10, 1_000_000)])
+    await queryRecentTape()
+    expect(limit).toHaveBeenCalledWith(TAPE_LATEST)
+  })
+
+  it('draws a lone block (nothing is spent anchoring a timeline)', async () => {
+    limit.mockResolvedValue([row(10, 1_000_000)])
+    expect(await queryRecentTape()).toBe('10,1000000|0,0,3,10')
+  })
+
+  it('is null when there are no blocks to draw', async () => {
+    limit.mockResolvedValue([])
     await expect(queryRecentTape()).resolves.toBeNull()
   })
 

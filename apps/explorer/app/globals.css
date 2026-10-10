@@ -568,212 +568,66 @@
   }
 }
 
-/* Block tape */
+/* Tape primitives (.tp-*): the band, header, track, row, tile, ring, label and legend that the block
+   tape (components/home/BlockTape.tsx), the block / tx strip (components/tape/BlockStrip.tsx) and,
+   for the band chrome, the address ledger (components/tape/AddressLedger.tsx) are all drawn from.
+   Each component adds only what is its own: the tape its gaps and clamped label (.tp-gap, .bt-chip),
+   the strip its separators, failed hatch and anchored label (.bs-*), the ledger its axis (.ldg-*).
+   A tile's width is pure CSS and never measured: tiles are flex items whose flex-grow is their --w
+   (the tape: transactions; the strip: gas used in thousands), so a row is exactly the content width
+   at every viewport and never scrolls. --f is the fill height (a percent). Tiles are bare
+   <li><a> / <i> (selectors, not classes) to keep the homepage's ~40 of them small in the HTML: the
+   page's streamed content must stay inside the first network chunk. */
 @layer components {
-  /* components/home/BlockTape.tsx. Tile width is pure CSS: --s (seconds, inline) times
-     --pxs (px per second), so there is no layout JS and nothing to shift. */
-  .bt-box {
+  .tp-box {
     @apply bg-card border-y border-hair;
   }
-  .bt-head {
-    @apply max-w-7xl mx-auto px-4 pt-3 flex items-center justify-between gap-4 min-h-[38px] font-mono text-xs text-mut;
+  .tp-head {
+    @apply max-w-7xl mx-auto px-4 pt-3 flex items-center justify-between gap-4 font-mono text-xs text-mut;
+    min-height: var(--tp-head-h, 38px);
   }
-  .bt-dot {
+  .tp-dot {
     @apply mr-2 w-[9px] h-[9px] shrink-0 rounded-[2px] bg-acc;
   }
-  /* Forced colours drop the accent fill, so the dot would vanish. It has no state (one accent dot,
-     decorative, beside the chain name), so opt it out of the override and fill it with a system
-     colour. */
-  @media (forced-colors: active) {
-    .bt-dot {
-      forced-color-adjust: none;
-      background-color: CanvasText;
-    }
-  }
-  .bt-stats {
+  .tp-stats {
     @apply flex gap-3 whitespace-nowrap;
   }
-  .bt-rate {
+  .tp-rate {
     @apply hidden min-[480px]:inline;
   }
-  .bt-leg {
+  .tp-leg {
     @apply max-w-7xl mx-auto px-4 py-3 min-h-[60px] sm:min-h-[44px] font-mono text-xs leading-[18px] text-mut;
   }
-  .bt-track {
-    height: 64px;
-    overflow: hidden;
-  }
-  .bt-fade {
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
-    mask-image: linear-gradient(90deg, transparent, #000 min(12vw, 120px));
-  }
-  /* Keyboard focus on a tile in the fade zone would otherwise be dimmed. */
-  .bt-fade:has(:focus-visible) {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-  .bt-row {
-    --pxs: 24px;
-    display: flex;
-    justify-content: flex-end; /* newest at the right; older tiles overflow and clip on the left */
-    gap: 2px;
-    height: 100%;
-    padding: 8px 6px 10px 0; /* room for the 4px focus ring */
-  }
-  /* Tiles are bare <li><a> (selectors, not classes) to keep the ~130 of them small in the
-     HTML: the page's streamed content must stay inside the first network chunk. */
-  .bt-row > li {
-    display: flex;
-    flex: none;
-    width: max(2px, calc(var(--s) * var(--pxs) - 2px));
-  }
-  .bt-row a {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    border-radius: 3px;
-    background: var(--acc-t);
-    container-type: inline-size;
-  }
-  .bt-row a:hover,
-  .bt-row a[aria-current] {
-    z-index: 1;
-    outline: 2px solid var(--ink);
-    outline-offset: 1px;
-  }
-  .bt-row a:focus-visible {
-    z-index: 1;
-  }
-  /* The current tile's ink outline would hide the global focus ring, so draw the ring outside it. */
-  .bt-row a[aria-current]:focus-visible {
-    box-shadow: 0 0 0 4px var(--card), 0 0 0 6px var(--acc-ink);
-  }
-  /* Lead-in: decorative ghost tiles (<li aria-hidden>, first child) fill the track left of the
-     oldest block, so a tape shorter than the column has no hole. Same tile width (--avg, the mean
-     block seconds, from the row) and the same 2px gap as real tiles. 270deg runs from the right
-     edge, so the period lines up flush with the oldest real tile. */
-  .bt-row > .bt-ghost {
-    --w: max(6px, calc(var(--avg, 1) * var(--pxs)));
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 0;
-    opacity: 0.55;
-    background: repeating-linear-gradient(270deg, var(--acc-t) 0 calc(var(--w) - 2px), transparent 0 var(--w));
-  }
-  /* The current block (a block page's own tile): outline above, label chip floating over its top
-     edge in a taller track. The chip is outside the tile's overflow clip, so it fits any width. */
-  .bt-row > .bt-cur {
-    position: relative;
-  }
-  .bt-row .bt-chip {
-    left: auto;
-    top: auto;
-    right: 0;
-    bottom: calc(100% + 4px);
-    background: var(--ink);
-    color: var(--card);
-    pointer-events: none;
-  }
-  .bt-track.bt-has-cur {
-    height: 86px;
-  }
-  .bt-has-cur .bt-row {
-    padding-top: 30px;
-  }
-  /* Fill = gas used. */
-  .bt-row a::before {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    bottom: 0;
-    height: var(--g);
-    background: var(--acc);
-  }
-  /* Forced colours (Windows High Contrast) drop background colours, and the tile fill is the data
-     (fill = gas used, width = block time), so the whole tape would vanish. Each tile gets a
-     CanvasText outline from ::after (absolute, so no layout change and the label's container query
-     is untouched) and its fill becomes a Highlight block inside it: empty vs full still reads, and
-     the hover / aria-current outline above (a thicker, offset outline) is left as it is. The ghost
-     lead-in tiles are decoration, and their pale tint would read as phantom empty tiles. */
-  @media (forced-colors: active) {
-    .bt-row a::before {
-      forced-color-adjust: none;
-      background: Highlight;
-    }
-    .bt-row a::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border: 1px solid CanvasText;
-      border-radius: inherit;
-    }
-    .bt-row > .bt-ghost {
-      background: none;
-    }
-  }
-  .bt-row span {
-    position: absolute;
-    left: 8px;
-    top: 6px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--acc-t);
-    color: var(--ink);
-    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-  /* The label is ~106px wide at 9 digits; show it only on tiles that can hold it. */
-  @container (max-width: 119px) {
-    .bt-row span {
-      display: none;
-    }
-  }
-  @media (min-width: 768px) {
-    .bt-track {
-      height: 84px;
-    }
-    .bt-track.bt-has-cur {
-      height: 106px;
-    }
-    .bt-row {
-      --pxs: 34px;
-    }
-  }
-}
-
-/* Block strip (components/tape/BlockStrip.tsx): the txs of ONE block. flex-grow = gas used in
-   thousands (--w), fill = gas price (--f), no gaps and min-width 0 so the strip is exactly the
-   content width at every viewport; a card-coloured edge is the separator, so dense runs of 21k-gas
-   transfers read as texture. The edge is 1px but never more than 45% of its tile: a phone-width
-   dense block has tiles under 1px, and a fixed 1px edge would paint over them and leave a hole.
-   It is a pseudo-element, not a border or inset shadow, so it adds no layout floor per tile.
-   Only the ringed (.c) tile keeps a floor width (3px, so it cannot vanish). A failed (.x) tile is
-   exactly its share like any other: a floor on every failed tile would overflow a block with more
-   failed txs than content pixels (145 x 2px > 288px at 320px). */
-@layer components {
-  .bs-track {
+  .tp-track {
     height: 64px;
   }
-  .bs-track.bs-has-cur {
+  /* A ringed tile has a label floating over it: taller track and row padding make room for it. */
+  .tp-track.tp-cur {
     height: 92px;
   }
-  .bs-row {
+  .tp-row {
+    position: relative;
     display: flex;
     height: 100%;
     padding: 8px 0 10px;
   }
-  .bs-has-cur .bs-row {
+  .tp-cur .tp-row {
     padding-top: 34px;
   }
-  .bs-row > i {
-    position: relative;
+  .tp-row > * {
     flex: var(--w) 1 0;
     min-width: 0;
+  }
+  /* The ringed tile never shrinks under 3px, so it cannot vanish. */
+  .tp-row > .c {
+    min-width: 3px;
+  }
+  .tp-row :is(i, a) {
+    position: relative;
     background: var(--acc-t);
   }
-  .bs-row > i::before {
+  /* Fill. */
+  .tp-row :is(i, a)::before {
     content: "";
     position: absolute;
     left: 0;
@@ -782,6 +636,134 @@
     height: var(--f);
     background: var(--acc);
   }
+  .tp-row a:hover,
+  .tp-row a[aria-current],
+  .tp-row > i.c {
+    z-index: 1;
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  .tp-row a:focus-visible {
+    z-index: 1;
+  }
+  /* The ringed tile's ink outline would hide the global focus ring, so draw the ring outside it. */
+  .tp-row a[aria-current]:focus-visible {
+    box-shadow: 0 0 0 4px var(--card), 0 0 0 6px var(--acc-ink);
+  }
+  /* Label over a tile (the ringed tx, the ringed block). Placement is the component's own. */
+  .tp-chip {
+    position: absolute;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--card);
+    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-style: normal;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  @media (min-width: 768px) {
+    .tp-track {
+      height: 84px;
+    }
+    .tp-track.tp-cur {
+      height: 112px;
+    }
+  }
+  /* Forced colours (Windows High Contrast) drop background colours, and the tile fill is the data
+     (fill = gas used / gas price), so the whole tape would vanish. The fill becomes a Highlight
+     block, the label a CanvasText one; the ring is an outline and survives. The block tape's tiles
+     (.tp-gap) also get a CanvasText outline from ::after (absolute, so no layout change), so empty
+     vs full still reads; the strip draws its own edges (.bs-*). */
+  @media (forced-colors: active) {
+    .tp-dot {
+      forced-color-adjust: none;
+      background-color: CanvasText;
+    }
+    .tp-row :is(i, a)::before {
+      forced-color-adjust: none;
+      background: Highlight;
+    }
+    .tp-chip {
+      forced-color-adjust: none;
+      background: CanvasText;
+      color: Canvas;
+    }
+    .tp-gap a::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid CanvasText;
+      border-radius: inherit;
+    }
+  }
+}
+
+/* Block tape (components/home/BlockTape.tsx) on the primitives: rounded tiles 2px apart, none under
+   2px wide (an empty block stays visible), and the ringed block's label. The label is placed by --q
+   (its tile's centre as a fraction of the row) and shifted left by the same fraction of its own
+   width: at 0 it starts at the row's left edge, at 1 it ends at the right edge, in between it sits
+   over its tile. So it is inside the track at every width, wherever the block is. --q is computed
+   by the page (lib/tape.ts layoutTiles, the flexbox below modelled with its floors) for two tracks,
+   --p-sm for a 375px phone (343px) and --p for a 1440px desktop (1248px), so no layout is measured
+   in the browser; the `sm` breakpoint picks between them (about where the two are equally far off for
+   a tape whose floors engage). Every cell is a real block: there are no placeholder cells, so
+   nothing is faded. */
+@layer components {
+  .tp-gap {
+    gap: 2px;
+  }
+  .tp-gap > li {
+    display: flex;
+    min-width: 2px;
+  }
+  .tp-gap a {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 3px;
+  }
+  .bt-chip {
+    --q: var(--p-sm, var(--p));   /* HTML cached by the previous build carries --p only */
+    left: calc(var(--q) * 100%);
+    bottom: calc(100% - 27px);
+    transform: translateX(calc(var(--q) * -100%));
+  }
+  @media (min-width: 640px) {
+    .bt-chip {
+      --q: var(--p);
+    }
+  }
+  /* The label is always inside the row (see above). A pointer at the same --q of the label's OWN width
+     points at the tile: label left = q * (row - label), so pointer = label left + q * label = q * row,
+     the tile's centre. That is exact at the two reference tracks (the tile's flexbox, floors and gaps
+     included); between them it is approximate, and for a tape whose floors engage (many near-empty
+     blocks) it can be tens of px off at the widths furthest from both. It stays 4px inside the label
+     (half its own width), and takes the label's background, so forced colours need no rule. */
+  .bt-chip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: clamp(4px, calc(var(--q) * 100%), calc(100% - 4px));
+    width: 8px;
+    height: 4px;
+    margin-left: -4px;
+    background: inherit;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+  }
+}
+
+/* Block strip (components/tape/BlockStrip.tsx): the txs of ONE block, on the primitives. flex-grow =
+   gas used in thousands (--w), fill = gas price (--f), no gaps and min-width 0 so the strip is
+   exactly the content width at every viewport; a card-coloured edge is the separator, so dense runs
+   of 21k-gas transfers read as texture. The edge is 1px but never more than 45% of its tile: a
+   phone-width dense block has tiles under 1px, and a fixed 1px edge would paint over them and leave
+   a hole. It is a pseudo-element, not a border or inset shadow, so it adds no layout floor per tile.
+   Only the ringed (.c) tile keeps a floor width (3px, so it cannot vanish). A failed (.x) tile is
+   exactly its share like any other: a floor on every failed tile would overflow a block with more
+   failed txs than content pixels (145 x 2px > 288px at 320px). */
+@layer components {
   .bs-row > i::after {
     content: "";
     position: absolute;
@@ -797,47 +779,18 @@
   .bs-row > i.x::before {
     display: none;
   }
-  .bs-row > i.c {
-    min-width: 3px;
-    z-index: 1;
-    outline: 2px solid var(--ink);
-    outline-offset: 1px;
-  }
   .bs-chip {
-    position: absolute;
     right: 0;
     bottom: calc(100% + 7px);
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--ink);
-    color: var(--card);
-    font-family: var(--font-mono), ui-monospace, Menlo, monospace;
-    font-size: 11px;
-    font-style: normal;
-    white-space: nowrap;
-    pointer-events: none;
   }
   .bs-chip.l {
     right: auto;
     left: 0;
   }
-  @media (min-width: 768px) {
-    .bs-track {
-      height: 84px;
-    }
-    .bs-track.bs-has-cur {
-      height: 112px;
-    }
-  }
-  /* Forced colours drop backgrounds and the fill IS the data: a CanvasText edge per tile (the
-     ::after, so no border widens a tile past its share), the fill as Highlight, failed tiles keep a
-     CanvasText hatch, the ring stays (outline survives). A ringed failed tile inherits
+  /* Forced colours: a CanvasText edge per tile (the ::after, so no border widens a tile past its
+     share), failed tiles keep a CanvasText hatch. A ringed failed tile inherits
      forced-color-adjust: none from .x, so the UA no longer recolours its outline: say CanvasText. */
   @media (forced-colors: active) {
-    .bs-row > i::before {
-      forced-color-adjust: none;
-      background: Highlight;
-    }
     .bs-row > i::after {
       forced-color-adjust: none;
       background: CanvasText;
@@ -849,25 +802,19 @@
     .bs-row > i.c {
       outline-color: CanvasText;
     }
-    .bs-chip {
-      forced-color-adjust: none;
-      background: CanvasText;
-      color: Canvas;
-    }
   }
 }
 
-/* Address ledger (components/tape/AddressLedger.tsx): a page of an address's transactions. Tiles sit
-   above (received) or below (sent) a hairline axis; flex-grow = 1 + log2(1 + seconds since the
-   previous one); solid = native value, outlined (.o) = tokens or calls; .s = provider-flagged spam.
-   On phones the head stacks its two cells (the title and the totals do not fit side by side in 256px
-   without truncating the title to a few letters); the loading shell has the same two cells. */
+/* Address ledger (components/tape/AddressLedger.tsx): a page of an address's transactions, on the
+   primitives' band chrome (.tp-head, .tp-dot, .tp-rate, .tp-leg). Tiles sit above (received) or
+   below (sent) a hairline axis; flex-grow = 1 + log2(1 + seconds since the previous one); solid =
+   native value, outlined (.o) = tokens or calls; .s = provider-flagged spam. On phones the head
+   stacks its two cells (the title and the totals do not fit side by side in 256px without
+   truncating the title to a few letters); the loading shell has the same two cells. */
 @layer components {
   .ldg {
     @apply mb-4 rounded-xl border border-hair bg-card;
-  }
-  .ldg-head {
-    @apply px-4 pt-3 flex items-center justify-between gap-4 min-h-[30px] font-mono text-xs text-mut;
+    --tp-head-h: 30px;
   }
   .ldg-row {
     position: relative;
@@ -913,9 +860,6 @@
   }
   .ldg-row > .s {
     opacity: 0.3;
-  }
-  .ldg-leg {
-    @apply px-4 py-3 min-h-[60px] sm:min-h-[44px] font-mono text-xs leading-[18px] text-mut;
   }
   @media (max-width: 639px) {
     .ldg-head {

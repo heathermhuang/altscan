@@ -14,7 +14,7 @@ const shell = () => renderToStaticMarkup(createElement(AddressLedgerShell, { cur
 
 /** The number of direct children of the card's `.ldg-head` (the head holds no div, so the first </div> closes it). */
 function headCells(markup: string): number {
-  const head = markup.match(/<div class="ldg-head">(.*?)<\/div>/s)?.[1] ?? ''
+  const head = markup.match(/<div class="tp-head ldg-head">(.*?)<\/div>/s)?.[1] ?? ''
   let depth = 0
   let cells = 0
   for (const [, close, tag, selfClose] of head.matchAll(/<(\/?)([a-z]+)[^>]*?(\/?)>/g)) {

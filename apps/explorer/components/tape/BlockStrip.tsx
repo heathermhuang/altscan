@@ -37,34 +37,34 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
     + (cur ? `; this one is the ${ordinal(curPos + 1)}${share !== null ? ` and used ${share}% of the block's gas` : ''}` : '')
 
   return (
-    <div className={`bt-box${className ? ` ${className}` : ''}`}>
-      <div className="bt-head">
+    <div className={`tp-box${className ? ` ${className}` : ''}`}>
+      <div className="tp-head">
         <span className="flex items-center min-w-0">
-          <span className="bt-dot" aria-hidden="true" />
+          <span className="tp-dot" aria-hidden="true" />
           <span className="text-ink truncate">
             Block #{fmt(blockNumber)}<span className="hidden sm:inline text-mut">, transaction by transaction</span>
           </span>
         </span>
-        <span className="bt-stats">
+        <span className="tp-stats">
           <span>{txs.length} txns · {failed} failed</span>
-          {pct !== null && <span className="bt-rate">gas {pct}% of limit</span>}
+          {pct !== null && <span className="tp-rate">gas {pct}% of limit</span>}
         </span>
       </div>
-      <div className={`bs-track max-w-7xl mx-auto px-4${cur ? ' bs-has-cur' : ''}`}>
-        <div className="bs-row" role="img" aria-label={label}>
+      <div className={`tp-track max-w-7xl mx-auto px-4${cur ? ' tp-cur' : ''}`}>
+        <div className="tp-row bs-row" role="img" aria-label={label}>
           {txs.map((t, k) => {
             const cls = [k === curPos && 'c', !t.ok && 'x'].filter(Boolean).join(' ')
             return (
               <i key={t.i} className={cls || undefined} style={{ '--w': weights[k], '--f': `${fills[k]}%` } as CSSProperties}>
                 {k === curPos && (
-                  <span className={`bs-chip${centre < 0.5 ? ' l' : ''}`}>this tx · {fmt(t.gas)} gas</span>
+                  <span className={`tp-chip bs-chip${centre < 0.5 ? ' l' : ''}`}>this tx · {fmt(t.gas)} gas</span>
                 )}
               </i>
             )
           })}
         </div>
       </div>
-      <div className="bt-leg"><p>{LEGEND}</p></div>
+      <div className="tp-leg"><p>{LEGEND}</p></div>
     </div>
   )
 }

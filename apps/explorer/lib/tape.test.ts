@@ -1,45 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { decodeTape, encodeTape, gasPct, latestTapeCount, meanSeconds, ratePerMin, spreadSeconds, stripFills, stripWeight, tapeWindow, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
+import { TAPE_AFTER, TAPE_BEFORE, TAPE_LATEST, TAPE_TRACK_LG, TAPE_TRACK_SM, avgTilePx, chipFraction, decodeTape, encodeTape, gasPct, layoutTiles, ratePerMin, stripFills, stripWeight, tapeBlocks, tapeWeight, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
-
-describe('spreadSeconds', () => {
-  it('returns nothing for no tuples or a lone anchor', () => {
-    expect(spreadSeconds([])).toEqual([])
-    expect(spreadSeconds([t(10, 100)])).toEqual([])
-  })
-
-  it('gives a block the gap to the previous second; the oldest only anchors', () => {
-    expect(spreadSeconds([t(10, 100), t(11, 112, 5, 40)])).toEqual([{ n: 11, seconds: 12, txs: 5, gas: 40 }])
-  })
-
-  it('splits the gap evenly across blocks that share a second', () => {
-    const out = spreadSeconds([t(10, 100), t(11, 101), t(12, 101), t(13, 101)])
-    expect(out.map(b => b.n)).toEqual([11, 12, 13])
-    for (const b of out) expect(b.seconds).toBeCloseTo(1 / 3, 6)
-  })
-
-  it('widens the share when the gap is longer than a second', () => {
-    const out = spreadSeconds([t(10, 100), t(11, 105), t(12, 105)])
-    expect(out.map(b => b.seconds)).toEqual([2.5, 2.5])
-  })
-
-  it('sorts by block number, so newest-first input gives oldest-first output', () => {
-    const out = spreadSeconds([t(13, 103), t(12, 102), t(11, 101), t(10, 100)])
-    expect(out.map(b => b.n)).toEqual([11, 12, 13])
-    expect(out.map(b => b.seconds)).toEqual([1, 1, 1])
-  })
-
-  it('carries tx count and gas through unchanged', () => {
-    const out = spreadSeconds([t(1, 10), t(2, 12, 46, 9), t(3, 13, 0, 100)])
-    expect(out.map(b => [b.txs, b.gas])).toEqual([[46, 9], [0, 100]])
-  })
-
-  it('conserves time: displayed seconds sum to newest minus oldest second', () => {
-    const out = spreadSeconds([t(1, 50), t(2, 51), t(3, 51), t(4, 53), t(5, 53), t(6, 53), t(7, 60)])
-    expect(out.reduce((s, b) => s + b.seconds, 0)).toBeCloseTo(10, 9)
-  })
-})
 
 describe('ratePerMin', () => {
   it('is null for no tuples or a single tuple', () => {
@@ -96,30 +58,181 @@ describe('gasPct', () => {
   })
 })
 
-describe('meanSeconds', () => {
-  it('is 0 for no blocks', () => {
-    expect(meanSeconds([])).toBe(0)
+describe('tapeBlocks', () => {
+  it('draws every block it is given: nothing is held back to anchor a timeline', () => {
+    expect(tapeBlocks([])).toEqual([])
+    expect(tapeBlocks([t(10, 100, 5, 40)])).toEqual([{ n: 10, txs: 5, gas: 40 }])
   })
 
-  it('averages the tile intervals, so ghost tiles match the real ones', () => {
-    const out = spreadSeconds([t(1, 100), t(2, 101), t(3, 101), t(4, 104)])
-    // (0.5 + 0.5 + 3) / 3
-    expect(meanSeconds(out)).toBeCloseTo(4 / 3, 9)
+  it('sorts by block number, so newest-first input gives oldest-first (left to right) output', () => {
+    expect(tapeBlocks([t(13, 103), t(11, 101), t(12, 102)]).map(b => b.n)).toEqual([11, 12, 13])
+  })
+
+  it('carries tx count and gas through unchanged and drops the timestamp', () => {
+    expect(tapeBlocks([t(1, 10, 46, 9), t(2, 12, 0, 100)])).toEqual([{ n: 1, txs: 46, gas: 9 }, { n: 2, txs: 0, gas: 100 }])
   })
 })
 
-describe('tapeWindow', () => {
-  it('is 40 before / 8 after on a 0.45s chain', () => {
-    expect(tapeWindow(0.45)).toEqual({ before: 40, after: 8 })
+describe('tapeWeight (a tile\'s share of the width = its transaction count)', () => {
+  it('is the transaction count', () => {
+    expect(tapeWeight(1)).toBe(1)
+    expect(tapeWeight(57)).toBe(57)
+    expect(tapeWeight(253)).toBe(253)
   })
 
-  it('keeps a few tiles on a 12s chain, where one tile is ~400px', () => {
-    expect(tapeWindow(12)).toEqual({ before: 3, after: 1 })
+  it('keeps an empty block in the layout (weight 1), so a tape of empty blocks still fills the track', () => {
+    expect(tapeWeight(0)).toBe(1)
   })
 
-  it('never asks for more than 40 / 8 or fewer than 3 / 1', () => {
-    expect(tapeWindow(0.01)).toEqual({ before: 40, after: 8 })
-    expect(tapeWindow(600)).toEqual({ before: 3, after: 1 })
+  it('treats a bad count as empty rather than letting NaN or a negative reach the layout', () => {
+    expect(tapeWeight(NaN)).toBe(1)
+    expect(tapeWeight(-4)).toBe(1)
+    expect(tapeWeight(Infinity)).toBe(1)
+  })
+
+  it('rounds a fractional count (the weight is an integer flex-grow)', () => {
+    expect(tapeWeight(12.6)).toBe(13)
+  })
+})
+
+// The flex layout the tape uses: `flex: var(--w) 1 0` per tile, 2px gaps, min-width 2px (3px for the ringed tile).
+const LAYOUT = { gapPx: 2, floorPx: 2, ringFloorPx: 3 }
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+// The Codex fixture: a block page whose 24 older neighbours and the ringed block hold 1 tx each and whose 6 newer hold 100.
+const CODEX = [...Array(25).fill(1), ...Array(6).fill(100)] as number[]
+
+describe('layoutTiles (the tape\'s flexbox, modelled)', () => {
+  it('shares the track out by weight, less the gaps, when no tile is under its floor', () => {
+    const t = layoutTiles([1, 2, 3, 4], 100, LAYOUT)
+    // free = 100 - 3 gaps * 2 = 94; shares 9.4 / 18.8 / 28.2 / 37.6
+    expect(t.map(x => x.width)).toEqual([expect.closeTo(9.4, 9), expect.closeTo(18.8, 9), expect.closeTo(28.2, 9), expect.closeTo(37.6, 9)])
+    expect(t.map(x => x.left)).toEqual([0, expect.closeTo(11.4, 9), expect.closeTo(32.2, 9), expect.closeTo(62.4, 9)])
+  })
+
+  it('widths plus gaps fill the track exactly, with and without floors engaged', () => {
+    for (const w of [[1, 2, 3, 4, 5], CODEX, [57, 44, 36, 253, 20], [1, 1, 1000]]) {
+      const t = layoutTiles(w, 343, { ...LAYOUT, ringIndex: 1 })
+      expect(sum(t.map(x => x.width)) + 2 * (w.length - 1)).toBeCloseTo(343, 9)
+      const last = t[t.length - 1]
+      expect(last.left + last.width).toBeCloseTo(343, 9)
+    }
+  })
+
+  it('puts the Codex example\'s ringed tile 96px in: 24 floored tiles and 24 gaps before it, whatever the track', () => {
+    for (const track of [TAPE_TRACK_SM, TAPE_TRACK_LG]) {
+      const t = layoutTiles(CODEX, track, { ...LAYOUT, ringIndex: 24 })
+      expect(t[24].left).toBe(96)
+      expect(t[24].width).toBe(3)                                  // the ringed floor
+      for (let i = 0; i < 24; i++) expect(t[i].width).toBe(2)       // weight 1 against 100: the floor
+      // the six heavy tiles share what is left: track - 60 gaps - 48 - 3
+      for (let i = 25; i < 31; i++) expect(t[i].width).toBeCloseTo((track - 60 - 48 - 3) / 6, 9)
+    }
+  })
+
+  it('freezes a tile at its floor and shares the rest again, until nothing is under its floor (like the CSS algorithm)', () => {
+    // floor 4.5, no gaps, track 15: shares 2.5 / 5 / 7.5 -> tile 0 is under, frozen at 4.5; the remaining 10.5 over 2:3 is
+    // 4.2 / 6.3 -> tile 1 is now under, frozen at 4.5; tile 2 gets the 6 that is left
+    const t = layoutTiles([1, 2, 3], 15, { gapPx: 0, floorPx: 4.5 })
+    expect(t.map(x => x.width)).toEqual([4.5, 4.5, 6])
+  })
+
+  it('never goes under a floor, even for an all-zero window (flex-grow 0: tiles stay at their floor, free space is left over)', () => {
+    const t = layoutTiles([0, 0, 0, 0], 343, { ...LAYOUT, ringIndex: 2 })
+    expect(t.map(x => x.width)).toEqual([2, 2, 3, 2])
+    expect(t.map(x => x.left)).toEqual([0, 4, 8, 13])
+    for (const w of [CODEX, [0, 5, 0], [1, 1, 1]]) {
+      layoutTiles(w, 343, { ...LAYOUT, ringIndex: 0 }).forEach((x, i) => expect(x.width).toBeGreaterThanOrEqual(i === 0 ? 3 : 2))
+    }
+  })
+
+  it('lets floors overflow a track too narrow for them (min-width wins), and treats a bad weight as 0', () => {
+    const t = layoutTiles(Array(10).fill(1), 20, LAYOUT)
+    expect(t.map(x => x.width)).toEqual(Array(10).fill(2))
+    expect(t[9].left + t[9].width).toBe(38)   // 10 * 2 + 9 * 2: past the 20px track, as the browser would
+    expect(layoutTiles([NaN, -3, 5], 100, { gapPx: 0, floorPx: 0 }).map(x => x.width)).toEqual([0, 0, 100])
+  })
+
+  it('shares out only the fraction of the free space that the grow factors add up to when they sum under 1 (the CSS rule)', () => {
+    const t = layoutTiles([0.2, 0.3], 100, { gapPx: 2, floorPx: 0 })
+    expect(t[0].width).toBeCloseTo(98 * 0.5 * 0.4, 9)
+    expect(t[1].width).toBeCloseTo(98 * 0.5 * 0.6, 9)
+  })
+
+  it('is empty for no tiles', () => {
+    expect(layoutTiles([], 343, LAYOUT)).toEqual([])
+  })
+})
+
+describe('chipFraction (where the ringed tile\'s centre sits in the track, 0 = left end, 1 = right end)', () => {
+  it('is the middle for a lone tile', () => {
+    expect(chipFraction([5], 0, 343)).toBe(0.5)
+  })
+
+  it('is the centre of the tile the flexbox gives it, as a fraction of the track', () => {
+    // weights 2 | 3 | 4 on 343px: free = 339, tile 1 spans 77.33..190.33, centre 133.83
+    expect(chipFraction([2, 3, 4], 1, 343)).toBeCloseTo(133.83 / 343, 4)
+    expect(chipFraction([2, 3, 4], 0, 343)).toBeCloseTo(37.67 / 343, 4)
+    expect(chipFraction([2, 3, 4], 2, 343)).toBeCloseTo(267.67 / 343, 4)
+  })
+
+  it('accounts for the floors: the Codex example is 97.5px in (96 + half the 3px ringed tile), not at 4% of the track', () => {
+    // by weight alone the ringed tile (1 of 625) would be at 0.04
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_SM)).toBeCloseTo(97.5 / 343, 4)
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_SM)).toBeGreaterThan(0.25)
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_LG)).toBeCloseTo(97.5 / 1248, 4)
+  })
+
+  it('stays inside 0..1 at both ends however heavy the neighbours are, and when the floors overflow the track', () => {
+    const w = [1, 1000, 1, 1000, 1]
+    for (let k = 0; k < w.length; k++) {
+      const p = chipFraction(w, k, 343)
+      expect(p).toBeGreaterThanOrEqual(0)
+      expect(p).toBeLessThanOrEqual(1)
+    }
+    expect(chipFraction([1, 500, 500], 0, 343)).toBeLessThan(0.01)
+    expect(chipFraction([500, 500, 1], 2, 343)).toBeGreaterThan(0.99)
+    expect(chipFraction(Array(200).fill(1), 199, 343)).toBe(1)
+  })
+
+  it('falls back to the middle for an index that is not a tile or a track that is not a width', () => {
+    expect(chipFraction([3, 3], -1, 343)).toBe(0.5)
+    expect(chipFraction([3, 3], 2, 343)).toBe(0.5)
+    expect(chipFraction([], 0, 343)).toBe(0.5)
+    expect(chipFraction([3, 3], 1, 0)).toBe(0.5)
+  })
+
+  it('has two reference tracks: the content of a 375px phone and of a 1440px desktop (max-w-7xl less the gutters)', () => {
+    expect(TAPE_TRACK_SM).toBe(375 - 2 * 16)
+    expect(TAPE_TRACK_LG).toBe(1280 - 2 * 16)
+  })
+})
+
+describe('tape block counts (fixed per surface, the same on both chains)', () => {
+  // The track is the viewport minus the page's 16px side gutters; tiles are separated by 2px.
+  const track = (viewport: number) => viewport - 32
+
+  it('a tile is at least 6px on average at 375px, on the latest-blocks tape and the block page\'s', () => {
+    expect(avgTilePx(TAPE_LATEST, track(375))).toBeGreaterThanOrEqual(6)
+    expect(avgTilePx(TAPE_BEFORE + 1 + TAPE_AFTER, track(375))).toBeGreaterThanOrEqual(6)
+  })
+
+  it('the latest-blocks count is as many as that allows to the nearest ten (more would drop under 6px at 375)', () => {
+    expect(avgTilePx(TAPE_LATEST + 10, track(375))).toBeLessThan(6)
+  })
+
+  it('shows more than 20 tiles wide enough to read at 1440px', () => {
+    expect(TAPE_LATEST).toBeGreaterThan(20)
+    expect(avgTilePx(TAPE_LATEST, track(1440))).toBeGreaterThan(20)
+  })
+
+  it('looks further back than forward on a block page, so the ringed tile sits right of centre', () => {
+    expect(TAPE_BEFORE).toBeGreaterThan(TAPE_AFTER)
+    expect(TAPE_AFTER).toBeGreaterThan(0)
+  })
+
+  it('avgTilePx is the track less the gaps, shared out', () => {
+    expect(avgTilePx(10, 100)).toBe(8.2)   // (100 - 9 gaps * 2px) / 10
+    expect(avgTilePx(1, 100)).toBe(100)
   })
 })
 
@@ -132,18 +245,6 @@ describe('toTapeTuple', () => {
   it('accepts the cached form: ISO string timestamp, decimal-string gas', () => {
     const row = { number: 8, timestamp: '2026-10-05T12:00:00.250Z', txCount: 0, gasUsed: '50', gasLimit: '100' }
     expect(toTapeTuple(row)).toEqual([8, Math.floor(Date.parse('2026-10-05T12:00:00.250Z') / 1000), 0, 50])
-  })
-})
-
-describe('latestTapeCount', () => {
-  it('is ~32s of chain time: 72 on BNB, the 7-block minimum on ETH', () => {
-    expect(latestTapeCount(0.45)).toBe(72)
-    expect(latestTapeCount(12)).toBe(7)
-  })
-
-  it('never exceeds 100 or drops below 7', () => {
-    expect(latestTapeCount(0.1)).toBe(100)
-    expect(latestTapeCount(60)).toBe(7)
   })
 })
 

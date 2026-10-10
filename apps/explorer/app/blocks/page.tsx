@@ -28,7 +28,9 @@ export const metadata: Metadata = {
 // The tape rides the same cache as the table (this page reads searchParams, so the route itself is
 // dynamic and would otherwise query on every request). Built once at module scope; the failure is
 // swallowed OUTSIDE the cache, so a rejection is never stored and the next request retries.
-const cachedTape = createPageCache('blocks-tape', BLOCKS_REVALIDATE_SECONDS, queryRecentTape)
+// '-v2': the tape's block count changed (lib/tape.ts), so strings cached by the old build (72 BNB / 7 ETH
+// blocks) are not served.
+const cachedTape = createPageCache('blocks-tape-v2', BLOCKS_REVALIDATE_SECONDS, queryRecentTape)
 
 async function readTape(): Promise<string | null> {
   try {
