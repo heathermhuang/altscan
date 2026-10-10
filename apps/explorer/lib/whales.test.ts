@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { getChainConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rankWhalesByUsd, rawWeiLiteral, type WhaleTx } from '@/lib/whales'
+import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rankWhalesByUsd, rankingNote, rawWeiLiteral, type WhaleTx } from '@/lib/whales'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -159,11 +159,14 @@ describe('mergeWhaleRows', () => {
     expect(mergeWhaleRows([bnb], [usdt]).map(r => r.hash)).toEqual(['0xbnb', '0xusdt'])
   })
 
-  it('keeps every row of both halves (25 + 25 never reaches the 50 cap)', () => {
+  it('unions both halves whole: the queries already cap at 25 + 25, so a second cap here would cut rows by raw value', () => {
     const native = Array.from({ length: 25 }, (_, i) => row(`0xn${i}`, String(i)))
     const token = Array.from({ length: 25 }, (_, i) => row(`0xt${i}`, String(i), { transferType: 'token' }))
 
     expect(mergeWhaleRows(native, token)).toHaveLength(50)
+    // Past the SQL caps nothing is dropped here either; ranking, not the merge, decides order.
+    const more = Array.from({ length: 60 }, (_, i) => row(`0x${i}`, String(i)))
+    expect(mergeWhaleRows(more, null)).toHaveLength(60)
   })
 })
 
@@ -343,5 +346,20 @@ describe('buildNativeWhaleQuery carries the partial-index floor as a literal', (
 
   it('accepts the configured floor', () => {
     expect(() => rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)).not.toThrow()
+  })
+})
+
+describe('rankingNote', () => {
+  it('states the live-price basis only when a native price is known', () => {
+    const note = rankingNote('BNB', 'WBNB', true)
+    expect(note).toContain('at the live BNB price')
+    expect(note).toContain('stablecoins at $1')
+  })
+
+  it('says plainly that the native price is unavailable, and that native rows are unranked, when it is not', () => {
+    const note = rankingNote('ETH', 'WETH', false)
+    expect(note).not.toMatch(/live/i)
+    expect(note).toContain('ETH price is unavailable')
+    expect(note).toMatch(/ETH and WETH transfers .*unranked/)
   })
 })

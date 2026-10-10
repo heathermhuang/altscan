@@ -125,16 +125,16 @@ const COMPACT_CAP = 999_995_000_000_000
  *
  * T is the last unit. A figure past 999T reads "999T+", the way a capped count elsewhere reads
  * "10,000+": such a supply or market value is a junk or unit-confused token, and "1000000.00T"
- * would only pretend to precision it does not have. A non-zero value under 0.005 reads
- * "<0.01", never "0". `prefix` goes in front of the digits, after any sign ("-$5M").
- * "—" when there is no number.
+ * would only pretend to precision it does not have. A non-zero value that would round to 0.00
+ * reads "<0.01" (or ">-0.01" below zero), never "0" or "-0". `prefix` goes in front of the
+ * digits, after any sign ("-$5M"). "—" when there is no number.
  */
 export function formatCompact(n: number | null | undefined, prefix = ''): string {
   if (n == null || !Number.isFinite(n)) return '—'
   const sign = n < 0 ? '-' : ''
   const abs = Math.abs(n)
   if (abs >= COMPACT_CAP) return `${sign}${prefix}999T+`
-  if (n > 0 && n < 0.005) return `<${prefix}0.01`
+  if (abs > 0 && abs < 0.005) return n > 0 ? `<${prefix}0.01` : `>-${prefix}0.01`
   return `${sign}${prefix}${COMPACT.format(abs)}`
 }
 

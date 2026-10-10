@@ -27,7 +27,7 @@ import { chainConfig } from '@/lib/chain'
 import { formatUnits } from 'ethers'
 import type { WhaleConfig } from '@altscan/chain-config'
 import { safeBigInt } from '@/lib/format'
-import { fetchNativeUsd } from '@/lib/native-price'
+import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
@@ -59,7 +59,6 @@ export type WhaleResult = {
 }
 
 const QUERY_TIMEOUT_MS = 15_000
-const PRICE_TIMEOUT_MS = 4_000
 
 function cutoffFor(period: WhalePeriod): SQL {
   switch (period) {
@@ -234,13 +233,16 @@ export type RankedWhale = WhaleTx & {
 
 export type WhaleFetch = {
   rows: RankedWhale[]
+  /** The native price the rows were ranked with, or null when none could be had. The page says which. */
+  nativeUsd: number | null
   /** true when at least one half failed — the page must say so rather than
    *  rendering the empty state and implying the market was quiet. */
   degraded: boolean
 }
 
 /**
- * Union of both halves, capped at 50 (25 + 25, so the cap never bites).
+ * Union of both halves. No cap: the queries already return at most 25 + 25, and a cap here would
+ * run BEFORE ranking, so it could only ever cut rows by their raw amount.
  *
  * Deliberately NOT ordered by `value`. That used to rank by the raw base-unit number, which
  * compares an 18-decimal BNB amount with an 18-decimal USDT amount and a 6-decimal one as if
@@ -253,10 +255,26 @@ export function mergeWhaleRows(
   native: WhaleTx[] | null,
   token: WhaleTx[] | null,
 ): WhaleTx[] {
-  return [...(native ?? []), ...(token ?? [])].slice(0, 50)
+  return [...(native ?? []), ...(token ?? [])]
 }
 
 const NATIVE_DECIMALS = 18
+
+/** The price if it is a real one (finite and > 0), else null: "no native price", not a price of nothing. */
+function usablePrice(price: number | null): number | null {
+  return price != null && Number.isFinite(price) && price > 0 ? price : null
+}
+
+/**
+ * The sentence under the page intro that says how the list is ranked. It names the live native price
+ * only when one was used: the ranking (and this text) is cached for the window, so a price that
+ * failed to load is a fact about the window, not something to paper over with "live".
+ */
+export function rankingNote(currency: string, wrappedSymbol: string, nativePriced: boolean): string {
+  return nativePriced
+    ? `Ranked by estimated USD value: stablecoins at $1, ${currency} and ${wrappedSymbol} at the live ${currency} price. A transfer with no price is listed last.`
+    : `The ${currency} price is unavailable right now, so ${currency} and ${wrappedSymbol} transfers are unranked and listed last, newest first. Stablecoin transfers are ranked by estimated USD value at $1.`
+}
 
 /**
  * Price each row and order the list by USD value, largest first.
@@ -282,7 +300,7 @@ export function rankWhalesByUsd(
   nativeUsd: number | null,
   cfg: Pick<WhaleConfig, 'wrapped' | 'stablecoins'> = chainConfig.whales,
 ): RankedWhale[] {
-  const native = nativeUsd != null && Number.isFinite(nativeUsd) && nativeUsd > 0 ? nativeUsd : null
+  const native = usablePrice(nativeUsd)
   const wrapped = cfg.wrapped.address.toLowerCase()
   const pegged = new Map(cfg.stablecoins.map(s => [s.address.toLowerCase(), s.decimals]))
 
@@ -336,12 +354,14 @@ export async function queryWhales(
         ? db.execute(buildTokenWhaleQuery(period, filters))
         : Promise.resolve([]),
     ),
-    // Bounded: an unreachable price source must cost the page a label ("no price"), not seconds.
-    withTimeout(fetchNativeUsd(), PRICE_TIMEOUT_MS, 'whales price').catch(() => null),
+    // Bounded by what the helper's own chain needs to reach a non-Binance fallback (11 s). It runs beside the
+    // two 15 s database timeouts, so it cannot make the page wait longer than they already can. A price
+    // that still has not arrived reads as null, which the page says out loud (rankingNote).
+    withTimeout(fetchNativeUsd(), NATIVE_PRICE_BUDGET_MS, 'whales price').then(usablePrice, () => null),
   ])
 
   const rows = rankWhalesByUsd(mergeWhaleRows(result.native, result.token), nativeUsd)
-  return { rows, degraded: result.native === null || result.token === null }
+  return { rows, nativeUsd, degraded: result.native === null || result.token === null }
 }
 
 /**
@@ -371,8 +391,10 @@ export async function queryWhales(
  *  cache, and the table needs a real `Date` back.
  *
  *  The rows are priced and ranked INSIDE the cached read (`queryWhales`), so the order, the USD
- *  figures and the price they came from are one snapshot for the whole window. Every field
- *  is a string, a number or null: no BigInt, which would make Next's cache write throw. */
+ *  figures and the price they came from are one snapshot for the whole window. A price that
+ *  failed is part of that snapshot (`nativeUsd: null`, cached like the rest), which is why the
+ *  page words its ranking note from it (`rankingNote`) instead of always claiming a live price.
+ *  Every field is a string, a number or null: no BigInt, which would make Next's cache write throw. */
 const fetchWhalesCached = createPageCache(
   // 'whales-usd', not 'whales': the cached rows now carry `decimals` and `usd`, and the page reads both.
   // The incremental cache outlives a deploy, so under the old name the page would be handed
@@ -380,8 +402,8 @@ const fetchWhalesCached = createPageCache(
   'whales-usd',
   WHALES_REVALIDATE_SECONDS,
   async (period: WhalePeriod, minNativeWei: string, filters: readonly TokenFilter[]) => {
-    const { rows, degraded } = await queryWhales(period, minNativeWei, filters)
-    return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), degraded }
+    const { rows, nativeUsd, degraded } = await queryWhales(period, minNativeWei, filters)
+    return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), nativeUsd, degraded }
   },
 )
 
@@ -393,6 +415,7 @@ export async function fetchWhales(
   const cached = await fetchWhalesCached(period, minNativeWei, filters)
   return {
     rows: cached.rows.map((r) => ({ ...r, timestamp: new Date(r.timestamp) })),
+    nativeUsd: cached.nativeUsd,
     degraded: cached.degraded,
   }
 }

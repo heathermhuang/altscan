@@ -345,9 +345,14 @@ describe('formatCompact', () => {
     expect(formatCompact(-1e18)).toBe('-999T+')
   })
 
-  it('never shows a non-zero value as 0', () => {
+  it('never shows a non-zero value as 0, on either side of it', () => {
     expect(formatCompact(0.004)).toBe('<0.01')
     expect(formatCompact(0.01)).toBe('0.01')
+    // A negative that rounds to nothing is "above -0.01", never "-0".
+    expect(formatCompact(-0.004)).toBe('>-0.01')
+    expect(formatCompact(-0.01)).toBe('-0.01')
+    expect(formatCompact(0)).toBe('0')
+    expect(formatCompactUsd(-0.004)).toBe('>-$0.01')
   })
 
   it('reads "—" for a number we do not have', () => {

@@ -27,6 +27,7 @@ import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
+import { fetchNativeUsd } from '@/lib/native-price'
 import { txShareOfBlock } from '@/lib/tape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 
@@ -47,66 +48,6 @@ export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
 
 // Transfers shown under the summary card; a tx with more has the full list further down.
 const TRANSFER_PREVIEW = 3
-
-async function fetchNativePrice(): Promise<number | null> {
-  const binanceSymbol = chainConfig.market.binanceSymbol
-  const ccSymbol = chainConfig.market.cryptoCompareSymbol
-
-  // Try multiple Binance endpoints (binance.us for US-based servers like Render)
-  for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
-    try {
-      const res = await fetch(
-        `${host}/api/v3/ticker/price?symbol=${binanceSymbol}`,
-        { next: { revalidate: 300 }, signal: AbortSignal.timeout(3000) },
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const price = parseFloat(data.price)
-        if (price > 0) return price
-      }
-    } catch { /* try next */ }
-  }
-
-  // Fallback: CryptoCompare
-  try {
-    const res = await fetch(
-      `https://min-api.cryptocompare.com/data/price?fsym=${ccSymbol}&tsyms=USD`,
-      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
-    )
-    if (res.ok) {
-      const data = await res.json()
-      if (data?.USD > 0) return data.USD
-    }
-  } catch { /* try next */ }
-
-  // Fallback: CoinGecko
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`,
-      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
-    )
-    if (res.ok) {
-      const data = await res.json()
-      return data[chainConfig.coingeckoId]?.usd ?? null
-    }
-  } catch { /* try next */ }
-
-  // Fallback: CoinCap
-  const coincapId = chainConfig.market.coincapId
-  try {
-    const res = await fetch(
-      `https://api.coincap.io/v2/assets/${coincapId}`,
-      { next: { revalidate: 300 }, signal: AbortSignal.timeout(5000) },
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const price = parseFloat(data?.data?.priceUsd)
-      if (price > 0) return price
-    }
-  } catch (e) { swallow('tx/price-all-failed', e) }
-
-  return null
-}
 
 /**
  * Confirmation depth is a property of the CHAIN, not of our index. Reading
@@ -320,7 +261,7 @@ export default async function TxDetailPage({
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
-    fetchNativePrice(),
+    fetchNativeUsd(),
     fetchChainTip(),
     // An RPC-path tx has no local block, so no strip.
     fromRpc ? Promise.resolve(null) : getBlockStrip(tx.blockNumber),
