@@ -159,6 +159,15 @@ jobs:
           ADDRESS_QUERY_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/explorer/lib/address-query.pg.test.ts
 
+      # The header typeahead's prefix LIKE and /search's exact-match lookup: both are served by
+      # text_pattern_ops expression indexes, and a plan that stops using them silently seq-scans a
+      # multi-million-row table. Asserts the plan (and that the driver runs them unprepared, which is what
+      # lets a bound LIKE use the index). Its table is TEMP, so it shares worker_test.
+      - name: PG-gated explorer suite (token typeahead + exact-match index plans)
+        env:
+          TOKEN_SUGGEST_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/explorer/lib/token-suggest.pg.test.ts
+
       # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
       # on the server to reproduce a full noeviction instance, so it needs the
       # throwaway service and must never be pointed at a shared Redis.

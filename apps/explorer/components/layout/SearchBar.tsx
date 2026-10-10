@@ -15,9 +15,10 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
   const router = useRouter()
   const lg = size === 'lg'
 
-  // The suggestions are code and a request the page can do without until someone uses the field.
+  // The suggestions are code and a request the page can do without until someone uses the field. A chunk
+  // that fails to load (offline) leaves the plain field, and the next focus tries again.
   const load = () => {
-    if (!Suggest) import('./SearchSuggest').then((m) => setSuggest(() => m.SearchSuggest))
+    if (!Suggest) import('./SearchSuggest').then((m) => setSuggest(() => m.SearchSuggest), () => {})
   }
 
   const handleSearch = (e: React.FormEvent) => {

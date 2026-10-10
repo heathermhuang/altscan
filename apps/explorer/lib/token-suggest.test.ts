@@ -74,4 +74,10 @@ describe('shapeSuggestions', () => {
     const rows = [row(1, 'CAKEX', 'Cakex', 900), row(2, 'CAKE', 'PancakeSwap Token', 100)]
     expect(shapeSuggestions(rows, 'cake', 'bnb').map((r) => r.symbol)).toEqual(['CAKE', 'CAKEX'])
   })
+
+  it('judges lookalikes by the chain it is asked about', () => {
+    const ethUsdt = { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', holderCount: 5 }
+    expect(shapeSuggestions([ethUsdt], 'usdt', 'eth')[0].lookalike).toBe(false)
+    expect(shapeSuggestions([ethUsdt], 'usdt', 'bnb')[0].lookalike).toBe(true)
+  })
 })
