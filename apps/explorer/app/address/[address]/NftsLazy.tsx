@@ -10,6 +10,23 @@ type NftsResponse = {
   reason?: string
 }
 
+/** One holding. Exported so the card can be rendered without the fetch. */
+export function NftCard({ nft }: { nft: ProviderNft }) {
+  return (
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
+      {nft.imageUrl ? (
+        <img src={nft.imageUrl} alt={nft.name} loading="lazy" className="w-full aspect-square object-cover" />
+      ) : (
+        <div className="w-full aspect-square bg-hair2 flex items-center justify-center text-mut"><Icon name="image" className="h-8 w-8" /></div>
+      )}
+      <div className="p-2">
+        <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
+        <p className="text-xs text-mut">{nft.symbol}</p>
+      </div>
+    </div>
+  )
+}
+
 export function NftsLazy({ addr }: { addr: string }) {
   const [data, setData] = useState<NftsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,17 +80,7 @@ export function NftsLazy({ addr }: { addr: string }) {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {nfts.map(nft => (
-          <div key={`${nft.tokenAddress}-${nft.tokenId}`} className="bg-card rounded-xl border border-hair overflow-hidden">
-            {nft.imageUrl ? (
-              <img src={nft.imageUrl} alt={nft.name} loading="lazy" className="w-full aspect-square object-cover" />
-            ) : (
-              <div className="w-full aspect-square bg-hair2 flex items-center justify-center text-mut"><Icon name="image" className="h-8 w-8" /></div>
-            )}
-            <div className="p-2">
-              <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
-              <p className="text-xs text-mut">{nft.symbol}</p>
-            </div>
-          </div>
+          <NftCard key={`${nft.tokenAddress}-${nft.tokenId}`} nft={nft} />
         ))}
       </div>
     </div>
