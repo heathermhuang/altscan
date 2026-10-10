@@ -43,7 +43,7 @@ export default async function ValidatorsPage() {
       .limit(100)
   } catch (e) { swallow('validators/query', e) }  // DB not connected
   const blockCounts = validators.length > 0 ? await fetchBlocks24h() : null
-  const display = validatorDisplays(validators)
+  const display = validatorDisplays(validators, blockCounts)
   const blocksCell = (address: string) => {
     const n = blocksProduced(blockCounts, address)
     return n === null ? '—' : formatNumber(n)

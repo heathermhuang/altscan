@@ -128,3 +128,49 @@ describe('validatorDisplays: voting power 0 in the ValidatorSet fallback run', (
     expect(validatorDisplays([])).toEqual([])
   })
 })
+
+// A validator in the stored set that produced no block in the last 24h, while the set as a whole did, is
+// not "active" in any sense a reader can see: the 24h block counts decide, not the status the indexer
+// always writes. "Standby" is the neutral reading; stronger facts (jailed, no stake) are never overwritten.
+describe('validatorDisplays: Standby', () => {
+  const STANDBY = { label: 'Standby', variant: 'default' }
+  const counts = (entries: Record<string, number>) => new Map(Object.entries(entries))
+
+  it('reads "Standby" with a neutral badge at 0 blocks in 24h while another validator produced blocks', () => {
+    const out = validatorDisplays([row(A, 'Figment'), row(B, 'Idle')], counts({ [A]: 72 }))
+    expect(out.map(d => d.status)).toEqual([{ label: 'active', variant: 'success' }, STANDBY])
+  })
+
+  it('a validator that produced even one block stays active', () => {
+    expect(validatorDisplays([row(A, 'x'), row(B, 'y')], counts({ [A]: 72, [B]: 1 })).map(d => d.status.label)).toEqual(['active', 'active'])
+  })
+
+  it('matches the stored address to the miner counts case-insensitively', () => {
+    const mixed = A.replace('75b851', '75B851')
+    expect(validatorDisplays([row(mixed, 'Figment'), row(B, 'Idle')], counts({ [A]: 72 })).map(d => d.status.label)).toEqual(['active', 'Standby'])
+  })
+
+  it('does not infer Standby when the block counts are unavailable (null) or when the whole set produced none', () => {
+    expect(validatorDisplays([row(A, 'x'), row(B, 'y')], null).map(d => d.status.label)).toEqual(['active', 'active'])
+    expect(validatorDisplays([row(A, 'x'), row(B, 'y')]).map(d => d.status.label)).toEqual(['active', 'active'])
+    expect(validatorDisplays([row(A, 'x'), row(B, 'y')], counts({})).map(d => d.status.label)).toEqual(['active', 'active'])
+    // Miners that are not in the validator table do not make the set "producing".
+    expect(validatorDisplays([row(A, 'x'), row(B, 'y')], counts({ [C]: 40 })).map(d => d.status.label)).toEqual(['active', 'active'])
+  })
+
+  it('keeps jailed and "No stake": both are stronger facts than being idle', () => {
+    const out = validatorDisplays([row(A, 'Figment'), row(B, 'Jailed', '9', 'jailed'), row(C, 'Squirrel', '0')], counts({ [A]: 72 }))
+    expect(out[1].status).toEqual({ label: 'jailed', variant: 'fail' })
+    expect(out[2].status).toEqual({ label: 'No stake', variant: 'default' })
+  })
+
+  it('leaves any other stored status as stored', () => {
+    expect(validatorDisplays([row(A, 'Figment'), row(B, 'x', '9', 'inactive')], counts({ [A]: 72 }))[1].status).toEqual({ label: 'inactive', variant: 'default' })
+  })
+
+  it('in a ValidatorSet fallback run (power unknown) an idle validator is still Standby, with its power still unknown', () => {
+    const out = validatorDisplays([row(A, 'Figment', '0'), row(B, 'Idle', '0')], counts({ [A]: 72 }))
+    expect(out.map(d => d.status.label)).toEqual(['active', 'Standby'])
+    expect(out.map(d => d.powerUnknown)).toEqual([true, true])
+  })
+})
