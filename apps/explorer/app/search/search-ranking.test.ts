@@ -60,6 +60,32 @@ describe('/search token ranking', () => {
     expect(rowOrder(await searchHtml('USDT'))[0]).toBe(CANONICAL)
   })
 
+  // /search?q=tether in production: tokens NAMED exactly "Tether" (flagged lookalikes) are an exact-name
+  // match, while the canonical "Tether USD" is only a name-prefix match, and they out-hold it.
+  it('puts the canonical "Tether USD" above lookalikes named exactly "Tether" on BNB', async () => {
+    rows = [
+      token(addr(1), '\u054D\u0405\u216E\u0422', 'Tether', 9_000_003),
+      token(addr(2), '\u054DSDT', 'Tether', 9_000_002),
+      token(addr(3), 'USDT', 'Tether', 9_000_001),
+      token(CANONICAL, 'USDT', 'Tether USD', 5_000_000),
+    ]
+    const html = await searchHtml('tether')
+    expect(rowOrder(html)).toEqual([CANONICAL, addr(1), addr(2), addr(3)])
+    expect(html.match(/lookalike<span/g)).toHaveLength(3)
+  })
+
+  it('puts the canonical "Tether USD" above lookalikes named exactly "Tether" on Ethereum', async () => {
+    const eth = '0xdac17f958d2ee523a2206206994597c13d831ec7'
+    rows = [
+      token(addr(1), 'USDT', 'Tether', 9_000_002),
+      token(addr(2), '\u054DSDT', 'Tether', 9_000_001),
+      token(eth, 'USDT', 'Tether USD', 5_000_000),
+    ]
+    const html = await searchHtml('tether', 'eth')
+    expect(rowOrder(html)).toEqual([eth, addr(1), addr(2)])
+    expect(html.match(/lookalike<span/g)).toHaveLength(2)
+  })
+
   it('shows the top 10 of its 50 candidates, and says it is a top 10', async () => {
     rows = Array.from({ length: 50 }, (_, i) => token(addr(i + 1), 'USDT', `Tether ${i}`, 1000 - i))
     const html = await searchHtml('usdt')

@@ -41,7 +41,7 @@ describe('rankTokenMatches tiers', () => {
   })
 })
 
-describe('rankTokenMatches within a tier', () => {
+describe('rankTokenMatches lookalikes', () => {
   it('puts a non-lookalike before a lookalike even when the lookalike has far more holders', () => {
     const fake = row('USDT', 'Tether USD', 5_000_000)
     const real = row('USDT', 'Tether USD', 40)
@@ -59,10 +59,45 @@ describe('rankTokenMatches within a tier', () => {
       .toEqual([b, c, a, fakeHigh, fakeLow])
   })
 
-  it('keeps a better tier ahead of a better class: a lookalike exact symbol beats a clean prefix', () => {
-    const fakeExact = row('USDT', 'x', 1)
-    const cleanPrefix = row('USDTX', 'x', 1_000_000)
-    expect(rankTokenMatches([cleanPrefix, fakeExact], 'usdt', (t) => t === fakeExact)).toEqual([fakeExact, cleanPrefix])
+  it('ranks every real token above every lookalike, whatever the tier: a clean prefix beats a lookalike exact symbol', () => {
+    const fakeExact = row('USDT', 'x', 5_000_000)
+    const cleanPrefix = row('USDTX', 'x', 1)
+    expect(rankTokenMatches([fakeExact, cleanPrefix], 'usdt', (t) => t === fakeExact)).toEqual([cleanPrefix, fakeExact])
+  })
+
+  it('ranks a clean contains-match above a lookalike exact symbol (the weakest real token still wins)', () => {
+    const fakeExact = row('USDT', 'Tether USD', 9_000_000)
+    const cleanInner = row('VUSDT', 'Venus USDT', 3)
+    expect(rankTokenMatches([fakeExact, cleanInner], 'usdt', (t) => t === fakeExact)).toEqual([cleanInner, fakeExact])
+  })
+
+  it('the production case: lookalikes named exactly "Tether" rank below the canonical "Tether USD"', () => {
+    // /search?q=tether on both chains: three tokens NAMED "Tether" (an exact-name match) outranked the
+    // canonical contract, whose name "Tether USD" is only a name-prefix match.
+    const canonical = row('USDT', 'Tether USD', 5_000_000, '0x55d398326f99059ff775485246999027b3197955')
+    const fakeA = row('ՍЅⅮТ', 'Tether', 9_000_001)
+    const fakeB = row('ՍSDT', 'Tether', 9_000_002)
+    const fakeC = row('USDT', 'Tether', 9_000_003)
+    const top = rankTokenMatches([fakeC, fakeB, fakeA, canonical], 'tether', (t) => t !== canonical)
+    expect(top[0]).toBe(canonical)
+    expect(top).toEqual([canonical, fakeC, fakeB, fakeA])
+  })
+
+  it('the production case: a lookalike with the exact symbol "USDT" ranks below a real token in a lower tier', () => {
+    const real = row('USDT.z', 'Tether USD Bridged ZED20', 40)
+    const fake = row('USDT', 'Tether USD', 9_000_000)
+    expect(rankTokenMatches([fake, real], 'usdt', (t) => t === fake)).toEqual([real, fake])
+  })
+
+  it('keeps tier order among the lookalikes themselves, after every real token', () => {
+    const realInner = row('ABC', 'My Tether Dollar', 1)
+    const fakeContains = row('XYZ', 'Fake Tether Dollar', 9_000_000)
+    const fakePrefix = row('TETHERX', 'x', 2)
+    const fakeExactName = row('QQQ', 'Tether', 3)
+    const fakeExactSymbol = row('TETHER', 'y', 1)
+    const fakes = new Set([fakeContains, fakePrefix, fakeExactName, fakeExactSymbol])
+    expect(rankTokenMatches([fakeContains, fakePrefix, realInner, fakeExactName, fakeExactSymbol], 'tether', (t) => fakes.has(t)))
+      .toEqual([realInner, fakeExactSymbol, fakeExactName, fakePrefix, fakeContains])
   })
 
   it('breaks a full tie by address, so the order does not flap between renders', () => {
