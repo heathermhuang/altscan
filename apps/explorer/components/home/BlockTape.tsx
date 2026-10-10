@@ -3,7 +3,9 @@ import { useState, type CSSProperties, type KeyboardEvent, type SyntheticEvent }
 import { chipFraction, decodeTape, ratePerMin, tapeBlocks, tapeWeight, type TapeBlock } from '@/lib/tape'
 
 const LEGEND = 'width = transactions · fill = gas used · newest on the right'
-const LEGEND_CUR = 'width = transactions · fill = gas used · ringed = this block · newest on the right'
+// Kept to two lines at 320px (.tp-leg is two lines tall there): a third line would make the band jump when the
+// hover / focus readout swaps in. "at right", not "on the right", is what keeps the ring in.
+const LEGEND_CUR = 'width = transactions · fill = gas used · ringed = this block · newest at right'
 
 // Fixed locale: the same string on server and client, so hydration cannot mismatch.
 const fmt = (n: number) => n.toLocaleString('en-US')

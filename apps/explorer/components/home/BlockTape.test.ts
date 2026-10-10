@@ -46,7 +46,34 @@ describe('BlockTape legend', () => {
 
   it('adds the ring to the legend only when a block is ringed', () => {
     expect(html()).not.toContain('ringed')
-    expect(html({ current: 11 })).toContain('width = transactions · fill = gas used · ringed = this block · newest on the right')
+    expect(html({ current: 11 })).toContain('width = transactions · fill = gas used · ringed = this block · newest at right')
+  })
+
+  // The legend sits in `.tp-leg`, two lines tall (min-h 60px) on a phone, and hovering or focusing a tile swaps
+  // in a one-line readout. A legend that wraps to 3 lines at 320px (288px of content = 40 mono glyphs of 7.2px)
+  // makes the band, and everything below it, jump 18px on that swap. 39 columns leaves a glyph of sub-pixel slack;
+  // a trailing "·" that does not fit moves to the next line, as it does in the browser.
+  const legendOf = (h: string) => h.match(/<p data-readout[^>]*>([^<]*)<\/p>/)![1]
+  const lines = (text: string, cols: number) => {
+    let n = 1, used = 0
+    for (const word of text.split(' ')) {
+      if (used === 0) used = word.length
+      else if (used + 1 + word.length <= cols) used += 1 + word.length
+      else { n++; used = word.length }
+    }
+    return n
+  }
+
+  it('both legends fit two lines at 320px, so the hover / focus swap to the readout never changes the band\'s height', () => {
+    for (const props of [{}, { heading: 'as of 21:04 UTC' }, { current: 11 }]) {
+      const text = legendOf(html(props))
+      expect(text.length).toBeGreaterThan(40)   // it does wrap, so the check below means something
+      expect(lines(text, 39), text).toBeLessThanOrEqual(2)
+    }
+  })
+
+  it('the wrap model sees the 3-line legend this replaced', () => {
+    expect(lines('width = transactions · fill = gas used · ringed = this block · newest on the right', 39)).toBe(3)
   })
 })
 

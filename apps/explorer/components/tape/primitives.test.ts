@@ -13,7 +13,15 @@ import { encodeTape } from '@/lib/tape'
 // exists in the stylesheet, the per-component duplicates that were folded in stay gone, and nothing
 // in the tape CSS fades (a fade belongs to placeholder cells, and the tape has none).
 const css = readFileSync(fileURLToPath(new URL('../../app/globals.css', import.meta.url)), 'utf8')
-const tapeCss = css.slice(css.indexOf('/* Tape primitives'), css.indexOf('/* Block strip ('))   // primitives + the block tape's own rules
+// The slice is between two comment markers; if either is renamed, indexOf is -1 and the assertions below would
+// pass on an empty or wrong string. So a missing or misordered marker throws, and a test checks what was sliced.
+function between(from: string, to: string): string {
+  const i = css.indexOf(from)
+  const j = css.indexOf(to)
+  if (i < 0 || j <= i) throw new Error(`primitives.test.ts: CSS markers moved ("${from}" at ${i}, "${to}" at ${j})`)
+  return css.slice(i, j)
+}
+const tapeCss = between('/* Tape primitives', '/* Block strip (')   // primitives + the block tape's own rules
 
 const markup = [
   renderToStaticMarkup(createElement(BlockTape, { tape: encodeTape([[10, 1000, 2, 10], [11, 1001, 3, 20], [12, 1002, 4, 30]]), chainName: 'BNB Chain', current: 11 })),
@@ -30,6 +38,12 @@ const markup = [
 const classes = new Set([...markup.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/)))
 
 describe('shared tape primitives', () => {
+  it('slices the whole tape section: the primitives and the block tape\'s own rules, none of the strip or ledger', () => {
+    expect(tapeCss.length).toBeGreaterThan(2000)
+    for (const rule of ['.tp-box {', '.tp-row {', '.tp-chip {', '.tp-gap > li {', '.bt-chip {']) expect(tapeCss, rule).toContain(rule)
+    for (const rule of ['.bs-row', '.ldg-row']) expect(tapeCss, rule).not.toContain(rule)
+  })
+
   it('has a rule for every tape class the three components render', () => {
     const tape = [...classes].filter(c => /^(tp|bt|bs|ldg)-/.test(c))
     expect(tape.length).toBeGreaterThan(10)
@@ -57,6 +71,11 @@ describe('shared tape primitives', () => {
     expect(tapeCss).not.toMatch(/mask/)
     expect(tapeCss).not.toMatch(/opacity:\s*0?\.\d+/)
     expect(css).not.toMatch(/\.bt-fade/)
+  })
+
+  it('keeps a floor under every tile (2px) and the ringed one (3px), so a block with few transactions never vanishes', () => {
+    expect(tapeCss).toMatch(/\.tp-gap > li\s*{[^}]*min-width:\s*2px/)
+    expect(tapeCss).toMatch(/\.tp-row > \.c\s*{[^}]*min-width:\s*3px/)
   })
 
   it('clamps the ringed block\'s label by its own width, so no px or viewport maths can leave the track', () => {

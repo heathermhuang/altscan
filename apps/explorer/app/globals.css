@@ -725,9 +725,11 @@
     bottom: calc(100% - 27px);
     transform: translateX(calc(var(--p) * -100%));
   }
-  /* A pointer at the same --p of the label's OWN width lands exactly over the tile's centre
-     (label left = p * (row - label), pointer = label left + p * label = p * row), so a clamped
-     label still points at its tile. It takes the label's background, so forced colours need no rule. */
+  /* The label is always inside the row (see above). A pointer at the same --p of the label's OWN width
+     points at the tile: label left = p * (row - label), so pointer = label left + p * label = p * row,
+     the tile's centre by weight. --p ignores the 2px / 3px floors and the 2px gaps, so where a floor
+     engages (a tile much lighter than its neighbours) the pointer is approximate, a few px off. It
+     takes the label's background, so forced colours need no rule. */
   .bt-chip::after {
     content: "";
     position: absolute;
