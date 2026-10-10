@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { mediaBlock } from '@/lib/css-media'
 import { describe, expect, it } from 'vitest'
 import { TxnsTable, type TxnRow } from './TxnsTable'
 
@@ -67,9 +68,8 @@ describe('TxnsTable cell contract', () => {
 })
 
 const css = readFileSync(new URL('../../globals.css', import.meta.url), 'utf8')
-// The block "Transaction rows on phones" opens at its comment and closes at the next top-level comment.
-const phoneBlock = css.slice(css.indexOf('/* Transaction rows on phones'), css.indexOf('/* Tape primitives'))
-const phoneMedia = phoneBlock.slice(phoneBlock.indexOf('@media (max-width: 639.98px)'))
+// The phone media query of the "Transaction rows on phones" section.
+const phoneMedia = mediaBlock(css, '(max-width: 639.98px)', css.indexOf('/* Transaction rows on phones'))
 
 describe('.dt-ad in app/globals.css', () => {
   it('positions each of the four cells', () => {
@@ -77,10 +77,6 @@ describe('.dt-ad in app/globals.css', () => {
   })
 
   it('exists only below 640px, so the desktop table is untouched', () => {
-    const before = css.slice(0, css.indexOf(phoneMedia))
-    const after = css.slice(css.indexOf(phoneMedia) + phoneMedia.length)
-    expect(before + after).not.toContain('.dt-ad')
-    // the one place the table is named outside the media query is the comment above it
-    expect(phoneBlock.slice(0, phoneBlock.indexOf('@media (max-width: 639.98px)'))).not.toMatch(/\.dt-ad\b[^{]*\{/)
+    expect(css.replace(phoneMedia, '')).not.toContain('.dt-ad')
   })
 })

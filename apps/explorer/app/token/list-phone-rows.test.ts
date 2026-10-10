@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { mediaBlock } from '@/lib/css-media'
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { HOLDER_LABELS } from '@/lib/holder-labels'
@@ -63,8 +64,7 @@ describe('/token list cell contract', () => {
 })
 
 const css = readFileSync(new URL('../globals.css', import.meta.url), 'utf8')
-const phoneBlock = css.slice(css.indexOf('/* Transaction rows on phones'), css.indexOf('/* Tape primitives'))
-const phoneMedia = phoneBlock.slice(phoneBlock.indexOf('@media (max-width: 639.98px)'))
+const phoneMedia = mediaBlock(css, '(max-width: 639.98px)', css.indexOf('/* Transaction rows on phones'))
 
 describe('.dt-tk in app/globals.css', () => {
   it('positions each of the five cells', () => {
@@ -79,8 +79,6 @@ describe('.dt-tk in app/globals.css', () => {
   })
 
   it('exists only below 640px, so the desktop table is untouched', () => {
-    const before = css.slice(0, css.indexOf(phoneMedia))
-    const after = css.slice(css.indexOf(phoneMedia) + phoneMedia.length)
-    expect(before + after).not.toContain('.dt-tk')
+    expect(css.replace(phoneMedia, '')).not.toContain('.dt-tk')
   })
 })
