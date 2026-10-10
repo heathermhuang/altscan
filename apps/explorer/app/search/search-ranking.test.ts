@@ -99,9 +99,10 @@ describe('/search token ranking', () => {
     expect(await searchHtml('usdt')).toContain('Found 4 tokens')
   })
 
+  // The 50 by-holders candidates, and (search-exact.test.ts) up to 10 rows whose symbol or name equals the query.
   it('asks the database for 50 candidates, ordered, instead of five unordered rows', async () => {
     await searchHtml('usdt')
-    expect(limits).toEqual([50])
+    expect(limits).toEqual([50, 10])
     expect(orderings).toHaveLength(1)
   })
 
