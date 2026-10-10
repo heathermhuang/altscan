@@ -228,6 +228,40 @@ describe('lookalikeOf: format characters and Lisu letters', () => {
   })
 })
 
+// C0 and C1 controls (and DEL) are not in \p{M}, \p{Cf} or \s, but they render as nothing: "US<BEL>DT" reads as USDT.
+describe('lookalikeOf: control characters', () => {
+  const CONTROL_USDT = [
+    ['BEL inside', 'US\u0007DT'],
+    ['NUL prefix', '\u0000USDT'],
+    ['ESC inside', 'USD\u001BT'],
+    ['DEL inside', 'U\u007FSDT'],
+    ['C1 control (U+0085) suffix', 'USDT\u0085'],
+  ] as const
+
+  it('folds a control character away, like any other invisible one', () => {
+    for (const [label, symbol] of CONTROL_USDT) expect(foldConfusables(symbol), label).toBe('USDT')
+  })
+
+  it.each(CONTROL_USDT)('flags %s as USDT at a non-canonical address, by symbol and by name', (_label, text) => {
+    expect(lookalikeOf({ address: SPAM, symbol: text, name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+    expect(lookalikeOf({ address: SPAM, symbol: text, name: 'x' }, 'eth')).toEqual({ symbol: 'USDT', canonical: ETH_USDT })
+    expect(lookalikeOf({ address: SPAM, symbol: 'x', name: text }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it('does not flag the real USDT contracts, with or without a control character in what they report', () => {
+    for (const [chain, address] of [['bnb', BNB_USDT.toLowerCase()], ['eth', ETH_USDT.toLowerCase()]] as const) {
+      expect(lookalikeOf({ address, symbol: 'USDT', name: 'Tether USD' }, chain)).toBeNull()
+      for (const [label, symbol] of CONTROL_USDT) {
+        expect(lookalikeOf({ address, symbol, name: 'Tether USD' }, chain), `${chain} ${label}`).toBeNull()
+      }
+    }
+  })
+
+  it('does not flag a token whose symbol merely contains a control character', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'CA\u0007KE', name: 'PancakeSwap Token' }, 'bnb')).toBeNull()
+  })
+})
+
 // The glyph table is generated from Unicode's confusables.txt (UTS #39 v18.0.0, 2026-08-06): every entry whose
 // source is one non-ASCII code point and whose prototype is one Latin letter, except long s (U+017F). NFKD folding
 // an entry does NOT keep it out: the repo pins no Node version, and an older runtime's Unicode data lacks the
