@@ -13,6 +13,7 @@
 import { unstable_cache } from 'next/cache'
 import { chainConfig } from '@/lib/chain'
 import { swallow } from '@/lib/observability'
+import { withTimeout } from '@/lib/with-timeout'
 
 /**
  * Build the cache key for a page query.
@@ -30,6 +31,35 @@ export function buildCacheKey(
   parts: readonly (string | number)[],
 ): string[] {
   return [name, chainConfig.key, ...parts.map(String)]
+}
+
+/**
+ * In-flight inline recomputes, keyed like the cache entry itself (name, chain, serialized arguments).
+ * An entry lives only while its promise does: `finally` drops it on success, failure and timeout.
+ */
+const inFlight = new Map<string, Promise<unknown>>()
+
+/**
+ * Run `query` for a too-old entry, once per key however many readers are waiting. The wait is bounded
+ * by the page deadline (`DB_TIMEOUT_MS`): a hung query (statement_timeout is opt-in and does not fire
+ * on a dead socket) would otherwise pin every reader of the key, where serving the old entry used to
+ * be instant. A timeout is just a rejection, so it takes the stale-on-error path below. Only this
+ * inline path is bounded; a cold miss runs inside Next's cache write and waits as long as it takes.
+ * The timeout abandons the wait, not the query, so the next flight may overlap a straggler: at most
+ * one new query per key per deadline.
+ */
+function recomputeOnce<A extends unknown[], T>(
+  name: string,
+  args: A,
+  query: (...args: A) => Promise<T>,
+): Promise<T> {
+  const key = JSON.stringify(buildCacheKey(name, [JSON.stringify(args)]))
+  let flight = inFlight.get(key) as Promise<T> | undefined
+  if (!flight) {
+    flight = withTimeout(query(...args)).finally(() => inFlight.delete(key))
+    inFlight.set(key, flight)
+  }
+  return flight
 }
 
 /**
@@ -73,16 +103,24 @@ export function buildCacheKey(
  *
  * Two things keep that recompute from making an outage worse. Concurrent
  * readers of one entry share ONE in-flight recompute (Next's own dedupe lives
- * on the request, so it cannot do this), and a recompute that fails serves the
- * old value and logs `[page-cache/<name>:stale-on-error]`: normally the page is
- * fresh, and during an outage it is no worse than before the bound existed. A
- * cold miss has no old value, so it rejects exactly as it always has, and
- * nothing is ever cached from a failure. An entry with no usable stamp has no
- * value to trust, so it rejects too.
+ * on the request, so it cannot do this), and a recompute that fails, or is
+ * still running after the page deadline (`DB_TIMEOUT_MS`), serves the old value
+ * and logs `[page-cache/<name>:stale-on-error]`. So the normal case is fresh,
+ * and during an outage the page still shows what it showed before the bound
+ * existed, though no longer instantly: a failing recompute is answered as soon
+ * as it fails, a hung one after the deadline, and concurrent readers share that
+ * single wait. A cold miss has no old value, so it rejects exactly as it
+ * always has (and is not subject to the deadline), and nothing is ever cached
+ * from a failure. An entry with no usable stamp has no value to trust, so it
+ * rejects too.
  *
- * The callback Next sees is now the same wrapper for every cache, so `name`
- * (with the chain) is all that tells two caches apart, here and in the
- * in-flight map: keep it unique per call.
+ * The callback Next sees is now the same wrapper for every cache, and Next
+ * derives the cache id from that callback's source text plus the key parts. It
+ * used to include each query's own text, so editing the query changed the id.
+ * Now only `name` (with the chain) tells two caches apart, here and in the
+ * in-flight map, and across a deploy only `name` separates old entries from
+ * new: keep it unique per call, AND change it whenever the cached value's
+ * shape changes, as `whales-usd` did, or the new code is handed the old shape.
  */
 export function createPageCache<A extends unknown[], T>(
   name: string,
@@ -100,33 +138,19 @@ export function createPageCache<A extends unknown[], T>(
   )
   return async (...args: A) => {
     const hit = await cached(...args)
+    // `?.` and the checks below look dead on this type, but an entry written before the stamp existed
+    // (an earlier deploy) has no `at` and may not even be an object. Its id should not match this
+    // wrapper's, so this is the guard if one ever does: it is read as too old.
     const age = Date.now() - hit?.at
     // NaN (no stamp) and negative (clock stepped back) both fail this test and fall through to a query.
     if (age >= 0 && age <= maxAgeMs) return hit.value
     try {
       return await recomputeOnce(name, args, query)
     } catch (err) {
-      // `hit.at` is a number only for an entry this module wrote, whose `value` is a real T.
+      // A finite `at` means an entry this module wrote, whose `value` is a real T (see the note above).
       if (!Number.isFinite(hit?.at)) throw err
       swallow(`page-cache/${name}:stale-on-error`, err)
       return hit.value
     }
   }
-}
-
-/** In-flight inline recomputes, keyed like the cache entry itself. An entry lives only while its promise does. */
-const inFlight = new Map<string, Promise<unknown>>()
-
-function recomputeOnce<A extends unknown[], T>(
-  name: string,
-  args: A,
-  query: (...args: A) => Promise<T>,
-): Promise<T> {
-  const key = JSON.stringify(buildCacheKey(name, [JSON.stringify(args)]))
-  let flight = inFlight.get(key) as Promise<T> | undefined
-  if (!flight) {
-    flight = query(...args).finally(() => inFlight.delete(key))
-    inFlight.set(key, flight)
-  }
-  return flight
 }

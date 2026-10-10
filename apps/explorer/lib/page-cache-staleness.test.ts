@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPageCache } from '@/lib/page-cache'
+import { DB_TIMEOUT_MS } from '@/lib/with-timeout'
 
 // A stand-in for Next 15.5's `unstable_cache` on a dynamic route, written from
 // next/dist/server/web/spec-extension/unstable-cache.js. The real one throws outside a Next request
@@ -397,5 +398,108 @@ describe('createPageCache entries are self-describing and JSON-safe', () => {
     vi.setSystemTime(T0 - 60 * 60 * SECOND)
 
     expect(await read(1)).toEqual({ page: 1, tip: 'v2' })
+  })
+})
+
+describe('createPageCache puts a deadline on the inline recompute', () => {
+  // A query can hang: statement_timeout is opt-in and does not fire on a dead socket. Without a
+  // deadline one hung recompute pins every too-old reader of that key for as long as it hangs, where
+  // serving the old entry used to be instant. Distinct cache names throughout, so a flight that never
+  // settles cannot leak into another test through the module-level in-flight map.
+  const PENDING = Symbol('pending')
+  /** The promise's value if it has settled by now, PENDING if not (never waits). */
+  const peek = <T,>(p: Promise<T>) => Promise.race([p, Promise.resolve(PENDING)])
+
+  /** A cache that has one good entry, then a query that never answers. */
+  async function hung(name: string) {
+    const query = vi.fn<(page: number) => Promise<string>>()
+    query.mockResolvedValueOnce('old')
+    const read = createPageCache(name, 60, query)
+    await read(1)
+    query.mockImplementation(() => new Promise<string>(() => {}))
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    return { query, read }
+  }
+
+  it('is the existing page deadline: DB_TIMEOUT_MS', () => {
+    expect(DB_TIMEOUT_MS).toBe(8000)
+  })
+
+  it('serves the old value and logs once the deadline passes on a never-settling query', async () => {
+    refresh.on = false
+    const { read } = await hung('hang-serve')
+
+    const reader = read(1)
+    await vi.advanceTimersByTimeAsync(DB_TIMEOUT_MS - 1)
+    expect(await peek(reader)).toBe(PENDING)
+    expect(swallow).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await peek(reader)).toBe('old')
+    expect(swallow).toHaveBeenCalledTimes(1)
+    expect(swallow).toHaveBeenCalledWith('page-cache/hang-serve:stale-on-error', expect.objectContaining({ message: 'query timeout' }))
+  })
+
+  it('shares one hung flight between concurrent readers, and all of them get the old value at the deadline', async () => {
+    refresh.on = false
+    const { query, read } = await hung('hang-shared')
+    query.mockClear()
+
+    const readers = Array.from({ length: 5 }, () => read(1))
+    await vi.advanceTimersByTimeAsync(DB_TIMEOUT_MS)
+
+    expect(await Promise.all(readers.map(peek))).toEqual(Array(5).fill('old'))
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the flight when the deadline fires: a later stale read starts a new one', async () => {
+    refresh.on = false
+    const { query, read } = await hung('hang-clears')
+    query.mockClear()
+
+    const first = read(1)
+    await vi.advanceTimersByTimeAsync(DB_TIMEOUT_MS)
+    expect(await peek(first)).toBe('old')
+    expect(query).toHaveBeenCalledTimes(1)
+
+    // The hung promise is still pending somewhere; the map must not be waiting on it.
+    query.mockResolvedValueOnce('new')
+    const second = read(1)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await peek(second)).toBe('new')
+    expect(query).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets a slow recompute that beats the deadline return its fresh value', async () => {
+    refresh.on = false
+    const query = vi.fn(async (page: number) => {
+      await new Promise(resolve => setTimeout(resolve, 5 * SECOND))
+      return { page, tip: 'v2' }
+    })
+    const read = createPageCache('slow-ok', 60, query)
+    const warm = read(1)
+    await vi.advanceTimersByTimeAsync(5 * SECOND)
+    await warm
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+
+    const reader = read(1)
+    await vi.advanceTimersByTimeAsync(5 * SECOND)
+
+    expect(await peek(reader)).toEqual({ page: 1, tip: 'v2' })
+    expect(swallow).not.toHaveBeenCalled()
+  })
+
+  it('does not apply to a cold miss: a first read slower than the deadline still resolves', async () => {
+    const query = vi.fn(async (page: number) => {
+      await new Promise(resolve => setTimeout(resolve, 3 * DB_TIMEOUT_MS))
+      return page
+    })
+    const read = createPageCache('cold-slow', 60, query)
+
+    const reader = read(1)
+    await vi.advanceTimersByTimeAsync(3 * DB_TIMEOUT_MS)
+
+    expect(await peek(reader)).toBe(1)
+    expect(swallow).not.toHaveBeenCalled()
   })
 })
