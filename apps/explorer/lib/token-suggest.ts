@@ -17,7 +17,9 @@
  * filter (cost grows with the rows passed before 50 match). The estimate for a prefix narrower than a
  * histogram bucket is a fraction of a bucket, whatever the truth, so on a 1.9M-row table 31 of the 4,096
  * three-letter prefixes chose the walk, each took 150 ms to 1.0 s, and a prefix with under 50 matches
- * walks the whole table. Each arm below has a ceiling that no estimate can raise.
+ * walks the whole table. The arms below cannot: the first reads 5,000 rows, always; the second reads 300 in
+ * index order, or, when the planner expects only a few matches, fetches and sorts them all, which is bounded by
+ * the one histogram bucket (~1% of the table) its estimate came from. Neither ever walks the table.
  */
 import { or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
@@ -59,7 +61,8 @@ export const SUGGEST_PREFIX_ROWS = 300
  *    USDT-named copies, which the arm below cannot (it reads them in no useful order).
  *  - by prefix: `ORDER BY lower(symbol) USING ~<~` is the text_pattern_ops index's own order, so it is read
  *    straight off tokens_lower_symbol_idx and stopped at 300 matches. It finds a rare, low-holder ticker.
- * Whatever the prefix, no more than 5,300 index entries are read.
+ * No prefix reads more than 5,000 + 300 rows when the planner expects many matches (it reads the second arm in
+ * index order and stops), or 5,000 + the few it expected (a bitmap scan and a sort of at most one histogram bucket).
  */
 export function suggestQuery(prefix: string) {
   const like = likePrefixPattern(prefix)

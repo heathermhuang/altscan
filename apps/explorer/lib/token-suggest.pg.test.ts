@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import type { SQL } from 'drizzle-orm'
-import { exactMatchQuery, suggestQuery, suggestRows, SUGGEST_POPULAR_ROWS, SUGGEST_PREFIX_ROWS } from './token-suggest'
+import { exactMatchQuery, suggestQuery, suggestRows } from './token-suggest'
 
 /**
  * The two token lookups behind the header typeahead and /search's exact matches, against a REAL Postgres,
@@ -111,12 +111,14 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
       expect(plan.indexes).toEqual(expect.arrayContaining(['tokens_lower_symbol_idx', 'tokens_holder_count_idx']))
     })
 
-    // The point of the two arms: whatever the planner guesses for a prefix, it reads at most 5,000 tokens by
-    // holders plus 300 by symbol. The plain `LIKE p ORDER BY holder_count DESC LIMIT 50` walks the WHOLE
-    // holder_count index for a prefix the planner over-estimates (100,065 rows read for under 50 results, in this
-    // 100,065-row fixture; ~2% of three-letter prefixes do it, which ones depends on ANALYZE's random sample).
-    // So this sweeps every two-letter prefix and one three-letter prefix in thirteen.
-    it('reads at most 5,300 rows for every one of 572 prefixes', async () => {
+    // The point of the two arms: whatever the planner guesses for a prefix, it never walks the table. The plain
+    // `LIKE p ORDER BY holder_count DESC LIMIT 50` walks the WHOLE holder_count index for a prefix the planner
+    // over-estimates (100,065 rows read for under 50 results, in this 100,065-row fixture; ~2% of three-letter
+    // prefixes do it, which ones depends on ANALYZE's random sample). The two arms read 5,000 rows by holders plus
+    // at most a few hundred by symbol (the planner may fetch and sort a prefix it expects few matches for: up to
+    // ~450 here), so the bound is 10% of the table. This sweeps every two-letter prefix and one three-letter prefix
+    // in thirteen.
+    it('reads under 10% of the table for every one of 572 prefixes', async () => {
       const L = 'abcdefghijklmnop'
       const prefixes = [...L].flatMap((a) => [...L].map((b) => a + b))
       let i = 0
@@ -127,7 +129,7 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
         if (rowsRead > worst.rows) { worst.prefix = prefix; worst.rows = rowsRead }
       }
       expect(prefixes).toHaveLength(572)
-      expect(worst.rows).toBeLessThanOrEqual(SUGGEST_POPULAR_ROWS + SUGGEST_PREFIX_ROWS)
+      expect(worst.rows).toBeLessThan(10_000)
     }, 60_000)
 
     it('returns the most-held tokens with that symbol prefix, case-insensitively', async () => {
