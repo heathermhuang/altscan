@@ -786,10 +786,13 @@ export type TtWhaleIndex = {
  * cost BNB's throughput cannot spare.
  *
  * Pure, and the single source of the statements: the flat CONCURRENTLY list (ETH, a
- * monolithic table), the partitioned builder (BNB) and the production build script all
- * render from here. Postgres only uses a partial index when it can PROVE the query
- * implies the predicate, so the address and floor are literals in the DDL and must be
- * literals in the query too (partial-index-needs-literal-predicate).
+ * monolithic table) and the partitioned builder (BNB) both render from here. (The one-off
+ * production build script embeds the same text; building both ways and diffing
+ * pg_get_indexdef showed them identical.)
+ *
+ * Postgres only uses a partial index when it can PROVE the query implies the predicate,
+ * so the address and floor are literals in the DDL and must be literals in the query too
+ * (partial-index-needs-literal-predicate).
  *
  * Spliced into DDL, so each piece is proven here rather than trusting config. The
  * address must be lowercase: `token_transfers.token_address` is stored lowercase, and
