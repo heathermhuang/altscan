@@ -21,6 +21,12 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
     if (!Suggest) import('./SearchSuggest').then((m) => setSuggest(() => m.SearchSuggest), () => {})
   }
 
+  // The combobox attributes describe a popup, so they arrive with it (the first focus). With no JS, or a chunk that
+  // failed to load, this is a plain search field: assistive tech must not hear "combobox, collapsed" on it.
+  const comboboxProps = Suggest
+    ? { role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': combo.open, 'aria-controls': `${id}-list`, 'aria-activedescendant': combo.active } as const
+    : {}
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     const href = routeForQuery(query)
@@ -39,11 +45,7 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
         placeholder={lg ? PLACEHOLDER : PLACEHOLDER_SHORT}
         aria-label="Search by address, tx hash, block number, or token name"
         aria-keyshortcuts="/"
-        role="combobox"
-        aria-autocomplete="list"
-        aria-expanded={combo.open}
-        aria-controls={Suggest ? `${id}-list` : undefined}
-        aria-activedescendant={combo.active}
+        {...comboboxProps}
         autoComplete="off"
         suppressHydrationWarning
       />

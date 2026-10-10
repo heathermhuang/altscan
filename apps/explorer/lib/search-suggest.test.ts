@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { hintFor, nextActive, suggestTokensFor, tokenQuery, type TokenSuggestion } from '@/lib/search-suggest'
+import { hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type TokenSuggestion } from '@/lib/search-suggest'
 
 const TX = 'aB'.repeat(32)
 const ADDR = 'Cd'.repeat(20)
-const tok = (symbol: string, holders = 1): TokenSuggestion => ({ address: `0x${symbol}`, symbol, name: symbol, holders, lookalike: false })
+const tok = (symbol: string, holders = 1): TokenSuggestion => ({ address: `0x${symbol}`, symbol, name: symbol, holders, lookalikeOf: null })
 
 describe('hintFor: the detected format, from the text alone (no request)', () => {
   it('names a block, with the number grouped and the href the form would go to', () => {
     expect(hintFor('#126779120')).toEqual({ kind: 'block', label: 'Block', value: '#126,779,120', href: '/blocks/126779120' })
     expect(hintFor('126,779,120')).toEqual({ kind: 'block', label: 'Block', value: '#126,779,120', href: '/blocks/126779120' })
     expect(hintFor('7')).toEqual({ kind: 'block', label: 'Block', value: '#7', href: '/blocks/7' })
+  })
+
+  it('groups digits in threes from the right, whatever the length', () => {
+    expect(['7', '123', '1234', '12345', '123456', '1234567'].map((q) => hintFor(q)?.value))
+      .toEqual(['#7', '#123', '#1,234', '#12,345', '#123,456', '#1,234,567'])
   })
 
   it('names a transaction and an address, shortening the hex and adding the missing 0x', () => {
@@ -66,5 +71,32 @@ describe('nextActive: arrow keys through the options', () => {
   it('is "none" when there are no options', () => {
     expect(nextActive(-1, 0, 'ArrowDown')).toBe(-1)
     expect(nextActive(0, 0, 'ArrowUp')).toBe(-1)
+  })
+})
+
+describe('indexOfKey: the highlight follows the option, not its position', () => {
+  it('finds the option by its key wherever it now is', () => {
+    expect(indexOfKey(['hint', 'a', 'b'], 'b')).toBe(2)
+    // an answer arrived and put two tokens ahead of it: still the same option
+    expect(indexOfKey(['hint', 'c', 'd', 'b'], 'b')).toBe(3)
+  })
+
+  it('is -1 once the option is gone, so Enter submits the form instead of picking a different token', () => {
+    expect(indexOfKey(['hint', 'c', 'd'], 'b')).toBe(-1)
+    expect(indexOfKey(['hint', 'a'], null)).toBe(-1)
+    expect(indexOfKey([], 'b')).toBe(-1)
+  })
+})
+
+describe('adversarial input in the box', () => {
+  const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t }
+
+  it('groups a 16,000-digit block number (capped at 200 digits) in under 5 ms', () => {
+    const q = '1'.repeat(16_000)
+    hintFor(q) // warm up
+    expect(ms(() => hintFor(q))).toBeLessThan(5)
+    expect(hintFor(q)?.value).toBe('#' + '1'.repeat(200).replace(/\B(?=(\d{3})+(?!\d))/g, ','))
+    expect(ms(() => hintFor(q + 'x'))).toBeLessThan(5)
+    expect(ms(() => tokenQuery(q + 'x'))).toBeLessThan(5)
   })
 })

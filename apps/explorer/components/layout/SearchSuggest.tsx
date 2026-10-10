@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  hintFor, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
+  hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
 } from '@/lib/search-suggest'
 
 /**
@@ -31,12 +31,13 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
   const router = useRouter()
   const list = useRef<HTMLUListElement>(null)
   const [earlier, setEarlier] = useState<TokenSuggestion[]>([])
-  const [active, setActive] = useState(-1)
+  // The highlighted option, by its href: an index would drift to another token when a fetch answer re-orders the list.
+  const [activeKey, setActiveKey] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const tq = tokenQuery(query)
 
   // A new query reopens the list and clears the highlight.
-  useEffect(() => { setDismissed(false); setActive(-1) }, [query])
+  useEffect(() => { setDismissed(false); setActiveKey(null) }, [query])
 
   // Token suggestions: wait for typing to pause, drop the answer to a query that has since changed.
   useEffect(() => {
@@ -57,37 +58,40 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
     ...suggestTokensFor(tq, earlier).map((token) => ({ href: `/token/${token.address}`, token })),
   ]
   const open = !dismissed && options.length > 0
-  const activeId = open && active >= 0 && active < options.length ? `${id}-${active}` : undefined
+  const active = indexOfKey(options.map((o) => o.href), activeKey)
+  const activeId = open && active >= 0 ? `${id}-${active}` : undefined
 
   // Before paint, so the input's aria-expanded / aria-activedescendant never lag the list on screen.
   useLayoutEffect(() => { onCombo({ open, active: activeId }) }, [open, activeId, onCombo])
 
   const go = (href: string) => { setDismissed(true); router.push(href) }
 
-  // Keys and focus belong to the field, which is SearchBar's: listen on its form. The handlers read the
-  // latest options through a ref, so they are attached once; the highlight is written to it as well as to
-  // state, so keys repeating faster than a render still step one option each.
-  const latest = useRef({ options, open, active, go })
-  latest.current = { options, open, active, go }
+  // Keys and focus belong to the field, which is SearchBar's: listen on its form. The handlers read the latest
+  // options through a ref (set after each render), so they are attached once; the highlight is also written to it
+  // as it changes, so keys repeating faster than a render still step one option each.
+  const latest = useRef({ options, open, activeKey, go })
+  useLayoutEffect(() => { latest.current = { options, open, activeKey, go } })
   useEffect(() => {
     const form = list.current?.closest('form')
     if (!form) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target !== form.elements.namedItem('q') || e.isComposing) return
-      const { options: opts, open: isOpen, active: act, go: pick } = latest.current
+      const { options: opts, open: isOpen, activeKey: key, go: pick } = latest.current
+      const keys = opts.map((o) => o.href)
+      const at = indexOfKey(keys, key)
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         if (opts.length === 0) return
         e.preventDefault()
         if (!isOpen) return setDismissed(false)
-        latest.current.active = nextActive(act, opts.length, e.key)
-        setActive(latest.current.active)
-      } else if (e.key === 'Enter' && isOpen && act >= 0) {
+        latest.current.activeKey = keys[nextActive(at, keys.length, e.key)]
+        setActiveKey(latest.current.activeKey)
+      } else if (e.key === 'Enter' && isOpen && at >= 0) {
         e.preventDefault() // a pick, not a form submit
-        pick(opts[act].href)
+        pick(opts[at].href)
       } else if (e.key === 'Escape' && isOpen) {
         e.preventDefault() // Header's Escape (closing the mobile menu) leaves this one to the list
         setDismissed(true)
-        setActive(-1)
+        setActiveKey(null)
       }
     }
     const onFocusOut = (e: FocusEvent) => { if (e.target === form.elements.namedItem('q')) setDismissed(true) }
@@ -113,7 +117,7 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
             aria-selected={i === active}
             // Keeps focus in the field, so a click is a pick and not a blur that closes the list first.
             onMouseDown={(e) => e.preventDefault()}
-            onMouseMove={() => { if (i !== active) setActive(i) }}
+            onMouseMove={() => { if (o.href !== activeKey) setActiveKey(o.href) }}
             onClick={() => go(o.href)}
           >
             {'hint' in o ? (
@@ -125,7 +129,9 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
               <>
                 <span className="flex items-baseline gap-2">
                   <span className="font-mono font-semibold text-ink">{o.token.symbol}</span>
-                  {o.token.lookalike && <span className="badge badge-bad">lookalike</span>}
+                  {o.token.lookalikeOf && (
+                    <span className="badge badge-bad">lookalike<span className="sr-only"> of {o.token.lookalikeOf}</span></span>
+                  )}
                   <span className="ml-auto text-mut">{o.token.holders.toLocaleString('en-US')} holders</span>
                 </span>
                 <span className="block truncate text-mut">{o.token.name}</span>

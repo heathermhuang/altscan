@@ -141,6 +141,19 @@ describe('/search normalises the query before routing', () => {
     expect(await redirectOf(q)).toBe(to)
   })
 
+  // normaliseSearchQuery ran BEFORE the 200-character cap, and its digit regex was quadratic: a 16 KB ?q= held the
+  // event loop ~150 ms per request on this dynamic, unlimited page.
+  it('answers a 16,000-character adversarial q fast, capped to 200 characters like the old page', async () => {
+    await searchHtml('warm up')
+    const t = performance.now()
+    const to = await redirectOf('1'.repeat(16_000) + '1')
+    expect(performance.now() - t).toBeLessThan(50)
+    expect(to).toBe(`/blocks/${'1'.repeat(200)}`)
+    const t2 = performance.now()
+    await searchHtml('1'.repeat(100) + 'x' + '1'.repeat(16_000)) // a token search, with a long tail to drop
+    expect(performance.now() - t2).toBeLessThan(50)
+  })
+
   it('searches tokens for the text after a leading # (and says so on the page)', async () => {
     holderRows = []
     exactRows = []

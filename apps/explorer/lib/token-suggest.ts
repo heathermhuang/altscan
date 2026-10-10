@@ -105,12 +105,12 @@ export function shapeSuggestions(
   prefix: string,
   chain: ChainKey,
 ): TokenSuggestion[] {
-  const lookalike = (t: { address: string; symbol: string; name: string }) => lookalikeOf(t, chain) !== null
-  return rankTokenMatches(rows, prefix, lookalike, SUGGEST_LIMIT).map((t) => ({
+  const imitates = (t: { address: string; symbol: string; name: string }) => lookalikeOf(t, chain)?.symbol ?? null
+  return rankTokenMatches(rows, prefix, (t) => imitates(t) !== null, SUGGEST_LIMIT).map((t) => ({
     address: t.address,
     symbol: t.symbol,
     name: t.name,
     holders: t.holderCount,
-    lookalike: lookalike(t),
+    lookalikeOf: imitates(t),
   }))
 }

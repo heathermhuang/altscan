@@ -16,12 +16,19 @@ describe('SearchBar server markup', () => {
     expect(html).toContain('<button type="submit">Search</button>')
   })
 
-  it('is a closed combobox: the popup it will open is not in the page until the field is used', () => {
-    expect(html).toMatch(/<input [^>]*role="combobox"/)
-    expect(html).toMatch(/<input [^>]*aria-expanded="false"/)
-    expect(html).toMatch(/<input [^>]*aria-autocomplete="list"/)
-    expect(html).toMatch(/<input [^>]*autoComplete="off"|<input [^>]*autocomplete="off"/)
+  // Before the typeahead loads (first focus), with no JS, or after a failed chunk load there is no popup, so the field
+  // must not announce itself as a combobox. SearchSuggest's load adds the combobox attributes (verified in a browser).
+  it('is a plain search field: no combobox role or popup attributes until the typeahead has loaded', () => {
+    expect(html).toMatch(/<input [^>]*type="text"/)
+    expect(html).not.toContain('role="combobox"')
+    expect(html).not.toContain('aria-expanded')
+    expect(html).not.toContain('aria-autocomplete')
     expect(html).not.toContain('aria-controls')
+    expect(html).not.toContain('aria-activedescendant')
     expect(html).not.toContain('role="listbox"')
+  })
+
+  it('still turns the browser autofill popup off, which would overlap the list', () => {
+    expect(html).toMatch(/<input [^>]*autoComplete="off"|<input [^>]*autocomplete="off"/)
   })
 })

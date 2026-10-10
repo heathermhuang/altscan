@@ -71,7 +71,7 @@ describe('shapeSuggestions', () => {
     const rows = Array.from({ length: 12 }, (_, i) => row(i + 1, `AB${i}`, `Ab ${i}`, 100 - i))
     const out = shapeSuggestions(rows, 'ab', 'bnb')
     expect(out).toHaveLength(SUGGEST_LIMIT)
-    expect(out[0]).toEqual({ address: addr(1), symbol: 'AB0', name: 'Ab 0', holders: 100, lookalike: false })
+    expect(out[0]).toEqual({ address: addr(1), symbol: 'AB0', name: 'Ab 0', holders: 100, lookalikeOf: null })
     expect(() => JSON.stringify(out)).not.toThrow()
   })
 
@@ -83,8 +83,8 @@ describe('shapeSuggestions', () => {
       row(3, 'WBNX', 'Wbnx Coin', 10),
     ]
     const out = shapeSuggestions(rows, 'wb', 'bnb')
-    expect(out.map((r) => [r.address === WBNB ? 'real' : r.address.slice(-2), r.lookalike])).toEqual([
-      ['real', false], ['03', false], ['01', true], ['02', true],
+    expect(out.map((r) => [r.address === WBNB ? 'real' : r.address.slice(-2), r.lookalikeOf])).toEqual([
+      ['real', null], ['03', null], ['01', 'WBNB'], ['02', 'WBNB'],
     ])
   })
 
@@ -95,7 +95,15 @@ describe('shapeSuggestions', () => {
 
   it('judges lookalikes by the chain it is asked about', () => {
     const ethUsdt = { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', name: 'Tether USD', holderCount: 5 }
-    expect(shapeSuggestions([ethUsdt], 'usdt', 'eth')[0].lookalike).toBe(false)
-    expect(shapeSuggestions([ethUsdt], 'usdt', 'bnb')[0].lookalike).toBe(true)
+    expect(shapeSuggestions([ethUsdt], 'usdt', 'eth')[0].lookalikeOf).toBeNull()
+    expect(shapeSuggestions([ethUsdt], 'usdt', 'bnb')[0].lookalikeOf).toBe('USDT')
+  })
+
+  // The suggestion names what it imitates, so the badge can say "lookalike of USDT" to a screen reader, as /search's does.
+  it('names the token a lookalike imitates, whether its symbol or its name does the imitating', () => {
+    const bySymbol = row(1, 'USDT', 'Some Coin', 10)
+    const byName = row(2, 'USX', 'Tether USD', 9)
+    const out = shapeSuggestions([bySymbol, byName], 'us', 'bnb')
+    expect(out.map((r) => r.lookalikeOf)).toEqual(['USDT', 'USDT'])
   })
 })

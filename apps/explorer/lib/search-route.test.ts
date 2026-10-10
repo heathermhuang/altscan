@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyQuery, normaliseSearchQuery, routeForQuery } from '@/lib/search-route'
+import { classifyQuery, normaliseSearchQuery, routeForQuery, SEARCH_QUERY_MAX } from '@/lib/search-route'
 
 const TX = 'aB'.repeat(32) // 64 hex, mixed case
 const ADDR = 'Cd'.repeat(20) // 40 hex, mixed case
@@ -115,5 +115,32 @@ describe('classifyQuery', () => {
     expect(classifyQuery(`0X${TX}`)).toEqual({ kind: 'tx', q: `0x${TX}` })
     expect(classifyQuery('usdt')).toEqual({ kind: 'text', q: 'usdt' })
     expect(classifyQuery('   ')).toEqual({ kind: 'text', q: '' })
+  })
+})
+
+// The digit test used to be /^[\d,\s_]*\d[\d,\s_]*$/, which backtracks quadratically on a long digit run that fails at the
+// end: 16,000 digits and an 'x' held the event loop ~150 ms (node 24), per request, on /search (dynamic, not rate
+// limited) and per keystroke in the box. It is now linear, and the input is capped before any regex sees it.
+describe('adversarial input', () => {
+  const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t }
+  const EVIL = ['1'.repeat(16_000) + 'x', '1,'.repeat(8_000) + 'x', '1 '.repeat(8_000) + '_x', ',' .repeat(16_000) + 'x']
+
+  it.each(EVIL.map((q) => [q.slice(0, 12) + '…', q]))('normalises a 16,000-character input (%s) in under 5 ms', (_label, q) => {
+    normaliseSearchQuery(q) // warm up the regex
+    expect(ms(() => normaliseSearchQuery(q))).toBeLessThan(5)
+    expect(ms(() => classifyQuery(q))).toBeLessThan(5)
+    expect(ms(() => routeForQuery(q))).toBeLessThan(5)
+  })
+
+  it('caps the query at 200 characters before it is processed', () => {
+    expect(SEARCH_QUERY_MAX).toBe(200)
+    expect(normaliseSearchQuery('a'.repeat(300))).toBe('a'.repeat(200))
+    expect(normaliseSearchQuery('1'.repeat(300))).toBe('1'.repeat(200))
+    expect(routeForQuery('1'.repeat(300))).toBe(`/blocks/${'1'.repeat(200)}`)
+    expect(routeForQuery('b'.repeat(300))).toBe(`/search?q=${'b'.repeat(200)}`)
+  })
+
+  it('leaves a query of up to 200 characters alone', () => {
+    expect(normaliseSearchQuery('a'.repeat(200))).toBe('a'.repeat(200))
   })
 })

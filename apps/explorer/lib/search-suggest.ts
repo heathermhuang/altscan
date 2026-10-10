@@ -10,19 +10,30 @@ export const SUGGEST_MIN_CHARS = 2
 export const SUGGEST_MAX_CHARS = 50
 
 /** One row of GET /api/search/suggest. */
-export type TokenSuggestion = { address: string; symbol: string; name: string; holders: number; lookalike: boolean }
+export type TokenSuggestion = {
+  address: string; symbol: string; name: string; holders: number
+  /** The well-known token this one imitates (its symbol), or null when it is not flagged. */
+  lookalikeOf: string | null
+}
 
 export type Hint = { kind: 'block' | 'tx' | 'address'; label: string; value: string; href: string }
 
 const LABEL = { block: 'Block', tx: 'Transaction', address: 'Address' } as const
+
+/** 126779120 -> "126,779,120". Digits only, so it can't go through Number; a loop, not a lookahead regex (those backtrack). */
+function groupDigits(digits: string): string {
+  const head = digits.length % 3 || 3
+  let out = digits.slice(0, head)
+  for (let i = head; i < digits.length; i += 3) out += `,${digits.slice(i, i + 3)}`
+  return out
+}
 
 /** What the box will open for this text, if it is a block number, a tx hash or an address; no request. */
 export function hintFor(raw: string): Hint | null {
   const { kind, q } = classifyQuery(raw)
   const href = routeForQuery(raw)
   if (kind === 'text' || !href) return null
-  // Digits only, so grouping can't go through Number: a block number is short, but a pasted one need not be.
-  const value = kind === 'block' ? `#${q.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}` : `${q.slice(0, 8)}…${q.slice(-8)}`
+  const value = kind === 'block' ? `#${groupDigits(q)}` : `${q.slice(0, 8)}…${q.slice(-8)}`
   return { kind, label: LABEL[kind], value, href }
 }
 
@@ -40,6 +51,15 @@ export function tokenQuery(raw: string): string | null {
  */
 export function suggestTokensFor(q: string | null, earlier: readonly TokenSuggestion[]): TokenSuggestion[] {
   return q === null ? [] : earlier.filter((t) => t.symbol.toLowerCase().startsWith(q))
+}
+
+/**
+ * Where the highlighted option is now, -1 when there is none or it is gone. The highlight is kept as the option's
+ * key, not its index: an answer that arrives while an option is arrowed puts new tokens ahead of it, and an index
+ * would then point (and Enter would go) to a different token than the one shown.
+ */
+export function indexOfKey(keys: readonly string[], key: string | null): number {
+  return key === null ? -1 : keys.indexOf(key)
 }
 
 /** The active option (-1: none) after an arrow key; both directions wrap. */

@@ -28,8 +28,8 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string }>
 }) {
   const { q } = await searchParams
-  // Normalised first (a pasted "#125,761,128", "0X…" or a hex without its 0x), then capped to prevent abuse.
-  const query = normaliseSearchQuery(q ?? '').slice(0, 200)
+  // Normalised (a pasted "#125,761,128", "0X…" or a hex without its 0x); it caps the length first, to prevent abuse.
+  const query = normaliseSearchQuery(q ?? '')
   const showReferral = isBinanceIntentQuery(query)
 
   // Server-side redirect for recognized query patterns

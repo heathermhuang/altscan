@@ -52,16 +52,16 @@ describe('GET /api/search/suggest', () => {
     expect(res.headers.get('cache-control')).toBe('public, max-age=30')
     expect(await res.json()).toEqual({
       tokens: [
-        { address: addr(1), symbol: 'CAKE', name: 'PancakeSwap Token', holders: 900_000, lookalike: false },
-        { address: addr(2), symbol: 'CAKEX', name: 'Cakex', holders: 10, lookalike: false },
+        { address: addr(1), symbol: 'CAKE', name: 'PancakeSwap Token', holders: 900_000, lookalikeOf: null },
+        { address: addr(2), symbol: 'CAKEX', name: 'Cakex', holders: 10, lookalikeOf: null },
       ],
     })
   })
 
-  it('lists lookalikes after real tokens and flags them', async () => {
+  it('lists lookalikes after real tokens and names what they imitate', async () => {
     h.rows = [row(1, 'USDT', 'Tether USD', 9_000_000), row(2, 'USDX', 'Usdx', 5)]
-    const body = await (await get(await load(), '?q=usd')).json() as { tokens: { symbol: string; lookalike: boolean }[] }
-    expect(body.tokens.map((t) => [t.symbol, t.lookalike])).toEqual([['USDX', false], ['USDT', true]])
+    const body = await (await get(await load(), '?q=usd')).json() as { tokens: { symbol: string; lookalikeOf: string | null }[] }
+    expect(body.tokens.map((t) => [t.symbol, t.lookalikeOf])).toEqual([['USDX', null], ['USDT', 'USDT']])
   })
 
   it.each(['', '?q=', '?q=a', '?q=%20a%20', `?q=${'a'.repeat(51)}`, '?q=us%00dt'])(
