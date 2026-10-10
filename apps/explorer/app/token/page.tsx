@@ -131,9 +131,11 @@ export default async function TokenListPage({
       </div>
       <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="dt">
+        {/* `.dt-tk` (app/globals.css) turns each row into a three-line card under 640px from these same
+            cells, so every column is in the DOM at every width. Keep the cell order. */}
+        <table className="dt dt-tk">
           <caption className="sr-only">{typeLabels[tokenType]} sorted by holder count</caption>
-          <thead>
+          <thead className="max-sm:sr-only">
             <tr>
               <th scope="col">#</th>
               <th scope="col">Token</th>
@@ -183,6 +185,12 @@ export default async function TokenListPage({
         </table>
         </div>
       </div>
+      {/* Phones hide the header (and touch screens show no title), so the count's qualifier is said once, in the open. */}
+      {tokens.length > 0 && (
+        <p className="mt-3 text-xs text-mut">
+          <span className="text-ink2">{HOLDER_LABELS.indexed.heading}.</span> {HOLDER_LABELS.indexed.title}
+        </p>
+      )}
     </div>
   )
 }

@@ -459,7 +459,11 @@
 /* Transaction rows on phones (components/transactions/TxTable). Under 640px each row is a
    three-line card laid out from the same cells as the desktop table, so there is no second set of
    markup: 1) status dot, hash, age  2) from -> to  3) value and its unit. Cells are told apart by
-   position (hash, age, from, to, value, status), so keep that order in TxTable. */
+   position (hash, age, from, to, value, status), so keep that order in TxTable.
+   Two more tables take the same pattern, each with its own cell order (the same skeleton, only the
+   grid differs): `dt-ad`, an address's transactions (app/address/[address]/page.tsx and TxnsLazy.tsx:
+   hash, age, from/to or summary, value), and `dt-tk`, the /token list (#, token, symbol, indexed
+   holders, total supply). */
 @layer components {
   /* `compact` (the homepage) has no To column on desktop; the cell is there for phones. */
   @media (min-width: 640px) {
@@ -469,18 +473,28 @@
   }
   @media (max-width: 639.98px) {
     .dt-tx,
-    .dt-tx tbody {
+    .dt-tx tbody,
+    .dt-ad,
+    .dt-ad tbody,
+    .dt-tk,
+    .dt-tk tbody {
       display: block;
     }
-    .dt-tx tbody tr {
+    .dt-tx tbody tr,
+    .dt-ad tbody tr,
+    .dt-tk tbody tr {
       display: grid;
-      grid-template-columns: 10px fit-content(55%) minmax(0, 1fr) auto;
       column-gap: 8px;
       row-gap: 2px;
       align-items: center;
       padding: 10px 12px;
     }
-    .dt-tx td {
+    .dt-tx tbody tr {
+      grid-template-columns: 10px fit-content(55%) minmax(0, 1fr) auto;
+    }
+    .dt-tx td,
+    .dt-ad td,
+    .dt-tk td {
       padding: 0;
       min-width: 0;
       overflow: hidden;
@@ -564,6 +578,75 @@
       overflow: hidden;
       clip-path: inset(50%);
       white-space: nowrap;
+    }
+    /* `dt-ad`: 1) hash, age  2) from/to or summary  3) value and its unit. */
+    .dt-ad tbody tr {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .dt-ad td:nth-child(1) {
+      grid-area: 1 / 1;
+    }
+    .dt-ad td:nth-child(2) {
+      grid-area: 1 / 2;
+      text-align: right;
+    }
+    .dt-ad td:nth-child(3) {
+      grid-area: 2 / 1 / 3 / 3;
+    }
+    .dt-ad td:nth-child(4) {
+      grid-area: 3 / 1 / 4 / 3;
+    }
+    .dt-ad td:nth-child(3),
+    .dt-ad td:nth-child(4) {
+      font-size: 12px;
+    }
+    .dt-ad td:nth-child(4) {
+      color: var(--ink2);
+    }
+    /* `dt-tk`: 1) rank, name (and a lookalike badge), symbol  2) indexed holders  3) total supply.
+       The headers are visually hidden here, so the two figures carry their own label after them
+       (the holder count is never shown bare: lib/holder-labels.ts). The name may wrap, so the badge
+       is never the part that is cut off. */
+    .dt-tk tbody tr {
+      grid-template-columns: 24px minmax(0, 1fr) fit-content(35%);
+    }
+    .dt-tk td:nth-child(1) {
+      grid-area: 1 / 1;
+    }
+    .dt-tk td:nth-child(2) {
+      grid-area: 1 / 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .dt-tk td:nth-child(3) {
+      grid-area: 1 / 3;
+      text-align: right;
+    }
+    .dt-tk td:nth-child(4) {
+      grid-area: 2 / 2 / 3 / 4;
+    }
+    .dt-tk td:nth-child(5) {
+      grid-area: 3 / 2 / 4 / 4;
+    }
+    .dt-tk td:nth-child(4),
+    .dt-tk td:nth-child(5) {
+      font-size: 12px;
+    }
+    .dt-tk td:nth-child(4) {
+      color: var(--ink2);
+    }
+    .dt-tk td:nth-child(4)::after {
+      content: " indexed holders";
+      color: var(--mut);
+    }
+    .dt-tk td:nth-child(5)::after {
+      content: " total supply";
+      color: var(--mut);
+    }
+    /* The one-cell "No tokens indexed yet." row takes the whole card, not the rank column. */
+    .dt-tk td[colspan] {
+      grid-column: 1 / -1;
+      white-space: normal;
     }
   }
 }

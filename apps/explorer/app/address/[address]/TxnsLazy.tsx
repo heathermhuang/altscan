@@ -1,12 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { HistoryRow } from '@/lib/providers'
-import { formatNativeToken, formatNumber, timeAgo } from '@/lib/format'
-import { shortHash } from '@/lib/address-display'
+import { formatNumber } from '@/lib/format'
 import { AddressLedger, AddressLedgerShell } from '@/components/tape/AddressLedger'
+import { PROVIDER_DETAIL_CLASS, TxnsTable } from './TxnsTable'
 import { toLedgerRows } from '@/lib/ledger'
 
 type HistoryResponse = {
@@ -104,37 +103,20 @@ export function TxnsLazy({ addr, reserveLedger }: { addr: string; reserveLedger:
       />
       <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">{chainConfig.name} transaction history for this address</caption>
-            <thead className="bg-canvas border-b border-hair">
-              <tr>
-                <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">Tx Hash</th>
-                <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut hidden sm:table-cell">Age</th>
-                <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">Summary</th>
-                <th scope="col" className="text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut">Value ({chainConfig.currency})</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-hair">
-              {txs.map((tx) => (
-                <tr key={tx.hash} className={`hover:bg-canvas transition-colors ${tx.possibleSpam ? 'opacity-50' : ''}`}>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                      {shortHash(tx.hash)}
-                    </Link>
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
-                    {timeAgo(new Date(tx.blockTimestamp))}
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 text-ink2 text-[13px] max-w-xs truncate">
-                    {tx.summary || tx.category}
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    {formatNativeToken(tx.value)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TxnsTable
+            caption={`${chainConfig.name} transaction history for this address`}
+            currency={chainConfig.currency}
+            detailHeading="Summary"
+            detailClass={PROVIDER_DETAIL_CLASS}
+            unitInHeading
+            rows={txs.map((tx) => ({
+              hash: tx.hash,
+              timestamp: tx.blockTimestamp,
+              detail: tx.summary || tx.category,
+              value: tx.value,
+              faded: tx.possibleSpam,
+            }))}
+          />
         </div>
       </div>
       {/* Cursor pagination */}

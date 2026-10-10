@@ -9,6 +9,8 @@ import { swallow } from '@/lib/observability'
 import { fetchRecentTape } from '@/lib/recent-tape'
 import { withTimeout } from '@/lib/with-timeout'
 import { completeUtcDays, dateLabelIndices, toDayPoint, type DataPoint } from '@/lib/chart-days'
+import { completeUtcHours, hourLabel, hourlyCaption, hourlyRange, MIN_HOURS, type HourRow } from '@/lib/chart-hours'
+import { fetchHourlyChart } from '@/lib/charts-hourly'
 
 export const revalidate = 300
 
@@ -85,6 +87,22 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
   }
 }
 
+/**
+ * The whole UTC hours to plot when there are too few whole days, or null when there are fewer than
+ * MIN_HOURS (or the read failed): the page then keeps its block tape. Whether an hour is whole is
+ * judged at the moment the cached rows were read, not at this render.
+ */
+async function fetchWholeHours(): Promise<HourRow[] | null> {
+  try {
+    const { asOf, rows } = await fetchHourlyChart()
+    const whole = completeUtcHours(rows, new Date(asOf))
+    return whole.length >= MIN_HOURS ? whole : null
+  } catch (e) {
+    swallow('charts/hourly', e)
+    return null
+  }
+}
+
 export default async function ChartsPage() {
   // Run sequentially — each query can use 100MB+ on 36M row tables.
   // Promise.all() on these caused concurrent memory spikes → OOM.
@@ -103,9 +121,30 @@ export default async function ChartsPage() {
     </div>
   )
 
-  // With under 3 complete days of anything, every card below would say "not enough data". Show the blocks
-  // the explorer does have instead, and pay for that query only then.
-  const tape = [txData, gasData, blockData].every((d) => d.length < MIN_DAYS) ? await fetchRecentTape() : null
+  // With under 3 complete days of anything, every daily card would say "not enough data". A chain that
+  // keeps about two days of blocks (BNB) plots the whole hours it has instead; with too few of those,
+  // the blocks the explorer does have. The hourly read and the tape are paid for only then.
+  const lacksDays = [txData, gasData, blockData].every((d) => d.length < MIN_DAYS)
+  const hours = lacksDays ? await fetchWholeHours() : null
+  if (hours !== null) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
+        {header}
+        <p className="mb-6 text-sm text-mut">
+          Daily charts need {MIN_DAYS} complete UTC days of blocks and this explorer has indexed fewer, so these are hourly.
+        </p>
+        <ChartCards
+          period="Hourly"
+          tx={hourlySeries(hours, (h) => h.tx)}
+          gas={hourlySeries(hours, (h) => h.gas)}
+          blocks={hourlySeries(hours, (h) => h.blocks)}
+        />
+      </div>
+    )
+  }
+
+  const tape = lacksDays ? await fetchRecentTape() : null
   if (tape !== null) {
     return (
       <>
@@ -127,70 +166,109 @@ export default async function ChartsPage() {
     <div className="max-w-7xl mx-auto px-4 py-8">
       <BreadcrumbJsonLd items={[{ name: 'Network Charts' }]} />
       {header}
-
-      <div className="space-y-8">
-        <ChartCard title="Daily Transaction Count" data={txData}>
-          <LineChart
-            data={txData}
-            label="Transactions"
-            formatY={(n) => Math.round(n).toLocaleString()}
-          />
-        </ChartCard>
-
-        {/* No base-fee series at all (BNB has none): say why, instead of a "not enough data" card. */}
-        <ChartCard
-          title={`Gas Price History — Avg Base Fee (Gwei)`}
-          data={gasData}
-          noSeries={gasData.length === 0 && BigInt(chainConfig.minGasPriceWei) > 0n ? (
-            <div className="flex items-center justify-center h-32 text-center text-ink2 text-sm">
-              <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline">Gas Tracker</a> for current rates.</p>
-            </div>
-          ) : undefined}
-        >
-          <LineChart
-            data={gasData}
-            label="Gwei"
-            formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
-          />
-        </ChartCard>
-
-        <ChartCard title="Daily Block Count" data={blockData}>
-          <LineChart
-            data={blockData}
-            label="Blocks"
-            formatY={(n) => Math.round(n).toLocaleString()}
-          />
-        </ChartCard>
-      </div>
+      <ChartCards period="Daily" tx={dailySeries(txData)} gas={dailySeries(gasData)} blocks={dailySeries(blockData)} />
     </div>
   )
 }
 
-function ChartCard({ title, data, children, noSeries }: {
-  title: string
-  data: DataPoint[]
-  children: React.ReactNode
-  noSeries?: React.ReactNode
-}) {
+/** What a chart draws: a value and an x tick per point, the caption under the title, and what to say if there are too few points. */
+type Series = {
+  values: number[]
+  ticks: string[]
+  caption: string | null
+  /** Points needed before the chart is worth drawing. */
+  min: number
+  shortNote: string
+}
+
+function dailySeries(data: DataPoint[]): Series {
   const dateRange = data.length >= 2
     ? `${data[0].date} — ${data[data.length - 1].date}`
     : data.length === 1
     ? data[0].date
     : null
+  return {
+    values: data.map((d) => d.value),
+    ticks: data.map((d) => d.date.slice(5)),
+    caption: dateRange && `${dateRange} (${data.length} days)`,
+    min: MIN_DAYS,
+    shortNote: `Not enough data yet — ${data.length === 0 ? 'no complete UTC day' : `only ${data.length} complete UTC day${data.length === 1 ? '' : 's'}`} recorded. Charts will appear once at least ${MIN_DAYS} complete days of data are available.`,
+  }
+}
 
+/** One series of the whole hours: the hours `pick` has a number for (the base fee is null where a chain has none). */
+function hourlySeries(hours: HourRow[], pick: (h: HourRow) => number | null): Series {
+  const points = hours.flatMap((h) => {
+    const value = pick(h)
+    return value === null ? [] : [{ hourMs: h.hourMs, value }]
+  })
+  return {
+    values: points.map((p) => p.value),
+    ticks: points.map((p) => hourLabel(p.hourMs)),
+    caption: points.length > 0 ? `${hourlyCaption(points)} · ${hourlyRange(points)}` : null,
+    min: MIN_HOURS,
+    shortNote: `Not enough data yet — ${points.length === 0 ? 'no complete UTC hour' : `only ${points.length} complete UTC hour${points.length === 1 ? '' : 's'}`} recorded.`,
+  }
+}
+
+/** The three charts, daily or hourly: `period` is the word in the titles. */
+function ChartCards({ period, tx, gas, blocks }: { period: 'Daily' | 'Hourly'; tx: Series; gas: Series; blocks: Series }) {
+  return (
+    <div className="space-y-8">
+      <ChartCard title={`${period} Transaction Count`} series={tx}>
+        <LineChart
+          series={tx}
+          label="Transactions"
+          formatY={(n) => Math.round(n).toLocaleString()}
+        />
+      </ChartCard>
+
+      {/* No base-fee series at all (BNB has none): say why, instead of a "not enough data" card. */}
+      <ChartCard
+        title={`Gas Price History — Avg Base Fee (Gwei)`}
+        series={gas}
+        noSeries={gas.values.length === 0 && BigInt(chainConfig.minGasPriceWei) > 0n ? (
+          <div className="flex items-center justify-center h-32 text-center text-ink2 text-sm">
+            <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink underline">Gas Tracker</a> for current rates.</p>
+          </div>
+        ) : undefined}
+      >
+        <LineChart
+          series={gas}
+          label="Gwei"
+          formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
+        />
+      </ChartCard>
+
+      <ChartCard title={`${period} Block Count`} series={blocks}>
+        <LineChart
+          series={blocks}
+          label="Blocks"
+          formatY={(n) => Math.round(n).toLocaleString()}
+        />
+      </ChartCard>
+    </div>
+  )
+}
+
+function ChartCard({ title, series, children, noSeries }: {
+  title: string
+  series: Series
+  children: React.ReactNode
+  noSeries?: React.ReactNode
+}) {
   return (
     <div className="bg-card rounded-xl border border-hair p-4 sm:p-6">
       <h2 className="font-semibold tracking-[-0.02em] text-ink mb-1">{title}</h2>
-      {dateRange && (
-        <p className="text-xs text-mut mb-4">{dateRange} ({data.length} days)</p>
+      {series.caption && (
+        <p className="text-xs text-mut mb-4">{series.caption}</p>
       )}
-      {data.length >= MIN_DAYS ? (
+      {series.values.length >= series.min ? (
         children
       ) : (
         noSeries ?? (
           <div className="h-48 flex items-center justify-center text-center text-mut">
-            Not enough data yet — {data.length === 0 ? 'no complete UTC day' : `only ${data.length} complete UTC day${data.length === 1 ? '' : 's'}`} recorded.
-            Charts will appear once at least {MIN_DAYS} complete days of data are available.
+            {series.shortNote}
           </div>
         )
       )}
@@ -199,33 +277,35 @@ function ChartCard({ title, data, children, noSeries }: {
 }
 
 /**
- * A line chart of at least MIN_DAYS points. The plot is a stretched SVG (so it fills the card at any
+ * A line chart of at least MIN_DAYS (or MIN_HOURS) points. The plot is a stretched SVG (so it fills the card at any
  * width); the axis text is HTML, because text inside a stretched or scaled SVG shrinks with it (it
  * rendered at about 4px on a phone) and a label wider than a fixed gutter clipped.
  */
 function LineChart({
-  data,
+  series,
   label,
   formatY,
 }: {
-  data: DataPoint[]
+  series: Series
   label: string
   formatY?: (n: number) => string
 }) {
-  const maxVal = Math.max(...data.map((d) => d.value), 1)
-  const minVal = Math.min(...data.map((d) => d.value), 0)
+  const { values, ticks: xTicks } = series
+  const maxVal = Math.max(...values, 1)
+  const minVal = Math.min(...values, 0)
   const range = maxVal - minVal || 1
   const fmt = formatY ?? ((n: number) => n.toLocaleString())
 
   // The plot is a 100 x 100 box: x is the share of the width, y the share of the height.
-  const last = data.length - 1
+  const last = values.length - 1
   const xOf = (i: number) => (i / last) * 100
-  const points = data.map((d, i) => ({ x: xOf(i), y: 100 - ((d.value - minVal) / range) * 100 }))
+  const points = values.map((v, i) => ({ x: xOf(i), y: 100 - ((v - minVal) / range) * 100 }))
 
   // Top to bottom, max first: five rules and the five labels beside them.
   const ticks = [1, 0.75, 0.5, 0.25, 0]
-  // Up to five date labels, a whole step apart (first and last included), so they do not overlap.
-  const dateIdx = dateLabelIndices(data.length)
+  // Up to five labels (dates, or HH:00 on an hourly chart), a whole step apart (first and last
+  // included), so they do not overlap.
+  const dateIdx = dateLabelIndices(values.length)
 
   return (
     <div role="img" aria-label={label} className="flex gap-2 text-[11px] leading-[14px] text-mut">
@@ -255,7 +335,7 @@ function LineChart({
             />
             {/* Dots, only if few data points: zero-length round-capped segments, so they stay round
                 (a <circle> would stretch with the plot). */}
-            {data.length <= 30 && (
+            {values.length <= 30 && (
               <path
                 className="stroke-acc"
                 strokeWidth="6"
@@ -273,7 +353,7 @@ function LineChart({
               className="absolute whitespace-nowrap"
               style={{ left: `${xOf(i)}%`, transform: `translateX(-${xOf(i)}%)` }}
             >
-              {data[i].date.slice(5)}
+              {xTicks[i]}
             </span>
           ))}
         </div>
