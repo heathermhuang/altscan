@@ -4,7 +4,8 @@
  * a name or symbol that reads as a web address or a social handle is treated as unsafe. This only
  * DECIDES; the callers choose the treatment: a headline names the token by its short address instead
  * (tx-decoder safeTransferSymbol, addressHeadline), and a table keeps the text but badges it
- * (components/ui/LinkInName). Nothing here, or at any call site, ever turns the text into a link.
+ * (components/ui/LinkInName). An inline amount ("1,000 SYM"), the metadata and the JSON-LD name the token by its
+ * short address too (tokenText, lib/format). Nothing here, or at any call site, ever turns the text into a link.
  *
  * Pure and import-free on purpose: client components (the typeahead, the holdings tab) use it too.
  */
@@ -35,6 +36,15 @@ export function looksLikeUrlOrHandle(text: string | null | undefined): boolean {
   if (!text) return false
   // NFKC maps the halfwidth ideographic full stop (U+FF61) to U+3002, and neither is a '.' to NFKC: fold both ourselves.
   return URL_OR_HANDLE.test(text.normalize('NFKC').replace(/[\p{Cf}\p{Cc}]/gu, '').replace(/[\u3002\uFF61]/g, '.'))
+}
+
+/**
+ * True when any one of the texts reads as a URL or a handle: the one place the "symbol or name" question is
+ * asked, so a site cannot drift from the others (a token page shows the symbol AND the name, a holdings row
+ * only what it shows). Prefer `tokenText` (lib/format) where the sanitised text and a short-address fallback are needed.
+ */
+export function anyLinkLike(...texts: Array<string | null | undefined>): boolean {
+  return texts.some(looksLikeUrlOrHandle)
 }
 
 /** The badge's `title`: what "link in name" means. */

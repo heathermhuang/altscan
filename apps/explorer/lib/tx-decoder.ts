@@ -5,7 +5,7 @@ import type { ChainKey } from '@altscan/chain-config'
 import { getAddressLabel } from './known-addresses'
 import { safeBigInt, formatTokenAmount, sanitizeSymbolOr } from './format'
 import { lookalikeOf } from './lookalike'
-import { looksLikeUrlOrHandle } from './link-in-name'
+import { anyLinkLike } from './link-in-name'
 
 export interface DecodedTx {
   summary: string
@@ -45,7 +45,7 @@ export function safeTransferSymbol(
   const clean = sanitizeSymbolOr(symbol, '')
   if (!clean) return undefined
   if (lookalikeOf({ address, symbol: clean }, chain) || lookalikeOf({ address, symbol }, chain)) return undefined
-  if (looksLikeUrlOrHandle(clean) || looksLikeUrlOrHandle(symbol)) return undefined
+  if (anyLinkLike(clean, symbol)) return undefined
   return clean
 }
 

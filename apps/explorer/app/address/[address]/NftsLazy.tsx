@@ -3,11 +3,34 @@
 import { useEffect, useState } from 'react'
 import type { ProviderNft } from '@/lib/providers'
 import { Icon } from '@/components/ui/Icon'
+import { LinkInName } from '@/components/ui/LinkInName'
+import { shortenAddress } from '@/lib/address-display'
+import { anyLinkLike } from '@/lib/link-in-name'
 
 type NftsResponse = {
   nfts: ProviderNft[]
   limited?: boolean
   reason?: string
+}
+
+/** One holding. Exported so the card can be rendered without the fetch. */
+export function NftCard({ nft }: { nft: ProviderNft }) {
+  // Both texts are printed as given, so both are judged (lib/link-in-name). The text stays text and nothing links to it;
+  // the image's alt text, which a failed picture shows and a screen reader reads, uses the short address instead.
+  const linkLike = anyLinkLike(nft.name, nft.symbol)
+  return (
+    <div className="bg-card rounded-xl border border-hair overflow-hidden">
+      {nft.imageUrl ? (
+        <img src={nft.imageUrl} alt={linkLike ? shortenAddress(nft.tokenAddress) : nft.name} loading="lazy" className="w-full aspect-square object-cover" />
+      ) : (
+        <div className="w-full aspect-square bg-hair2 flex items-center justify-center text-mut"><Icon name="image" className="h-8 w-8" /></div>
+      )}
+      <div className="p-2">
+        <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
+        <p className="text-xs text-mut">{nft.symbol}{linkLike && <LinkInName className="ml-2" />}</p>
+      </div>
+    </div>
+  )
 }
 
 export function NftsLazy({ addr }: { addr: string }) {
@@ -63,17 +86,7 @@ export function NftsLazy({ addr }: { addr: string }) {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {nfts.map(nft => (
-          <div key={`${nft.tokenAddress}-${nft.tokenId}`} className="bg-card rounded-xl border border-hair overflow-hidden">
-            {nft.imageUrl ? (
-              <img src={nft.imageUrl} alt={nft.name} loading="lazy" className="w-full aspect-square object-cover" />
-            ) : (
-              <div className="w-full aspect-square bg-hair2 flex items-center justify-center text-mut"><Icon name="image" className="h-8 w-8" /></div>
-            )}
-            <div className="p-2">
-              <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
-              <p className="text-xs text-mut">{nft.symbol}</p>
-            </div>
-          </div>
+          <NftCard key={`${nft.tokenAddress}-${nft.tokenId}`} nft={nft} />
         ))}
       </div>
     </div>

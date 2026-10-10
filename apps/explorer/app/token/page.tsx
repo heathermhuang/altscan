@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { formatCompact, formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
 import { shortenAddress } from '@/lib/address-display'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
-import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { chainConfig } from '@/lib/chain'
@@ -153,7 +153,7 @@ export default async function TokenListPage({
               )
               // Flagged rows only: an unflagged row's cell is the bare link, with no extra node in the HTML or the flight payload.
               const lookalike = lookalikeOf(t, chainConfig.key)
-              const inName = looksLikeUrlOrHandle(t.name) || looksLikeUrlOrHandle(t.symbol)
+              const inName = anyLinkLike(t.name, t.symbol)
               return (
                 <tr key={t.address}>
                   <td className="text-mut">{i + 1}</td>

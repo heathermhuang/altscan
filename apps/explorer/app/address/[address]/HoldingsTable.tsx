@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { sanitizeSymbolOr, tokenLabel } from '@/lib/format'
 import { usdText, type HoldingRow } from '@/lib/holdings'
-import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 
 // Kicker-style column header, matching components/transactions/TxTable.
@@ -50,7 +50,7 @@ export function HoldingsTable({ rows, caption, nativeSymbol }: { rows: readonly 
               <tr key={r.tokenAddress} className="hover:bg-canvas transition-colors">
                 {/* Flagged rows only (judged on the text this row shows: the label and the symbol column): an unflagged row's cell is the bare link. */}
                 <td className="px-3 sm:px-4 py-2">
-                  {looksLikeUrlOrHandle(label) || looksLikeUrlOrHandle(r.symbol) ? <>{link}<LinkInName className="ml-2" /></> : link}
+                  {anyLinkLike(label, r.symbol) ? <>{link}<LinkInName className="ml-2" /></> : link}
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(r.symbol, '—')}</td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">{r.amount}</td>

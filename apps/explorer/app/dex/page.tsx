@@ -4,7 +4,7 @@ import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
-import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
@@ -62,10 +62,12 @@ export default async function DexPage({
   }
 
   // The indexer stores '???' for a symbol it could not read: that is an unknown token, not a ticker.
-  // A token with no metadata row at all keeps its bare amount.
+  // A token with no metadata row at all keeps its bare amount. A symbol that reads as a URL or handle is an advert
+  // (lib/link-in-name), so the leg names that token by its short address; any other is printed as given.
   const symbolText = (address: string | null) => {
     const symbol = tokenSymbolMap.get(address?.toLowerCase() ?? '')
-    return symbol === undefined ? '' : tokenTextOr(symbol, UNKNOWN_TOKEN)
+    if (symbol === undefined) return ''
+    return tokenTextOr(tokenUnit(symbol, address ?? ''), UNKNOWN_TOKEN)
   }
 
   // The strip draws the same trades as the table below it, sized from the cached trades and the cached

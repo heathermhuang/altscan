@@ -3,7 +3,7 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenTextOr } from '@/lib/format'
+import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Icon } from '@/components/ui/Icon'
@@ -13,7 +13,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
-import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { Contract } from 'ethers'
@@ -26,7 +26,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersFact } from './HoldersLazy'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
-import { shortHash, toChecksumAddress } from '@/lib/address-display'
+import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
 
 const ERC20_ABI = [
   'function name() view returns (string)',
@@ -104,6 +104,13 @@ async function healPlaceholderMeta(
   }
 }
 
+// "Name (SYMBOL)", the token as the metadata and the breadcrumb JSON-LD name it. Crawlers and link previews read those
+// without the badge a visitor sees beside the header, so a name or symbol that reads as a URL or handle (lib/link-in-name)
+// is an advert there: the token is named by its short address instead.
+function tokenIdentity(token: { name: string; symbol: string }, address: string): string {
+  return tokenText(token.symbol, token.name, address).linkLike ? shortenAddress(address) : `${token.name} (${token.symbol})`
+}
+
 // Missing tokens return noindex metadata instead of throwing notFound(): on
 // this Next version, notFound() from generateMetadata still responds 200 with
 // the not-found UI, so status can't be trusted for SEO — noindex in the head
@@ -126,22 +133,23 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   if (!token) {
     const rpcToken = await fetchTokenFromRpc(address.toLowerCase())
     if (rpcToken) return {
-      title: `${rpcToken.name} (${rpcToken.symbol})`,
-      description: `${rpcToken.name} (${rpcToken.symbol}) token on ${chainConfig.name}.`,
+      title: tokenIdentity(rpcToken, address),
+      description: `${tokenIdentity(rpcToken, address)} token on ${chainConfig.name}.`,
       alternates: { canonical: `/token/${address.toLowerCase()}` },
     }
     return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   token = await healPlaceholderMeta(token, address.toLowerCase())
   const standard = tokenTypeLabel(token.type, chainConfig.tokenStandard)
+  const identity = tokenIdentity(token, address)
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
-    title: `${token.name} (${token.symbol})`,
+    title: identity,
     // No holder count: tokens.holder_count is a frozen snapshot (see lib/holder-labels.ts), not something to publish as current.
-    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.`,
+    description: `${identity} ${standard} token on ${chainConfig.name}.`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
-      title: `${token.name} (${token.symbol})`,
+      title: identity,
       description: standard,
     },
   }
@@ -256,6 +264,14 @@ export default async function TokenDetailPage({
   const nameText = tokenTextOr(token.name, '—')
   const symbolText = tokenTextOr(token.symbol, '—')
 
+  // The header keeps the text, badged. Everywhere else the page prints the symbol (amounts, the supply line, captions, the
+  // holders table), a symbol that reads as a URL or handle (lib/link-in-name) is the token's short address, and any other
+  // is printed exactly as the page always did (even CJK, or the indexer's '???'): only the URL rule is applied here.
+  const shown = tokenText(token.symbol, token.name, addr)
+  const unit = tokenUnit(token.symbol, addr)
+  // DexScreener names the pair from the tokens' own symbols, so the same advert can be in it, as the text of an outbound link.
+  const pairLabel = marketData?.pairLabel && anyLinkLike(marketData.pairLabel) ? `${shortenAddress(addr)} pair` : marketData?.pairLabel
+
   // Pure string check, so it holds on the live (RPC-only) path too, where analyzeTokenRisk is skipped.
   const lookalike = lookalikeOf({ address: addr, symbol: token.symbol, name: token.name }, chainConfig.key)
   const signals: RiskSignal[] = lookalike
@@ -287,7 +303,7 @@ export default async function TokenDetailPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <BreadcrumbJsonLd items={[{ name: 'Tokens', href: '/token' }, { name: `${token.name} (${token.symbol})` }]} />
+      <BreadcrumbJsonLd items={[{ name: 'Tokens', href: '/token' }, { name: tokenIdentity(token, addr) }]} />
       <div className="mb-5">
         <p className="k">{'// '}token</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -301,7 +317,7 @@ export default async function TokenDetailPage({
               lookalike<span className="sr-only"> of {lookalike.symbol}</span>
             </span>
           )}
-          {(looksLikeUrlOrHandle(token.name) || looksLikeUrlOrHandle(token.symbol)) && <LinkInName />}
+          {shown.linkLike && <LinkInName />}
           <Badge variant="default">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</Badge>
           <a
             href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
@@ -344,10 +360,10 @@ export default async function TokenDetailPage({
                 rel="noopener noreferrer"
                 className="text-xs text-acc-ink hover:underline"
               >
-                {marketData.pairLabel} ↗
+                {pairLabel} ↗
               </a>
-            ) : marketData.pairLabel && (
-              <span className="text-xs text-mut">{marketData.pairLabel}</span>
+            ) : pairLabel && (
+              <span className="text-xs text-mut">{pairLabel}</span>
             )}
           </div>
           <dl className="ledger">
@@ -381,12 +397,12 @@ export default async function TokenDetailPage({
           </dl>
           {marketData.circulatingSupply != null && (
             <p className="text-xs text-mut mt-3">
-              Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {token.symbol}
+              Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {unit}
             </p>
           )}
-          {marketData.pairLabel && (
+          {pairLabel && (
             <p className="text-[11px] text-mut mt-2">
-              Price, 24h volume and liquidity are for the {marketData.pairLabel}; market cap and FDV are for the whole token.
+              Price, 24h volume and liquidity are for the {pairLabel}; market cap and FDV are for the whole token.
             </p>
           )}
           <p className="text-[11px] text-mut mt-2">
@@ -452,7 +468,7 @@ export default async function TokenDetailPage({
       <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
         <table className="dt">
-          <caption className="sr-only">Token transfers for {token.symbol}</caption>
+          <caption className="sr-only">Token transfers for {unit}</caption>
           <thead>
             <tr>
               <th scope="col">Tx Hash</th>
@@ -484,7 +500,7 @@ export default async function TokenDetailPage({
                     <AddressLink address={t.toAddress} />
                   </td>
                   <td>
-                    {amount} {token.symbol}
+                    {amount} {unit}
                   </td>
                 </tr>
               )

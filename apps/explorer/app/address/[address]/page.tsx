@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
+import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, safeBigInt, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -11,7 +11,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { toChecksumAddress, shortenAddress, shortHash, addressHeadline } from '@/lib/address-display'
+import { toChecksumAddress, addressHeadline } from '@/lib/address-display'
 import { resolveName } from '@/lib/name-resolver'
 import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/providers'
@@ -21,6 +21,8 @@ import { TxnsTable } from './TxnsTable'
 import { TransfersLazy } from './TransfersLazy'
 import { HoldingsTab, getTrackedBalances } from './HoldingsTab'
 import { NftsLazy } from './NftsLazy'
+import { TransferRow, type TransferTokenInfo } from './TransferRow'
+import { NftRow, type NftTransfer } from './NftRow'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
 import { WatchlistButton } from '@/components/ui/WatchlistButton'
@@ -585,7 +587,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
   }
 
   // Look up token info (name/symbol/decimals) for DB transfers
-  const tokenInfoMap = new Map<string, { name: string; symbol: string; decimals: number }>()
+  const tokenInfoMap = new Map<string, TransferTokenInfo>()
   if (transfers.length > 0) {
     try {
       const uniqueAddrs = [...new Set(transfers.map(t => t.tokenAddress))]
@@ -619,46 +621,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
           </thead>
           <tbody className="divide-y divide-hair">
             {transfers.map((t) => (
-              <tr key={`${t.txHash}-${t.logIndex}`} className="hover:bg-canvas transition-colors">
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
-                    {shortHash(t.txHash)}
-                  </Link>
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{formatNumber(t.blockNumber)}</td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link
-                    href={`/token/${t.tokenAddress}`}
-                   
-                    className="text-acc-ink hover:underline"
-                  >
-                    {tokenLabel(
-                      tokenInfoMap.get(t.tokenAddress)?.symbol,
-                      tokenInfoMap.get(t.tokenAddress)?.name,
-                      t.tokenAddress)}
-                  </Link>
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  {(() => {
-                    const decimals = tokenInfoMap.get(t.tokenAddress)?.decimals ?? 0
-                    const raw = t.value ?? '0'
-                    if (decimals > 0) {
-                      return <span title={formatTokenAmount(raw, decimals)}>{formatTokenAmount(raw, decimals, 6)}</span>
-                    }
-                    return raw.slice(0, 12)
-                  })()}
-                  {(() => {
-                    const sym = sanitizeSymbolOr(tokenInfoMap.get(t.tokenAddress)?.symbol, '')
-                    return sym ? ` ${sym}` : ''
-                  })()}
-                </td>
-              </tr>
+              <TransferRow key={`${t.txHash}-${t.logIndex}`} t={t} addr={addr} info={tokenInfoMap.get(t.tokenAddress)} />
             ))}
           </tbody>
         </table>
@@ -750,16 +713,7 @@ async function AnalyticsTab({
 // ---- NFTs Tab ----
 
 async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
-  let nftTransfers: Array<{
-    txHash: string
-    tokenAddress: string
-    tokenId: string | null
-    fromAddress: string
-    toAddress: string
-    blockNumber: number
-    name?: string
-    symbol?: string
-  }> = []
+  let nftTransfers: NftTransfer[] = []
 
   try {
     const result = await db.execute(sql`
@@ -820,28 +774,7 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
         </thead>
         <tbody className="divide-y divide-hair">
           {nftTransfers.map((t, i) => (
-            <tr key={i} className="hover:bg-canvas transition-colors">
-              <td className="px-3 sm:px-4 py-2">
-                <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
-                  {t.name ?? shortenAddress(t.tokenAddress)}
-                </Link>
-                {t.symbol && <span className="ml-1 text-xs text-mut">({t.symbol})</span>}
-              </td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                #{t.tokenId}
-              </td>
-              <td className="px-3 sm:px-4 py-2">
-                <span className={`font-mono text-xs font-medium ${t.toAddress.toLowerCase() === addr ? 'text-live' : 'text-warn'}`}>
-                  {t.toAddress.toLowerCase() === addr ? 'Received' : 'Sent'}
-                </span>
-              </td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
-                  {shortHash(t.txHash)}
-                </Link>
-              </td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut">{formatNumber(t.blockNumber)}</td>
-            </tr>
+            <NftRow key={i} t={t} addr={addr} />
           ))}
         </tbody>
       </table>

@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { TokenTransferRow } from '@/lib/providers'
-import { formatDecimalAmount, timeAgo, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { formatDecimalAmount, timeAgo, tokenText } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { LinkInName } from '@/components/ui/LinkInName'
 
 type TransfersResponse = {
   // TokenTransferRow, not ProviderTokenTransfer: the route serves a reduced
@@ -20,6 +21,42 @@ type TransfersResponse = {
   cursor: string | null
   limited?: boolean
   reason?: string
+}
+
+/** One row of the provider's history. Exported so the cells can be rendered without the fetch. */
+export function ProviderTransferRow({ t, addr }: { t: TokenTransferRow; addr: string }) {
+  // The provider's symbol is sanitised like the server tab's, and one that reads as a URL or handle (lib/link-in-name)
+  // keeps its text in the Token cell, badged, and is named by the token's short address after the amount.
+  const text = tokenText(t.tokenSymbol, null, t.tokenAddress)
+  const token = (
+    <Link href={`/token/${t.tokenAddress}`} className={text.linkLike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}>
+      {text.name}
+    </Link>
+  )
+  return (
+    <tr className="hover:bg-canvas transition-colors">
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+        <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
+          {shortHash(t.txHash)}
+        </Link>
+      </td>
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
+        {timeAgo(new Date(t.blockTimestamp))}
+      </td>
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
+        <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
+      </td>
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
+        <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
+      </td>
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+        {text.linkLike ? <>{token}<LinkInName className="ml-2" /></> : token}
+      </td>
+      <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
+        {formatDecimalAmount(t.valueFormatted)}{text.symbol ? ` ${text.symbol}` : ''}
+      </td>
+    </tr>
+  )
 }
 
 export function TransfersLazy({ addr }: { addr: string }) {
@@ -108,30 +145,7 @@ export function TransfersView({ data, addr, cursor, activeCursor, onCursor }: {
             </thead>
             <tbody className="divide-y divide-hair">
               {transfers.map((t) => (
-                <tr key={`${t.txHash}-${t.tokenAddress}`} className="hover:bg-canvas transition-colors">
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/tx/${t.txHash}`} className="text-acc-ink hover:underline">
-                      {shortHash(t.txHash)}
-                    </Link>
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
-                    {timeAgo(new Date(t.blockTimestamp))}
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
-                    <AddressLink address={t.fromAddress} self={t.fromAddress.toLowerCase() === addr} />
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
-                    <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
-                      {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
-                    </Link>
-                  </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    {formatDecimalAmount(t.valueFormatted)} {t.tokenSymbol}
-                  </td>
-                </tr>
+                <ProviderTransferRow key={`${t.txHash}-${t.tokenAddress}`} t={t} addr={addr} />
               ))}
             </tbody>
           </table>
