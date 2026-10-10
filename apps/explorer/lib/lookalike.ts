@@ -2,7 +2,8 @@
  * Lookalike tokens: airdrop spam whose symbol or name reads as a well-known token
  * (`U5D` plus Cyrillic U+0422, `USD` plus Greek U+03A4, fullwidth Latin from U+FF21) but whose
  * contract is not that token's. They rank high on /token by holder count and pass for
- * USDT at a glance, so the explorer LABELS them. Nothing is hidden, deleted or re-ranked.
+ * USDT at a glance, so the explorer LABELS them. Nothing is hidden or deleted; /search ranks them
+ * after every real token.
  *
  * Pure on purpose: no DB or RPC import (the only import is a type, erased at build), so it
  * is cheap to call once per row in a list. The chain is a PARAMETER, never read from env

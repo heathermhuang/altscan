@@ -45,7 +45,8 @@ export default async function SearchPage({
     let singleMatch: string | null = null
     try {
       // The SQL only finds rows that CONTAIN the query, biggest first; rankTokenMatches decides which
-      // 10 a visitor sees (exact symbol/name before prefix before contains, lookalikes after real tokens).
+      // 10 a visitor sees: every real token before every lookalike, then by match tier (exact symbol/name
+      // before prefix before contains), then holders.
       // Plain DESC, never NULLS LAST: holder_count is NOT NULL, so the order is the same, and plain DESC
       // matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops at the
       // limit. NULLS LAST cannot use that index and forced a seq scan + sort on every search (~3.6 s on BNB).
