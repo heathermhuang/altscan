@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
+import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -300,15 +300,16 @@ export default async function AddressPage({
         {balanceKnown && (
           <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
             Holds <span className="font-semibold text-ink">{groupDigits(formatNativeToken(displayBalance, 2))} {chainConfig.currency}</span>
-            {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(nativeUsd)})` : ''}
+            {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${formatCompactUsd(nativeUsd)})` : ''}
             {txCountText !== '—' && <> across {txCountText} {displayTxCount === 1 ? 'transaction' : 'transactions'}</>}.
           </p>
         )}
       </div>
 
       {/* Fact strip */}
-      <dl className="ledger mb-6">
+      <dl className="ledger mb-6 md:[--cols:2] lg:[--cols:4]">
         <Fact
+          wide
           label={`${chainConfig.currency} Balance`}
           value={balanceKnown ? `${groupDigits(formatNativeToken(displayBalance, 8))} ${chainConfig.currency}` : 'Unavailable'}
           sub={nativeUsd ? `$${nativeUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined}
@@ -323,6 +324,7 @@ export default async function AddressPage({
           sub={displayFirstSeen ? formatUtc(displayFirstSeen) : undefined}
         />
         <Fact
+          wide
           label="Type"
           value={kind}
         />
@@ -1018,11 +1020,16 @@ function TabLink({
   )
 }
 
-function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/**
+ * `wide` is for the balance: a figure that must not break mid-number, so it never wraps
+ * and, below lg where four cells are too narrow for it, takes a row of the two-column
+ * ledger to itself (Type shares that rule, so the grid has no empty cell).
+ */
+function Fact({ label, value, sub, wide }: { label: string; value: string; sub?: string; wide?: boolean }) {
   return (
-    <div>
+    <div className={wide ? 'col-span-2 lg:col-span-1' : undefined}>
       <dt className="k">{label}</dt>
-      <dd className="mt-1 break-words font-mono text-[15px] text-ink">{value}</dd>
+      <dd className={`mt-1 font-mono text-[15px] text-ink ${wide ? 'whitespace-nowrap' : 'break-words'}`}>{value}</dd>
       {sub && <dd className="mt-0.5 break-words text-xs text-mut">{sub}</dd>}
     </div>
   )

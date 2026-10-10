@@ -5,7 +5,10 @@ import {
   formatETH,
   formatGwei,
   formatUsdPrice,
+  formatCompact,
   formatCompactUsd,
+  formatAmountCompact,
+  tinyAmount,
   formatPercent,
   formatTokenAmount,
   formatUtc,
@@ -301,5 +304,116 @@ describe('formatShare', () => {
     expect(formatShare(0)).toBe('0.0')
     expect(formatShare(0.1)).toBe('0.1')
     expect(formatShare(58.708)).toBe('58.7')
+  })
+})
+
+describe('formatCompact', () => {
+  it('reads a billions-scale figure as billions, never as thousands of millions', () => {
+    // The /dex bug: 8,265,400,000 rendered "8265.40M" because the ladder stopped at M.
+    expect(formatCompact(8_265_400_000)).toBe('8.27B')
+    expect(formatCompact(1_000_000_000)).toBe('1B')
+  })
+
+  it('uses K / M / B / T with at most two decimals and no trailing zeros', () => {
+    expect(formatCompact(0)).toBe('0')
+    expect(formatCompact(999)).toBe('999')
+    expect(formatCompact(1_000)).toBe('1K')
+    expect(formatCompact(12_340)).toBe('12.34K')
+    expect(formatCompact(345_600_000)).toBe('345.6M')
+    expect(formatCompact(1_250_000_000)).toBe('1.25B')
+    expect(formatCompact(2_500_000_000_000)).toBe('2.5T')
+  })
+
+  it('carries into the next unit instead of printing 1000.00 of the smaller one', () => {
+    expect(formatCompact(999_994)).toBe('999.99K')
+    expect(formatCompact(999_995)).toBe('1M')
+    expect(formatCompact(999_995_000)).toBe('1B')
+    expect(formatCompact(999_995_000_000)).toBe('1T')
+  })
+
+  it('stops at 999T: a figure beyond it says "999T+", never "1000000.00T"', () => {
+    // The live /token supply bug: a 1e18-token supply printed "1000000.00T".
+    expect(formatCompact(1e18)).toBe('999T+')
+    expect(formatCompact(1e15)).toBe('999T+')
+    // 999.995T would round to "1000T"; the cap applies to the rounded reading.
+    expect(formatCompact(999_995_000_000_000)).toBe('999T+')
+    expect(formatCompact(999_994_000_000_000)).toBe('999.99T')
+  })
+
+  it('keeps the sign, and the cap applies to the magnitude', () => {
+    expect(formatCompact(-5_000_000)).toBe('-5M')
+    expect(formatCompact(-1e18)).toBe('-999T+')
+  })
+
+  it('never shows a non-zero value as 0, on either side of it', () => {
+    expect(formatCompact(0.004)).toBe('<0.01')
+    expect(formatCompact(0.01)).toBe('0.01')
+    // A negative that rounds to nothing is "above -0.01", never "-0".
+    expect(formatCompact(-0.004)).toBe('>-0.01')
+    expect(formatCompact(-0.01)).toBe('-0.01')
+    expect(formatCompact(0)).toBe('0')
+    expect(formatCompactUsd(-0.004)).toBe('>-$0.01')
+  })
+
+  it('reads "—" for a number we do not have', () => {
+    expect(formatCompact(NaN)).toBe('—')
+    expect(formatCompact(Infinity)).toBe('—')
+    expect(formatCompact(undefined)).toBe('—')
+    expect(formatCompact(null)).toBe('—')
+  })
+
+  it('formatCompactUsd is the same ladder with a dollar sign in front of the digits', () => {
+    expect(formatCompactUsd(8_265_400_000)).toBe('$8.27B')
+    expect(formatCompactUsd(-5_000_000)).toBe('-$5M')
+    expect(formatCompactUsd(1e18)).toBe('$999T+')
+    expect(formatCompactUsd(0.004)).toBe('<$0.01')
+    expect(formatCompactUsd(NaN)).toBe('—')
+    expect(formatCompactUsd(undefined)).toBe('—')
+  })
+})
+
+describe('tinyAmount', () => {
+  it('is "<0." then zeros then a 1, one place for every precision a table uses', () => {
+    expect(tinyAmount(4)).toBe('<0.0001')
+    expect(tinyAmount(6)).toBe('<0.000001')
+    expect(tinyAmount(1)).toBe('<0.1')
+  })
+
+  it('is what every fixed-decimal amount formatter returns for a non-zero amount that rounds to zero', () => {
+    expect(formatNativeToken(1n)).toBe(tinyAmount(4))
+    expect(formatNativeToken(1n, 6)).toBe(tinyAmount(6))
+    expect(formatTokenAmount('1', 18, 4)).toBe(tinyAmount(4))
+  })
+})
+
+describe('formatAmountCompact', () => {
+  it('shows a non-zero amount that rounds to 0.0000 as "<0.0001", never "0.0000"', () => {
+    // The /dex bug: `amt.toFixed(4)` printed "0.0000 WBNB" for a dust swap.
+    expect(formatAmountCompact('1', 18)).toBe('<0.0001')
+    expect(formatAmountCompact('49999999999999', 18)).toBe('<0.0001')
+    expect(formatAmountCompact('50000000000000', 18)).toBe('0.0001')
+  })
+
+  it('leaves zero as "0"', () => {
+    expect(formatAmountCompact('0', 18)).toBe('0')
+    expect(formatAmountCompact(0n, 6)).toBe('0')
+  })
+
+  it('is exact to four places below 1,000, trimming trailing zeros', () => {
+    expect(formatAmountCompact('12345600000000000000', 18)).toBe('12.3456')
+    expect(formatAmountCompact('5000000000000000000', 18)).toBe('5')
+    expect(formatAmountCompact('999999999999999999999', 18)).toBe('1,000') // rounds up at four places, still grouped
+    expect(formatAmountCompact('999500000', 6)).toBe('999.5')
+  })
+
+  it('goes compact from 1,000 up, through the one compact ladder', () => {
+    expect(formatAmountCompact('1000000000', 6)).toBe('1K')
+    expect(formatAmountCompact('8265400000000000000000000000', 18)).toBe('8.27B')
+    expect(formatAmountCompact('1000000000000000000000000', 18)).toBe('1M')
+    expect(formatAmountCompact('1000000000000000000000000000000000000', 18)).toBe('999T+')
+  })
+
+  it('reads a bad amount rather than throwing', () => {
+    expect(formatAmountCompact('not a number', 18)).toBe('0')
   })
 })

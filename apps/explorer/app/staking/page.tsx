@@ -5,6 +5,7 @@ import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
+import { formatCompact } from '@/lib/format'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
@@ -67,7 +68,7 @@ export default async function StakingPage() {
         <StatCard
           label="Deposited to the deposit contract (all time)"
           value={deposited
-            ? `${(deposited / 1e6).toFixed(2)}M ETH`
+            ? `${formatCompact(deposited)} ETH`
             : '—'}
           note="Balance of the ETH2 deposit contract, which only receives deposits"
         />

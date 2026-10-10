@@ -15,6 +15,15 @@ export function safeBigInt(value: string | number | bigint | null | undefined): 
 }
 
 /**
+ * What a non-zero amount that rounds to nothing at `places` decimals reads: "<0.0001" for
+ * four places. The one rule for every fixed-decimal amount, so a dust amount never renders
+ * as "0.0000" (or "0"), which says the amount is nothing. Zero itself stays "0".
+ */
+export function tinyAmount(places: number): string {
+  return `<0.${'0'.repeat(places - 1)}1`
+}
+
+/**
  * Adaptive-precision native-token amount: rounds to at most `maxDecimals` places
  * and trims trailing zeros, so "1.5" doesn't render as "1.5000". A nonzero
  * amount that rounds away to nothing at this precision renders as "<0.0001"
@@ -36,7 +45,7 @@ export function formatNativeToken(wei: bigint | string, maxDecimals = 4): string
   const rounded = (value + scale / 2n) / scale // round-half-up, in units of 10^-maxDecimals
 
   if (rounded === 0n) {
-    return `<0.${'0'.repeat(maxDecimals - 1)}1`
+    return tinyAmount(maxDecimals)
   }
 
   const divisor = 10n ** BigInt(maxDecimals)
@@ -104,10 +113,45 @@ export function formatUsdPrice(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: max })}`
 }
 
-/** Compact USD for large figures: $1.25B, $345.6M, $12.34K. */
-export function formatCompactUsd(n: number): string {
-  if (!Number.isFinite(n)) return '—'
-  return `$${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n)}`
+const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 })
+// 999.995T is the first value that would round to "1000T", so it is where the ladder stops.
+const COMPACT_CAP = 999_995_000_000_000
+
+/**
+ * The one compact number: 8265400000 -> "8.27B", 345600000 -> "345.6M", 12340 -> "12.34K".
+ * Up to two decimals, no trailing zeros, and a value that rounds up to the next unit
+ * carries into it (999995 -> "1M", never "1000K"). Intl rounds on the decimal reading, so the
+ * carry holds at every boundary.
+ *
+ * T is the last unit. A figure past 999T reads "999T+", the way a capped count elsewhere reads
+ * "10,000+": such a supply or market value is a junk or unit-confused token, and "1000000.00T"
+ * would only pretend to precision it does not have. A non-zero value that would round to 0.00
+ * reads "<0.01" (or ">-0.01" below zero), never "0" or "-0". `prefix` goes in front of the
+ * digits, after any sign ("-$5M"). "—" when there is no number.
+ */
+export function formatCompact(n: number | null | undefined, prefix = ''): string {
+  if (n == null || !Number.isFinite(n)) return '—'
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  if (abs >= COMPACT_CAP) return `${sign}${prefix}999T+`
+  if (abs > 0 && abs < 0.005) return n > 0 ? `<${prefix}0.01` : `>-${prefix}0.01`
+  return `${sign}${prefix}${COMPACT.format(abs)}`
+}
+
+/** Compact USD for large figures: $1.25B, $345.6M, $12.34K, $999T+. */
+export function formatCompactUsd(n: number | null | undefined): string {
+  return formatCompact(n, '$')
+}
+
+/**
+ * A token amount for a dense table, from its raw base units: exact to four places under 1,000
+ * (trailing zeros trimmed, dust as "<0.0001"), the compact ladder from 1,000 up. The two rules
+ * are formatTokenAmount's tiny-amount floor and formatCompact, not a third pair of thresholds.
+ */
+export function formatAmountCompact(raw: string | bigint, decimals: number): string {
+  const units = safeBigInt(raw)
+  if (units >= 1000n * 10n ** BigInt(decimals)) return formatCompact(Number(formatUnits(units, decimals)))
+  return formatTokenAmount(units, decimals, 4)
 }
 
 /** Signed percentage to 2dp, e.g. "+3.20%" / "-1.50%". */
@@ -228,7 +272,7 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
     if (maxFractionDigits !== undefined && places > maxFractionDigits) {
       const scale = 10n ** BigInt(places - maxFractionDigits)
       const rounded = (units + scale / 2n) / scale
-      if (rounded === 0n && units !== 0n) return `<0.${'0'.repeat(maxFractionDigits - 1)}1`
+      if (rounded === 0n && units !== 0n) return tinyAmount(maxFractionDigits)
       units = rounded
       places = maxFractionDigits
     }

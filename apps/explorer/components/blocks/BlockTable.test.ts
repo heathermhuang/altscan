@@ -33,3 +33,12 @@ describe('BlockTable gas bar', () => {
     expect(gasCells[2]).toBe('—')
   })
 })
+
+describe('BlockTable txn count', () => {
+  it('groups a count in the thousands, like the block number beside it', () => {
+    const big = [{ number: 1234567, timestamp: new Date(), miner: MINER, txCount: 1234, gasUsed: null, gasLimit: '100000000' }]
+    const h = renderToStaticMarkup(createElement(BlockTable, { blocks: big }))
+    expect(h).toContain('<td>1,234</td>')
+    expect(h).toContain('1,234,567')
+  })
+})

@@ -24,7 +24,10 @@ import { createPageCache } from '@/lib/page-cache'
 import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
+import { formatUnits } from 'ethers'
+import type { WhaleConfig } from '@altscan/chain-config'
 import { safeBigInt } from '@/lib/format'
+import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
@@ -44,6 +47,8 @@ export type WhaleTx = {
   timestamp: Date
   transferType: 'native' | 'token'
   tokenSymbol?: string
+  /** The token's contract address (lowercase), on token rows. What a row is priced by: never its symbol. */
+  tokenAddress?: string
 }
 
 /** null = the query failed; [] = it succeeded and found nothing. The page
@@ -55,6 +60,13 @@ export type WhaleResult = {
 
 const QUERY_TIMEOUT_MS = 15_000
 
+/** Native transfers fetched as ranking candidates: the largest by value. */
+export const WHALE_NATIVE_CANDIDATES = 50
+/** Per tracked token, the newest qualifying transfers fetched as ranking candidates. */
+export const WHALE_TOKEN_CANDIDATES = 25
+/** Rows the page shows, after every candidate has been priced and ranked. */
+export const WHALES_SHOWN = 50
+
 function cutoffFor(period: WhalePeriod): SQL {
   switch (period) {
     case '1h': return sql`NOW() - INTERVAL '1 hour'`
@@ -65,7 +77,7 @@ function cutoffFor(period: WhalePeriod): SQL {
 }
 
 /**
- * The 25 largest native transfers in the window.
+ * The `WHALE_NATIVE_CANDIDATES` (50) largest native transfers in the window: the ranking candidates.
  *
  * The `value > <floor>` literal is NOT redundant, however much it looks it.
  * It is what lets the planner match the partial index
@@ -105,35 +117,43 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
         AND value > ${rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)}
         AND value > ${minNativeWei}
       ORDER BY value DESC
-      LIMIT 25
+      LIMIT ${sql.raw(String(WHALE_NATIVE_CANDIDATES))}
   `
 }
 
 /**
- * The 25 most recent tracked-token transfers above each token's threshold.
+ * The `WHALE_TOKEN_CANDIDATES` (25) most recent transfers of each tracked token above its threshold:
+ * the ranking candidates. The page prices and ranks all of them (rankWhalesByUsd) and shows the top 50.
+ *
+ * Newest-N, not value-ordered, on purpose: `token_transfers` has no index on `value`, and value-ordered
+ * per-token reads measured 10-39 s each on prod ETH (USDT 24h 9.9 s, 30d 38.9 s; WETH 24h 20 s) and
+ * 2-6 minutes on BNB, while the newest-N walk takes at most ~2 s (BNB WBNB, whose transfers over
+ * 1 WBNB are sparse in the index, is the slow one at 1.1-2.0 s). The limit is NOT raised past 25
+ * because that walk's cost scales with it: 100 would be about 4x, ~8 s, on a BNB cache miss.
+ * The list is therefore the largest of the recent candidates, not a proven top 50 of the whole
+ * window, and the page's ranking note says so (`rankingNote`).
  *
  * One arm per token, `UNION ALL`ed, rather than a single scan with
  * `token_address IN (…) AND (per-token OR arms)`. The OR form cannot use
  * `tt_token_ts_idx (token_address, timestamp DESC)` to stop early: Postgres has
  * to gather every tracked-token transfer in the window and sort it. Each arm
- * here is instead an index walk that stops at 25 rows.
+ * here is instead an index walk that stops at its limit.
  *
  * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold):
  *   24h   6,110 ms  ->    6.7 ms
  *    7d  28,916 ms  ->    0.3 ms
  *
- * A per-token `LIMIT 25` is enough for a global top-25: the global result can
- * contain at most 25 rows from any one token, so each arm's own top 25 is a
- * superset of that token's contribution.
+ * There is no cap across tokens: each arm contributes its own candidates and the ranking decides
+ * which survive. A "newest 25 across all tokens" cut here would be a recency sample taken before
+ * any price is seen, and could drop an older $1M transfer in favour of recent $1K ones.
  *
- * The `LEFT JOIN tokens` is applied AFTER the limit — joining before it made the
- * lookup run against every candidate row instead of the 25 that survive.
+ * The `LEFT JOIN tokens` is applied AFTER the limits — joining before them made the
+ * lookup run against every candidate row instead of the (at most 25 per token) that survive.
  *
  * `(timestamp, tx_hash, log_index)` is the sort key, not `timestamp` alone. A
  * timestamp is a block, and a hot token moves many times per block, so ordering
- * by timestamp alone leaves the cut inside a tie group and the page reshuffles
- * between ISR regenerations. The inner and outer ORDER BYs must stay identical
- * or the merge argument above stops holding.
+ * by timestamp alone leaves each arm's cut inside a tie group and the page
+ * reshuffles between ISR regenerations. The arms and the final select use the same key.
  */
 export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly TokenFilter[]): SQL {
   if (filters.length === 0) {
@@ -150,20 +170,18 @@ export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly Toke
         WHERE token_address = ${f.address}
           AND timestamp >= ${cutoffFor(period)}
           AND value > ${f.minValue}
+        -- newest-N, not value-ordered: no value index; value ordering measured 10-39 s per token on ETH, 2-6 min on BNB; this walk <= 2 s
         ORDER BY timestamp DESC, tx_hash DESC, log_index DESC
-        LIMIT 25
+        LIMIT ${sql.raw(String(WHALE_TOKEN_CANDIDATES))}
       )`)
 
   return sql`
       SELECT u.tx_hash as hash, u.from_address as "fromAddress", u.to_address as "toAddress",
              u.value, u.block_number as "blockNumber", u.timestamp,
              'token' as "transferType",
-             COALESCE(tk.symbol, 'TOKEN') as "tokenSymbol"
-      FROM (
-        SELECT * FROM (${sql.join(arms, sql` UNION ALL `)}) m
-        ORDER BY m.timestamp DESC, m.tx_hash DESC, m.log_index DESC
-        LIMIT 25
-      ) u
+             COALESCE(tk.symbol, 'TOKEN') as "tokenSymbol",
+             u.token_address as "tokenAddress"
+      FROM (${sql.join(arms, sql` UNION ALL `)}) u
       LEFT JOIN tokens tk ON tk.address = u.token_address
       ORDER BY u.timestamp DESC, u.tx_hash DESC, u.log_index DESC
   `
@@ -180,6 +198,7 @@ function parseWhaleRow(row: unknown): WhaleTx {
     timestamp: new Date(r.timestamp as string),
     transferType: r.transferType === 'token' ? 'token' : 'native',
     tokenSymbol: r.tokenSymbol ? String(r.tokenSymbol) : undefined,
+    tokenAddress: r.tokenAddress ? String(r.tokenAddress).toLowerCase() : undefined,
   }
 }
 
@@ -217,35 +236,118 @@ export async function settleWhaleQueries(
   return { native: unwrap(native, 'native'), token: unwrap(token, 'token') }
 }
 
+/** A transfer with what the page needs to show and rank it: its token's decimals and its USD value. */
+export type RankedWhale = WhaleTx & {
+  decimals: number
+  /** value x price, a plain number, or null when this row has no price: shown as "no price", ranked last. */
+  usd: number | null
+}
+
 export type WhaleFetch = {
-  rows: WhaleTx[]
+  rows: RankedWhale[]
+  /** The native price the rows were ranked with, or null when none could be had. The page says which. */
+  nativeUsd: number | null
   /** true when at least one half failed — the page must say so rather than
    *  rendering the empty state and implying the market was quiet. */
   degraded: boolean
 }
 
 /**
- * Merge both halves, rank by value descending, cap the list.
+ * Union of both halves, every candidate kept. No cap here: a cap before ranking could only cut
+ * rows by recency or raw amount. The list is cut to `WHALES_SHOWN` in `queryWhales`, after the
+ * USD sort.
  *
- * Pure and exported so tests exercise the REAL comparator. A test that
- * re-implements this sort inline passes identically whether the comparator is
- * correct or not, which is exactly how the numeric(78,18) crash slipped through.
+ * Deliberately NOT ordered by `value`. That used to rank by the raw base-unit number, which
+ * compares an 18-decimal BNB amount with an 18-decimal USDT amount and a 6-decimal one as if
+ * they were one unit: 32,800 USDT (~$33k) outranked 15,000 BNB (~$11M). Order needs a price,
+ * so it lives in `rankWhalesByUsd`.
+ *
+ * Pure and exported so tests exercise the real function.
  */
 export function mergeWhaleRows(
   native: WhaleTx[] | null,
   token: WhaleTx[] | null,
 ): WhaleTx[] {
   return [...(native ?? []), ...(token ?? [])]
-    .sort((a, b) => {
-      // safeBigInt, NOT BigInt. `transactions.value` is numeric(78,18) and
-      // postgres-js returns the full scale — "5000…000.000000000000000000".
-      // Raw BigInt() throws SyntaxError on that, which would escape fetchWhales
-      // and 500 the page: strictly worse than the bug being fixed.
-      const av = safeBigInt(a.value)
-      const bv = safeBigInt(b.value)
-      return bv > av ? 1 : bv < av ? -1 : 0
-    })
-    .slice(0, 50)
+}
+
+const NATIVE_DECIMALS = 18
+
+/** The price if it is a real one (finite and > 0), else null: "no native price", not a price of nothing. */
+function usablePrice(price: number | null): number | null {
+  return price != null && Number.isFinite(price) && price > 0 ? price : null
+}
+
+/**
+ * The sentence under the page intro that says how the list is ranked, and from what. The list is the
+ * largest of a candidate set, not a proven top of the whole window (see buildTokenWhaleQuery), so the
+ * set is named from the same constants the queries use. It names the live native price only when one
+ * was used: the ranking (and this text) is cached for the window, so a price that failed to load is a
+ * fact about the window, not something to paper over with "live".
+ */
+export function rankingNote(currency: string, wrappedSymbol: string, nativePriced: boolean): string {
+  const basis = `the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers and the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token in this period`
+  return nativePriced
+    ? `Showing the top ${WHALES_SHOWN} by estimated USD value among ${basis}. Stablecoins are priced at $1, ${currency} and ${wrappedSymbol} at the live ${currency} price; a transfer with no price is listed last.`
+    : `The ${currency} price is unavailable right now, so ${currency} and ${wrappedSymbol} transfers are unranked: they follow the stablecoin transfers, newest first, and may not fit in the ${WHALES_SHOWN} shown. Showing the top ${WHALES_SHOWN} among ${basis}; stablecoins are ranked by estimated USD value at $1.`
+}
+
+/**
+ * Price each row and order the list by USD value, largest first.
+ *
+ * What a price is, in order:
+ *   - native transfers and the wrapped native token (WBNB / WETH): `nativeUsd`, the live market price;
+ *   - a stablecoin the chain config tracks: $1. That is a PEG ASSUMPTION, which is why the page calls
+ *     every figure an estimate. The config's `stablecoins` is the allow-list: it is keyed by contract
+ *     address per chain, and a coin belongs there only if it is meant to trade at $1;
+ *   - anything else: no price (`usd: null`).
+ * A row is matched by `tokenAddress`, never by `tokenSymbol`: symbols are chosen by whoever deploys the
+ * token, so a scam token called "USDT" would otherwise be pegged at $1 and ranked by its fake balance.
+ * An absent, zero or non-finite `nativeUsd` is "no native price", not a price of nothing.
+ *
+ * Rows with no price follow every priced row, newest first; equal values break the same way (newest,
+ * then hash descending), so two renders of the same rows are never reshuffled. The result is plain
+ * JSON: strings and numbers only, safe to hand to the page cache.
+ *
+ * Pure and exported so tests exercise the real comparator.
+ */
+export function rankWhalesByUsd(
+  rows: readonly WhaleTx[],
+  nativeUsd: number | null,
+  cfg: Pick<WhaleConfig, 'wrapped' | 'stablecoins'> = chainConfig.whales,
+): RankedWhale[] {
+  const native = usablePrice(nativeUsd)
+  const wrapped = cfg.wrapped.address.toLowerCase()
+  const pegged = new Map(cfg.stablecoins.map(s => [s.address.toLowerCase(), s.decimals]))
+
+  const priced = rows.map((r): RankedWhale => {
+    let decimals = NATIVE_DECIMALS
+    let price: number | null = null
+    if (r.transferType === 'native') {
+      price = native
+    } else {
+      const addr = r.tokenAddress?.toLowerCase()
+      if (addr === wrapped) {
+        decimals = cfg.wrapped.decimals
+        price = native
+      } else if (addr !== undefined && pegged.has(addr)) {
+        decimals = pegged.get(addr)!
+        price = 1
+      }
+    }
+    // Number() is for ordering and display only; safeBigInt keeps numeric(78,18) tails from throwing.
+    const amount = price === null ? NaN : Number(formatUnits(safeBigInt(r.value), decimals))
+    const usd = Number.isFinite(amount) ? amount * price! : null
+    return { ...r, decimals, usd }
+  })
+
+  return priced.sort((a, b) => {
+    if (a.usd !== null && b.usd !== null && a.usd !== b.usd) return b.usd - a.usd
+    if ((a.usd === null) !== (b.usd === null)) return a.usd === null ? 1 : -1
+    const byTime = b.timestamp.getTime() - a.timestamp.getTime()
+    if (byTime !== 0) return byTime
+    return a.hash === b.hash ? 0 : a.hash < b.hash ? 1 : -1
+  })
 }
 
 export const WHALES_REVALIDATE_SECONDS = 300
@@ -261,15 +363,22 @@ export async function queryWhales(
   minNativeWei: string,
   filters: readonly TokenFilter[],
 ): Promise<WhaleFetch> {
-  const result = await settleWhaleQueries(
-    db.execute(buildNativeWhaleQuery(period, minNativeWei)),
-    filters.length > 0
-      ? db.execute(buildTokenWhaleQuery(period, filters))
-      : Promise.resolve([]),
-  )
+  const [result, nativeUsd] = await Promise.all([
+    settleWhaleQueries(
+      db.execute(buildNativeWhaleQuery(period, minNativeWei)),
+      filters.length > 0
+        ? db.execute(buildTokenWhaleQuery(period, filters))
+        : Promise.resolve([]),
+    ),
+    // Bounded by what the helper's own chain needs to reach a non-Binance fallback (11 s). It runs beside the
+    // two 15 s database timeouts, so it cannot make the page wait longer than they already can. A price
+    // that still has not arrived reads as null, which the page says out loud (rankingNote).
+    withTimeout(fetchNativeUsd(), NATIVE_PRICE_BUDGET_MS, 'whales price').then(usablePrice, () => null),
+  ])
 
-  const rows = mergeWhaleRows(result.native, result.token)
-  return { rows, degraded: result.native === null || result.token === null }
+  // Rank every candidate, THEN keep the top WHALES_SHOWN: the cached value stays ~50 rows.
+  const rows = rankWhalesByUsd(mergeWhaleRows(result.native, result.token), nativeUsd).slice(0, WHALES_SHOWN)
+  return { rows, nativeUsd, degraded: result.native === null || result.token === null }
 }
 
 /**
@@ -296,13 +405,22 @@ export async function queryWhales(
  *  the exact failure #110 fixed.
  *
  *  Timestamps cross as ISO strings: `Date` does not survive the incremental
- *  cache, and the table needs a real `Date` back. */
+ *  cache, and the table needs a real `Date` back.
+ *
+ *  The rows are priced and ranked INSIDE the cached read (`queryWhales`), so the order, the USD
+ *  figures and the price they came from are one snapshot for the whole window. A price that
+ *  failed is part of that snapshot (`nativeUsd: null`, cached like the rest), which is why the
+ *  page words its ranking note from it (`rankingNote`) instead of always claiming a live price.
+ *  Every field is a string, a number or null: no BigInt, which would make Next's cache write throw. */
 const fetchWhalesCached = createPageCache(
-  'whales',
+  // 'whales-usd', not 'whales': the cached rows now carry `decimals` and `usd`, and the page reads both.
+  // The incremental cache outlives a deploy, so under the old name the page would be handed
+  // rows without them for up to a revalidate window.
+  'whales-usd',
   WHALES_REVALIDATE_SECONDS,
   async (period: WhalePeriod, minNativeWei: string, filters: readonly TokenFilter[]) => {
-    const { rows, degraded } = await queryWhales(period, minNativeWei, filters)
-    return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), degraded }
+    const { rows, nativeUsd, degraded } = await queryWhales(period, minNativeWei, filters)
+    return { rows: rows.map(r => ({ ...r, timestamp: r.timestamp.toISOString() })), nativeUsd, degraded }
   },
 )
 
@@ -314,6 +432,7 @@ export async function fetchWhales(
   const cached = await fetchWhalesCached(period, minNativeWei, filters)
   return {
     rows: cached.rows.map((r) => ({ ...r, timestamp: new Date(r.timestamp) })),
+    nativeUsd: cached.nativeUsd,
     degraded: cached.degraded,
   }
 }

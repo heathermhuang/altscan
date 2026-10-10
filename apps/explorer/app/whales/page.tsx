@@ -1,5 +1,5 @@
-import { fetchWhales, type WhalePeriod } from '@/lib/whales'
-import { timeAgo, safeBigInt } from '@/lib/format'
+import { fetchWhales, rankingNote, type WhalePeriod } from '@/lib/whales'
+import { timeAgo, formatCompactUsd, formatTokenAmount } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
@@ -7,7 +7,6 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { shortHash } from '@/lib/address-display'
-import { swallow } from '@/lib/observability'
 
 export const revalidate = 300
 
@@ -56,7 +55,7 @@ export default async function WhalesPage({
   const { nativeMinWei, wrapped, stablecoins } = chainConfig.whales
   const tokenFilters = [wrapped, ...stablecoins]
 
-  const { rows: whales, degraded } = await fetchWhales(period, nativeMinWei, tokenFilters)
+  const { rows: whales, nativeUsd, degraded } = await fetchWhales(period, nativeMinWei, tokenFilters)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -67,6 +66,9 @@ export default async function WhalesPage({
         <p className="mt-2 max-w-3xl text-sm text-ink2">
           Large transfers on {chainConfig.name} — native (≥{formatTokenAmount(nativeMinWei, 18)} {chainConfig.currency}), {wrapped.symbol}
           {stablecoins.length > 0 && <>, and stablecoins (≥${formatTokenAmount(stablecoins[0].minValue, stablecoins[0].decimals)})</>}
+        </p>
+        <p className="text-mut text-xs mt-1">
+          {rankingNote(chainConfig.currency, wrapped.symbol, nativeUsd !== null)}
         </p>
         {period === 'all' && (
           <p className="text-mut text-xs mt-1">
@@ -92,13 +94,6 @@ export default async function WhalesPage({
         ))}
       </div>
 
-      <AdReserve
-        context="whales"
-        placement="whales_before_table"
-        variant="compact"
-        className="mb-6"
-      />
-
       {degraded && whales.length > 0 && (
         <p className="mb-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           Showing partial results — one data source is unavailable.
@@ -121,11 +116,8 @@ export default async function WhalesPage({
           </thead>
           <tbody>
             {whales.map((w, i) => {
-              // Native and wrapped are 18-decimal; stablecoins differ per chain
-              // (6 on Ethereum, 18 on BNB Chain), so resolve from config.
-              const decimals =
-                stablecoins.find(s => s.symbol === w.tokenSymbol)?.decimals ?? 18
-              const displayAmount = formatTokenAmount(w.value, decimals)
+              // w.decimals is resolved from the token's contract address (6 for ETH's stablecoins, 18 elsewhere).
+              const displayAmount = formatTokenAmount(w.value, w.decimals, 2)
               const symbol = w.tokenSymbol ?? chainConfig.currency
 
               return (
@@ -151,6 +143,9 @@ export default async function WhalesPage({
                   <td className="font-semibold text-right">
                     {displayAmount}{' '}
                     <span className="text-mut font-normal text-xs">{symbol}</span>
+                    <span className="block whitespace-nowrap text-mut font-normal text-xs">
+                      {w.usd === null ? 'no price' : `≈ ${formatCompactUsd(w.usd)}`}
+                    </span>
                   </td>
                 </tr>
               )
@@ -173,20 +168,14 @@ export default async function WhalesPage({
         </table>
         </div>
       </div>
+
+      {/* After the table, so on a phone the transfers come first. The placement id is the settings key and keeps its name. */}
+      <AdReserve
+        context="whales"
+        placement="whales_before_table"
+        variant="compact"
+        className="mt-6"
+      />
     </div>
   )
-}
-
-function formatTokenAmount(value: string, decimals: number): string {
-  try {
-    const divisor = 10n ** BigInt(decimals)
-    const raw = safeBigInt(value)
-    const whole = raw / divisor
-    const frac = raw % divisor
-    const fracStr = frac.toString().padStart(decimals, '0').slice(0, 2).replace(/0+$/, '')
-    return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString()
-  } catch (e) {
-    swallow('whales/query', e)
-    return '—'
-  }
 }
