@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatCompactUsd, formatNumber, timeAgo } from '@/lib/format'
+import { formatCompactUsd, formatNumber, formatPercent, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { BlockTape } from '@/components/home/BlockTape'
@@ -160,11 +160,6 @@ function deriveMarketCap(
   return { value: price.price * supply, change24h: price.change24h }
 }
 
-/** "+1.23%" or "-0.50%"; null when there is no change to show (a source that gave none is not 0%). */
-function percentText(change: number | null | undefined): string | null {
-  return change == null ? null : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`
-}
-
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
@@ -200,7 +195,7 @@ export default async function HomePage() {
   const priceDisplay = nativePrice
     ? `$${nativePrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '—'
-  const changeDisplay = percentText(nativePrice?.change24h)
+  const changeDisplay = nativePrice?.change24h == null ? null : formatPercent(nativePrice.change24h)
   const changePositive = nativePrice?.change24h == null ? null : nativePrice.change24h >= 0
 
   return (
@@ -253,7 +248,7 @@ export default async function HomePage() {
           <StatCard
             label={`${chainConfig.currency} Market Cap`}
             value={marketCap ? formatCompactUsd(marketCap.value) : '—'}
-            subtext={percentText(marketCap?.change24h)}
+            subtext={marketCap?.change24h == null ? null : formatPercent(marketCap.change24h)}
             subtextPositive={marketCap?.change24h == null ? null : marketCap.change24h >= 0}
           />
           <StatCard
