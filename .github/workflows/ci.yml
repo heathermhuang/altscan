@@ -134,6 +134,22 @@ jobs:
           TOKEN_HEAL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/indexer/src/token-heal.pg.test.ts
 
+      # The round-5 production indexes: tokens' lower() text_pattern_ops pair and the
+      # combined token_transfers whale partial index (tt_whale_idx), on BNB's partitioned
+      # shape and ETH's plain one. It proves the parent turns valid, a partition made by
+      # the real creator inherits the index, the steady-state boot issues no DDL, every
+      # token's value-ordered query uses it, and the boot sweep leaves an index build in
+      # flight alone. It creates and drops token_transfers/tokens in public and its
+      # catalog helpers match relations by name across schemas, so it gets a database of
+      # its own.
+      - name: Create whale-index-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE whale_idx_test'
+
+      - name: PG-gated indexer suite (tokens + token_transfers whale indexes)
+        env:
+          TT_WHALE_INDEX_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/whale_idx_test
+        run: npx vitest run apps/indexer/src/tt-whale-index.pg.test.ts
+
       # POST /api/v1/query's filter.address: an OR across from/to ordered by
       # block_number walked the whole table and hit the web statement_timeout
       # ~95x/hour on BNB. Asserts rows read, not wall time. Its tables are TEMP,

@@ -193,18 +193,18 @@ describe('rankWhalesByUsd', () => {
 
   // BNB-shaped: 18-decimal stablecoins.
   const BNB_CFG = {
-    wrapped: { address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', symbol: 'WBNB', decimals: 18, minValue: '1' },
+    wrapped: { address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', symbol: 'WBNB', decimals: 18, minValue: '1', indexFloor: '100' },
     stablecoins: [
-      { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18, minValue: '1' },
-      { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18, minValue: '1' },
+      { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18, minValue: '1', indexFloor: '100' },
+      { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18, minValue: '1', indexFloor: '100' },
     ],
   }
   // ETH-shaped: 6-decimal stablecoins, so a raw amount is a different size per unit.
   const ETH_CFG = {
-    wrapped: { address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH', decimals: 18, minValue: '1' },
+    wrapped: { address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH', decimals: 18, minValue: '1', indexFloor: '100' },
     stablecoins: [
-      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6, minValue: '1' },
-      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6, minValue: '1' },
+      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6, minValue: '1', indexFloor: '100' },
+      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6, minValue: '1', indexFloor: '100' },
     ],
   }
 

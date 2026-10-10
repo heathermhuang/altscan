@@ -27,7 +27,7 @@ pnpm test    # vitest run (root config, all workspaces)
 ## Testing gotchas
 
 - **PG-gated suites are silently SKIPPED by a bare `pnpm test`.** Each is gated on its own
-  env var, and CI runs only six of the eight by name:
+  env var, and CI runs only seven of the nine by name:
   | Suite | Gate | In CI? |
   |---|---|---|
   | `apps/indexer/src/backfill-worker.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes |
@@ -36,6 +36,7 @@ pnpm test    # vitest run (root config, all workspaces)
   | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` | yes |
   | `apps/explorer/lib/address-query.pg.test.ts` | `ADDRESS_QUERY_TEST_PG_URL` | yes |
   | `apps/indexer/src/token-heal.pg.test.ts` | `TOKEN_HEAL_TEST_PG_URL` | yes |
+  | `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` | yes (own DB, `whale_idx_test`) |
   | `apps/indexer/src/retention-partition-drop.pg.test.ts` | `BACKFILL_TEST_PG_URL` | **no** |
   | `apps/indexer/src/retention-boundary-partition.pg.test.ts` | `BOUNDARY_TEST_PG_URL` | **no** |
   The last two run nowhere unless you run them by hand — do that before touching retention.
@@ -64,6 +65,10 @@ pnpm test    # vitest run (root config, all workspaces)
   named `eth-indexer` has `rootDir: apps/indexer`, **not** `apps/eth-indexer`.
 - Import `@altscan/explorer-core/format`, **not** the barrel, in code that must stay light.
 - New provider cache keys use the `moralis:v2:<chain>:<currency>` prefix.
+- `tt_whale_idx` (one partial index on `token_transfers` covering every tracked whale token) **encodes its
+  predicate in its name**: `CREATE INDEX IF NOT EXISTS` keeps an existing index, so adding a token or changing
+  an `indexFloor` without a new name (`tt_whale_v2_idx`) silently leaves production on the old predicate.
+  `ensure-schema.test.ts` pins the exact predicate per chain and fails on such a change.
 
 ### processBlock is replay-safe — keep it that way
 Replaying a block that already exists repairs its missing derived rows instead of
