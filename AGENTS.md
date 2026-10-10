@@ -65,6 +65,10 @@ pnpm test    # vitest run (root config, all workspaces)
   named `eth-indexer` has `rootDir: apps/indexer`, **not** `apps/eth-indexer`.
 - Import `@altscan/explorer-core/format`, **not** the barrel, in code that must stay light.
 - New provider cache keys use the `moralis:v2:<chain>:<currency>` prefix.
+- `tt_whale_idx` (one partial index on `token_transfers` covering every tracked whale token) **encodes its
+  predicate in its name**: `CREATE INDEX IF NOT EXISTS` keeps an existing index, so adding a token or changing
+  an `indexFloor` without a new name (`tt_whale_v2_idx`) silently leaves production on the old predicate.
+  `ensure-schema.test.ts` pins the exact predicate per chain and fails on such a change.
 
 ### processBlock is replay-safe — keep it that way
 Replaying a block that already exists repairs its missing derived rows instead of

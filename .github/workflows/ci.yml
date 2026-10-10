@@ -135,12 +135,13 @@ jobs:
         run: npx vitest run apps/indexer/src/token-heal.pg.test.ts
 
       # The round-5 production indexes: tokens' lower() text_pattern_ops pair and the
-      # per-token token_transfers whale partial indexes, on BNB's partitioned shape and
-      # ETH's plain one. It proves the parent turns valid, a partition made by the real
-      # creator inherits the index, the steady-state boot issues no DDL, and the
-      # value-ordered query uses it. It creates and drops token_transfers/tokens in
-      # public and its catalog helpers match relations by name across schemas, so it
-      # gets a database of its own.
+      # combined token_transfers whale partial index (tt_whale_idx), on BNB's partitioned
+      # shape and ETH's plain one. It proves the parent turns valid, a partition made by
+      # the real creator inherits the index, the steady-state boot issues no DDL, every
+      # token's value-ordered query uses it, and the boot sweep leaves an index build in
+      # flight alone. It creates and drops token_transfers/tokens in public and its
+      # catalog helpers match relations by name across schemas, so it gets a database of
+      # its own.
       - name: Create whale-index-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE whale_idx_test'
 

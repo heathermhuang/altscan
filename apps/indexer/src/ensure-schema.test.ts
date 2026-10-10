@@ -4,9 +4,11 @@ import {
   buildPartitionedTtWhaleIndexSql,
   buildPartitionedWhaleIndexSql,
   TT_WHALE_COLUMNS,
-  ttWhaleIndexes,
+  TT_WHALE_IDX,
+  ttWhaleIndex,
   TT_TOKEN_TS_COLUMNS,
   TT_TOKEN_TS_IDX,
+  INVALID_INDEX_DROP_LOCK_TIMEOUT,
   INVALID_INDEX_SWEEP_SQL,
   partitionRangesToCreate,
   retireOldDexKeySql,
@@ -357,8 +359,10 @@ describe('partitionRangesToCreate — the ladder for a table partitioned from da
 //  - the value-ordered whale arm: token_transfers has no index on `value`, so
 //    "largest transfers of USDT" read 10-39 s on ETH and minutes on BNB.
 // A statement that is only ever executed by a human is a statement that never
-// runs (ddl-in-a-file-nothing-executes), so these live in ensureSchema, and the
-// production build script is generated from the same shapes.
+// runs (ddl-in-a-file-nothing-executes), so these live in ensureSchema. The one-off
+// production build script (outside the repo) embeds a HAND-COPIED version of the same
+// statements; nothing in this repo pins it. Equivalence was checked by building the
+// same fixtures both ways and diffing pg_indexes.indexdef (r5 task-2 report).
 // ---------------------------------------------------------------------------
 describe('tokens_lower_symbol_idx / tokens_lower_name_idx', () => {
   // text_pattern_ops is what makes LIKE 'q%' indexable under a non-C collation
@@ -386,102 +390,107 @@ describe('tokens_lower_symbol_idx / tokens_lower_name_idx', () => {
   })
 })
 
-describe('ttWhaleIndexes — one partial index per tracked token', () => {
-  it.each(['bnb', 'eth'] as const)('%s: one per tracked token, named from its symbol, predicate = literal address AND literal floor', (key: ChainKey) => {
+describe('ttWhaleIndex — ONE combined partial index per chain', () => {
+  const arm = (a: string, f: string) => `(token_address = '${a}' AND value > ${f})`
+
+  it.each(['bnb', 'eth'] as const)('%s: one OR-predicate listing every tracked token in config order, literal address and floor', (key: ChainKey) => {
     const { wrapped, stablecoins } = getChainConfig(key).whales
-    const specs = ttWhaleIndexes(getChainConfig(key).whales)
-    const tokens = [wrapped, ...stablecoins]
-    expect(specs.map(w => w.name)).toEqual(tokens.map(t => `tt_whale_${t.symbol.toLowerCase()}_idx`))
-    specs.forEach((w, i) => {
-      expect(w.predicate).toBe(`token_address = '${tokens[i].address}' AND value > ${tokens[i].indexFloor}`)
-      // A bound parameter cannot prove a partial-index predicate; this must be literals only.
-      expect(w.predicate).not.toMatch(/[$?]/)
-    })
+    const w = ttWhaleIndex(getChainConfig(key).whales)
+    expect(w.name).toBe('tt_whale_idx')
+    expect(w.predicate).toBe([wrapped, ...stablecoins].map(t => arm(t.address, t.indexFloor)).join(' OR '))
+    // A bound parameter cannot prove a partial-index predicate; this must be literals only.
+    expect(w.predicate).not.toMatch(/[$?]/)
   })
 
-  it('names exactly the four production indexes', () => {
-    expect(ttWhaleIndexes(getChainConfig('bnb').whales).map(w => w.name))
-      .toEqual(['tt_whale_wbnb_idx', 'tt_whale_usdt_idx', 'tt_whale_usdc_idx'])
-    expect(ttWhaleIndexes(getChainConfig('eth').whales).map(w => w.name))
-      .toEqual(['tt_whale_weth_idx', 'tt_whale_usdt_idx', 'tt_whale_usdc_idx'])
+  // The planner proves "token = a2 AND value > F2" implies the OR only when each arm is its OWN
+  // parenthesised AND — and the exact text is what a later token-set change must not drift from.
+  it('pins the exact production predicate of each chain (change the token set or a floor => bump the name)', () => {
+    expect(ttWhaleIndex(getChainConfig('bnb').whales).predicate).toBe(
+      "(token_address = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' AND value > 100000000000000000000) OR " +
+      "(token_address = '0x55d398326f99059ff775485246999027b3197955' AND value > 100000000000000000000000) OR " +
+      "(token_address = '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d' AND value > 100000000000000000000000)",
+    )
+    expect(ttWhaleIndex(getChainConfig('eth').whales).predicate).toBe(
+      "(token_address = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' AND value > 50000000000000000000) OR " +
+      "(token_address = '0xdac17f958d2ee523a2206206994597c13d831ec7' AND value > 100000000000) OR " +
+      "(token_address = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' AND value > 100000000000)",
+    )
   })
 
   it('defaults to the running chain', () => {
-    expect(ttWhaleIndexes()).toEqual(ttWhaleIndexes(getChainConfig().whales))
+    expect(ttWhaleIndex()).toEqual(ttWhaleIndex(getChainConfig().whales))
+    expect(TT_WHALE_IDX).toBe('tt_whale_idx')
   })
 
   // Everything in the predicate is spliced into DDL unescaped.
   it('refuses a token that cannot be spliced safely', () => {
     const base = getChainConfig('bnb').whales
-    const bad = (patch: Partial<typeof base.wrapped>) => ttWhaleIndexes({ ...base, wrapped: { ...base.wrapped, ...patch } })
+    const bad = (patch: Partial<typeof base.wrapped>) => ttWhaleIndex({ ...base, wrapped: { ...base.wrapped, ...patch } })
     expect(() => bad({ indexFloor: "1'; DROP TABLE token_transfers --" })).toThrow(/digits/)
     expect(() => bad({ indexFloor: '1e23' })).toThrow(/digits/)
     expect(() => bad({ indexFloor: '' })).toThrow(/digits/)
     expect(() => bad({ address: "0x'; DROP TABLE x --" })).toThrow(/address/)
     expect(() => bad({ address: base.wrapped.address.toUpperCase().replace('0X', '0x') })).toThrow(/address/)  // stored lowercase
-    expect(() => bad({ symbol: 'W BNB' })).toThrow(/symbol/)
-    expect(() => bad({ symbol: "x'; --" })).toThrow(/symbol/)
   })
 
-  it('refuses two tokens that would share an index name', () => {
+  it('refuses the same token listed twice', () => {
     const base = getChainConfig('bnb').whales
-    expect(() => ttWhaleIndexes({ ...base, stablecoins: [base.stablecoins[0], { ...base.stablecoins[1], symbol: 'usdt' }] }))
+    expect(() => ttWhaleIndex({ ...base, stablecoins: [base.stablecoins[0], { ...base.stablecoins[1], address: base.stablecoins[0].address }] }))
       .toThrow(/duplicate/i)
   })
 })
 
-describe('tt_whale_*_idx on a MONOLITHIC token_transfers (ETH)', () => {
-  it.each(['bnb', 'eth'] as const)('%s config: emits one exact CONCURRENTLY statement per token', (key: ChainKey) => {
-    const specs = ttWhaleIndexes(getChainConfig(key).whales)
-    const stmts = buildConcurrentIndexList(false, FLOOR, specs).map(s => s.replace(/\s+/g, ' '))
-    for (const w of specs) {
-      expect(stmts.filter(s => s.includes(` ${w.name} `)), w.name).toEqual([
-        `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${w.name} ON token_transfers(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`,
-      ])
-    }
+describe('tt_whale_idx on a MONOLITHIC token_transfers (ETH)', () => {
+  it.each(['bnb', 'eth'] as const)('%s config: emits exactly one CONCURRENTLY statement', (key: ChainKey) => {
+    const w = ttWhaleIndex(getChainConfig(key).whales)
+    const stmts = buildConcurrentIndexList(false, FLOOR, w).map(s => s.replace(/\s+/g, ' '))
+    expect(stmts.filter(s => s.includes(' tt_whale_'))).toEqual([
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_whale_idx ON token_transfers(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`,
+    ])
   })
 
   it('leads on token_address then value DESC, so a per-token value-ordered scan can stop at LIMIT', () => {
     expect(TT_WHALE_COLUMNS).toBe('token_address, value DESC')
   })
 
-  it('spells ETH\'s USDT index with its real address and the $100k floor in 6-decimal units', () => {
-    const stmts = buildConcurrentIndexList(false, FLOOR, ttWhaleIndexes(getChainConfig('eth').whales))
+  it("spells ETH's statement with its three real addresses and the 6-decimal $100k floor", () => {
+    const stmts = buildConcurrentIndexList(false, FLOOR, ttWhaleIndex(getChainConfig('eth').whales))
     expect(stmts).toContain(
-      "CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_whale_usdt_idx ON token_transfers(token_address, value DESC) " +
-      "WHERE token_address = '0xdac17f958d2ee523a2206206994597c13d831ec7' AND value > 100000000000",
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_whale_idx ON token_transfers(token_address, value DESC) WHERE ' +
+      "(token_address = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' AND value > 50000000000000000000) OR " +
+      "(token_address = '0xdac17f958d2ee523a2206206994597c13d831ec7' AND value > 100000000000) OR " +
+      "(token_address = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' AND value > 100000000000)",
     )
   })
 
   // CONCURRENTLY is rejected on a partitioned parent: BNB takes the ON ONLY +
-  // per-partition route below, so the flat list must not carry these there.
-  it('are absent from the flat list when partitioned', () => {
-    const stmts = buildConcurrentIndexList(true, FLOOR, ttWhaleIndexes(getChainConfig('bnb').whales))
+  // per-partition route below, so the flat list must not carry it there.
+  it('is absent from the flat list when partitioned', () => {
+    const stmts = buildConcurrentIndexList(true, FLOOR, ttWhaleIndex(getChainConfig('bnb').whales))
     expect(stmts.filter(s => s.includes('tt_whale_'))).toEqual([])
   })
 })
 
-describe('tt_whale_*_idx on a PARTITIONED token_transfers (BNB)', () => {
-  const [wbnb, usdt] = ttWhaleIndexes(getChainConfig('bnb').whales)
+describe('tt_whale_idx on a PARTITIONED token_transfers (BNB)', () => {
+  const w = ttWhaleIndex(getChainConfig('bnb').whales)
+  const PRED = w.predicate
 
   it('emits the exact parent / child / attach statements', () => {
-    expect(buildPartitionedTtWhaleIndexSql(usdt, 'token_transfers_p_118938552')).toEqual({
-      parent:
-        "CREATE INDEX IF NOT EXISTS tt_whale_usdt_idx ON ONLY token_transfers(token_address, value DESC) " +
-        "WHERE token_address = '0x55d398326f99059ff775485246999027b3197955' AND value > 100000000000000000000000",
+    expect(buildPartitionedTtWhaleIndexSql(w, 'token_transfers_p_118938552')).toEqual({
+      parent: `CREATE INDEX IF NOT EXISTS tt_whale_idx ON ONLY token_transfers(token_address, value DESC) WHERE ${PRED}`,
       child:
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS token_transfers_p_118938552_whale_usdt_idx ON token_transfers_p_118938552(token_address, value DESC) " +
-        "WHERE token_address = '0x55d398326f99059ff775485246999027b3197955' AND value > 100000000000000000000000",
-      childName: 'token_transfers_p_118938552_whale_usdt_idx',
-      attach: 'ALTER INDEX tt_whale_usdt_idx ATTACH PARTITION token_transfers_p_118938552_whale_usdt_idx',
+        'CREATE INDEX CONCURRENTLY IF NOT EXISTS token_transfers_p_118938552_whale_idx ' +
+        `ON token_transfers_p_118938552(token_address, value DESC) WHERE ${PRED}`,
+      childName: 'token_transfers_p_118938552_whale_idx',
+      attach: 'ALTER INDEX tt_whale_idx ATTACH PARTITION token_transfers_p_118938552_whale_idx',
     })
-    expect(buildPartitionedTtWhaleIndexSql(wbnb, 'token_transfers_legacy').child).toContain(
-      "ON token_transfers_legacy(token_address, value DESC) WHERE token_address = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' AND value > 100000000000000000000",
+    expect(buildPartitionedTtWhaleIndexSql(w, 'token_transfers_legacy').child).toContain(
+      'ON token_transfers_legacy(token_address, value DESC) WHERE (token_address = ',
     )
   })
 
   it('creates the parent ON ONLY and each child CONCURRENTLY (rejected outright on a partitioned parent)', () => {
-    const { parent, child } = buildPartitionedTtWhaleIndexSql(usdt, 'token_transfers_p_1')
+    const { parent, child } = buildPartitionedTtWhaleIndexSql(w, 'token_transfers_p_1')
     expect(parent).toMatch(/^CREATE INDEX IF NOT EXISTS \S+ ON ONLY token_transfers\(/)
     expect(parent).not.toContain('CONCURRENTLY')
     expect(child).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS \S+ ON token_transfers_p_1\(/)
@@ -489,31 +498,43 @@ describe('tt_whale_*_idx on a PARTITIONED token_transfers (BNB)', () => {
 
   // ATTACH PARTITION adopts a child only when its definition matches the parent's
   // exactly, and the two are built from separate strings.
-  it('builds a child whose definition (columns + predicate) is byte-identical to the parent\'s', () => {
-    for (const w of [wbnb, usdt]) {
-      const { parent, child } = buildPartitionedTtWhaleIndexSql(w, 'token_transfers_p_7')
-      const tail = (s: string) => s.slice(s.indexOf('('))
-      expect(tail(child).replace('token_transfers_p_7', 'token_transfers')).toBe(tail(parent))
-    }
+  it("builds a child whose definition (columns + predicate) is byte-identical to the parent's", () => {
+    const { parent, child } = buildPartitionedTtWhaleIndexSql(w, 'token_transfers_p_7')
+    const tail = (s: string) => s.slice(s.indexOf('('))
+    expect(tail(child).replace('token_transfers_p_7', 'token_transfers')).toBe(tail(parent))
   })
 
-  it('names children uniquely per (partition, token), stably, inside the 63-byte identifier limit', () => {
+  it('names children uniquely per partition, stably, inside the 63-byte identifier limit', () => {
     const names = new Set<string>()
-    for (const w of ttWhaleIndexes(getChainConfig('bnb').whales)) {
-      for (const part of ['token_transfers_legacy', 'token_transfers_p_118938552', 'token_transfers_p_118842552', 'token_transfers_p_9999999999999']) {
-        const { childName } = buildPartitionedTtWhaleIndexSql(w, part)
-        expect(childName.length, childName).toBeLessThanOrEqual(63)
-        expect(childName).toBe(buildPartitionedTtWhaleIndexSql(w, part).childName)
-        names.add(childName)
-      }
+    for (const part of ['token_transfers_legacy', 'token_transfers_p_118938552', 'token_transfers_p_118842552', 'token_transfers_p_9999999999999']) {
+      const { childName } = buildPartitionedTtWhaleIndexSql(w, part)
+      expect(childName.length, childName).toBeLessThanOrEqual(63)
+      expect(childName).toBe(buildPartitionedTtWhaleIndexSql(w, part).childName)
+      names.add(childName)
     }
-    expect(names.size).toBe(12)
+    expect(names.size).toBe(4)
   })
 
-  it('never reuses the parent names of the existing token_transfers indexes', () => {
+  it('never reuses the name of an existing token_transfers or transactions index', () => {
     const taken = new Set([TT_TOKEN_TS_IDX, 'tt_token_idx', 'tt_from_ts_idx', 'tt_to_ts_idx', 'tt_block_idx', 'tt_tx_idx', 'tx_whale_value_idx'])
-    for (const key of ['bnb', 'eth'] as const) {
-      for (const w of ttWhaleIndexes(getChainConfig(key).whales)) expect(taken.has(w.name), w.name).toBe(false)
-    }
+    expect(taken.has(w.name)).toBe(false)
+  })
+})
+
+// The boot sweep drops invalid LEAF indexes. A CONCURRENTLY build in flight is invalid by definition, so the sweep
+// must not touch one (its plain DROP would queue an ACCESS EXCLUSIVE lock behind the build and stall boot AND every
+// writer), and its DROP must give up quickly where it cannot get the lock. The behaviour is proven against a real
+// in-flight build in tt-whale-index.pg.test.ts; this pins the SQL shape.
+describe('INVALID_INDEX_SWEEP_SQL leaves indexes under construction alone', () => {
+  const normalized = INVALID_INDEX_SWEEP_SQL.replace(/\s+/g, ' ')
+  it('anti-joins pg_stat_progress_create_index on the index oid', () => {
+    expect(normalized).toMatch(/NOT EXISTS \( ?SELECT 1 FROM pg_stat_progress_create_index p WHERE p\.index_relid = c\.oid/)
+  })
+  it('still sweeps ordinary leaves only', () => {
+    expect(normalized).toMatch(/c\.relkind = 'i'/)
+    expect(normalized).toMatch(/NOT i\.indisvalid/)
+  })
+  it('bounds its DROP with a lock timeout', () => {
+    expect(INVALID_INDEX_DROP_LOCK_TIMEOUT).toMatch(/^\d+s$/)
   })
 })
