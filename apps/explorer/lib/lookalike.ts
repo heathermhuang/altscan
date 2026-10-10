@@ -364,9 +364,10 @@ export const HOMOGLYPHS: Record<string, string> = {
   '\u{1E8C7}': 'I',
 }
 
-// Combining marks, format characters (zero-width joiners, bidi marks), whitespace, and the blank
-// "filler" letters that render as nothing: Hangul fillers U+115F U+1160 U+3164 U+FFA0, braille blank U+2800.
-const INVISIBLE = /[\p{M}\p{Cf}\s\u115F\u1160\u3164\uFFA0\u2800]/gu
+// Combining marks, format characters (zero-width joiners, bidi marks), control characters (NUL, BEL, ESC, DEL,
+// the C1 block), whitespace, and the blank "filler" letters that render as nothing: Hangul fillers U+115F U+1160
+// U+3164 U+FFA0, braille blank U+2800.
+const INVISIBLE = /[\p{M}\p{Cf}\p{Cc}\s\u115F\u1160\u3164\uFFA0\u2800]/gu
 
 function mapGlyphs(s: string): string {
   let out = ''

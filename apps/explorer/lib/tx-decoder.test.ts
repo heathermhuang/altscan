@@ -182,9 +182,10 @@ describe('safeTransferSymbol', () => {
     expect(safeTransferSymbol(REAL_USDT_BNB, 'USDT', 'eth')).toBeUndefined()
   })
 
-  // Check what the page will SHOW, not what was stored: foldConfusables keeps a control character
-  // (U+0007) that sanitizeSymbol strips, so "US<BEL>DT" does not fold to USDT, yet displays as USDT.
-  it('judges the sanitised symbol too: a control character cannot hide a lookalike', () => {
+  // Check what the page will SHOW, not what was stored: foldConfusables keeps a character the glyph table
+  // has no entry for (U+20AC) that sanitizeSymbol strips, so "US<euro>DT" does not fold to USDT, yet displays as USDT.
+  it('judges the sanitised symbol too: a stray character cannot hide a lookalike', () => {
+    expect(safeTransferSymbol(SPAM, 'US\u20ACDT', 'bnb')).toBeUndefined()
     expect(safeTransferSymbol(SPAM, 'US\u0007DT', 'bnb')).toBeUndefined()
     expect(safeTransferSymbol(SPAM, 'U\u0001S\u001FDT', 'bnb')).toBeUndefined()
     expect(safeTransferSymbol(SPAM, 'BN\u0007B', 'bnb')).toBeUndefined()   // native coin

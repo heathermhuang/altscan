@@ -37,9 +37,9 @@ export function safeTransferSymbol(
 ): string | undefined {
   if (!symbol) return undefined
   // Sanitise FIRST and judge what the page would show. foldConfusables keeps characters that
-  // sanitizeSymbol strips (a control character), so "US<BEL>DT" does not fold to USDT yet displays as
-  // USDT. The raw symbol is checked too: it catches the shapes only the fold sees (invisible and
-  // lookalike letters that sanitising keeps or maps differently).
+  // sanitizeSymbol strips (any non-ASCII character the glyph table has no entry for), so "US<euro>DT" does
+  // not fold to USDT yet displays as USDT. The raw symbol is checked too: it catches the shapes only the
+  // fold sees (invisible and lookalike letters that sanitising keeps or maps differently).
   const clean = sanitizeSymbolOr(symbol, '')
   if (!clean) return undefined
   if (lookalikeOf({ address, symbol: clean }, chain) || lookalikeOf({ address, symbol }, chain)) return undefined
