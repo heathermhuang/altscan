@@ -22,7 +22,6 @@ import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersFact } from './HoldersLazy'
-import { holdersPhrase } from '@/lib/holder-labels'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, toChecksumAddress } from '@/lib/address-display'
@@ -136,12 +135,12 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${token.name} (${token.symbol})`,
-    // A holder count of 0 is a lagging reading (the Holders card shows "—"), so it is not stated.
-    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${holdersPhrase(token.holderCount, 'indexed')}.` : ''}`,
+    // No holder count: tokens.holder_count is a frozen snapshot (see lib/holder-labels.ts), not something to publish as current.
+    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
-      description: token.holderCount > 0 ? `${standard} · ${holdersPhrase(token.holderCount, 'indexed')}` : standard,
+      description: standard,
     },
   }
 }

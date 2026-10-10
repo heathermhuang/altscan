@@ -178,15 +178,19 @@ export function holdingsNote(o: {
   tracked: readonly TrackedToken[]
   trackedKnown: boolean
   nativeSymbol: string
+  /** Whether the native coin's live price was available: the wrapped token is only priced if it was. */
+  nativePriced: boolean
   others: 'index' | 'moralis' | 'none'
 }): string {
   const names = list(o.tracked.map((t) => t.symbol))
-  const wrapped = o.tracked.find((t) => t.kind === 'wrapped')
-  const lead = o.trackedKnown
-    ? `${names} are read from the chain just now: stablecoins at $1, ${wrapped?.symbol ?? 'the wrapped token'} at the live ${o.nativeSymbol} price.`
-    : `${names} could not be read from the chain right now.`
+  const wrapped = o.tracked.find((t) => t.kind === 'wrapped')?.symbol ?? 'the wrapped token'
+  const lead = !o.trackedKnown
+    ? `${names} could not be read from the chain right now.`
+    : o.nativePriced
+      ? `${names} are read from the chain just now: stablecoins at $1, ${wrapped} at the live ${o.nativeSymbol} price.`
+      : `${names} are read from the chain just now: stablecoins at $1; ${wrapped} has no price right now.`
   const rest = {
-    index: ' Other balances come from this explorer\'s index: approximate, and not priced.',
+    index: " Other balances come from this explorer's index, a stale snapshot, and are not priced.",
     moralis: ' Other balances come from Moralis where it answers, priced only where it has a price.',
     none: '',
   }[o.others]

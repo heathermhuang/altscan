@@ -180,14 +180,24 @@ describe('usdText', () => {
 })
 
 describe('holdingsNote', () => {
-  const base = { tracked: tokens, nativeSymbol: 'BNB' }
+  const base = { tracked: tokens, nativeSymbol: 'BNB', nativePriced: true }
 
   it('names the tracked tokens and how each is priced, then where the rest comes from', () => {
     expect(holdingsNote({ ...base, trackedKnown: true, others: 'index' })).toBe(
-      "USDT, USDC and WBNB are read from the chain just now: stablecoins at $1, WBNB at the live BNB price. Other balances come from this explorer's index: approximate, and not priced.",
+      "USDT, USDC and WBNB are read from the chain just now: stablecoins at $1, WBNB at the live BNB price. Other balances come from this explorer's index, a stale snapshot, and are not priced.",
     )
     expect(holdingsNote({ ...base, trackedKnown: true, others: 'moralis' })).toContain('Other balances come from Moralis where it answers, priced only where it has a price.')
     expect(holdingsNote({ ...base, trackedKnown: true, others: 'none' })).not.toContain('Other balances')
+  })
+
+  it('calls the index a stale snapshot, never "approximate"', () => {
+    expect(holdingsNote({ ...base, trackedKnown: true, others: 'index' })).not.toMatch(/approximate/i)
+  })
+
+  it('does not claim a live price for the wrapped token when the price lookup failed', () => {
+    const n = holdingsNote({ ...base, nativePriced: false, trackedKnown: true, others: 'none' })
+    expect(n).toBe('USDT, USDC and WBNB are read from the chain just now: stablecoins at $1; WBNB has no price right now.')
+    expect(n).not.toContain('live BNB price')
   })
 
   it('says so when the live read failed, instead of implying the tracked tokens were checked', () => {

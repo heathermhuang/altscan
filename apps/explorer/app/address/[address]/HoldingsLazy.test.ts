@@ -13,7 +13,7 @@ const tracked = priceTracked(trackedTokens(BSC.whales), { [USDT]: String(600_000
 const prov = (symbol: string, usdValue: string | null, address: string, balance = String(3n * E18)) =>
   ({ tokenAddress: address, symbol, name: symbol, logo: null, decimals: 18, balance, balanceFormatted: null, usdValue })
 const view = (data: Parameters<typeof HoldingsView>[0]['data'], t: Parameters<typeof HoldingsView>[0]['tracked'] = tracked) =>
-  renderToStaticMarkup(createElement(HoldingsView, { data, tracked: t }))
+  renderToStaticMarkup(createElement(HoldingsView, { data, tracked: t, nativePriced: true }))
 const cells = (html: string) =>
   [...html.matchAll(/<tr class="hover:bg-canvas transition-colors">(.*?)<\/tr>/g)].map((m) =>
     [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((c) => c[1].replace(/<[^>]+>/g, '')),
@@ -67,7 +67,7 @@ describe('HoldingsLazy shell', () => {
   const note = (html: string) => html.match(/<span>(USDT, USDC and WBNB[^<]*)<\/span>/)?.[1]
 
   it('draws the note while loading, identical to the one drawn after the provider answers', () => {
-    const loading = renderToStaticMarkup(createElement(HoldingsLazy, { addr: '0xabc', tracked }))
+    const loading = renderToStaticMarkup(createElement(HoldingsLazy, { addr: '0xabc', tracked, nativePriced: true }))
     expect(loading).toContain('animate-pulse')
     expect(note(loading)).toBeDefined()
     expect(note(loading)).toBe(note(view({ tokens: [prov('CAKE', '12.5', '0x' + '2'.repeat(40))] })))

@@ -44,10 +44,13 @@ describe('token page holder labels', () => {
     expect(html).not.toContain('<dt class="k">Holders</dt>')
   })
 
-  it('labels the count in the page and OpenGraph descriptions too', async () => {
+  // A frozen snapshot (about 1% of the live count) is not published as if current: the descriptions that
+  // search engines and link previews show carry no holder count at all.
+  it('leaves the frozen count out of the page and OpenGraph descriptions', async () => {
     const meta = await (await import('./page')).generateMetadata({ params })
-    expect(meta.description).toContain('835,871 indexed holders.')
-    expect(meta.openGraph?.description).toBe('BEP-20 · 835,871 indexed holders')
+    expect(meta.description).toBe('Tether USD (USDT) BEP-20 token on BNB Chain.')
+    expect(meta.openGraph?.description).toBe('BEP-20')
+    expect(`${meta.description} ${meta.openGraph?.description}`).not.toMatch(/835|holders/i)
   })
 })
 
@@ -60,7 +63,7 @@ describe('HoldersFact', () => {
     expect(indexed).toContain('835,871')
     expect(provider).toContain('<dt class="k">Holders (Moralis)</dt>')
     expect(provider).toContain('79,823,380')
-    expect(indexed).toMatch(/title="[^"]*this explorer/i)
+    expect(indexed).toMatch(/title="A snapshot from this explorer[^"]*not updated/i)
     expect(provider).toMatch(/title="[^"]*Moralis/)
   })
 

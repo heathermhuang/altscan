@@ -17,20 +17,21 @@ type HoldingsResponse = {
  * words "where it answers" are for), so it is drawn from the first paint and the swap from skeleton
  * to table never changes its height.
  */
-function HoldingsNote({ tracked }: { tracked: HoldingRow[] | null }) {
+function HoldingsNote({ tracked, nativePriced }: { tracked: HoldingRow[] | null; nativePriced: boolean }) {
   return (
     <HoldingsBanner>
-      {holdingsNote({ tracked: trackedTokens(chainConfig.whales), trackedKnown: tracked !== null, nativeSymbol: chainConfig.currency, others: 'moralis' })}
+      {holdingsNote({ tracked: trackedTokens(chainConfig.whales), trackedKnown: tracked !== null, nativeSymbol: chainConfig.currency, nativePriced, others: 'moralis' })}
     </HoldingsBanner>
   )
 }
 
 /**
  * The tab's content once the provider has answered (or failed). `tracked` is the page's live read of
- * the tracked tokens (USDT, USDC, the wrapped token), already priced; null = that read failed. They
+ * the tracked tokens (USDT, USDC, the wrapped token), already priced; null = that read failed.
+ * `nativePriced`: whether the page had a native price for the wrapped token. They
  * are merged into whatever the provider lists, which may leave them out.
  */
-export function HoldingsView({ data, tracked }: { data: HoldingsResponse | null; tracked: HoldingRow[] | null }) {
+export function HoldingsView({ data, tracked, nativePriced }: { data: HoldingsResponse | null; tracked: HoldingRow[] | null; nativePriced: boolean }) {
   const providerOk = !!data && !data.limited
   const known = tracked !== null
   const tokens = trackedTokens(chainConfig.whales)
@@ -42,7 +43,7 @@ export function HoldingsView({ data, tracked }: { data: HoldingsResponse | null;
 
   return (
     <div>
-      <HoldingsNote tracked={tracked} />
+      <HoldingsNote tracked={tracked} nativePriced={nativePriced} />
       {rows.length === 0 ? (
         <p className="text-mut">{providerOk ? 'No token holdings found for this address.' : unavailable}</p>
       ) : (
@@ -55,7 +56,7 @@ export function HoldingsView({ data, tracked }: { data: HoldingsResponse | null;
   )
 }
 
-export function HoldingsLazy({ addr, tracked }: { addr: string; tracked: HoldingRow[] | null }) {
+export function HoldingsLazy({ addr, tracked, nativePriced }: { addr: string; tracked: HoldingRow[] | null; nativePriced: boolean }) {
   const [data, setData] = useState<HoldingsResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -71,7 +72,7 @@ export function HoldingsLazy({ addr, tracked }: { addr: string; tracked: Holding
   if (loading) {
     return (
       <div>
-        <HoldingsNote tracked={tracked} />
+        <HoldingsNote tracked={tracked} nativePriced={nativePriced} />
         {/* The table's own box and row height (header + 5 rows of 37 px), so a five-row answer replaces it
             without moving what is below. */}
         <div className="animate-pulse bg-card rounded-xl border border-hair overflow-hidden divide-y divide-hair">
@@ -83,5 +84,5 @@ export function HoldingsLazy({ addr, tracked }: { addr: string; tracked: Holding
     )
   }
 
-  return <HoldingsView data={data} tracked={tracked} />
+  return <HoldingsView data={data} tracked={tracked} nativePriced={nativePriced} />
 }

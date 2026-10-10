@@ -86,13 +86,20 @@ describe('address Holdings tab (BNB)', () => {
   it('says where the numbers come from', async () => {
     const html = await tab()
     expect(html).toContain('USDT, USDC and WBNB are read from the chain just now')
-    expect(html).toContain('Other balances come from this explorer&#x27;s index: approximate, and not priced.')
+    expect(html).toContain('Other balances come from this explorer&#x27;s index, a stale snapshot, and are not priced.')
   })
 
   it('shows the wrapped token unpriced, never invented, when there is no native price', async () => {
     const rows = cells(await tab({ nativeUsd: null }))
     expect(rows.find((r) => r[0] === 'WBNB')).toEqual(['WBNB', 'WBNB', '2', 'no price'])
     expect(rows[0][0]).toBe('USDT')
+  })
+
+  it('does not call the wrapped token live-priced when there is no native price', async () => {
+    const html = await tab({ nativeUsd: null })
+    expect(html).toContain('stablecoins at $1; WBNB has no price right now.')
+    expect(html).not.toContain('live BNB price')
+    expect(await tab()).toContain('WBNB at the live BNB price')
   })
 
   it('lists a tracked token once: the live row replaces a stale index row', async () => {

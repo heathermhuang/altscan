@@ -17,7 +17,7 @@ describe('/token list holder label', () => {
   it('heads the holders column "Indexed holders", with the tooltip', async () => {
     const { default: Page } = await import('./page')
     const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({}) }))
-    expect(html).toMatch(/<th scope="col" title="[^"]*this explorer[^"]*">Indexed holders<\/th>/i)
+    expect(html).toMatch(/<th scope="col" title="A snapshot from this explorer[^"]*">Indexed holders<\/th>/i)
     expect(html).not.toContain('>Holders</th>')
     expect(html).toContain('835,871')
   })

@@ -67,11 +67,11 @@ export async function HoldingsTab({ addr, isBot, nativeUsd }: { addr: string; is
   }
 
   const note = (others: 'index' | 'none') =>
-    holdingsNote({ tracked: tokens, trackedKnown: tracked !== null, nativeSymbol: chainConfig.currency, others })
+    holdingsNote({ tracked: tokens, trackedKnown: tracked !== null, nativeSymbol: chainConfig.currency, nativePriced: nativeUsd !== null, others })
 
   if (indexRows.length === 0) {
     // Nothing in the index: the provider may still know this address. Bots get the local view only.
-    if (!isBot) return <HoldingsLazy addr={addr} tracked={tracked} />
+    if (!isBot) return <HoldingsLazy addr={addr} tracked={tracked} nativePriced={nativeUsd !== null} />
     if (!tracked || tracked.length === 0) return <p className="text-mut">No token holdings found for this address.</p>
     return (
       <div>
