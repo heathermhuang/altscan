@@ -12,6 +12,7 @@
  */
 import { unstable_cache } from 'next/cache'
 import { chainConfig } from '@/lib/chain'
+import { swallow } from '@/lib/observability'
 
 /**
  * Build the cache key for a page query.
@@ -68,11 +69,20 @@ export function buildCacheKey(
  * Each entry therefore carries the time it was computed, and a hit older than
  * the TTL is recomputed inline; Next's refresh still lands, so the next reader
  * hits. The stamp is a plain number (a BigInt voids Next's JSON write), and an
- * entry with no usable stamp counts as too old. An inline failure propagates
- * like a miss does; the stale entry is never served in its place.
+ * entry with no usable stamp counts as too old.
+ *
+ * Two things keep that recompute from making an outage worse. Concurrent
+ * readers of one entry share ONE in-flight recompute (Next's own dedupe lives
+ * on the request, so it cannot do this), and a recompute that fails serves the
+ * old value and logs `[page-cache/<name>:stale-on-error]`: normally the page is
+ * fresh, and during an outage it is no worse than before the bound existed. A
+ * cold miss has no old value, so it rejects exactly as it always has, and
+ * nothing is ever cached from a failure. An entry with no usable stamp has no
+ * value to trust, so it rejects too.
  *
  * The callback Next sees is now the same wrapper for every cache, so `name`
- * (with the chain) is all that tells two caches apart: keep it unique per call.
+ * (with the chain) is all that tells two caches apart, here and in the
+ * in-flight map: keep it unique per call.
  */
 export function createPageCache<A extends unknown[], T>(
   name: string,
@@ -90,8 +100,33 @@ export function createPageCache<A extends unknown[], T>(
   )
   return async (...args: A) => {
     const hit = await cached(...args)
-    // NaN (no stamp) and negative (clock stepped back) both fail this test and fall through to a query.
     const age = Date.now() - hit?.at
-    return age >= 0 && age <= maxAgeMs ? hit.value : query(...args)
+    // NaN (no stamp) and negative (clock stepped back) both fail this test and fall through to a query.
+    if (age >= 0 && age <= maxAgeMs) return hit.value
+    try {
+      return await recomputeOnce(name, args, query)
+    } catch (err) {
+      // `hit.at` is a number only for an entry this module wrote, whose `value` is a real T.
+      if (!Number.isFinite(hit?.at)) throw err
+      swallow(`page-cache/${name}:stale-on-error`, err)
+      return hit.value
+    }
   }
+}
+
+/** In-flight inline recomputes, keyed like the cache entry itself. An entry lives only while its promise does. */
+const inFlight = new Map<string, Promise<unknown>>()
+
+function recomputeOnce<A extends unknown[], T>(
+  name: string,
+  args: A,
+  query: (...args: A) => Promise<T>,
+): Promise<T> {
+  const key = JSON.stringify(buildCacheKey(name, [JSON.stringify(args)]))
+  let flight = inFlight.get(key) as Promise<T> | undefined
+  if (!flight) {
+    flight = query(...args).finally(() => inFlight.delete(key))
+    inFlight.set(key, flight)
+  }
+  return flight
 }

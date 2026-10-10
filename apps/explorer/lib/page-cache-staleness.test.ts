@@ -10,9 +10,15 @@ import { createPageCache } from '@/lib/page-cache'
 //     background (`age > revalidate` -> kick `cb`, then `return cachedResponse`);
 //   - a refresh that rejects is swallowed and stores nothing.
 //
+// `refresh.on = false` switches the background refresh off, to isolate the reader's own inline
+// recompute: in production Next starts one refresh PER REQUEST (its dedupe lives on the request's
+// workStore), so a count of query runs would otherwise mix the two.
+//
 // That second line is the bug this file pins: after an idle gap the first reader gets the entry as the
 // previous reader left it, 27 minutes old on ethscan.io/blocks.
-const { store, background, fakeUnstableCache } = vi.hoisted(() => {
+const { store, background, refresh, swallow, fakeUnstableCache } = vi.hoisted(() => {
+  const refresh = { on: true }
+  const swallow = vi.fn()
   const store = new Map<string, { body: string | undefined; storedAt: number }>()
   const background: Promise<unknown>[] = []
   const fakeUnstableCache = (
@@ -28,14 +34,15 @@ const { store, background, fakeUnstableCache } = vi.hoisted(() => {
       put(result)
       return result
     }
-    if ((Date.now() - entry.storedAt) / 1000 > opts.revalidate) {
+    if (refresh.on && (Date.now() - entry.storedAt) / 1000 > opts.revalidate) {
       background.push(cb(...args).then(put, () => {}))
     }
     return entry.body === undefined ? undefined : JSON.parse(entry.body)
   }
-  return { store, background, fakeUnstableCache }
+  return { store, background, refresh, swallow, fakeUnstableCache }
 })
 vi.mock('next/cache', () => ({ unstable_cache: fakeUnstableCache }))
+vi.mock('@/lib/observability', () => ({ swallow }))
 
 const T0 = Date.UTC(2026, 9, 9, 11, 50, 59)
 const SECOND = 1000
@@ -56,6 +63,8 @@ const settle = () => Promise.all(background.splice(0))
 beforeEach(() => {
   store.clear()
   background.length = 0
+  refresh.on = true
+  swallow.mockClear()
   vi.useFakeTimers()
   vi.setSystemTime(T0)
 })
@@ -157,19 +166,23 @@ describe('createPageCache bounds how stale a served entry can be', () => {
 })
 
 describe('createPageCache failure semantics', () => {
-  it('lets a rejection propagate on a miss, and stores nothing', async () => {
+  // The outage case must be no worse than before this module bounded staleness: a too-old entry whose
+  // recompute fails is served (and logged), because the alternative is an empty page or a 500 for a
+  // list that was fine a minute ago. The normal case never gets here: it is fresh.
+
+  it('(b) a cold miss that rejects propagates, and stores nothing', async () => {
     const boom = new Error('db down')
     const query = vi.fn<(page: number) => Promise<string>>()
     query.mockRejectedValueOnce(boom).mockResolvedValueOnce('ok')
     const read = createPageCache('t', 60, query)
 
     await expect(read(1)).rejects.toBe(boom)
+    expect(swallow).not.toHaveBeenCalled()
+    expect(store.size).toBe(0)
     expect(await read(1)).toBe('ok')
   })
 
-  it('lets a rejection propagate when the entry is too old, instead of serving it silently', async () => {
-    // A page that cannot be queried must say so (callers catch and render their own error state), not
-    // show a 27-minute-old list as though it were current.
+  it('(a) a too-old entry whose recompute rejects serves the old value and logs the failure', async () => {
     const boom = new Error('db down')
     const query = vi.fn<(page: number) => Promise<string>>()
     query.mockResolvedValueOnce('old').mockRejectedValue(boom)
@@ -177,22 +190,169 @@ describe('createPageCache failure semantics', () => {
     await read(1)
 
     vi.setSystemTime(T0 + 30 * 60 * SECOND)
-    await expect(read(1)).rejects.toBe(boom)
+
+    expect(await read(1)).toBe('old')
+    expect(swallow).toHaveBeenCalledTimes(1)
+    expect(swallow).toHaveBeenCalledWith('page-cache/t:stale-on-error', boom)
     await settle()
   })
 
-  it('does not let a failed refresh poison the entry: the next read recovers', async () => {
+  it('(c) a fresh entry never reaches the query, even one that would reject', async () => {
+    const query = vi.fn<(page: number) => Promise<string>>()
+    query.mockResolvedValueOnce('ok').mockRejectedValue(new Error('db down'))
+    const read = createPageCache('t', 60, query)
+    await read(1)
+
+    vi.setSystemTime(T0 + 10 * SECOND)
+
+    expect(await read(1)).toBe('ok')
+    expect(query).toHaveBeenCalledTimes(1)
+    expect(swallow).not.toHaveBeenCalled()
+  })
+
+  it('caches nothing from a failure: the stored entry keeps its old stamp and the next read recovers', async () => {
     const boom = new Error('db down')
     const query = vi.fn<(page: number) => Promise<string>>()
     query.mockResolvedValueOnce('old').mockRejectedValueOnce(boom).mockRejectedValueOnce(boom).mockResolvedValue('new')
     const read = createPageCache('t', 60, query)
     await read(1)
+    const before = [...store.values()].map(e => e.body)
 
     vi.setSystemTime(T0 + 90 * SECOND)
-    await expect(read(1)).rejects.toBe(boom)
+    expect(await read(1)).toBe('old')
     await settle()
+    expect([...store.values()].map(e => e.body)).toEqual(before)
 
     expect(await read(1)).toBe('new')
+  })
+
+  it('does not serve an entry with no usable stamp on error: there is nothing trustworthy to serve', async () => {
+    const boom = new Error('db down')
+    const query = vi.fn<(page: number) => Promise<unknown>>()
+    query.mockResolvedValueOnce('old').mockRejectedValue(boom)
+    const read = createPageCache('t', 60, query)
+    await read(1)
+    for (const [id, entry] of store) store.set(id, { ...entry, body: JSON.stringify({ bare: 'value' }) })
+
+    await expect(read(1)).rejects.toBe(boom)
+    expect(swallow).not.toHaveBeenCalled()
+  })
+})
+
+describe('createPageCache recomputes a too-old entry once for all concurrent readers', () => {
+  // A slow query, so the readers genuinely overlap. Next's own refresh is off (see the top of the file).
+  function slowSource() {
+    const state = { value: 'v1', calls: 0, fail: null as Error | null }
+    const query = vi.fn(async (page: number = 1) => {
+      state.calls++
+      await new Promise(resolve => setTimeout(resolve, 100))
+      if (state.fail) throw state.fail
+      return { page, tip: state.value }
+    })
+    return { state, query }
+  }
+  async function warm(read: (page: number) => Promise<unknown>, page = 1) {
+    const first = read(page)
+    await vi.advanceTimersByTimeAsync(100)
+    await first
+  }
+  const CONCURRENT = 8
+
+  it('runs one query for N concurrent stale reads, and every reader gets the fresh value', async () => {
+    refresh.on = false
+    const { state, query } = slowSource()
+    const read = createPageCache('t', 60, query)
+    await warm(read)
+    state.value = 'v2'
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    state.calls = 0
+
+    const reads = Array.from({ length: CONCURRENT }, () => read(1))
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(await Promise.all(reads)).toEqual(Array(CONCURRENT).fill({ page: 1, tip: 'v2' }))
+    expect(state.calls).toBe(1)
+  })
+
+  it('forgets the flight once it settles: a later stale read queries again', async () => {
+    refresh.on = false
+    const { state, query } = slowSource()
+    const read = createPageCache('t', 60, query)
+    await warm(read)
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    state.calls = 0
+
+    const first = read(1)
+    await vi.advanceTimersByTimeAsync(100)
+    await first
+    expect(state.calls).toBe(1)
+
+    // The stand-in's entry is still stale (its refresh is off), so this read recomputes again.
+    state.value = 'v2'
+    const second = read(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await second).toEqual({ page: 1, tip: 'v2' })
+    expect(state.calls).toBe(2)
+  })
+
+  it('shares a failed recompute too: one query, every reader gets the old value, and the next read retries', async () => {
+    refresh.on = false
+    const boom = new Error('db down')
+    const { state, query } = slowSource()
+    const read = createPageCache('t', 60, query)
+    await warm(read)
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    state.calls = 0
+    state.fail = boom
+
+    const reads = Array.from({ length: CONCURRENT }, () => read(1))
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(await Promise.all(reads)).toEqual(Array(CONCURRENT).fill({ page: 1, tip: 'v1' }))
+    expect(state.calls).toBe(1)
+    expect(swallow).toHaveBeenCalledTimes(CONCURRENT)
+
+    state.fail = null
+    state.value = 'v2'
+    const retry = read(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await retry).toEqual({ page: 1, tip: 'v2' })
+    expect(state.calls).toBe(2)
+  })
+
+  it('does not share across different arguments', async () => {
+    refresh.on = false
+    const { state, query } = slowSource()
+    const read = createPageCache('t', 60, query)
+    await warm(read, 1)
+    await warm(read, 2)
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    state.calls = 0
+
+    const reads = [read(1), read(2), read(1), read(2)]
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect((await Promise.all(reads)).map(r => (r as { page: number }).page)).toEqual([1, 2, 1, 2])
+    expect(state.calls).toBe(2)
+  })
+
+  it('does not share across different caches that happen to take the same arguments', async () => {
+    refresh.on = false
+    const a = slowSource()
+    const b = slowSource()
+    const readA = createPageCache('cache-a', 60, a.query)
+    const readB = createPageCache('cache-b', 60, b.query)
+    await warm(readA)
+    await warm(readB)
+    vi.setSystemTime(T0 + 30 * 60 * SECOND)
+    a.state.calls = 0
+    b.state.calls = 0
+
+    const reads = [readA(1), readB(1)]
+    await vi.advanceTimersByTimeAsync(100)
+    await Promise.all(reads)
+
+    expect([a.state.calls, b.state.calls]).toEqual([1, 1])
   })
 })
 
