@@ -13,6 +13,8 @@ describe('looksLikeUrlOrHandle', () => {
     'example.com/path', 'example.com.au', 'Visit claim.xyz to claim 1000 USDT',
     't.me/airdrop', 'T.ME/x', 'join t.me/scam',
     '币安链能飞.vip', 'ЦАРЬ.com',
+    'discord.gg/claim', 'pump.fun', 'claim.link', 'bit.ly/x', 'knewit.fun', 'TOPS.FUN',
+    'claim。xyz', 'claim｡xyz', 'ｃｌａｉｍ。ｘｙｚ', '币安。com', 'visit claim。io now',
     '@airdrop_bot', 'Claim @elonmusk', '(@handle)', '@ab',
   ])('flags %j', (text) => {
     expect(looksLikeUrlOrHandle(text)).toBe(true)
@@ -21,6 +23,7 @@ describe('looksLikeUrlOrHandle', () => {
   it.each([
     'USDT', 'USDT.z', 'BTC.b', 'WETH.e', 'USDC.e', 'stETH', 'Tether USD', 'Wrapped BNB', 'PancakeSwap Token',
     'BTC.c', 'ETH.x', 'CAKE-LP', 'Wrapped Ether (Wormhole)', 'ETH.commit', '币安支付.burn', 'Startup Mr. Miyagi', 'Ondo U.S. Dollar Token',
+    'WBNB', 'U.S.', 'e.g.', 'e.g. Tether', 'LINK', 'ChainLink Token', 'FUN', 'Funfair', '你好。世界', 'USDT。z',
   ])('does not flag the ticker or name %j', (text) => {
     expect(looksLikeUrlOrHandle(text)).toBe(false)
   })

@@ -14,7 +14,7 @@ vi.mock('@/lib/db', async () => {
 })
 vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => { throw new Error('no rpc in this test') } }))
 
-import { VerifyForm } from './VerifyForm'
+import { VerifyForm, CHECK_FAILED_MESSAGE } from './VerifyForm'
 import VerifyPage from './page'
 import { metadata } from './layout'
 import { analyzeTokenRisk } from '@/lib/token-risk'
@@ -41,6 +41,18 @@ describe('/verify wording matches what the form does', () => {
     const description = String(metadata.description)
     expect(description).toMatch(/Sourcify/)
     expect(description).not.toMatch(/publish|match deployed bytecode/i)
+  })
+})
+
+describe('/verify: the rest of the wording says "check" too', () => {
+  it('the tab title names the Sourcify check, not a verification the page cannot perform', () => {
+    expect(String(metadata.title)).toMatch(/Sourcify/)
+    expect(String(metadata.title)).not.toMatch(/^Verify/)
+  })
+
+  it('the error fallback says the check failed, not that verification failed', () => {
+    expect(CHECK_FAILED_MESSAGE).toMatch(/check failed/i)
+    expect(CHECK_FAILED_MESSAGE).not.toMatch(/verification failed/i)
   })
 })
 

@@ -9,7 +9,7 @@
  * Pure and import-free on purpose: client components (the typeahead, the holdings tab) use it too.
  */
 
-const TLDS = 'com|io|xyz|org|net|app|top|vip|cc|me|co|site|online|finance|exchange'
+const TLDS = 'com|io|xyz|org|net|app|top|vip|cc|me|co|site|online|finance|exchange|gg|fun|link|ly'
 
 const URL_OR_HANDLE = new RegExp(
   [
@@ -27,12 +27,14 @@ const URL_OR_HANDLE = new RegExp(
 
 /**
  * True when `text` contains a URL, a `www.` host, a domain on a common TLD, `t.me/…` or an `@handle`.
- * Fullwidth letters fold to ASCII (NFKC) and invisible characters are dropped first, so
- * "ｗｗｗ．scam．ｃｏｍ" and "exam​ple.com" are seen as what they display as.
+ * Fullwidth letters fold to ASCII (NFKC), invisible characters are dropped and the ideographic full stops
+ * (U+3002, U+FF61) read as '.', so a name is judged as what it displays as: fullwidth "ｗｗｗ．scam．ｃｏｍ",
+ * "exam" + a zero-width space + "ple.com", and "claim。xyz" are all flagged.
  */
 export function looksLikeUrlOrHandle(text: string | null | undefined): boolean {
   if (!text) return false
-  return URL_OR_HANDLE.test(text.normalize('NFKC').replace(/[\p{Cf}\p{Cc}]/gu, ''))
+  // NFKC maps the halfwidth ideographic full stop (U+FF61) to U+3002, and neither is a '.' to NFKC: fold both ourselves.
+  return URL_OR_HANDLE.test(text.normalize('NFKC').replace(/[\p{Cf}\p{Cc}]/gu, '').replace(/[\u3002\uFF61]/g, '.'))
 }
 
 /** The badge's `title`: what "link in name" means. */

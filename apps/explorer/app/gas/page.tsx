@@ -7,7 +7,7 @@ import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { confirmationWindow } from '@/lib/confirmation-window'
 import { feeCard, GAS_TIER_BLOCKS, gasTiersNote, gasTiles } from '@/lib/gas-tiers'
-import { fetchGasTiers } from '@/lib/gas-percentiles'
+import { fetchGasTiers, GAS_REVALIDATE_SECONDS } from '@/lib/gas-percentiles'
 
 export const revalidate = 45
 
@@ -19,7 +19,8 @@ export const metadata: Metadata = {
 
 export default async function GasPage() {
   // The tiers come from the indexed blocks (cached), the headline card from the node: start both together.
-  const tiersRead = fetchGasTiers().catch((e) => { swallow('gas/tiers', e); return null })
+  let tiersFailed = false
+  const tiersRead = fetchGasTiers().catch((e) => { swallow('gas/tiers', e); tiersFailed = true; return null })
   const provider = await getWebProvider()
   let gasPrice = 0n
   let baseFeePerGas: bigint | null = null
@@ -59,7 +60,7 @@ export default async function GasPage() {
         <p className="k">{'// '}gas</p>
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Gas Tracker</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink2">
-          Live {chainConfig.name} gas prices updated every block. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
+          {chainConfig.name} gas prices, refreshed every {GAS_REVALIDATE_SECONDS} seconds. Gas is the fee paid to validators for processing transactions — higher gas means faster confirmation.
           {hasGasFloor && ` ${chainConfig.name} maintains a low minimum gas price of ${floorGwei} Gwei with typical confirmation in ${confirmationWindow(chainConfig.blockTime)}.`}
           {chainConfig.features.hasEip1559 && ` ${chainConfig.name} gas fluctuates with network demand, using EIP-1559 base fee mechanics.`}
         </p>
@@ -68,7 +69,7 @@ export default async function GasPage() {
       <dl className="ledger [--cols:3] mb-2">
         {tiles.map(t => <Fact key={t.label} label={t.label} gwei={t.gwei} basis={t.basis} />)}
       </dl>
-      <p className="mb-8 text-xs text-mut">{gasTiersNote(tiers, chainConfig.features.hasEip1559)}</p>
+      <p className="mb-8 text-xs text-mut">{gasTiersNote(tiers, chainConfig.features.hasEip1559, tiersFailed)}</p>
 
       <AdReserve
         context="gas"

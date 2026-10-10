@@ -41,10 +41,10 @@ describe.skipIf(!PG_URL)('/gas tier query: against a real Postgres', () => {
   afterAll(async () => { await conn?.end({ timeout: 5 }) })
 
   /** Blocks first..last, each with base fee `baseFee(n)` and one transaction per entry of `prices(n)` (wei). */
-  async function load(first: number, last: number, baseFee: (n: number) => number, prices: (n: number) => number[]) {
+  async function load(first: number, last: number, baseFee: (n: number) => number | null, prices: (n: number) => number[]) {
     await conn.unsafe('TRUNCATE transactions, blocks')
     const ns = Array.from({ length: last - first + 1 }, (_, i) => first + i)
-    await conn.unsafe(`INSERT INTO blocks VALUES ${ns.map(n => `(${n}, ${baseFee(n)})`).join(',')}`)
+    await conn.unsafe(`INSERT INTO blocks VALUES ${ns.map(n => `(${n}, ${baseFee(n) ?? 'NULL'})`).join(',')}`)
     const txs = ns.flatMap(n => prices(n).map((p, i) => `('0x${n}-${i}', ${n}, ${p})`))
     if (txs.length > 0) await conn.unsafe(`INSERT INTO transactions VALUES ${txs.join(',')}`)
   }
@@ -57,6 +57,30 @@ describe.skipIf(!PG_URL)('/gas tier query: against a real Postgres', () => {
     await conn.unsafe(`INSERT INTO transactions SELECT '0xsys-' || n || '-' || i, n, 0 FROM generate_series(11, 30) n, generate_series(1, 3) i`)
     const tiers = await queryGasTiers(db)
     expect(tiers).toEqual({ slow: String(1 * GWEI), standard: String(2 * GWEI), fast: String(3 * GWEI), baseFee: String(30 * GWEI) })
+  })
+
+  // A block with no recorded base fee has no knowable tip. COALESCE(base, 0) would read its whole price as tip
+  // (lib/gas-breakdown.ts: "a confident wrong answer"), so in the tip regime such blocks are out of the sample.
+  it('ETH-like: a block with a NULL base fee is left out of the tip sample, not counted as all tip', async () => {
+    const nullBase = (n: number) => n === 15 || n === 16
+    await load(1, 30, n => (nullBase(n) ? null : n * GWEI), n => (nullBase(n)
+      ? Array.from({ length: 4 }, () => 500 * GWEI)
+      : [1, 2, 3, 4].map(tip => n * GWEI + tip * GWEI)))
+    expect(await queryGasTiers(db)).toEqual({ slow: String(1 * GWEI), standard: String(2 * GWEI), fast: String(3 * GWEI), baseFee: String(30 * GWEI) })
+  })
+
+  it('BNB-like: NULL-base blocks stay in the sample (the base fee is not used there)', async () => {
+    await load(100, 119, n => (n % 2 === 0 ? null : 0), () => [50_000_000, 60_000_000, 70_000_000, 80_000_000])
+    expect(await queryGasTiers(db)).toEqual({ slow: '50000000', standard: '60000000', fast: '70000000', baseFee: null })
+  })
+
+  it('is null with fewer than 20 transactions across the window: three identical "percentiles" of one tx say nothing', async () => {
+    await load(1, 20, () => 0, n => (n === 20 ? [GWEI] : []))
+    expect(await queryGasTiers(db)).toBeNull()
+    await load(1, 20, () => 0, n => (n <= 19 ? [GWEI] : []))
+    expect(await queryGasTiers(db)).toBeNull()
+    await load(1, 20, () => 0, () => [GWEI])
+    expect(await queryGasTiers(db)).not.toBeNull()
   })
 
   it('BNB-like (base fee 0): the percentiles are the gas prices themselves', async () => {

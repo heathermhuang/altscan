@@ -347,7 +347,7 @@ export default async function AddressPage({
             <div className="flex items-center gap-3">
               <Badge variant="pending">Unverified</Badge>
               <Link href="/verify" className="text-sm text-acc-ink hover:underline">
-                Verify this contract →
+                Check on Sourcify →
               </Link>
             </div>
           )}

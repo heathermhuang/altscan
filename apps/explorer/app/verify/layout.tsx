@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 
 export const metadata: Metadata = {
-  title: 'Verify Contract',
+  title: 'Check Contract on Sourcify',
   description: `Check whether a ${chainConfig.name} contract is verified on Sourcify, and list it as verified on ${chainConfig.brandDomain} if it is.`,
   alternates: { canonical: '/verify' },
 }

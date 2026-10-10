@@ -5,7 +5,7 @@ import type { GasTiers } from '@/lib/gas-tiers'
 // /gas: Slow / Standard / Fast are percentiles of what recent transactions paid (lib/gas-tiers), read from the
 // indexed blocks. The headline card still comes from the node. Nothing here touches a network or a database.
 const h = vi.hoisted(() => ({ tiers: vi.fn() }))
-vi.mock('@/lib/gas-percentiles', () => ({ fetchGasTiers: h.tiers }))
+vi.mock('@/lib/gas-percentiles', () => ({ fetchGasTiers: h.tiers, GAS_REVALIDATE_SECONDS: 45 }))
 vi.mock('@/lib/rpc', () => ({
   getWebProvider: async () => ({
     getFeeData: async () => ({ gasPrice: 50_000_000n }),
@@ -46,7 +46,8 @@ describe('/gas tiers', () => {
     const t = await text()
     expect(t.match(/Gwei · \d+th percentile/g)).toHaveLength(3)
     expect(t).toMatch(/Slow — Gwei/)
-    expect(t).toContain('Not available right now.')
+    expect(t).toContain('Not enough recent transactions.')
+    expect(t).not.toContain('Not available right now.')
     expect(t).toContain('from the last 20 blocks')
   })
 
@@ -55,6 +56,14 @@ describe('/gas tiers', () => {
     const t = await text()
     expect(t).toMatch(/Slow — Gwei/)
     expect(t).toContain('Not available right now.')
+    expect(t).not.toContain('Not enough recent transactions.')
+  })
+
+  it('does not claim to update every block: tiles and page refresh every 45 seconds', async () => {
+    h.tiers.mockResolvedValue(BNB)
+    const t = await text()
+    expect(t).not.toMatch(/updated every block/i)
+    expect(t).toMatch(/gas prices, refreshed every 45 seconds/)
   })
 
   it('the headline card is still the node\'s reading', async () => {
@@ -82,6 +91,6 @@ describe('/gas tiers on Ethereum', () => {
     h.tiers.mockResolvedValue(null)
     const t = await text()
     expect(t).toMatch(/Slow — Gwei · 25th percentile/)
-    expect(t).toMatch(/Not available right now\. The newest block(?:'|&#x27;)s base fee plus the priority fee/)
+    expect(t).toMatch(/Not enough recent transactions\. The newest block(?:'|&#x27;)s base fee plus the priority fee/)
   })
 })

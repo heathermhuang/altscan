@@ -3,6 +3,9 @@ import { useState } from 'react'
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
+/** Shown when the route gives no reason of its own. */
+export const CHECK_FAILED_MESSAGE = 'The Sourcify check failed. The contract may not be verified there yet.'
+
 export function VerifyForm() {
   const [address,  setAddress]  = useState('')
   const [status,   setStatus]   = useState<Status>('idle')
@@ -34,7 +37,7 @@ export function VerifyForm() {
         setMessage('Verified on Sourcify.')
       } else {
         setStatus('error')
-        setMessage(data.error ?? 'Verification failed — contract may not be on Sourcify yet.')
+        setMessage(data.error ?? CHECK_FAILED_MESSAGE)
       }
     } catch (err) {
       setStatus('error')

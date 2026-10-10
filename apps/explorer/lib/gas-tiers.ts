@@ -7,6 +7,8 @@ import { formatGwei, safeBigInt } from './format'
  * (lib/gas-percentiles.ts), over the transactions of the newest GAS_TIER_BLOCKS blocks.
  */
 export const GAS_TIER_BLOCKS = 20
+/** Fewest transactions across that window that three percentiles can honestly be read from (one tx would be three copies of one price). */
+export const GAS_TIER_MIN_TXS = 20
 
 /** What the tier query returns: the counts it was computed over, the newest block's base fee, and the three percentile values (wei, numeric text). */
 export type GasTierRow = {
@@ -21,9 +23,9 @@ export type GasTiers = { slow: string; standard: string; fast: string; baseFee: 
 
 const WEI = /^\d+$/
 
-/** The tiers, or null when the sample is too thin to honestly call them that (fewer blocks than asked for, no transactions, a missing value). */
+/** The tiers, or null when the sample is too thin to honestly call them that (fewer blocks or transactions than asked for, a missing value). */
 export function gasTiersFrom(row: GasTierRow | undefined): GasTiers | null {
-  if (!row || row.blocks < GAS_TIER_BLOCKS || row.txs <= 0 || !row.tiers || row.tiers.length !== 3) return null
+  if (!row || row.blocks < GAS_TIER_BLOCKS || row.txs < GAS_TIER_MIN_TXS || !row.tiers || row.tiers.length !== 3) return null
   const [slow, standard, fast] = row.tiers
   if (slow == null || standard == null || fast == null || ![slow, standard, fast].every(v => WEI.test(v))) return null
   // BNB's blocks carry a base fee of 0 (or none): no base fee, so the percentiles are plain gas prices.
@@ -46,13 +48,17 @@ export function gasTiles(tiers: GasTiers | null): GasTile[] {
   })
 }
 
-/** The line under the tiles: what they are and which blocks they are from (also when there is nothing to show). */
-export function gasTiersNote(tiers: GasTiers | null, eip1559: boolean): string {
+/**
+ * The line under the tiles: what they are and which blocks they are from, also when there is nothing to show.
+ * `failed` = the read itself failed; otherwise a null `tiers` is a sample too thin to call percentiles.
+ */
+export function gasTiersNote(tiers: GasTiers | null, eip1559: boolean, failed = false): string {
   const withBase = tiers ? tiers.baseFee !== null : eip1559
   const what = withBase
     ? `The newest block's base fee plus the priority fee (tip) paid by transactions from the last ${GAS_TIER_BLOCKS} blocks: Slow is the 25th percentile tip, Standard the 50th, Fast the 75th.`
     : `The gas price paid by transactions from the last ${GAS_TIER_BLOCKS} blocks: Slow is the 25th percentile, Standard the 50th, Fast the 75th. System transactions at a zero gas price are left out.`
-  return tiers ? what : `Not available right now. ${what}`
+  if (tiers) return what
+  return `${failed ? 'Not available right now.' : 'Not enough recent transactions.'} ${what}`
 }
 
 /**

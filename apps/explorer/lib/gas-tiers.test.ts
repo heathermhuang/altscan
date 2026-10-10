@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { feeCard, GAS_TIER_BLOCKS, gasTiersFrom, gasTiersNote, gasTiles, type GasTierRow } from './gas-tiers'
+import { feeCard, GAS_TIER_BLOCKS, GAS_TIER_MIN_TXS, gasTiersFrom, gasTiersNote, gasTiles, type GasTierRow } from './gas-tiers'
 
 const GWEI = 10n ** 9n
 
@@ -26,10 +26,18 @@ describe('gasTiersFrom', () => {
     expect(gasTiersFrom(bnbRow({ blocks: GAS_TIER_BLOCKS - 1 }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ blocks: 0 }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ txs: 0 }))).toBeNull()
+    expect(gasTiersFrom(bnbRow({ txs: 1 }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ tiers: null }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ tiers: ['50000000', null, '74750000'] }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ tiers: ['50000000', '50000001'] }))).toBeNull()
     expect(gasTiersFrom(bnbRow({ tiers: ['50000000', 'NaN', '74750000'] }))).toBeNull()
+  })
+
+  // One transaction gives three identical tiers labelled 25th/50th/75th: a percentile needs a sample.
+  it('needs at least 20 transactions in the window, so a thin one is "—", not three copies of one price', () => {
+    expect(GAS_TIER_MIN_TXS).toBe(20)
+    expect(gasTiersFrom(bnbRow({ txs: GAS_TIER_MIN_TXS - 1 }))).toBeNull()
+    expect(gasTiersFrom(bnbRow({ txs: GAS_TIER_MIN_TXS }))).not.toBeNull()
   })
 
   it('carries only strings: a BigInt anywhere in a cached value silently voids the cache write', () => {
@@ -78,9 +86,14 @@ describe('gasTiersNote', () => {
     expect(gasTiersNote(gasTiersFrom(ethRow()), true)).toMatch(/base fee plus the priority fee/)
   })
 
-  it('says so when there is no data, and still names the sample', () => {
-    expect(gasTiersNote(null, false)).toMatch(/^Not available right now\./)
-    expect(gasTiersNote(null, true)).toMatch(/from the last 20 blocks/)
+  it('a thin sample says there are not enough recent transactions, and still names the sample', () => {
+    expect(gasTiersNote(null, false)).toMatch(/^Not enough recent transactions\./)
+    expect(gasTiersNote(null, true)).toMatch(/^Not enough recent transactions\..*from the last 20 blocks/)
+  })
+
+  it('a failed read says it is not available right now, and still names the sample', () => {
+    expect(gasTiersNote(null, false, true)).toMatch(/^Not available right now\./)
+    expect(gasTiersNote(null, true, true)).toMatch(/from the last 20 blocks/)
   })
 
   it('has no synthetic buffer', () => {
