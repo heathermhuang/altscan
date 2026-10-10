@@ -4,8 +4,7 @@ import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
-import { timeAgo, safeBigInt, formatEstimate, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
-import { formatUnits } from 'ethers'
+import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
@@ -158,8 +157,6 @@ export default async function DexPage({
               // Look up token decimals from enriched data, default to 18
               const inDecimals = tokenDecimalsMap.get(t.tokenIn?.toLowerCase() ?? '') ?? 18
               const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '') ?? 18
-              const amtIn = Number(formatUnits(safeBigInt(t.amountIn), inDecimals))
-              const amtOut = Number(formatUnits(safeBigInt(t.amountOut), outDecimals))
               const inSymbol = symbolText(t.tokenIn)
               const outSymbol = symbolText(t.tokenOut)
               return (
@@ -174,11 +171,11 @@ export default async function DexPage({
                     <AddressLink address={t.pairAddress} />
                   </td>
                   <td>
-                    {amtIn > 1e6 ? `${(amtIn / 1e6).toFixed(2)}M` : amtIn > 1000 ? `${(amtIn / 1000).toFixed(2)}K` : amtIn.toFixed(4)}
+                    {formatAmountCompact(t.amountIn, inDecimals)}
                     {inSymbol && <span className="inline-block text-mut ml-1 text-xs">{inSymbol}</span>}
                   </td>
                   <td>
-                    {amtOut > 1e6 ? `${(amtOut / 1e6).toFixed(2)}M` : amtOut > 1000 ? `${(amtOut / 1000).toFixed(2)}K` : amtOut.toFixed(4)}
+                    {formatAmountCompact(t.amountOut, outDecimals)}
                     {outSymbol && <span className="inline-block text-mut ml-1 text-xs">{outSymbol}</span>}
                   </td>
                   <td className="hidden sm:table-cell">

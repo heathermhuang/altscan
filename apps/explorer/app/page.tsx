@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatNumber, timeAgo } from '@/lib/format'
+import { formatCompactUsd, formatNumber, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { BlockTape } from '@/components/home/BlockTape'
@@ -232,13 +232,6 @@ function deriveMarketCap(
   return { value: price.usd * supply, change24h: price.change24h }
 }
 
-function formatMarketCap(value: number): string {
-  if (value >= 1e12) return `$${(value / 1e12).toFixed(1)}T`
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`
-  return `$${formatNumber(Math.round(value))}`
-}
-
 export default async function HomePage() {
   let latestBlocks: typeof schema.blocks.$inferSelect[] = []
   let latestTxs: typeof schema.transactions.$inferSelect[] = []
@@ -328,7 +321,7 @@ export default async function HomePage() {
           />
           <StatCard
             label={`${chainConfig.currency} Market Cap`}
-            value={marketCap ? formatMarketCap(marketCap.value) : '—'}
+            value={marketCap ? formatCompactUsd(marketCap.value) : '—'}
             subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
             subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
           />

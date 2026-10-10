@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
+import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, formatTokenAmount, timeAgo, safeBigInt, sanitizeSymbolOr, tokenLabel, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -300,7 +300,7 @@ export default async function AddressPage({
         {balanceKnown && (
           <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
             Holds <span className="font-semibold text-ink">{groupDigits(formatNativeToken(displayBalance, 2))} {chainConfig.currency}</span>
-            {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(nativeUsd)})` : ''}
+            {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${formatCompactUsd(nativeUsd)})` : ''}
             {txCountText !== '—' && <> across {txCountText} {displayTxCount === 1 ? 'transaction' : 'transactions'}</>}.
           </p>
         )}

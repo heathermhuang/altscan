@@ -43,7 +43,7 @@ export function BlockTable({ blocks, compact = false, gasBar = false }: {
                 </Link>
               </td>
               <td className="text-mut">{timeAgo(new Date(b.timestamp))}</td>
-              <td>{b.txCount}</td>
+              <td>{formatNumber(b.txCount)}</td>
               {!compact && (
                 <td className="text-mut hidden sm:table-cell font-mono">
                   {shortenAddress(b.miner)}

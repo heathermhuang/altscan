@@ -3,7 +3,7 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenTextOr } from '@/lib/format'
+import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenTextOr } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Icon } from '@/components/ui/Icon'
@@ -456,24 +456,8 @@ export default async function TokenDetailPage({
           </thead>
           <tbody>
             {transfers.map((t) => {
-              const amount = (() => {
-                try {
-                  const divisor = 10n ** BigInt(token.decimals)
-                  const whole = BigInt(t.value ?? '0') / divisor
-                  const frac = BigInt(t.value ?? '0') % divisor
-                  const fracStr = frac
-                    .toString()
-                    .padStart(token.decimals, '0')
-                    .slice(0, 4)
-                    .replace(/0+$/, '')
-                  return fracStr
-                    ? `${whole.toLocaleString()}.${fracStr}`
-                    : whole.toLocaleString()
-                } catch (e) {
-                  swallow('token/holder-fmt', e)
-                  return (t.value ?? '0').slice(0, 10)
-                }
-              })()
+              // Four places, a dust transfer as "<0.0001" rather than "0".
+              const amount = formatTokenAmount(t.value ?? '0', token.decimals, 4)
               return (
                 <tr key={`${t.txHash}-${t.logIndex}`}>
                   <td className="whitespace-nowrap">
@@ -484,7 +468,7 @@ export default async function TokenDetailPage({
                       {shortHash(t.txHash)}
                     </Link>
                   </td>
-                  <td className="text-mut hidden sm:table-cell">{t.blockNumber}</td>
+                  <td className="text-mut hidden sm:table-cell">{formatNumber(t.blockNumber)}</td>
                   <td>
                     <AddressLink address={t.fromAddress} />
                   </td>

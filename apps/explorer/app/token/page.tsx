@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { desc, eq, sql } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
+import { formatCompact, formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
 import { shortenAddress } from '@/lib/address-display'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { tokenTypeLabel } from '@/lib/token-type-label'
@@ -21,12 +21,8 @@ function formatSupply(raw: string, decimals: number): string {
   try {
     const divisor = 10n ** BigInt(decimals)
     const whole = safeBigInt(raw) / divisor
-    // Abbreviate large numbers: T, B, M, K
-    const n = Number(whole)
-    if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`
-    if (n >= 1e9)  return `${(n / 1e9).toFixed(2)}B`
-    if (n >= 1e6)  return `${(n / 1e6).toFixed(2)}M`
-    return whole.toLocaleString()
+    // Under a million the whole figure, grouped; from there the one compact ladder (capped at 999T+).
+    return whole < 1_000_000n ? whole.toLocaleString() : formatCompact(Number(whole))
   } catch (e) {
     swallow('tokens/list', e)
     return raw.slice(0, 12) + (raw.length > 12 ? '…' : '')

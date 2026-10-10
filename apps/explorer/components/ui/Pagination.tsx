@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { formatNumber } from '@/lib/format'
 
 export function Pagination({ page, total, perPage, baseUrl, hrefFor }: {
   page: number
@@ -20,7 +21,7 @@ export function Pagination({ page, total, perPage, baseUrl, hrefFor }: {
           ←
         </Link>
       )}
-      <span className="text-mut">Page {page} of {totalPages}</span>
+      <span className="text-mut">Page {formatNumber(page)} of {formatNumber(totalPages)}</span>
       {page < totalPages && (
         <Link href={href(page + 1)} aria-label="Next page" className="px-3 py-1 rounded-[9px] border border-hair bg-card text-ink hover:border-hair3 transition-colors">
           →
