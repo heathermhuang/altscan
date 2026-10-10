@@ -6,8 +6,8 @@
  * placeholders as names and a stake-less validator as ACTIVE. The indexer is left alone: both
  * are corrected here, at the render boundary.
  */
-import { shortenAddress } from './address-display'
-import { safeBigInt } from './format'
+import { shortenAddress } from '@/lib/address-display'
+import { safeBigInt } from '@/lib/format'
 
 export type ValidatorRow = {
   address: string

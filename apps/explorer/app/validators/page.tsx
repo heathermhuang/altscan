@@ -12,7 +12,7 @@ import { validatorDisplays } from '@/lib/validator-display'
 
 export const metadata: Metadata = {
   title: `Validators`,
-  description: `${chainConfig.name} validator set — view active validators, voting power, and commission rates on ${chainConfig.brandDomain}.`,
+  description: `${chainConfig.name} validator set — view validators, voting power, and commission rates on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/validators' },
 }
 
@@ -89,7 +89,7 @@ export default async function ValidatorsPage() {
                     {display[i].name}
                   </Link>
                 </td>
-                <td>
+                <td className="whitespace-nowrap">
                   <Badge variant={display[i].status.variant}>{display[i].status.label}</Badge>
                 </td>
                 <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>

@@ -189,7 +189,7 @@ export default async function DexPage({
               )
             })}
             {trades.length === 0 && (
-              <tr><td colSpan={7} className="py-16 text-center font-sans"><p className="text-ink2 text-lg mb-1">No DEX trades found</p><p className="text-mut text-sm">Trades from {chainConfig.dex.primary} and other DEXes will appear here as they are indexed.</p></td></tr>
+              <tr><td colSpan={7} className="py-16 text-center font-sans"><p className="text-ink2 text-lg mb-1">No DEX trades found</p><p className="text-mut text-sm">Swaps from {chainConfig.dex.primary} and compatible AMM pairs will appear here as they are indexed.</p></td></tr>
             )}
           </tbody>
         </table>
