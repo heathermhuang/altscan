@@ -250,13 +250,26 @@ export function tokenLabel(symbol: string | null | undefined, name: string | nul
 }
 
 /**
+ * `units` base units as a decimal string with `places` decimals ("1500000000000000000", 18 -> "1.5"; a whole
+ * number keeps a ".0", except at 0 places), exactly ethers' formatUnits. Plain BigInt on purpose: formatUnits drags ethers' units
+ * code into every client chunk that imports this module once a client component formats an amount.
+ */
+export function unitsToDecimal(units: bigint, places: number): string {
+  const sign = units < 0n ? '-' : ''
+  const digits = (units < 0n ? -units : units).toString().padStart(places + 1, '0')
+  if (places === 0) return sign + digits
+  const frac = digits.slice(digits.length - places).replace(/0+$/, '')
+  return `${sign}${digits.slice(0, digits.length - places)}.${frac || '0'}`
+}
+
+/**
  * Exact token amount from a raw base-unit string.
  *
  * The previous inline version was `Number(BigInt(value)) / 10 ** decimals`
  * capped at 4 fraction digits, which is lossy twice over: Number() cannot hold
  * a large token balance exactly, and the cap silently truncated real digits —
- * 232,619.50962301 AMP rendered as "232,619.5096". ethers' formatUnits is
- * string-based and exact, so the integer part is grouped and the fraction is
+ * 232,619.50962301 AMP rendered as "232,619.5096". unitsToDecimal (plain BigInt)
+ * is string-based and exact, so the integer part is grouped and the fraction is
  * kept in full, with only trailing zeros trimmed.
  *
  * `maxFractionDigits` (>= 1) is for DISPLAY: it rounds half-up in BigInt to that
@@ -276,7 +289,7 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
       units = rounded
       places = maxFractionDigits
     }
-    raw = formatUnits(units, places)
+    raw = unitsToDecimal(units, places)
   } catch {
     return String(value)
   }
