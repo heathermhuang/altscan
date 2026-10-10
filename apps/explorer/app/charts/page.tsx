@@ -8,6 +8,7 @@ import { BlockTape } from '@/components/home/BlockTape'
 import { swallow } from '@/lib/observability'
 import { fetchRecentTape } from '@/lib/recent-tape'
 import { withTimeout } from '@/lib/with-timeout'
+import { completeUtcDays } from '@/lib/chart-days'
 
 export const revalidate = 300
 
@@ -17,7 +18,20 @@ export const metadata: Metadata = {
   alternates: { canonical: '/charts' },
 }
 
-type DataPoint = { date: string; value: number }
+/** `firstTs`: epoch ms of the day's earliest block, so a day that starts mid-day can be told from a whole one. */
+/** Days of data a chart needs before it is worth drawing. */
+const MIN_DAYS = 3
+
+type DataPoint = { date: string; value: number; firstTs: number }
+
+function toPoint(row: unknown): DataPoint {
+  const r = row as Record<string, unknown>
+  return {
+    date: String(r.date).slice(0, 10),
+    value: Number(r.value),
+    firstTs: Math.round(Number(r.first_ts) * 1000),
+  }
+}
 
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
@@ -26,16 +40,14 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
     // queries that run for 8+ minutes and consume DB connections.
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(b.timestamp AT TIME ZONE 'UTC') as date,
-             SUM(b.tx_count)::int as value
+             SUM(b.tx_count)::int as value,
+             EXTRACT(EPOCH FROM MIN(b.timestamp)) as first_ts
       FROM blocks b
       WHERE b.timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
-    return Array.from(result).map((row) => ({
-      date: String((row as Record<string, unknown>).date).slice(0, 10),
-      value: Number((row as Record<string, unknown>).value),
-    }))
+    return Array.from(result).map(toPoint)
   } catch (e) {
     swallow('charts/query', e)
     return []
@@ -48,7 +60,8 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
   try {
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
-             AVG(base_fee_per_gas::numeric / 1e9)::numeric(18,4) as value
+             AVG(base_fee_per_gas::numeric / 1e9)::numeric(18,4) as value,
+             EXTRACT(EPOCH FROM MIN(timestamp)) as first_ts
       FROM blocks
       WHERE timestamp >= NOW() - INTERVAL '30 days'
         AND base_fee_per_gas IS NOT NULL
@@ -56,10 +69,7 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       GROUP BY 1
       ORDER BY 1
     `))
-    const data = Array.from(result).map((row) => ({
-      date: String((row as Record<string, unknown>).date).slice(0, 10),
-      value: Number((row as Record<string, unknown>).value),
-    }))
+    const data = Array.from(result).map(toPoint)
     if (data.length >= 3) return data
   } catch (e) { swallow('charts/fallback', e) }  // fall through
 
@@ -73,16 +83,14 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
   try {
     const result = await withTimeout(db.execute(sql`
       SELECT DATE(timestamp AT TIME ZONE 'UTC') as date,
-             COUNT(*)::int as value
+             COUNT(*)::int as value,
+             EXTRACT(EPOCH FROM MIN(timestamp)) as first_ts
       FROM blocks
       WHERE timestamp >= NOW() - INTERVAL '30 days'
       GROUP BY 1
       ORDER BY 1
     `))
-    return Array.from(result).map((row) => ({
-      date: String((row as Record<string, unknown>).date).slice(0, 10),
-      value: Number((row as Record<string, unknown>).value),
-    }))
+    return Array.from(result).map(toPoint)
   } catch (e) {
     swallow('charts/series', e)
     return []
@@ -92,9 +100,12 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
 export default async function ChartsPage() {
   // Run sequentially — each query can use 100MB+ on 36M row tables.
   // Promise.all() on these caused concurrent memory spikes → OOM.
-  const txData = await fetchDailyTxCount()
-  const gasData = await fetchDailyGasHistory()
-  const blockData = await fetchDailyBlockCount()
+  const now = new Date()
+  // Complete UTC days only: a day still in progress, or one the index only caught the end of, would
+  // plot as a collapse.
+  const txData = completeUtcDays(await fetchDailyTxCount(), now)
+  const gasData = completeUtcDays(await fetchDailyGasHistory(), now)
+  const blockData = completeUtcDays(await fetchDailyBlockCount(), now)
 
   const header = (
     <div className="mb-6">
@@ -104,9 +115,9 @@ export default async function ChartsPage() {
     </div>
   )
 
-  // With under 3 days of anything, every card below would say "not enough data". Show the blocks
+  // With under 3 complete days of anything, every card below would say "not enough data". Show the blocks
   // the explorer does have instead, and pay for that query only then.
-  const tape = [txData, gasData, blockData].every((d) => d.length < 3) ? await fetchRecentTape() : null
+  const tape = [txData, gasData, blockData].every((d) => d.length < MIN_DAYS) ? await fetchRecentTape() : null
   if (tape !== null) {
     return (
       <>
@@ -134,29 +145,32 @@ export default async function ChartsPage() {
           <LineChart
             data={txData}
             label="Transactions"
-            formatY={(n) => n.toLocaleString()}
+            formatY={(n) => Math.round(n).toLocaleString()}
           />
         </ChartCard>
 
-        <ChartCard title={`Gas Price History — Avg Base Fee (Gwei)`} data={gasData}>
-          {gasData.length > 0 ? (
-            <LineChart
-              data={gasData}
-              label="Gwei"
-              formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
-            />
-          ) : BigInt(chainConfig.minGasPriceWei) > 0n ? (
+        {/* No base-fee series at all (BNB has none): say why, instead of a "not enough data" card. */}
+        <ChartCard
+          title={`Gas Price History — Avg Base Fee (Gwei)`}
+          data={gasData}
+          noSeries={gasData.length === 0 && BigInt(chainConfig.minGasPriceWei) > 0n ? (
             <div className="flex items-center justify-center h-32 text-center text-ink2 text-sm">
               <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline">Gas Tracker</a> for current rates.</p>
             </div>
-          ) : null}
+          ) : undefined}
+        >
+          <LineChart
+            data={gasData}
+            label="Gwei"
+            formatY={(n) => `${(n < 1 ? n.toFixed(4) : n.toFixed(2)).replace(/\.?0+$/, '')} Gwei`}
+          />
         </ChartCard>
 
         <ChartCard title="Daily Block Count" data={blockData}>
           <LineChart
             data={blockData}
             label="Blocks"
-            formatY={(n) => n.toLocaleString()}
+            formatY={(n) => Math.round(n).toLocaleString()}
           />
         </ChartCard>
       </div>
@@ -164,7 +178,12 @@ export default async function ChartsPage() {
   )
 }
 
-function ChartCard({ title, data, children }: { title: string; data: DataPoint[]; children: React.ReactNode }) {
+function ChartCard({ title, data, children, noSeries }: {
+  title: string
+  data: DataPoint[]
+  children: React.ReactNode
+  noSeries?: React.ReactNode
+}) {
   const dateRange = data.length >= 2
     ? `${data[0].date} — ${data[data.length - 1].date}`
     : data.length === 1
@@ -177,18 +196,25 @@ function ChartCard({ title, data, children }: { title: string; data: DataPoint[]
       {dateRange && (
         <p className="text-xs text-mut mb-4">{dateRange} ({data.length} days)</p>
       )}
-      {data.length > 0 && data.length < 3 ? (
-        <div className="h-48 flex items-center justify-center text-mut">
-          Not enough data yet — only {data.length} day{data.length === 1 ? '' : 's'} recorded.
-          Charts will appear once at least 3 days of data are available.
-        </div>
-      ) : (
+      {data.length >= MIN_DAYS ? (
         children
+      ) : (
+        noSeries ?? (
+          <div className="h-48 flex items-center justify-center text-center text-mut">
+            Not enough data yet — {data.length === 0 ? 'no complete UTC day' : `only ${data.length} complete UTC day${data.length === 1 ? '' : 's'}`} recorded.
+            Charts will appear once at least {MIN_DAYS} complete days of data are available.
+          </div>
+        )
       )}
     </div>
   )
 }
 
+/**
+ * A line chart of at least MIN_DAYS points. The plot is a stretched SVG (so it fills the card at any
+ * width); the axis text is HTML, because text inside a stretched or scaled SVG shrinks with it (it
+ * rendered at about 4px on a phone) and a label wider than a fixed gutter clipped.
+ */
 function LineChart({
   data,
   label,
@@ -198,107 +224,73 @@ function LineChart({
   label: string
   formatY?: (n: number) => string
 }) {
-  if (data.length === 0) {
-    return (
-      <div className="h-48 flex items-center justify-center text-mut">
-        No data yet
-      </div>
-    )
-  }
-
-  const width = 800
-  const height = 200
-  const pad = { top: 10, right: 20, bottom: 30, left: 60 }
-  const innerW = width - pad.left - pad.right
-  const innerH = height - pad.top - pad.bottom
-
   const maxVal = Math.max(...data.map((d) => d.value), 1)
   const minVal = Math.min(...data.map((d) => d.value), 0)
   const range = maxVal - minVal || 1
-
-  const points = data.map((d, i) => ({
-    x: pad.left + (i / (data.length - 1 || 1)) * innerW,
-    y: pad.top + innerH - ((d.value - minVal) / range) * innerH,
-    value: d.value,
-    date: d.date,
-  }))
-
-  const polyline = points.map((p) => `${p.x},${p.y}`).join(' ')
   const fmt = formatY ?? ((n: number) => n.toLocaleString())
 
-  // Y-axis ticks: 5 lines
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
-    y: pad.top + innerH - t * innerH,
-    label: fmt(minVal + t * range),
-  }))
+  // The plot is a 100 x 100 box: x is the share of the width, y the share of the height.
+  const last = data.length - 1
+  const xOf = (i: number) => (i / last) * 100
+  const points = data.map((d, i) => ({ x: xOf(i), y: 100 - ((d.value - minVal) / range) * 100 }))
 
-  // X-axis: show every 7th date label, always include last
-  const xLabels = data.filter((_, i) => i % 7 === 0 || i === data.length - 1)
+  // Top to bottom, max first: five rules and the five labels beside them.
+  const ticks = [1, 0.75, 0.5, 0.25, 0]
+  // Five date labels, evenly spaced, first and last included, so they never touch.
+  const labelCount = Math.min(data.length, 5)
+  const dateIdx = Array.from({ length: labelCount }, (_, k) => Math.round((k * last) / (labelCount - 1)))
 
   return (
-    <div className="w-full overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full"
-        style={{ minWidth: 300 }}
-        aria-label={label}
-      >
-        {/* Grid lines */}
-        <g className="stroke-hair" strokeWidth="1">
-          {yTicks.map((t, i) => (
-            <line
-              key={i}
-              x1={pad.left}
-              y1={t.y}
-              x2={width - pad.right}
-              y2={t.y}
+    <div role="img" aria-label={label} className="flex gap-2 text-[11px] leading-[14px] text-mut">
+      {/* h-48 = the plot's height; each label is one 14px line, so justify-between centres the first
+          and last on the plot's top and bottom rules once the plot is inset by half a line (7px). */}
+      <div className="flex h-48 shrink-0 flex-col justify-between text-right">
+        {ticks.map((t) => (
+          <span key={t}>{fmt(minVal + t * range)}</span>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="h-48 py-[7px]">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" aria-hidden="true">
+            <path
+              className="stroke-hair"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              d={ticks.map((t) => `M0 ${t * 100}H100`).join('')}
             />
-          ))}
-        </g>
-        {/* Y-axis labels */}
-        <g className="fill-mut" fontSize="11">
-          {yTicks.map((t, i) => (
-            <text
+            <polyline
+              points={points.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill="none"
+              className="stroke-acc"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Dots, only if few data points: zero-length round-capped segments, so they stay round
+                (a <circle> would stretch with the plot). */}
+            {data.length <= 30 && (
+              <path
+                className="stroke-acc"
+                strokeWidth="6"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+                d={points.map((p) => `M${p.x} ${p.y}h0`).join('')}
+              />
+            )}
+          </svg>
+        </div>
+        <div className="relative mt-1 h-[14px]">
+          {dateIdx.map((i) => (
+            <span
               key={i}
-              x={pad.left - 5}
-              y={t.y + 4}
-              textAnchor="end"
+              className="absolute whitespace-nowrap"
+              style={{ left: `${xOf(i)}%`, transform: `translateX(-${xOf(i)}%)` }}
             >
-              {t.label}
-            </text>
+              {data[i].date.slice(5)}
+            </span>
           ))}
-        </g>
-        {/* X-axis labels */}
-        <g className="fill-mut" fontSize="10">
-          {xLabels.map((d, i) => {
-            const idx = data.indexOf(d)
-            const x = pad.left + (idx / (data.length - 1 || 1)) * innerW
-            return (
-              <text
-                key={i}
-                x={x}
-                y={height - 5}
-                textAnchor="middle"
-              >
-                {d.date.slice(5)}
-              </text>
-            )
-          })}
-        </g>
-        {/* Line */}
-        <polyline
-          points={polyline}
-          fill="none"
-          className="stroke-acc"
-          strokeWidth="2"
-          strokeLinejoin="round"
-        />
-        {/* Dots — only if few data points */}
-        {data.length <= 30 &&
-          points.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r="3" className="fill-acc" />
-          ))}
-      </svg>
+        </div>
+      </div>
     </div>
   )
 }
