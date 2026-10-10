@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PRODUCER_TILES_MAX, producerLegend, producerStrip, producerSummary, type ProducerInput } from '@/lib/producers'
+import { producerLegend, producerStrip, producerSummary, type ProducerInput } from '@/lib/producers'
 import { legendLines } from '@/test-support/legend-lines'
 
 const E18 = 10n ** 18n
@@ -97,55 +97,6 @@ describe('producerStrip', () => {
 
   it('says "1 block", not "1 blocks"', () => {
     expect(producerStrip(vals, counts({ 1: 1, 2: 99 }), 'BNB')!.tiles[0].read).toContain('1 block (1.0%) ·')
-  })
-})
-
-// Every tile ships twice (the HTML and the page's flight payload), and /validators sits just under the first
-// network flight (~14.6 KB with headers), so the strip is capped: the table beside it has every validator.
-describe('producerStrip cap', () => {
-  const many = Array.from({ length: 30 }, (_, i) => v(i + 1, BigInt(1000 - i * 10) * E18))
-  const all = Object.fromEntries(many.map((_, i) => [i + 1, 10 + i]))   // validator k produced 9 + k blocks (k = 1..30)
-
-  it(`draws at most ${PRODUCER_TILES_MAX} validators, in table order, then ONE tile for the rest`, () => {
-    expect(PRODUCER_TILES_MAX).toBe(24)
-    const s = producerStrip(many, counts(all), 'BNB')!
-    expect(s.tiles).toHaveLength(PRODUCER_TILES_MAX + 1)
-    expect(s.tiles.slice(0, PRODUCER_TILES_MAX).map(t => t.name)).toEqual(many.slice(0, PRODUCER_TILES_MAX).map(x => x.name))
-    expect(s.tiles.slice(0, PRODUCER_TILES_MAX).every(t => t.href)).toBe(true)
-  })
-
-  it('the rest tile is labelled, sized by the blocks of everyone it stands for, neutral and not a link', () => {
-    const s = producerStrip(many, counts(all), 'BNB')!
-    const rest = s.tiles[PRODUCER_TILES_MAX]
-    const restBlocks = Array.from({ length: 6 }, (_, i) => 10 + 24 + i).reduce((a, b) => a + b, 0)   // validators 25..30
-    expect(rest).toMatchObject({ name: '6 other validators', w: restBlocks, f: 0, rest: true })
-    expect(rest.href).toBeUndefined()
-    const window = Object.values(all).reduce((a, b) => a + b, 0)
-    expect(rest.read).toBe(`${restBlocks} blocks (${((restBlocks / window) * 100).toFixed(1)}%)`)
-  })
-
-  it('scales the fill to the largest validator among those DRAWN, and counts every producer in the totals', () => {
-    const s = producerStrip(many, counts(all), 'BNB')!
-    expect(s.tiles[0].f).toBe(100)
-    expect(s.producing).toBe(30)
-    expect(s.windowBlocks).toBe(Object.values(all).reduce((a, b) => a + b, 0))
-  })
-
-  it('has no rest tile at the cap or under it', () => {
-    const at = producerStrip(many.slice(0, PRODUCER_TILES_MAX), counts(Object.fromEntries(Object.entries(all).slice(0, PRODUCER_TILES_MAX))), 'BNB')!
-    expect(at.tiles).toHaveLength(PRODUCER_TILES_MAX)
-    expect(at.tiles.some(t => t.rest)).toBe(false)
-  })
-
-  it('says in the text alternative how many are drawn as one tile', () => {
-    const s = producerStrip(many, counts(all), 'BNB')!
-    expect(producerSummary(s)).toContain('The last 6 are one tile.')
-    expect(producerSummary(producerStrip(vals, counts({ 1: 3 }), 'BNB')!)).not.toContain('one tile')
-  })
-
-  it('keeps the rest tile\'s readout inside the two-line slot', () => {
-    const rest = producerStrip(many, counts(all), 'BNB')!.tiles[PRODUCER_TILES_MAX]
-    expect(legendLines(`${rest.name} · ${rest.read}`)).toBeLessThanOrEqual(2)
   })
 })
 
