@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chainConfig } from '@/lib/chain'
-import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
+import { fetchNativeQuote, fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
 
 const BINANCE = /api\.binance\.(us|com)\/api\/v3\/ticker\/price/
 const CRYPTOCOMPARE = /min-api\.cryptocompare\.com/
@@ -71,5 +71,80 @@ describe('fetchNativeUsd', () => {
     await fetchNativeUsd()
     const [binanceUs, binanceCom, firstFallback] = timeouts
     expect(NATIVE_PRICE_BUDGET_MS).toBeGreaterThanOrEqual(binanceUs + binanceCom + firstFallback)
+  })
+})
+
+// The homepage shows the 24h change beside the price, so it needs each source's 24h endpoint: the
+// same sources in the same order with the same guard, returning { usd, change24h }.
+describe('fetchNativeQuote', () => {
+  const BINANCE_24H = /api\.binance\.(us|com)\/api\/v3\/ticker\/24hr/
+  const CC_FULL = /min-api\.cryptocompare\.com\/data\/pricemultifull/
+  const cc = chainConfig.market.cryptoCompareSymbol
+
+  it('reads the Binance 24h ticker first and stops there', async () => {
+    replies = [[BINANCE_24H, { ok: true, body: { lastPrice: '731.25', priceChangePercent: '-1.5' } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 731.25, change24h: -1.5 })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain(`symbol=${chainConfig.market.binanceSymbol}`)
+  })
+
+  it('tries binance.us before binance.com, then falls through to CryptoCompare', async () => {
+    replies = [[CC_FULL, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: 700, CHANGEPCT24HOUR: 2.25 } } } } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 700, change24h: 2.25 })
+    expect(calls.filter(u => BINANCE_24H.test(u)).map(u => new URL(u).host)).toEqual(['api.binance.us', 'api.binance.com'])
+  })
+
+  it('falls through CryptoCompare to CoinGecko, whose answer carries the 24h change', async () => {
+    replies = [[COINGECKO, { ok: true, body: { [chainConfig.coingeckoId]: { usd: 690, usd_24h_change: -0.75 } } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 690, change24h: -0.75 })
+    expect(calls.find(u => COINGECKO.test(u))).toContain('include_24hr_change=true')
+  })
+
+  it('falls through CoinGecko to CoinCap', async () => {
+    replies = [[COINCAP, { ok: true, body: { data: { priceUsd: '705.5', changePercent24Hr: '3.1' } } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 705.5, change24h: 3.1 })
+  })
+
+  it('a missing or unparseable 24h change reads 0 rather than NaN or undefined', async () => {
+    replies = [[BINANCE_24H, { ok: true, body: { lastPrice: '731.25', priceChangePercent: 'n/a' } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 731.25, change24h: 0 })
+    replies = [[COINGECKO, { ok: true, body: { [chainConfig.coingeckoId]: { usd: 690 } } }]]
+    expect(await fetchNativeQuote()).toEqual({ usd: 690, change24h: 0 })
+  })
+
+  it('a CoinGecko answer without a positive price falls through to CoinCap, like fetchNativeUsd', async () => {
+    replies = [
+      [COINGECKO, { ok: true, body: { [chainConfig.coingeckoId]: { usd: 0, usd_24h_change: 5 } } }],
+      [COINCAP, { ok: true, body: { data: { priceUsd: '705.5', changePercent24Hr: '1' } } }],
+    ]
+    expect(await fetchNativeQuote()).toEqual({ usd: 705.5, change24h: 1 })
+  })
+
+  it('never reports a zero, negative or non-numeric price, and is null when every source is down', async () => {
+    replies = [
+      [BINANCE_24H, { ok: true, body: { lastPrice: '0', priceChangePercent: '1' } }],
+      [CC_FULL, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: -3 } } } } }],
+      [COINGECKO, { ok: true, body: {} }],
+      [COINCAP, { ok: true, body: { data: { priceUsd: 'n/a' } } }],
+    ]
+    expect(await fetchNativeQuote()).toBeNull()
+    replies = []
+    expect(await fetchNativeQuote()).toBeNull()
+  })
+
+  it('asks for the same timeouts as fetchNativeUsd, so NATIVE_PRICE_BUDGET_MS covers it too', async () => {
+    await fetchNativeUsd()
+    const price = [...timeouts]
+    timeouts = []
+    await fetchNativeQuote()
+    expect(timeouts).toEqual(price)
+  })
+
+  it('keeps the homepage cache window: each hit is memoised for 60 s, not the 300 s of fetchNativeUsd', async () => {
+    const seen: unknown[] = []
+    vi.stubGlobal('fetch', async (_url: string, init?: { next?: { revalidate?: number } }) => { seen.push(init?.next?.revalidate); throw new Error('unreachable') })
+    await fetchNativeQuote()
+    expect(seen).toHaveLength(5) // both Binance hosts, CryptoCompare, CoinGecko, CoinCap
+    expect(new Set(seen)).toEqual(new Set([60]))
   })
 })
