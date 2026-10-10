@@ -1,16 +1,41 @@
 /**
  * Where a search-box query goes: a block, a tx, an address, or the token search page.
- * Pure so the box (components/layout/SearchBar.tsx) and its tests share one definition.
+ * Pure so the box (components/layout/SearchBar.tsx), the /search page and their tests share one definition.
  */
+
+/**
+ * Turn what a visitor pasted into the form the router understands:
+ *  - trim, and strip one leading "#" ("#125761128" is a block, "#cake" a search for cake);
+ *  - inside an all-digit query, drop "," space and "_" ("125,761,128" is how block explorers print a number);
+ *  - lowercase a "0X" prefix, and add the "0x" a bare 40- or 64-hex string (address, tx hash) is missing.
+ * Hex keeps its case otherwise (addresses are checksummed). An all-digit string is never taken for hex:
+ * a 40-digit number is a block.
+ */
+export function normaliseSearchQuery(raw: string): string {
+  let q = raw.trim()
+  if (q.startsWith('#')) q = q.slice(1).trim()
+  if (/^[\d,\s_]*\d[\d,\s_]*$/.test(q)) return q.replace(/[,\s_]/g, '')
+  if (q.startsWith('0X')) q = `0x${q.slice(2)}`
+  if (/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(q)) return `0x${q}`
+  return q
+}
+
+export type QueryKind = 'block' | 'tx' | 'address' | 'text'
+
+/** What a query opens, and the normalised text it opens it with. */
+export function classifyQuery(raw: string): { kind: QueryKind; q: string } {
+  const q = normaliseSearchQuery(raw)
+  if (/^\d+$/.test(q)) return { kind: 'block', q }
+  if (/^0x[0-9a-fA-F]{64}$/.test(q)) return { kind: 'tx', q }
+  if (/^0x[0-9a-fA-F]{40}$/.test(q)) return { kind: 'address', q }
+  return { kind: 'text', q }
+}
+
 export function routeForQuery(raw: string): string | null {
-  const q = raw.trim()
+  const { kind, q } = classifyQuery(raw)
   if (!q) return null
-  // Pasted block numbers arrive as "#125761128", "125,761,128" or "125 761 128".
-  const body = q.startsWith('#') ? q.slice(1) : q
-  if (/^\d+(?:[,_ ]+\d+)*$/.test(body)) return `/blocks/${body.replace(/[,_ ]/g, '')}`
-  // Hex keeps its case; a missing 0x is added, an 0X is lowercased.
-  const hex = /^(?:0[xX])?([0-9a-fA-F]+)$/.exec(body)?.[1]
-  if (hex?.length === 64) return `/tx/0x${hex}`
-  if (hex?.length === 40) return `/address/0x${hex}`
+  if (kind === 'block') return `/blocks/${q}`
+  if (kind === 'tx') return `/tx/${q}`
+  if (kind === 'address') return `/address/${q}`
   return `/search?q=${encodeURIComponent(q)}`
 }
