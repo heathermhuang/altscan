@@ -28,7 +28,7 @@ ok(/from '@\/lib\/chain-client'/.test(lazy), "6. imports chainConfig from @/lib/
 ok(!/from '@\/lib\/chain'/.test(lazy), '7. does NOT import the server @/lib/chain into a client component')
 ok(/import type \{ HoldersResult \}/.test(lazy), '8. imports HoldersResult as a TYPE (no server runtime pulled into client)')
 ok(/fetch\(`\/api\/internal\/token\/\$\{address\}\/holders`\)/.test(lazy), '9. fetches the internal holders route')
-ok(/export function HoldersLazy/.test(lazy) && /export function HoldersCountLazy/.test(lazy), '10. exports both HoldersLazy and HoldersCountLazy')
+ok(/export function HoldersLazy/.test(lazy) && /export function HoldersFact/.test(lazy), '10. exports both HoldersLazy and HoldersFact')
 ok(/const inflight = new Map/.test(lazy), '11. shares ONE in-flight fetch per address (table + count dedupe)')
 ok(/if \(data\.holders\.length === 0\) return null/.test(lazy), '12. renders nothing when there are no holders to show')
 
@@ -36,7 +36,7 @@ ok(/if \(data\.holders\.length === 0\) return null/.test(lazy), '12. renders not
 ok(/getTokenHolders\(addr, \{ skipProvider: true \}\)/.test(page), '13. SSR holders call always skips the provider (0 CU for crawlers AND no-JS scrapers)')
 ok(!/from 'next\/headers'/.test(page), '14. page no longer imports next/headers (SSR bot-gate removed)')
 ok(!/isBotRequest/.test(page), '15. page no longer references isBotRequest')
-ok(/<HoldersLazy\b/.test(page) && /<HoldersCountLazy\b/.test(page), '16. page renders HoldersLazy + HoldersCountLazy')
+ok(/<HoldersLazy\b/.test(page) && /<HoldersFact\b/.test(page), '16. page renders HoldersLazy + HoldersFact')
 ok(!/\btopHolders\b/.test(page) && !/\btotalSupplyBig\b/.test(page), '17. page dropped the now-unused topHolders / totalSupplyBig locals')
 ok(/\{!isLive && \(\s*<HoldersLazy/.test(page), '18. HoldersLazy gated to indexed (!isLive) tokens, matching prior behavior')
 

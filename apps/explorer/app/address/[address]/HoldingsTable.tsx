@@ -45,7 +45,7 @@ export function HoldingsTable({ rows, caption, nativeSymbol }: { rows: readonly 
             <tr key={r.tokenAddress} className="hover:bg-canvas transition-colors">
               <td className="px-3 sm:px-4 py-2">
                 <Link href={`/token/${r.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
-                  {tokenLabel(r.name, r.symbol, r.tokenAddress)}
+                  {tokenLabel(r.symbol, r.name, r.tokenAddress)}
                 </Link>
               </td>
               <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(r.symbol, '—')}</td>

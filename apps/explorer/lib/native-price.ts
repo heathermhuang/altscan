@@ -1,7 +1,7 @@
 /**
  * The native coin's USD price: Binance first (binance.us before .com, since Render is US-based),
- * then CryptoCompare, CoinGecko and CoinCap. The one implementation behind the tx page and /whales
- * (the homepage and address page still inline their own chains). `null` when every source fails;
+ * then CryptoCompare, CoinGecko and CoinCap. The one implementation behind the tx page, the address
+ * page and /whales (the homepage still inlines its own chain). `null` when every source fails;
  * callers label that, they never invent a price.
  *
  * Every source must answer with a price > 0 to count. That is the stricter of the two guards the
