@@ -19,14 +19,15 @@ export default function VerifyPage() {
         </p>
       </div>
 
+      <VerifyForm />
+
+      {/* After the form, so on a phone the form comes first. The placement id is the settings key and keeps its name. */}
       <AdReserve
         context="verify"
         placement="verify_intro"
         variant="compact"
-        className="mb-8"
+        className="mt-8"
       />
-
-      <VerifyForm />
     </div>
   )
 }

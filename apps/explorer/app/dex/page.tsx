@@ -92,13 +92,6 @@ export default async function DexPage({
         <Fact label="DEXes in top pairs" value={topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'} />
       </dl>
 
-      <AdReserve
-        context="dex"
-        placement="dex_after_stats"
-        variant="compact"
-        className="mb-6"
-      />
-
       {/* Top Pairs */}
       {topPairs.length > 0 && (
         <div className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
@@ -197,6 +190,14 @@ export default async function DexPage({
         total={totalTrades}
         perPage={DEX_PAGE_SIZE}
         baseUrl="/dex"
+      />
+
+      {/* After the tables, so on a phone the trades come first. The placement id is the settings key and keeps its name. */}
+      <AdReserve
+        context="dex"
+        placement="dex_after_stats"
+        variant="compact"
+        className="mt-6"
       />
     </div>
   )

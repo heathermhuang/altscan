@@ -96,13 +96,6 @@ export default async function WhalesPage({
         ))}
       </div>
 
-      <AdReserve
-        context="whales"
-        placement="whales_before_table"
-        variant="compact"
-        className="mb-6"
-      />
-
       {degraded && whales.length > 0 && (
         <p className="mb-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3 text-sm text-ink2">
           Showing partial results — one data source is unavailable.
@@ -177,6 +170,14 @@ export default async function WhalesPage({
         </table>
         </div>
       </div>
+
+      {/* After the table, so on a phone the transfers come first. The placement id is the settings key and keeps its name. */}
+      <AdReserve
+        context="whales"
+        placement="whales_before_table"
+        variant="compact"
+        className="mt-6"
+      />
     </div>
   )
 }
