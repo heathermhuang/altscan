@@ -190,6 +190,16 @@ export function stripFills(prices: number[]): number[] {
 }
 
 /**
+ * `s` cut to at most `n` characters, with an ellipsis. For the names and symbols in a tile's readout, which anyone
+ * can choose, so a readout can fit its two-line slot (the legend's, 60px on a phone). Cuts on characters, not UTF-16
+ * units: a symbol ending in an emoji must not be left with half of it.
+ */
+export function clipText(s: string, n: number): string {
+  const chars = Array.from(s)
+  return chars.length > n ? `${chars.slice(0, n - 1).join('')}…` : s
+}
+
+/**
  * A tile of a TileStrip (components/tape/TileStrip.tsx): the strips on /gas, /validators, /dex and a
  * token's top holders. Plain data, so a page can hand it to the client component; the pure builders
  * (lib/gas-tape.ts, lib/producers.ts, lib/dex-size.ts, lib/holder-share.ts) make them.

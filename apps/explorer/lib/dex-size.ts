@@ -15,7 +15,7 @@ import type { WhaleConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
 import { shortHash } from '@/lib/address-display'
 import { formatCompactUsd, formatNumber } from '@/lib/format'
-import type { StripTile } from '@/lib/tape'
+import { clipText, type StripTile } from '@/lib/tape'
 
 export interface DexSwap {
   id: number
@@ -58,7 +58,7 @@ export function tradeUsd(t: DexSwap, nativeUsd: number | null, cfg: Cfg = chainC
   return null
 }
 
-const clip = (s: string, n = 14) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+const clip = (s: string) => clipText(s, 14)
 
 /** One tile per swap, oldest first (= left to right); `swaps` come newest first, as the page lists them. */
 export function dexStripTiles(

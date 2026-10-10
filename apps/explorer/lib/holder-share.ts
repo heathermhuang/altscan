@@ -6,7 +6,7 @@
  * row cannot disagree. Widths use parts per million, because a 0.004% holder is 0 bp but still a tile.
  * This module is imported by a client component, so it takes no heavy imports (lib/format pulls ethers).
  */
-import type { StripTile } from '@/lib/tape'
+import { clipText, type StripTile } from '@/lib/tape'
 
 export interface HolderShares {
   /** Per holder: share of supply in basis points (1/100 of a percent), floored; null for an unreadable balance. */
@@ -61,7 +61,8 @@ export function holderStripTiles(rows: readonly HolderRow[], shares: HolderShare
       w: Math.max(1, shares.ppm[i] ?? 0),
       f: 100,
       name: `Holder ${i + 1}: ${r.name}`,
-      read: `#${i + 1} ${r.name} · ${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${symbol}`,
+      // Two lines at most on a phone: a label and a symbol are anyone's to choose, so they are clipped here.
+      read: `#${i + 1} ${clipText(r.name, 20)} · ${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${clipText(symbol, 8)}`,
     }
   })
   if (shares.restPpm > 0) {

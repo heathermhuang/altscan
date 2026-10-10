@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TAPE_AFTER, TAPE_BEFORE, TAPE_LATEST, TAPE_TRACK_LG, TAPE_TRACK_SM, avgTilePx, chipFraction, decodeTape, encodeTape, gasPct, layoutTiles, ratePerMin, stripFills, stripWeight, tapeBlocks, tapeWeight, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
+import { clipText, TAPE_AFTER, TAPE_BEFORE, TAPE_LATEST, TAPE_TRACK_LG, TAPE_TRACK_SM, avgTilePx, chipFraction, decodeTape, encodeTape, gasPct, layoutTiles, ratePerMin, stripFills, stripWeight, tapeBlocks, tapeWeight, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -302,5 +302,18 @@ describe('txShareOfBlock', () => {
   it('has a position but no share when the strip\'s gas sums to zero', () => {
     const zero: StripTx[] = [{ i: 0, gas: 0, price: 0, ok: true }, { i: 1, gas: 0, price: 0, ok: true }]
     expect(txShareOfBlock(zero, 1)).toEqual({ pos: 1, pct: null })
+  })
+})
+
+describe('clipText', () => {
+  it('leaves text that fits, and cuts the rest to exactly n characters with an ellipsis', () => {
+    expect(clipText('USDT', 14)).toBe('USDT')
+    expect(clipText('A'.repeat(14), 14)).toBe('A'.repeat(14))
+    expect(clipText('A'.repeat(15), 14)).toBe(`${'A'.repeat(13)}…`)
+  })
+
+  it('cuts on characters, never through an emoji (a lone surrogate would print as a broken glyph)', () => {
+    expect(clipText('ab🐵🐵🐵', 4)).toBe('ab🐵…')
+    expect(clipText('🐵'.repeat(10), 3)).toBe('🐵🐵…')
   })
 })

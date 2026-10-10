@@ -66,6 +66,12 @@ describe('holderStripTiles', () => {
     expect(tiles[2].rest).toBe(true)
   })
 
+  it('keeps the readout inside the two-line slot at 320px even for a long label, a huge balance and a long symbol', () => {
+    const worst = holderStripTiles([{ addr: rows[0].addr, name: 'L'.repeat(60), amount: '987,654,321,098,765' }], shares, 'S'.repeat(40))[0]
+    expect(legendLines(worst.read), worst.read).toBeLessThanOrEqual(2)
+    expect(worst.read).toContain(`${'L'.repeat(19)}…`)
+  })
+
   it('reads the rank, name, share and amount on hover, and the rest\'s share', () => {
     expect(tiles[0].read).toBe('#1 Binance 8 · 25.00% of supply · 250 USDT')
     expect(tiles[2].read).toBe('Everyone else · 62.50% of supply')

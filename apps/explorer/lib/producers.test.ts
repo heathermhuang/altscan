@@ -58,7 +58,7 @@ describe('producerStrip', () => {
     const mixed = [v(1, 100n * E18), v(2, 0n), v(3, null)]
     const s = producerStrip(mixed, counts({ 1: 3, 2: 2, 3: 1 }), 'BNB')!
     expect(s.tiles.map(t => t.f)).toEqual([100, 0, 0])
-    expect(s.tiles[2].read).toContain('voting power unknown')
+    expect(s.tiles[2].read).toContain('power unknown')
   })
 
   it('pairs each tile with its table row by the same lowercase /address/ link', () => {
@@ -69,19 +69,31 @@ describe('producerStrip', () => {
 
   it('reads name, blocks, share of the window\'s blocks and voting power on hover', () => {
     const s = producerStrip(vals, counts({ 1: 30, 2: 70 }), 'BNB')!
-    expect(s.tiles[0].read).toBe('Val 1 · 30 blocks · 30.0% of the 100 in the window · voting power 400 BNB')
-    expect(s.tiles[1].read).toBe('Val 2 · 70 blocks · 70.0% of the 100 in the window · voting power 200 BNB')
+    expect(s.tiles[0].read).toBe('Val 1 · 30 blocks (30.0%) · power 400 BNB')
+    expect(s.tiles[1].read).toBe('Val 2 · 70 blocks (70.0%) · power 200 BNB')
+  })
+
+  // The readout replaces the legend in a two-line slot (60px on a phone, 39 columns at 320px). One that wraps
+  // to a third line made the whole band, and the page under it, jump 18px on hover (found by the 320px gate).
+  it('keeps the readout inside the two-line slot at 320px even for the longest realistic row', () => {
+    const long = [v(1, 123_456_789_012n * E18, 'N'.repeat(60)), v(2, null, 'M'.repeat(60))]
+    const s = producerStrip(long, counts({ 1: 191_999, 2: 1 }), 'BNB')!
+    for (const t of s.tiles) {
+      expect(legendLines(t.read), t.read).toBeLessThanOrEqual(2)
+      expect(t.read.length).toBeGreaterThan(40)
+    }
+    expect(s.tiles[0].read).toContain(`${'N'.repeat(19)}…`)   // a moniker is anyone's to choose: clipped
   })
 
   it('counts blocks by miners that are not in the list too: they are in the window, so shares are of ALL its blocks', () => {
     const s = producerStrip(vals, counts({ 1: 30 }, { '0xdead': 70 }), 'BNB')!
     expect(s.windowBlocks).toBe(100)
     expect(s.unlisted).toBe(70)
-    expect(s.tiles[0].read).toContain('30.0% of the 100 in the window')
+    expect(s.tiles[0].read).toContain('30 blocks (30.0%)')   // 30 of the window's 100, not of the 30 listed
   })
 
   it('says "1 block", not "1 blocks"', () => {
-    expect(producerStrip(vals, counts({ 1: 1, 2: 99 }), 'BNB')!.tiles[0].read).toContain('· 1 block ·')
+    expect(producerStrip(vals, counts({ 1: 1, 2: 99 }), 'BNB')!.tiles[0].read).toContain('· 1 block (1.0%) ·')
   })
 })
 

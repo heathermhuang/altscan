@@ -8,7 +8,7 @@
  * says so, when no shown validator has a known voting power (the ValidatorSet fallback writes 0).
  */
 import { formatNumber, formatShare } from '@/lib/format'
-import type { StripTile } from '@/lib/tape'
+import { clipText, type StripTile } from '@/lib/tape'
 
 export interface ProducerInput {
   address: string
@@ -55,14 +55,15 @@ export function producerStrip(
   const tiles = produced.map(({ v, n }): StripTile => {
     const href = `/address/${v.address.toLowerCase()}`
     const share = `${formatShare((n / windowBlocks) * 100)}%`
-    const power = v.power === null ? 'voting power unknown' : `voting power ${formatNumber(v.power / E18)} ${currency}`
+    const power = v.power === null ? 'power unknown' : `power ${formatNumber(v.power / E18)} ${currency}`
     return {
       id: href,
       href,
       w: n,
       f: !fillKnown ? 100 : v.power === null ? 0 : Number((v.power * 100n + max / 2n) / max),
       name: v.name,
-      read: `${v.name} · ${blocksText(n)} · ${share} of the ${formatNumber(windowBlocks)} in the window · ${power}`,
+      // Two lines at most on a phone: the moniker is anyone's to choose, so it is clipped here (`name` is whole).
+      read: `${clipText(v.name, 20)} · ${blocksText(n)} (${share}) · ${power}`,
     }
   })
   const best = produced.reduce((b, p) => (p.n > b.n ? p : b))
