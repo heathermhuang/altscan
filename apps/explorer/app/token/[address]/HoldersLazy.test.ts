@@ -99,6 +99,31 @@ describe('HoldersLazy strip', () => {
     }
   })
 
+  // The strip and the table are one list: after the holder-count labelling (lib/holder-labels.ts) nothing changed about
+  // which rows both read.
+  it('reads exactly the rows the table shows, in the same order, in both states', () => {
+    for (const html of [local, live]) {
+      const strip = html.match(/<div class="border-b border-hair">.*?<div class="tp-leg">/s)![0]
+      const stripHrefs = [...strip.matchAll(/<a href="([^"]+)"/g)].map(m => m[1])
+      const table = html.slice(html.indexOf('<tbody>'))
+      const rowHrefs = [...table.matchAll(/<tr><td[^>]*>\d+<\/td><td><span class="sm:hidden"><a [^>]*href="([^"]+)"/g)].map(m => m[1])
+      expect(stripHrefs).toHaveLength(3)
+      expect(stripHrefs).toEqual(rowHrefs)
+    }
+  })
+
+  // tokens.holder_count is a frozen snapshot and the provider total is cached (lib/holder-labels.ts): the header and the
+  // Holders fact label them. The strip is about the rows and their shares of supply, and must not restate either count.
+  it('never presents a holder count (indexed or provider) in its name, summary, head or legend', () => {
+    for (const html of [local, live]) {
+      const strip = html.match(/<div class="border-b border-hair">.*?<div class="tp-leg">.*?<\/div><\/div>/s)![0]
+      expect(strip).not.toMatch(/\btotal\b|indexed|Moralis|holders \(|\b42\b|4,200/)
+      expect(strip).toMatch(/Top 3 holders/)   // it counts the rows it draws, not the token's holders
+    }
+    // while the header, outside the strip, carries the labelled provider total
+    expect(live).toContain('42 holders (Moralis)')
+  })
+
   it('links each tile to its holder by the same href as the table row (that is how they pair)', () => {
     const addr = '0x' + '1'.padStart(40, '0')
     expect(live).toContain(`<a href="/address/${addr}" tabindex="0"`)
