@@ -17,6 +17,7 @@ import { getAddressRisk } from '@/lib/goplus'
 import { isBotRequest } from '@/lib/providers'
 import { getRetentionFloor, isLocalHistoryIncomplete } from '@/lib/retention'
 import { TxnsLazy } from './TxnsLazy'
+import { TxnsTable } from './TxnsTable'
 import { TransfersLazy } from './TransfersLazy'
 import { HoldingsTab, getTrackedBalances } from './HoldingsTab'
 import { NftsLazy } from './NftsLazy'
@@ -497,54 +498,29 @@ async function TxnsTab({
       />
       <div className="bg-card rounded-xl border border-hair overflow-hidden mb-4">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <caption className="sr-only">{chainConfig.name} transactions for this address</caption>
-          <thead className="bg-canvas border-b border-hair">
-            <tr>
-              <th scope="col" className={TH}>Tx Hash</th>
-              <th scope="col" className={`${TH} hidden sm:table-cell`}>Age</th>
-              <th scope="col" className={TH}>From / To</th>
-              <th scope="col" className={`${TH} hidden sm:table-cell`}>Value</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-hair">
-            {txs.map((tx) => (
-              <tr key={tx.hash} className="hover:bg-canvas transition-colors">
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <Link href={`/tx/${tx.hash}`} className="text-acc-ink hover:underline">
-                    {shortHash(tx.hash)}
-                  </Link>
-                  {/* Phones drop the Value column; it moves under the hash. */}
-                  <div className="text-xs text-mut sm:hidden">
-                    {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
-                  </div>
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-mut hidden sm:table-cell">
-                  {timeAgo(new Date(tx.timestamp))}
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  <div>
-                    <span className="text-mut text-xs">
-                      {tx.fromAddress.toLowerCase() === addr ? 'OUT' : 'IN'}{' '}
-                    </span>
-                    {tx.fromAddress.toLowerCase() === addr ? (
-                      tx.toAddress ? (
-                        <AddressLink address={tx.toAddress} />
-                      ) : (
-                        <span className="text-mut">Contract Creation</span>
-                      )
+          <TxnsTable
+            caption={`${chainConfig.name} transactions for this address`}
+            currency={chainConfig.currency}
+            detailHeading="From / To"
+            rows={txs.map((tx) => {
+              const out = tx.fromAddress.toLowerCase() === addr
+              return {
+                hash: tx.hash,
+                timestamp: tx.timestamp,
+                value: tx.value,
+                detail: (
+                  <>
+                    <span className="text-mut text-xs">{out ? 'OUT' : 'IN'}{' '}</span>
+                    {out ? (
+                      tx.toAddress ? <AddressLink address={tx.toAddress} /> : <span className="text-mut">Contract Creation</span>
                     ) : (
                       <AddressLink address={tx.fromAddress} />
                     )}
-                  </div>
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] hidden sm:table-cell">
-                  {formatNativeToken(safeBigInt(tx.value))} {chainConfig.currency}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </>
+                ),
+              }
+            })}
+          />
         </div>
       </div>
       <Pagination

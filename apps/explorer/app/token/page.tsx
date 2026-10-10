@@ -131,9 +131,11 @@ export default async function TokenListPage({
       </div>
       <div className="bg-card rounded-xl border border-hair overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="dt">
+        {/* `.dt-tk` (app/globals.css) turns each row into a three-line card under 640px from these same
+            cells, so every column is in the DOM at every width. Keep the cell order. */}
+        <table className="dt dt-tk">
           <caption className="sr-only">{typeLabels[tokenType]} sorted by holder count</caption>
-          <thead>
+          <thead className="max-sm:sr-only">
             <tr>
               <th scope="col">#</th>
               <th scope="col">Token</th>
