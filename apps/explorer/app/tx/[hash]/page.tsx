@@ -341,21 +341,24 @@ export default async function TxDetailPage({
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
 
   // Base fee lives on the block, not the transaction. For an indexed tx it is
-  // one PK lookup; on the RPC path fetchBlockFromRpc already carries it.
+  // one PK lookup; on the RPC path fetchBlockFromRpc already carries it. A tx in no block
+  // yet (`placed` is false: its blockNumber is the placeholder 0) has none to look up.
   let baseFeePerGas: string | null = null
-  try {
-    const [b] = await db.select({ baseFee: schema.blocks.baseFeePerGas })
-      .from(schema.blocks).where(eq(schema.blocks.number, tx.blockNumber)).limit(1)
-    baseFeePerGas = b?.baseFee ?? null
-  } catch (e) { swallow('tx/base-fee', e) }
-  if (baseFeePerGas == null) {
-    // Optional detail: fetchBlockFromRpc now throws on transport failure (a
-    // failed call is not an absent block), so degrade here rather than failing
-    // a tx page that otherwise rendered fine.
+  if (placed) {
     try {
-      const rpcBlock = await fetchBlockFromRpc(tx.blockNumber)
-      baseFeePerGas = rpcBlock?.baseFeePerGas ?? null
-    } catch (e) { swallow('tx/base-fee-rpc', e) }
+      const [b] = await db.select({ baseFee: schema.blocks.baseFeePerGas })
+        .from(schema.blocks).where(eq(schema.blocks.number, tx.blockNumber)).limit(1)
+      baseFeePerGas = b?.baseFee ?? null
+    } catch (e) { swallow('tx/base-fee', e) }
+    if (baseFeePerGas == null) {
+      // Optional detail: fetchBlockFromRpc now throws on transport failure (a
+      // failed call is not an absent block), so degrade here rather than failing
+      // a tx page that otherwise rendered fine.
+      try {
+        const rpcBlock = await fetchBlockFromRpc(tx.blockNumber)
+        baseFeePerGas = rpcBlock?.baseFeePerGas ?? null
+      } catch (e) { swallow('tx/base-fee-rpc', e) }
+    }
   }
   const gasBreakdown = computeGasBreakdown(tx.gasUsed ?? 0n, tx.gasPrice ?? 0n, baseFeePerGas)
 
@@ -554,7 +557,7 @@ export default async function TxDetailPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <dl className="ledger [--cols:5] mb-4">
         <Fact label="Status">
-          <Badge variant={outcome === 'success' ? 'success' : outcome === 'failed' ? 'fail' : 'default'}>
+          <Badge variant={outcome === 'success' ? 'success' : outcome === 'failed' ? 'fail' : 'pending'}>
             {TX_OUTCOME_LABEL[outcome]}
           </Badge>
         </Fact>
