@@ -8,7 +8,9 @@
  * says so, when no shown validator has a known voting power (the ValidatorSet fallback writes 0).
  */
 import { formatNumber, formatShare } from '@/lib/format'
+import { shortenAddress } from '@/lib/address-display'
 import { clipText } from '@/lib/clip-text'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
 import type { StripTile } from '@/lib/tape'
 
 export interface ProducerInput {
@@ -35,6 +37,8 @@ export interface ProducerStrip {
 }
 
 const E18 = 10n ** 18n
+/** A moniker is self-chosen, and one that reads as a web address or a handle is an advert, not a name (lib/link-in-name.ts): such a validator is named by its short address, as headlines do. */
+const nameOf = (v: ProducerInput) => (looksLikeUrlOrHandle(v.name) ? shortenAddress(v.address) : v.name)
 const blocksText = (n: number) => `${formatNumber(n)} block${n === 1 ? '' : 's'}`
 
 export function producerStrip(
@@ -62,7 +66,7 @@ export function producerStrip(
       w: n,
       f: !fillKnown ? 100 : v.power === null ? 0 : Number((v.power * 100n + max / 2n) / max),
       // Two lines at most on a phone: a moniker is anyone's to choose, so it is clipped. The strip says `name · read`.
-      name: clipText(v.name, 20),
+      name: clipText(nameOf(v), 20),
       read: `${blocksText(n)} (${share}) · ${power}`,
     }
   })
@@ -73,7 +77,7 @@ export function producerStrip(
     total: vals.length,
     windowBlocks,
     unlisted: windowBlocks - listed,
-    top: { name: best.v.name, blocks: best.n },
+    top: { name: nameOf(best.v), blocks: best.n },
     fillKnown,
   }
 }

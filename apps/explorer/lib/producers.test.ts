@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { producerLegend, producerStrip, producerSummary, type ProducerInput } from '@/lib/producers'
 import { legendLines } from '@/test-support/legend-lines'
+import { shortenAddress } from '@/lib/address-display'
+import { validatorDisplays, type ValidatorRow } from '@/lib/validator-display'
 
 const E18 = 10n ** 18n
 const v = (n: number, power: bigint | null, name = `Val ${n}`): ProducerInput => ({
@@ -123,5 +125,50 @@ describe('producer text', () => {
   it('has no clause about blocks nobody listed when every block is attributed, and is short', () => {
     const s = producerStrip(vals, counts({ 1: 30, 2: 20 }), 'BNB')!
     expect(producerSummary(s)).toBe('Most blocks: Val 1, 30 of 50 counted.')
+  })
+})
+
+// Standby (lib/validator-display.ts) = an active validator that produced nothing in the window while the set did.
+// The strip draws exactly the validators with a block, so a tile is never a Standby row and a Standby row has no tile.
+describe('producerStrip agrees with the table\'s Standby rule', () => {
+  const at = new Date('2026-10-10T00:00:00Z')
+  const rows = (n: number): ValidatorRow[] => Array.from({ length: n }, (_, i) => ({
+    address: `0xAA${String(i + 1).padStart(38, '0')}`, moniker: `Val ${i + 1}`, votingPower: String(BigInt(100 - i) * E18), status: 'active', updatedAt: at,
+  }))
+  const inputs = (r: ValidatorRow[]): ProducerInput[] => r.map((x, i) => ({ address: x.address, name: validatorDisplays(r)[i].name, power: BigInt(x.votingPower!) }))
+
+  it('draws no tile for a Standby validator, and every validator without a tile that is active reads Standby', () => {
+    const r = rows(5)
+    const c = counts({ 1: 30, 2: 20, 4: 10 })        // validators 3 and 5 produced nothing while others did
+    const display = validatorDisplays(r, c)
+    const strip = producerStrip(inputs(r), c, 'BNB')!
+    const drawn = new Set(strip.tiles.map(t => t.href))
+    r.forEach((x, i) => {
+      const hasTile = drawn.has(`/address/${x.address.toLowerCase()}`)
+      expect(display[i].status.label === 'Standby', x.moniker ?? undefined).toBe(!hasTile)
+    })
+    expect(strip.tiles).toHaveLength(3)
+  })
+
+  it('when the counts are unknown (null) or nobody produced, there is no strip and nobody is Standby', () => {
+    const r = rows(3)
+    expect(producerStrip(inputs(r), null, 'BNB')).toBeNull()
+    expect(validatorDisplays(r, null).some(d => d.status.label === 'Standby')).toBe(false)
+    expect(producerStrip(inputs(r), new Map(), 'BNB')).toBeNull()
+    expect(validatorDisplays(r, new Map()).some(d => d.status.label === 'Standby')).toBe(false)
+  })
+})
+
+// A moniker is self-chosen, and an advert is not a name (lib/link-in-name.ts): the strip names such a validator by its
+// short address, in the tile, the readout and the summary, as headlines do.
+describe('producerStrip and a moniker that reads as a web address', () => {
+  it('names the validator by its short address instead', () => {
+    const bad = [v(1, 5n * E18, 'Stake at claim-bnb.xyz'), v(2, 4n * E18, '@stakewith_us'), v(3, 3n * E18, 'Figment')]
+    const s = producerStrip(bad, counts({ 1: 30, 2: 20, 3: 10 }), 'BNB')!
+    expect(s.tiles[0].name).toBe(shortenAddress(bad[0].address))
+    expect(s.tiles[1].name).toBe(shortenAddress(bad[1].address))
+    expect(s.tiles[2].name).toBe('Figment')
+    expect(s.top.name).toBe(shortenAddress(bad[0].address))
+    expect(JSON.stringify(s)).not.toMatch(/claim-bnb|stakewith/)
   })
 })

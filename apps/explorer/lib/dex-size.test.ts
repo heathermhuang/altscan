@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { dexLegend, dexStripTiles, dexSummary, tradeUsd, type DexSwap } from '@/lib/dex-size'
 import { legendLines } from '@/test-support/legend-lines'
+import { shortenAddress } from '@/lib/address-display'
 
 const WRAPPED = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c'
 const USDT = '0x55d398326f99059ff775485246999027b3197955'
@@ -135,6 +136,16 @@ describe('dexStripTiles', () => {
     expect(said.length).toBeGreaterThan(40)
     const none = dexStripTiles([swap({ tokenIn: JUNK, amountIn: '1', tokenOut: JUNK, amountOut: '1' })], null, () => 'S'.repeat(40), cfg18)[0]
     expect(legendLines(`${none.name} · ${none.read}`), none.read).toBeLessThanOrEqual(2)
+  })
+
+  // A symbol is typed by whoever deploys the token, and airdrop spam uses it as an advert (lib/link-in-name.ts).
+  it('names a token whose symbol reads as a web address or a handle by its short address, in the readout', () => {
+    const t = dexStripTiles(
+      [swap({ tokenIn: USDT, amountIn: E18.toString(), tokenOut: JUNK, amountOut: '1' })],
+      null, addr => (addr === USDT ? 'USDT' : 'Visit claim.xyz'), cfg18,
+    )[0]
+    expect(t.read).toBe(`$1 · USDT → ${shortenAddress(JUNK)}`)
+    expect(`${t.name} ${t.read}`).not.toContain('claim.xyz')
   })
 
   it('draws nothing for no swaps', () => {

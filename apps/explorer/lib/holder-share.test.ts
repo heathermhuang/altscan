@@ -89,6 +89,13 @@ describe('holderStripTiles', () => {
     expect(tiles.map(t => t.f)).toEqual([100, 100, 0])
   })
 
+  it('does not repeat a token symbol that reads as a web address or a handle: "tokens" instead', () => {
+    const t = holderStripTiles([rows[0]], shares, 'claim-bnb.xyz')[0]
+    expect(t.read).toBe('25.00% of supply · 250 tokens')
+    expect(holderStripTiles([rows[0]], shares, '@airdrop')[0].read).toBe('25.00% of supply · 250 tokens')
+    expect(holderStripTiles([rows[0]], shares, 'USDT.z')[0].read).toContain('250 USDT.z')   // a ticker is not an address
+  })
+
   it('gives a holder under 1 ppm a weight of 1, never 0 (the CSS floor keeps it visible, the flex share must stay positive)', () => {
     const tiny = holderShares([tok(1)], '1000000000000000000000000000')!   // 1e-9 of supply
     expect(holderStripTiles([rows[0]], tiny, 'X')[0].w).toBe(1)

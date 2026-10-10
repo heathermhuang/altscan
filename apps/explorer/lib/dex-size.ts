@@ -13,9 +13,10 @@
  */
 import type { WhaleConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
-import { shortHash } from '@/lib/address-display'
+import { shortenAddress, shortHash } from '@/lib/address-display'
 import { formatCompactUsd } from '@/lib/format'
 import { clipText } from '@/lib/clip-text'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
 import type { StripTile } from '@/lib/tape'
 
 export interface DexSwap {
@@ -63,7 +64,11 @@ export function tradeUsd(t: DexSwap, nativeUsd: number | null, cfg: Cfg = chainC
   return null
 }
 
-const clip = (s: string) => clipText(s, 14)
+/** A symbol is typed by whoever deploys the token: one that reads as a web address or a handle is an advert (lib/link-in-name.ts), so the token is named by its short address. */
+const symbolText = (symbolOf: (address: string | null) => string, address: string | null) => {
+  const s = symbolOf(address)
+  return clipText(looksLikeUrlOrHandle(s) && address ? shortenAddress(address) : s, 14)
+}
 
 /** One tile per swap, oldest first (= left to right); `swaps` come newest first, as the page lists them. */
 export function dexStripTiles(
@@ -74,7 +79,7 @@ export function dexStripTiles(
 ): StripTile[] {
   return [...swaps].reverse().map((t): StripTile => {
     const usd = tradeUsd(t, nativeUsd, cfg)
-    const pair = `${clip(symbolOf(t.tokenIn))} → ${clip(symbolOf(t.tokenOut))}`
+    const pair = `${symbolText(symbolOf, t.tokenIn)} → ${symbolText(symbolOf, t.tokenOut)}`
     return {
       id: String(t.id),
       href: `/tx/${t.txHash}`,

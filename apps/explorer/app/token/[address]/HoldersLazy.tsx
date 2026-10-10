@@ -145,7 +145,7 @@ export function HoldersLazy({
           tiles={strip}
           title={`Top ${data.holders.length} holders`}
           stats={{ main: `${(shares.topBp / 100).toFixed(1)}% of supply`, side: data.source === 'moralis' ? 'real balances' : 'estimated' }}
-          label={`Top ${data.holders.length} holders of ${symbol}, width is share of supply`}
+          label={`Top ${data.holders.length} holders, width is share of supply`}
           legend={holdersLegend(data.source)}
           summary={holdersSummary(data.holders.length, shares, data.source)}
         />

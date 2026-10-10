@@ -7,6 +7,7 @@
  * This module is imported by a client component, so it takes no heavy imports (lib/format pulls ethers).
  */
 import { clipText } from '@/lib/clip-text'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
 import type { StripTile } from '@/lib/tape'
 
 export interface HolderShares {
@@ -54,13 +55,15 @@ export interface HolderRow {
 
 /** One tile per holder, in rank order, then an "others" tile for the rest of the supply. */
 export function holderStripTiles(rows: readonly HolderRow[], shares: HolderShares, symbol: string): StripTile[] {
+  // A symbol that reads as a web address or a handle is an advert (lib/link-in-name.ts): the readout says "tokens".
+  const unit = looksLikeUrlOrHandle(symbol) ? 'tokens' : clipText(symbol, 8)
   const tiles: StripTile[] = rows.map((r, i) => ({
     href: `/address/${r.addr.toLowerCase()}`,
     w: Math.max(1, shares.ppm[i] ?? 0),
     f: 100,
     // Two lines at most on a phone: a label is anyone's to choose, so it is clipped. The strip says `name · read`.
     name: `#${i + 1} ${clipText(r.name, 20)}`,
-    read: `${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${clipText(symbol, 8)}`,
+    read: `${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${unit}`,
   }))
   if (shares.restPpm > 0) {
     tiles.push({
