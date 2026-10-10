@@ -18,12 +18,12 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
   const span = gap < 1 ? 'in the same second' : `over ${formatSpan(gap)}`
   return (
     <figure className="ldg">
-      <div className="ldg-head">
+      <div className="tp-head ldg-head">
         <span className="flex items-center min-w-0">
-          <span className="bt-dot" aria-hidden="true" />
+          <span className="tp-dot" aria-hidden="true" />
           <span className="text-ink truncate">These {rows.length} transactions<span className="hidden md:inline text-mut">, as a ledger</span></span>
         </span>
-        <span className="whitespace-nowrap">▲ {nin} received · ▼ {nout} sent<span className="bt-rate"> · {span}</span></span>
+        <span className="whitespace-nowrap">▲ {nin} received · ▼ {nout} sent<span className="tp-rate"> · {span}</span></span>
       </div>
       <div className="ldg-row" role="img" aria-label={`${rows.length} transactions ${span}: ${nin} received, ${nout} sent`}>
         {rows.map((r, k) => (
@@ -34,7 +34,7 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
           />
         ))}
       </div>
-      <figcaption className="ldg-leg">{legend(currency)}</figcaption>
+      <figcaption className="tp-leg">{legend(currency)}</figcaption>
     </figure>
   )
 }
@@ -43,9 +43,9 @@ export function AddressLedger({ rows, currency }: { rows: LedgerRow[]; currency:
 export function AddressLedgerShell({ currency }: { currency: string }) {
   return (
     <figure className="ldg animate-pulse" aria-hidden="true">
-      <div className="ldg-head"><span>&nbsp;</span><span>&nbsp;</span></div>
+      <div className="tp-head ldg-head"><span>&nbsp;</span><span>&nbsp;</span></div>
       <div className="ldg-row" />
-      <figcaption className="ldg-leg">{legend(currency)}</figcaption>
+      <figcaption className="tp-leg">{legend(currency)}</figcaption>
     </figure>
   )
 }

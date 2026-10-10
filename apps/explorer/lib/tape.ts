@@ -1,64 +1,54 @@
-/** [blockNumber, unixSeconds, txCount, gasPct]: compact so the page can hand ~100 of them to the client. */
+/** [blockNumber, unixSeconds, txCount, gasPct]: compact so the page can hand a few dozen of them to the client. */
 export type TapeTuple = [number, number, number, number]
-/** A block as the tape draws it: `seconds` is the interval it took (its tile width), `gas` is 0-100. */
-export interface TapeBlock { n: number; seconds: number; txs: number; gas: number }
+/** A block as the tape draws it: width = `txs` (its transaction count), fill = `gas` (0-100). */
+export interface TapeBlock { n: number; txs: number; gas: number }
 
-/**
- * Give each block the interval it took: (previous block's time, own time]. Timestamps are whole
- * seconds, and BNB fits several blocks into one, so k blocks stamped `s` after a previous distinct
- * second `p` split (p, s] evenly, end to end. The oldest second has no predecessor and only anchors.
- * Accepts tuples in any order; returns the displayed blocks oldest first.
- */
-export function spreadSeconds(tuples: TapeTuple[]): TapeBlock[] {
-  const asc = [...tuples].sort((a, b) => a[0] - b[0])
-  const out: TapeBlock[] = []
-  let i = 0
-  let prev: number | null = null
-  while (i < asc.length) {
-    const s = asc[i][1]
-    let j = i
-    while (j < asc.length && asc[j][1] === s) j++
-    if (prev !== null) {
-      const k = j - i
-      const step = (s - prev) / k
-      for (let m = 0; m < k; m++) {
-        const [n, , txs, gas] = asc[i + m]
-        out.push({ n, seconds: step, txs, gas })
-      }
-    }
-    prev = s
-    i = j
-  }
-  return out
-}
-
-/** Mean tile interval in seconds (0 for no blocks): the width of a "ghost" tile that pads the tape's left edge. */
-export function meanSeconds(blocks: TapeBlock[]): number {
-  if (!blocks.length) return 0
-  return blocks.reduce((sum, b) => sum + b.seconds, 0) / blocks.length
+/** The blocks to draw, oldest first (= left to right), from tuples in any order. */
+export function tapeBlocks(tuples: TapeTuple[]): TapeBlock[] {
+  return [...tuples].sort((a, b) => a[0] - b[0]).map(([n, , txs, gas]) => ({ n, txs, gas }))
 }
 
 /**
- * How many blocks before and after a block to fetch for its page's tape: ~18s of chain time to the
- * left (older) and ~3.6s to the right (newer), so the highlighted tile sits near the right end and
- * stays on screen. BNB (0.45s) gives 40 and 8; ETH (12s) gives 3 and 1, since one ETH tile is
- * already ~400px wide.
+ * How many blocks each tape draws. Fixed per surface and the same on both chains: a tile's width is
+ * its transaction count, so the chain's block time (BNB 0.45s, ETH 12s) no longer sizes anything.
+ * The tiles share the track, so the tape fills it at any width. 40 is the largest round count whose
+ * tiles still average 6px on a 375px phone (343px track, 2px gaps: 6.6px; 50 would be 4.9px) and at
+ * 1440px they average 29px. A block page looks further back than forward so the ringed tile sits
+ * right of centre: 24 + itself + 6 = 31 tiles, 9px on a phone, 38px at 1440. Each tile is ~100 bytes
+ * of markup and the homepage HTML must stay inside one TCP window (~14.6 KB gzipped, Lighthouse
+ * mobile LCP), which is the other reason not to draw more.
  */
-export function tapeWindow(blockTime: number): { before: number; after: number } {
-  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
-  return {
-    before: clamp(Math.round(18 / blockTime), 3, 40),
-    after: clamp(Math.round(3.6 / blockTime), 1, 8),
-  }
+export const TAPE_LATEST = 40
+export const TAPE_BEFORE = 24
+export const TAPE_AFTER = 6
+/** The gap between tiles (the `gap` in app/globals.css, ".tp-gap"). */
+const TAPE_GAP_PX = 2
+
+/** The average tile width, in px, of `count` tiles sharing a track `trackPx` wide. */
+export function avgTilePx(count: number, trackPx: number): number {
+  return (trackPx - (count - 1) * TAPE_GAP_PX) / count
 }
 
 /**
- * How many of the newest blocks a "latest blocks" tape fetches: ~32s of chain time, which fills the
- * content column (1248px at 34px/s is ~37s, and its left ~120px sits under a fade). BNB (0.45s)
- * gives 72, ETH (12s) gives 7 (the tables' minimum); never more than 100.
+ * A tile's flex-grow: its transaction count, at least 1 so an empty block keeps a (tiny) share and a
+ * tape of empty blocks still fills the track. The CSS gives every tile a 2px minimum width on top, so
+ * a block with few transactions never vanishes (app/globals.css, ".tp-gap").
  */
-export function latestTapeCount(blockTime: number): number {
-  return Math.min(100, Math.max(7, Math.ceil(32 / blockTime)))
+export function tapeWeight(txs: number): number {
+  return Number.isFinite(txs) && txs > 1 ? Math.round(txs) : 1
+}
+
+/**
+ * Where tile `k` sits along the tape as a fraction of its width (0 = left end, 1 = right end),
+ * going by the tiles' weights. The ringed tile's label is placed at this fraction of the track and
+ * shifted left by the same fraction of its OWN width, which keeps the label inside the track at both
+ * ends and over its tile in the middle (app/globals.css, ".bt-chip"). The middle for no such tile.
+ */
+export function chipFraction(weights: number[], k: number): number {
+  const total = weights.reduce((s, w) => s + w, 0)
+  if (!(total > 0) || k < 0 || k >= weights.length) return 0.5
+  const before = weights.slice(0, k).reduce((s, w) => s + w, 0)
+  return (before + weights[k] / 2) / total
 }
 
 /** Blocks per minute measured from the oldest and newest block received. */

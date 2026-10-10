@@ -10,16 +10,12 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { swallow, swallowed } from '@/lib/observability'
-import { encodeTape, gasPct, latestTapeCount, type TapeTuple } from '@/lib/tape'
+import { encodeTape, gasPct, TAPE_LATEST, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
 // Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
 export const revalidate = 60
-
-// How many blocks the tape draws (lib/tape.ts: ~32s of chain time, BNB 72, ETH 7).
-// Kept tight on purpose: the homepage HTML must stay inside one TCP window (Lighthouse mobile LCP).
-const TAPE_N = latestTapeCount(chainConfig.blockTime)
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -242,7 +238,7 @@ export default async function HomePage() {
   }
 
   const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
-    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(TAPE_N).catch(swallowed('home/blocks', [])), []),
+    dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(TAPE_LATEST).catch(swallowed('home/blocks', [])), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(swallowed('home/txs', [])), []),
     fetchNativePrice(),
     fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
