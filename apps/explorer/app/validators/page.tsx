@@ -78,7 +78,7 @@ export default async function ValidatorsPage() {
         tiles={strip.tiles}
         title="Validators"
         stats={{ main: `${strip.producing} of ${strip.total} produced blocks`, side: 'last 24h' }}
-        label={`${chainConfig.name} validators that produced blocks in the last 24 hours, width is blocks produced${strip.fillKnown ? ', fill is voting power' : ''}`}
+        label={`Validators, width is blocks produced${strip.fillKnown ? ', fill is voting power' : ''}`}
         legend={producerLegend(strip.fillKnown)}
         summary={producerSummary(strip)}
       />

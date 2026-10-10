@@ -72,7 +72,7 @@ export default async function DexPage({
   // native price: nothing is fetched here (lib/dex-page.ts, lib/dex-size.ts).
   const swaps: DexSwap[] = trades.map(t => ({
     id: t.id, txHash: t.txHash, tokenIn: t.tokenIn, tokenOut: t.tokenOut,
-    amountIn: t.amountIn, amountOut: t.amountOut, blockNumber: t.blockNumber,
+    amountIn: t.amountIn, amountOut: t.amountOut,
   }))
   const stripTiles = dexStripTiles(
     swaps,

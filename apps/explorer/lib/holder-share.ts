@@ -54,25 +54,20 @@ export interface HolderRow {
 
 /** One tile per holder, in rank order, then an "others" tile for the rest of the supply. */
 export function holderStripTiles(rows: readonly HolderRow[], shares: HolderShares, symbol: string): StripTile[] {
-  const tiles: StripTile[] = rows.map((r, i) => {
-    const href = `/address/${r.addr.toLowerCase()}`
-    return {
-      id: href,
-      href,
-      w: Math.max(1, shares.ppm[i] ?? 0),
-      f: 100,
-      name: `Holder ${i + 1}: ${r.name}`,
-      // Two lines at most on a phone: a label and a symbol are anyone's to choose, so they are clipped here.
-      read: `#${i + 1} ${clipText(r.name, 20)} · ${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${clipText(symbol, 8)}`,
-    }
-  })
+  const tiles: StripTile[] = rows.map((r, i) => ({
+    href: `/address/${r.addr.toLowerCase()}`,
+    w: Math.max(1, shares.ppm[i] ?? 0),
+    f: 100,
+    // Two lines at most on a phone: a label is anyone's to choose, so it is clipped. The strip says `name · read`.
+    name: `#${i + 1} ${clipText(r.name, 20)}`,
+    read: `${bpText(shares.bp[i] ?? null)} of supply · ${r.amount} ${clipText(symbol, 8)}`,
+  }))
   if (shares.restPpm > 0) {
     tiles.push({
-      id: 'rest',
       w: shares.restPpm,
       f: 0,
-      name: 'All other holders',
-      read: `Everyone else · ${bpText(Math.floor(shares.restPpm / 100))} of supply`,
+      name: 'Everyone else',
+      read: `${bpText(Math.floor(shares.restPpm / 100))} of supply`,
       rest: true,
     })
   }

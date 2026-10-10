@@ -58,13 +58,12 @@ export function producerStrip(
     const share = `${formatShare((n / windowBlocks) * 100)}%`
     const power = v.power === null ? 'power unknown' : `power ${formatNumber(v.power / E18)} ${currency}`
     return {
-      id: href,
       href,
       w: n,
       f: !fillKnown ? 100 : v.power === null ? 0 : Number((v.power * 100n + max / 2n) / max),
-      name: v.name,
-      // Two lines at most on a phone: the moniker is anyone's to choose, so it is clipped here (`name` is whole).
-      read: `${clipText(v.name, 20)} · ${blocksText(n)} (${share}) · ${power}`,
+      // Two lines at most on a phone: a moniker is anyone's to choose, so it is clipped. The strip says `name · read`.
+      name: clipText(v.name, 20),
+      read: `${blocksText(n)} (${share}) · ${power}`,
     }
   })
   const best = produced.reduce((b, p) => (p.n > b.n ? p : b))
@@ -79,19 +78,18 @@ export function producerStrip(
   }
 }
 
-/** The measure, said exactly; two lines at most on a phone (components/tape/legend-lines.ts). */
+/** The measure, said exactly; two lines at most on a phone (test-support/legend-lines.ts). */
 export function producerLegend(fillKnown: boolean): string {
   return fillKnown
-    ? 'width = blocks produced, last 24h · fill = voting power vs the largest'
-    : 'width = blocks produced, last 24h · voting power unknown right now'
+    ? 'width = blocks produced, 24h · fill = voting power vs the largest shown'
+    : 'width = blocks produced, 24h · voting power unknown right now'
 }
 
-/** The strip's text alternative (the table beside it has every validator). */
+/**
+ * The strip's text alternative (the table beside it has every validator). The head stat, the list's accessible name
+ * and the legend already say what a tile is and how it is measured, so this carries only what they do not.
+ */
 export function producerSummary(s: ProducerStrip): string {
-  return `${s.producing} of ${s.total} validators produced blocks in the last 24 hours (${formatNumber(s.windowBlocks)} blocks counted); `
-    + `the most was ${s.top.name} with ${formatNumber(s.top.blocks)}. `
-    + (s.unlisted > 0 ? `${formatNumber(s.unlisted)} of the blocks came from addresses that are not in this list. ` : '')
-    + (s.fillKnown
-      ? 'Each tile is a validator in table order: width is its blocks, fill is its voting power against the largest shown.'
-      : 'Each tile is a validator in table order: width is its blocks. Voting power is unknown right now.')
+  return `Most blocks: ${s.top.name}, ${formatNumber(s.top.blocks)} of ${formatNumber(s.windowBlocks)} counted.`
+    + (s.unlisted > 0 ? ` ${formatNumber(s.unlisted)} came from addresses that are not in this list.` : '')
 }

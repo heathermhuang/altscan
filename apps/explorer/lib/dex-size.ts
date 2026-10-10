@@ -14,7 +14,7 @@
 import type { WhaleConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
 import { shortHash } from '@/lib/address-display'
-import { formatCompactUsd, formatNumber } from '@/lib/format'
+import { formatCompactUsd } from '@/lib/format'
 import { clipText } from '@/lib/clip-text'
 import type { StripTile } from '@/lib/tape'
 
@@ -25,16 +25,20 @@ export interface DexSwap {
   tokenOut: string | null
   amountIn: string
   amountOut: string
-  blockNumber: number
 }
 
 type Cfg = Pick<WhaleConfig, 'wrapped' | 'stablecoins'>
 
-/** `amount` base units as dollars to the cent, or null when it is not a non-negative integer. */
+/**
+ * `amount` base units as dollars, to a millionth of one: the amount is multiplied by the price (in micro-dollars
+ * a coin) BEFORE it is divided down by the decimals, so a leg worth less than a hundredth of a coin is still
+ * priced (flooring the amount to hundredths first read 0.009 WBNB as $0 and 1.999 WETH as $5,970 instead of $5,997).
+ * Null when the amount is not a non-negative integer.
+ */
 function dollars(amount: string, decimals: number, perCoin: number): number | null {
   if (!/^\d+$/.test(amount)) return null
-  const cents = (BigInt(amount) * 100n) / 10n ** BigInt(decimals)
-  return (Number(cents) / 100) * perCoin
+  const micro = (BigInt(amount) * BigInt(Math.round(perCoin * 1e6))) / 10n ** BigInt(decimals)
+  return Number(micro) / 1e6
 }
 
 /** The swap's size in USD, or null when it cannot be sized (see the module note). */
@@ -70,20 +74,20 @@ export function dexStripTiles(
 ): StripTile[] {
   return [...swaps].reverse().map((t): StripTile => {
     const usd = tradeUsd(t, nativeUsd, cfg)
-    const pair = `${clip(symbolOf(t.tokenIn))} → ${clip(symbolOf(t.tokenOut))} · #${formatNumber(t.blockNumber)}`
+    const pair = `${clip(symbolOf(t.tokenIn))} → ${clip(symbolOf(t.tokenOut))}`
     return {
       id: String(t.id),
       href: `/tx/${t.txHash}`,
       w: usd === null ? 0 : Math.max(1, Math.round(usd)),
       f: usd === null ? 0 : 100,
       name: `Swap ${shortHash(t.txHash)}`,
-      read: usd === null ? `not priced · ${pair}` : `${formatCompactUsd(usd)} swap · ${pair}`,
+      read: usd === null ? `not priced · ${pair}` : `${formatCompactUsd(usd)} · ${pair}`,
       ...(usd === null ? { hatch: true } : {}),
     }
   })
 }
 
-/** The measure, said exactly; two lines at most on a phone (components/tape/legend-lines.ts). */
+/** The measure, said exactly; two lines at most on a phone (test-support/legend-lines.ts). */
 export function dexLegend(currency: string, nativePriced: boolean): string {
   return nativePriced
     ? `width = USD size (stablecoins $1, ${currency} at market) · ▨ not priced`

@@ -195,17 +195,20 @@ export function stripFills(prices: number[]): number[] {
  * (lib/gas-tape.ts, lib/producers.ts, lib/dex-size.ts, lib/holder-share.ts) make them.
  */
 export interface StripTile {
-  /** Unique within the strip. A tile that pairs with a table row carries that row's link, lowercased. */
-  id: string
+  /**
+   * Unique within the strip. Optional: a tile that links is known by its lowercased `href` (which is also what pairs it
+   * with a table row), the remainder by its `name`. Set it only where hrefs can repeat (two swaps in one transaction).
+   */
+  id?: string
   /** The tile's width: its flex-grow. 0 = a fixed floor width (a hatched tile, which has no measurement). */
   w: number
   /** Fill height, 0-100. */
   f: number
   /** Where the tile goes. Omitted for a tile that is not one thing (the "others" remainder): not focusable. */
   href?: string
-  /** The link's accessible name; the measure is read out by `read`. */
+  /** What the tile is, short enough for the readout (anyone-chosen names are clipped by the builder). */
   name: string
-  /** What hovering or focusing the tile reads in the legend line. */
+  /** Its measure. The tile is announced and read out as `name · read`, so `read` must not repeat the name. */
   read: string
   /** Hatched: its width is not a measurement (a swap with no USD price). */
   hatch?: boolean

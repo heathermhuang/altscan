@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { producerLegend, producerStrip, producerSummary, type ProducerInput } from '@/lib/producers'
-import { legendLines } from '@/components/tape/legend-lines'
+import { legendLines } from '@/test-support/legend-lines'
 
 const E18 = 10n ** 18n
 const v = (n: number, power: bigint | null, name = `Val ${n}`): ProducerInput => ({
@@ -51,7 +51,7 @@ describe('producerStrip', () => {
     const s = producerStrip(unknown, counts({ 1: 3, 2: 1 }), 'BNB')!
     expect(s.fillKnown).toBe(false)
     expect(s.tiles.map(t => t.f)).toEqual([100, 100])
-    expect(producerLegend(false)).toBe('width = blocks produced, last 24h · voting power unknown right now')
+    expect(producerLegend(false)).toBe('width = blocks produced, 24h · voting power unknown right now')
   })
 
   it('draws a stake-less validator (power 0) with an empty fill and an unknown one with none either', () => {
@@ -64,13 +64,15 @@ describe('producerStrip', () => {
   it('pairs each tile with its table row by the same lowercase /address/ link', () => {
     const s = producerStrip(vals, counts({ 1: 1 }), 'BNB')!
     expect(s.tiles[0].href).toBe(`/address/${v(1, 0n).address.toLowerCase()}`)
-    expect(s.tiles[0].id).toBe(s.tiles[0].href)
+    expect(s.tiles[0].id).toBeUndefined()   // the strip keys a linked tile on its href: nothing to send twice
   })
 
-  it('reads name, blocks, share of the window\'s blocks and voting power on hover', () => {
+  it('is the name, then blocks, share of the window\'s blocks and voting power (the strip says name · read)', () => {
     const s = producerStrip(vals, counts({ 1: 30, 2: 70 }), 'BNB')!
-    expect(s.tiles[0].read).toBe('Val 1 · 30 blocks (30.0%) · power 400 BNB')
-    expect(s.tiles[1].read).toBe('Val 2 · 70 blocks (70.0%) · power 200 BNB')
+    expect(s.tiles.map(t => t.name)).toEqual(['Val 1', 'Val 2'])
+    expect(s.tiles[0].read).toBe('30 blocks (30.0%) · power 400 BNB')
+    expect(s.tiles[1].read).toBe('70 blocks (70.0%) · power 200 BNB')
+    expect(s.tiles[0].read).not.toContain('Val 1')   // the name is not sent twice
   })
 
   // The readout replaces the legend in a two-line slot (60px on a phone, 39 columns at 320px). One that wraps
@@ -79,10 +81,11 @@ describe('producerStrip', () => {
     const long = [v(1, 123_456_789_012n * E18, 'N'.repeat(60)), v(2, null, 'M'.repeat(60))]
     const s = producerStrip(long, counts({ 1: 191_999, 2: 1 }), 'BNB')!
     for (const t of s.tiles) {
-      expect(legendLines(t.read), t.read).toBeLessThanOrEqual(2)
-      expect(t.read.length).toBeGreaterThan(40)
+      const said = `${t.name} · ${t.read}`   // what the legend line shows
+      expect(legendLines(said), said).toBeLessThanOrEqual(2)
+      expect(said.length).toBeGreaterThan(40)
     }
-    expect(s.tiles[0].read).toContain(`${'N'.repeat(19)}…`)   // a moniker is anyone's to choose: clipped
+    expect(s.tiles[0].name).toBe(`${'N'.repeat(19)}…`)   // a moniker is anyone's to choose: clipped
   })
 
   it('counts blocks by miners that are not in the list too: they are in the window, so shares are of ALL its blocks', () => {
@@ -93,13 +96,13 @@ describe('producerStrip', () => {
   })
 
   it('says "1 block", not "1 blocks"', () => {
-    expect(producerStrip(vals, counts({ 1: 1, 2: 99 }), 'BNB')!.tiles[0].read).toContain('· 1 block (1.0%) ·')
+    expect(producerStrip(vals, counts({ 1: 1, 2: 99 }), 'BNB')!.tiles[0].read).toContain('1 block (1.0%) ·')
   })
 })
 
 describe('producer text', () => {
   it('states the exact measures in the legend', () => {
-    expect(producerLegend(true)).toBe('width = blocks produced, last 24h · fill = voting power vs the largest')
+    expect(producerLegend(true)).toBe('width = blocks produced, 24h · fill = voting power vs the largest shown')
   })
 
   it('keeps every legend inside the two-line slot at 320px', () => {
@@ -110,17 +113,15 @@ describe('producer text', () => {
     }
   })
 
-  it('summarises for a screen reader, including blocks the list cannot attribute', () => {
+  // The head stat, the list's name and the legend already say what a tile is and how it is measured, so the
+  // text alternative carries only what they do not: the leader, the window's total, and blocks nobody listed.
+  it('summarises for a screen reader with the facts the head, the name and the legend do not carry', () => {
     const s = producerStrip(vals, counts({ 1: 30, 2: 20 }, { '0xdead': 50 }), 'BNB')!
-    expect(producerSummary(s)).toBe(
-      '2 of 4 validators produced blocks in the last 24 hours (100 blocks counted); the most was Val 1 with 30. '
-      + '50 of the blocks came from addresses that are not in this list. '
-      + 'Each tile is a validator in table order: width is its blocks, fill is its voting power against the largest shown.',
-    )
+    expect(producerSummary(s)).toBe('Most blocks: Val 1, 30 of 100 counted. 50 came from addresses that are not in this list.')
   })
 
-  it('leaves the fill out of the summary when voting power is unknown', () => {
-    const s = producerStrip([v(1, null)], counts({ 1: 5 }), 'BNB')!
-    expect(producerSummary(s)).toContain('Each tile is a validator in table order: width is its blocks. Voting power is unknown right now.')
+  it('has no clause about blocks nobody listed when every block is attributed, and is short', () => {
+    const s = producerStrip(vals, counts({ 1: 30, 2: 20 }), 'BNB')!
+    expect(producerSummary(s)).toBe('Most blocks: Val 1, 30 of 50 counted.')
   })
 })

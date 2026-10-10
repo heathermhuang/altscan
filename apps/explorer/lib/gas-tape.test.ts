@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { gasBasis, gasFills, gasLegend, gasStats, gasStripTiles, gasSummary, rowFromBlock, type GasTapeRow } from '@/lib/gas-tape'
-import { legendLines } from '@/components/tape/legend-lines'
+import { legendLines } from '@/test-support/legend-lines'
 
 const row = (n: number, txs: number, used: number, fee: number | null): GasTapeRow => ({ n, txs, used, fee })
 // newest first, as the query returns them
@@ -42,7 +42,7 @@ describe('gasStripTiles', () => {
 
   it('is one tile per block, oldest first (= left to right), linked to the block', () => {
     expect(tiles.map(t => t.href)).toEqual(['/blocks/101', '/blocks/102', '/blocks/103'])
-    expect(tiles.map(t => t.id)).toEqual(['101', '102', '103'])
+    expect(tiles.every(t => t.id === undefined)).toBe(true)   // the href is unique, so it is the identity
     expect(tiles[0].name).toBe('Block 101')
   })
 
@@ -51,14 +51,29 @@ describe('gasStripTiles', () => {
     expect(tiles.map(t => t.f)).toEqual([25, 50, 100])
   })
 
-  it('reads number, transactions and the base fee in Gwei on hover', () => {
-    expect(tiles[2].read).toBe('#103 · 150 txns · base fee 0.8 Gwei')
-    expect(gasStripTiles([row(1_234_567, 3, 9, 1_000_000_000)], 'base-fee')[0].read).toBe('#1,234,567 · 3 txns · base fee 1 Gwei')
+  it('reads transactions and the base fee in Gwei on hover (the name is the block)', () => {
+    expect(tiles[2].read).toBe('150 txns · base fee 0.8 Gwei')
+    const big = gasStripTiles([row(1_234_567, 3, 9, 1_000_000_000)], 'base-fee')[0]
+    expect(big.name).toBe('Block 1,234,567')
+    expect(big.read).toBe('3 txns · base fee 1 Gwei')
+  })
+
+  it('reads an unknown base fee as unknown, never as 0 Gwei, and draws it empty', () => {
+    const t = gasStripTiles([row(103, 5, 10, 800_000_000), row(102, 5, 10, null)], 'base-fee')
+    expect(t[0].read).toBe('5 txns · base fee unknown')
+    expect(t[0].f).toBe(0)
+    expect(t[1].read).toBe('5 txns · base fee 0.8 Gwei')
+    expect(t.map(x => x.read).join()).not.toContain('0 Gwei')
+  })
+
+  it('does not call a real zero base fee unknown (it is a reading)', () => {
+    const t = gasStripTiles([row(103, 5, 10, 800_000_000), row(102, 5, 10, 0)], 'base-fee')
+    expect(t[0].read).toBe('5 txns · base fee 0 Gwei')
   })
 
   it('under the fallback it reads gas used, so the readout never claims a base fee that is not there', () => {
     const t = gasStripTiles(bnb, 'gas-used')
-    expect(t[2].read).toBe('#103 · 150 txns · gas used 60%')
+    expect(t[2].read).toBe('150 txns · gas used 60%')
     expect(t.map(x => x.f)).toEqual([0, 40, 60])
   })
 
@@ -70,7 +85,7 @@ describe('gasStripTiles', () => {
 describe('gas strip text', () => {
   it('states the exact fill in the legend, and says when it is the fallback', () => {
     expect(gasLegend('base-fee')).toBe('width = transactions · fill = base fee, % of the highest here · newest at right')
-    expect(gasLegend('gas-used')).toBe('width = transactions · fill = gas used (no base fee here) · newest at right')
+    expect(gasLegend('gas-used')).toBe('width = transactions · fill = gas used, % of limit · newest at right')
   })
 
   it('keeps both legends inside the two-line slot at 320px, so hovering never changes the band\'s height', () => {
@@ -84,6 +99,12 @@ describe('gas strip text', () => {
   it('heads the band with the newest block and the base fee range, or says there is none', () => {
     expect(gasStats(eth, 'base-fee')).toEqual({ main: 'latest #103', side: 'base fee 0.2–0.8 Gwei' })
     expect(gasStats(bnb, 'gas-used')).toEqual({ main: 'latest #103', side: 'no base fee on this chain: fill is gas used' })
+  })
+
+  it('says so in the text alternative when the newest block\'s base fee is unknown, not "0 Gwei"', () => {
+    const newestUnknown = [row(103, 5, 10, null), row(102, 5, 10, 800_000_000)]
+    expect(gasSummary(newestUnknown, 'base-fee')).toContain('the newest, block 103, has no base fee reading.')
+    expect(gasSummary(newestUnknown, 'base-fee')).not.toContain('was 0')
   })
 
   it('summarises for a screen reader with the same numbers the tiles carry', () => {

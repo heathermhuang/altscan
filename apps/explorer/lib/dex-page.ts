@@ -10,7 +10,7 @@ import { desc, sql } from 'drizzle-orm'
 import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { createPageCache } from '@/lib/page-cache'
-import { fetchNativeUsd } from '@/lib/native-price'
+import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
 import { withTimeout } from '@/lib/with-timeout'
 
 export const DEX_PAGE_SIZE = 25
@@ -46,15 +46,12 @@ export type DexPageData = {
 }
 
 /**
- * How long the cached read waits for the native price. Binance is 3 s a host and a miss falls through to
- * slower sources; the strip degrades visibly without a price, the table does not need it, so a hung
- * provider must not hold the cache fill (and the page behind it) for the helper's full 11 s.
+ * The native price, or null when no source answered inside the helper's own budget (what its chain needs to reach a
+ * non-Binance fallback, the same bound /whales uses) or the read threw. The strip degrades visibly without a price
+ * and the table does not need it, but a smaller wait would make every fallback after Binance unreachable.
  */
-export const DEX_PRICE_WAIT_MS = 4000
-
-/** The native price, or null when no source answered inside the bound (or the read threw). */
 export function readNativeUsd(fetchPrice: () => Promise<number | null> = fetchNativeUsd): Promise<number | null> {
-  return withTimeout(fetchPrice(), DEX_PRICE_WAIT_MS).catch(() => null)
+  return withTimeout(fetchPrice(), NATIVE_PRICE_BUDGET_MS).catch(() => null)
 }
 
 function estimate(result: unknown, key: string): number {

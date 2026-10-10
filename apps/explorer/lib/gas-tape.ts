@@ -48,20 +48,20 @@ export function gasStripTiles(rows: readonly GasTapeRow[], basis: GasBasis): Str
     .map((r, i) => ({ r, f: fills[i] }))
     .sort((a, b) => a.r.n - b.r.n)
     .map(({ r, f }) => ({
-      id: String(r.n),
       href: `/blocks/${r.n}`,
       w: tapeWeight(r.txs),
       f,
       name: `Block ${formatNumber(r.n)}`,
-      read: `#${formatNumber(r.n)} · ${r.txs} txns · ${basis === 'base-fee' ? `base fee ${gwei(r.fee ?? 0)} Gwei` : `gas used ${r.used}%`}`,
+      // An unknown base fee (null) is not a zero one: it must never read "0 Gwei".
+      read: `${r.txs} txns · ${basis === 'gas-used' ? `gas used ${r.used}%` : r.fee === null ? 'base fee unknown' : `base fee ${gwei(r.fee)} Gwei`}`,
     }))
 }
 
-/** The measure, said exactly; two lines at most on a phone (see components/tape/legend-lines.ts). */
+/** The measure, said exactly; two lines at most on a phone (see test-support/legend-lines.ts). */
 export function gasLegend(basis: GasBasis): string {
   return basis === 'base-fee'
     ? 'width = transactions · fill = base fee, % of the highest here · newest at right'
-    : 'width = transactions · fill = gas used (no base fee here) · newest at right'
+    : 'width = transactions · fill = gas used, % of limit · newest at right'
 }
 
 const newest = (rows: readonly GasTapeRow[]) => rows.reduce((m, r) => (r.n > m.n ? r : m), rows[0])
@@ -87,6 +87,7 @@ export function gasSummary(rows: readonly GasTapeRow[], basis: GasBasis): string
   }
   const fees = rows.flatMap(r => (r.fee !== null && r.fee > 0 ? [r.fee] : []))
   const latest = newest(rows)
-  return `Base fee across the latest ${n} blocks ran from ${gwei(Math.min(...fees))} to ${gwei(Math.max(...fees))} Gwei; the newest, block ${formatNumber(latest.n)}, was ${gwei(latest.fee ?? 0)} Gwei. `
+  const newestFee = latest.fee === null ? 'has no base fee reading.' : `was ${gwei(latest.fee)} Gwei.`
+  return `Base fee across the latest ${n} blocks ran from ${gwei(Math.min(...fees))} to ${gwei(Math.max(...fees))} Gwei; the newest, block ${formatNumber(latest.n)}, ${newestFee} `
     + 'Each tile is a block: width is its transactions, fill is its base fee as a share of the highest in view.'
 }

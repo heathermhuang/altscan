@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dexLegend, dexStripTiles, dexSummary, tradeUsd, type DexSwap } from '@/lib/dex-size'
-import { legendLines } from '@/components/tape/legend-lines'
+import { legendLines } from '@/test-support/legend-lines'
 
 const WRAPPED = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c'
 const USDT = '0x55d398326f99059ff775485246999027b3197955'
@@ -16,7 +16,7 @@ const cfg6 = {
 }
 const E18 = 10n ** 18n
 const swap = (o: Partial<DexSwap> & Pick<DexSwap, 'tokenIn' | 'tokenOut' | 'amountIn' | 'amountOut'>): DexSwap => ({
-  id: 1, txHash: `0x${'ab'.repeat(32)}`, blockNumber: 100, ...o,
+  id: 1, txHash: `0x${'ab'.repeat(32)}`, ...o,
 })
 
 describe('tradeUsd', () => {
@@ -61,15 +61,37 @@ describe('tradeUsd', () => {
     expect(tradeUsd(swap({ tokenIn: USDT, amountIn: 'x', tokenOut: JUNK, amountOut: '1' }), null, cfg18)).toBeNull()
   })
 
+  // The amount is scaled by the price BEFORE it is divided down: flooring it to hundredths of a coin first
+  // priced 0.009 WBNB (at $600) at $0, and 1.999 WETH (at $3,000) at $5,970 instead of $5,997.
+  it('does not floor a sub-0.01-coin leg to nothing before pricing it (18-decimal wrapped native)', () => {
+    const at = (units: bigint, price: number, wrapped = WRAPPED) =>
+      tradeUsd(swap({ tokenIn: JUNK, amountIn: '1', tokenOut: wrapped, amountOut: units.toString() }), price, cfg18)
+    expect(at(9n * 10n ** 15n, 600)).toBe(5.4)                  // 0.009 WBNB
+    expect(at(99n * 10n ** 14n, 3000)).toBe(29.7)               // 0.0099 WETH
+    expect(at(1999n * 10n ** 15n, 3000)).toBe(5997)             // 1.999 WETH
+  })
+
+  it('and the same on a 6-decimal chain, for a stablecoin and for a wrapped token with other decimals', () => {
+    expect(tradeUsd(swap({ tokenIn: JUNK, amountIn: '1', tokenOut: USDC6, amountOut: '5000' }), null, cfg6)).toBe(0.005)   // 0.005 USDC
+    expect(tradeUsd(swap({ tokenIn: USDC6, amountIn: '999999', tokenOut: JUNK, amountOut: '1' }), null, cfg6)).toBe(0.999999)
+    const cfg8 = { ...cfg6, wrapped: { ...cfg6.wrapped, decimals: 8 } }   // a WBTC-like wrapped token
+    expect(tradeUsd(swap({ tokenIn: JUNK, amountIn: '1', tokenOut: WRAPPED, amountOut: '900000' }), 60000, cfg8)).toBe(540)   // 0.009 coin
+  })
+
+  it('a price with cents is applied exactly', () => {
+    const t = swap({ tokenIn: JUNK, amountIn: '1', tokenOut: WRAPPED, amountOut: (3n * E18).toString() })
+    expect(tradeUsd(t, 612.34, cfg18)).toBeCloseTo(1837.02, 9)
+  })
+
   it('keeps cents on a large amount and does not lose the integer part', () => {
     expect(tradeUsd(swap({ tokenIn: USDT, amountIn: (123456789n * E18 + E18 / 4n).toString(), tokenOut: JUNK, amountOut: '1' }), null, cfg18)).toBe(123456789.25)
   })
 })
 
 describe('dexStripTiles', () => {
-  const a = swap({ id: 30, tokenIn: USDT, amountIn: (100n * E18).toString(), tokenOut: JUNK, amountOut: '1', blockNumber: 12, txHash: `0x${'aa'.repeat(32)}` })
-  const b = swap({ id: 29, tokenIn: JUNK, amountIn: '5', tokenOut: JUNK, amountOut: '9', blockNumber: 11, txHash: `0x${'bb'.repeat(32)}` })
-  const c = swap({ id: 28, tokenIn: JUNK, amountIn: '5', tokenOut: WRAPPED, amountOut: (E18 / 10n).toString(), blockNumber: 10, txHash: `0x${'cc'.repeat(32)}` })
+  const a = swap({ id: 30, tokenIn: USDT, amountIn: (100n * E18).toString(), tokenOut: JUNK, amountOut: '1', txHash: `0x${'aa'.repeat(32)}` })
+  const b = swap({ id: 29, tokenIn: JUNK, amountIn: '5', tokenOut: JUNK, amountOut: '9', txHash: `0x${'bb'.repeat(32)}` })
+  const c = swap({ id: 28, tokenIn: JUNK, amountIn: '5', tokenOut: WRAPPED, amountOut: (E18 / 10n).toString(), txHash: `0x${'cc'.repeat(32)}` })
   const sym = (addr: string | null) => ({ [USDT]: 'USDT', [WRAPPED]: 'WBNB' }[addr ?? ''] ?? 'Unknown token')
   const tiles = dexStripTiles([a, b, c], 600, sym, cfg18)   // the page's order: newest first
 
@@ -93,15 +115,26 @@ describe('dexStripTiles', () => {
 
   it('links to the transaction and reads USD, tokens and block on hover', () => {
     expect(tiles[2].href).toBe(`/tx/0x${'aa'.repeat(32)}`)
-    expect(tiles[2].read).toBe('$100 swap · USDT → Unknown token · #12')
-    expect(tiles[1].read).toBe('not priced · Unknown token → Unknown token · #11')
-    expect(tiles[0].read).toBe('$60 swap · Unknown token → WBNB · #10')
     expect(tiles[2].name).toBe('Swap 0xaaaaaa…aaaaa')
+    expect(tiles[2].read).toBe('$100 · USDT → Unknown token')
+    expect(tiles[1].read).toBe('not priced · Unknown token → Unknown token')
+    expect(tiles[0].read).toBe('$60 · Unknown token → WBNB')
   })
 
   it('clips a long symbol, which anyone can choose, so a readout cannot run to three lines', () => {
     const t = dexStripTiles([swap({ tokenIn: USDT, amountIn: E18.toString(), tokenOut: JUNK, amountOut: '1' })], null, addr => (addr === USDT ? 'USDT' : 'A'.repeat(60)), cfg18)
-    expect(t[0].read).toBe(`$1 swap · USDT → ${'A'.repeat(13)}… · #100`)
+    expect(t[0].read).toBe(`$1 · USDT → ${'A'.repeat(13)}…`)
+  })
+
+  // The legend line shows `name · read`; one that wraps to a third line moves the band (see components/tape).
+  it('keeps the readout inside the two-line slot at 320px for the longest realistic swap', () => {
+    const big = swap({ tokenIn: USDT, amountIn: (123_456_789n * E18).toString(), tokenOut: JUNK, amountOut: '1' })
+    const t = dexStripTiles([big], null, addr => (addr === USDT ? 'S'.repeat(40) : 'T'.repeat(40)), cfg18)[0]
+    const said = `${t.name} · ${t.read}`
+    expect(legendLines(said), said).toBeLessThanOrEqual(2)
+    expect(said.length).toBeGreaterThan(40)
+    const none = dexStripTiles([swap({ tokenIn: JUNK, amountIn: '1', tokenOut: JUNK, amountOut: '1' })], null, () => 'S'.repeat(40), cfg18)[0]
+    expect(legendLines(`${none.name} · ${none.read}`), none.read).toBeLessThanOrEqual(2)
   })
 
   it('draws nothing for no swaps', () => {

@@ -1,6 +1,6 @@
 /**
- * How many lines `text` takes in a monospace column `cols` wide, breaking at spaces as the browser does.
- * For tests of the tape legends: `.tp-leg` is two lines tall on a phone (60px), and hovering or focusing a
+ * TEST-ONLY (nothing in the app imports this). How many lines `text` takes in a monospace column `cols` wide,
+ * breaking at spaces as the browser does. For tests of the tape legends and readouts: `.tp-leg` is two lines tall on a phone (60px), and hovering or focusing a
  * tile swaps a one-line readout in, so a legend that wraps to a third line makes the band, and everything
  * below it, jump by a line on that swap. At 320px the legend has 288px, which is 39 glyphs of 7.2px with a
  * sub-pixel of slack (40 would be exactly full).

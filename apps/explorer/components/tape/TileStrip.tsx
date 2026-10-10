@@ -18,7 +18,13 @@ import { onArrowKeys } from './roving'
  *
  * Tiles are bare `<li><a/></li>` with `--w` / `--f` variables, so the layout is pure CSS and nothing
  * here measures anything. A tile with no `href` (`rest`) is not a link and not a tab stop.
+ * A tile is announced AND read out as `name · read`: that one string is its accessible name and its readout.
  */
+/** A tile's identity within its strip: its id, else its lowercase href (what a table row's link is matched against), else its name. */
+const keyOf = (t: StripTile) => t.id ?? t.href?.toLowerCase() ?? t.name
+/** What a screen reader announces for the tile and what the legend line reads out while it is hovered or focused. */
+const say = (t: StripTile) => `${t.name} · ${t.read}`
+
 export function TileStrip({
   tiles, title, stats, label, legend, summary, entry = 'first', rowsId, bare,
 }: {
@@ -27,7 +33,7 @@ export function TileStrip({
   stats?: { main: string; side?: string }
   /** The list's accessible name: what it is, and what width and fill mean. */
   label: string
-  /** The exact measure, in at most two lines on a phone (components/tape/legend-lines.ts). */
+  /** The exact measure, in at most two lines on a phone (test-support/legend-lines.ts). */
   legend: string
   /** The strip's text alternative, read with the list (aria-describedby). */
   summary: string
@@ -72,13 +78,14 @@ export function TileStrip({
   if (tiles.length === 0) return null
 
   const linked = tiles.filter(t => t.href)
-  const entryId = (entry === 'last' ? linked[linked.length - 1] : linked[0])?.id
-  const stop = rove !== null && linked.some(t => t.id === rove) ? rove : entryId
-  const active = tiles.find(t => t.id === hot)
+  const entryTile = entry === 'last' ? linked[linked.length - 1] : linked[0]
+  const entryId = entryTile && keyOf(entryTile)
+  const stop = rove !== null && linked.some(t => keyOf(t) === rove) ? rove : entryId
+  const active = tiles.find(t => keyOf(t) === hot)
   const idOf = (e: SyntheticEvent) => {
     const li = (e.target as HTMLElement).closest('li')
     const i = li?.parentElement ? Array.prototype.indexOf.call(li.parentElement.children, li) : -1
-    return tiles[i]?.id ?? null
+    return tiles[i] ? keyOf(tiles[i]) : null
   }
 
   return (
@@ -109,17 +116,18 @@ export function TileStrip({
           onBlur={() => setHover(null)}
         >
           {tiles.map(t => {
-            const on = t.id === hot ? '' : undefined
+            const key = keyOf(t)
+            const on = key === hot ? '' : undefined
             return (
               <li
-                key={t.id}
+                key={key}
                 className={t.hatch ? 'h' : t.rest ? 'r' : undefined}
                 style={{ '--w': t.w, '--f': `${t.f}%` } as CSSProperties}
               >
                 {t.href ? (
-                  <a href={t.href} tabIndex={t.id === stop ? 0 : -1} aria-label={t.name} data-hot={on} />
+                  <a href={t.href} tabIndex={key === stop ? 0 : -1} aria-label={say(t)} data-hot={on} />
                 ) : (
-                  <i role="img" aria-label={t.name} data-hot={on} />
+                  <i role="img" aria-label={say(t)} data-hot={on} />
                 )}
               </li>
             )
@@ -129,7 +137,7 @@ export function TileStrip({
       <p id={summaryId} className="sr-only">{summary}</p>
       <div className="tp-leg">
         <p data-readout aria-live="polite" className={active ? 'text-ink' : undefined}>
-          {active ? active.read : legend}
+          {active ? say(active) : legend}
         </p>
       </div>
     </div>

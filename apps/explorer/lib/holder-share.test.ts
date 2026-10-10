@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bpText, holderShares, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
-import { legendLines } from '@/components/tape/legend-lines'
+import { legendLines } from '@/test-support/legend-lines'
 
 const SUPPLY = '1000000000000000000000' // 1,000 tokens of 18 decimals
 const tok = (n: number) => (BigInt(n) * 10n ** 18n).toString()
@@ -52,12 +52,17 @@ describe('holderStripTiles', () => {
   const tiles = holderStripTiles(rows, shares, 'USDT')
 
   it('is one tile per holder, in rank order, then one "others" tile', () => {
-    expect(tiles.map(t => t.id)).toEqual([
+    expect(tiles.map(t => t.href)).toEqual([
       '/address/0xabcdef0000000000000000000000000000000001',
       '/address/0x0000000000000000000000000000000000000002',
-      'rest',
+      undefined,
     ])
+    expect(tiles.map(t => t.rest ?? false)).toEqual([false, false, true])
     expect(tiles.map(t => t.w)).toEqual([250_000, 125_000, 625_000])
+  })
+
+  it('sends no ids: the strip keys a linked tile on its href and the remainder on its name', () => {
+    expect(tiles.every(t => t.id === undefined)).toBe(true)
   })
 
   it('links a holder tile to its address by the same lowercase href the table row carries (that is what pairs them)', () => {
@@ -68,14 +73,16 @@ describe('holderStripTiles', () => {
 
   it('keeps the readout inside the two-line slot at 320px even for a long label, a huge balance and a long symbol', () => {
     const worst = holderStripTiles([{ addr: rows[0].addr, name: 'L'.repeat(60), amount: '987,654,321,098,765' }], shares, 'S'.repeat(40))[0]
-    expect(legendLines(worst.read), worst.read).toBeLessThanOrEqual(2)
-    expect(worst.read).toContain(`${'L'.repeat(19)}…`)
+    const said = `${worst.name} · ${worst.read}`   // what the legend line shows
+    expect(legendLines(said), said).toBeLessThanOrEqual(2)
+    expect(worst.name).toBe(`#1 ${'L'.repeat(19)}…`)
   })
 
-  it('reads the rank, name, share and amount on hover, and the rest\'s share', () => {
-    expect(tiles[0].read).toBe('#1 Binance 8 · 25.00% of supply · 250 USDT')
-    expect(tiles[2].read).toBe('Everyone else · 62.50% of supply')
-    expect(tiles[0].name).toBe('Holder 1: Binance 8')
+  it('is the rank and name, then the share and amount (the strip says name · read), and the rest\'s share', () => {
+    expect(tiles[0].name).toBe('#1 Binance 8')
+    expect(tiles[0].read).toBe('25.00% of supply · 250 USDT')
+    expect(tiles[2].name).toBe('Everyone else')
+    expect(tiles[2].read).toBe('62.50% of supply')
   })
 
   it('has no fill measure: every holder tile is solid', () => {
@@ -89,7 +96,7 @@ describe('holderStripTiles', () => {
 
   it('draws no "others" tile when there is nothing left over', () => {
     const all = holderShares([tok(700), tok(400)], SUPPLY)!
-    expect(holderStripTiles(rows, all, 'USDT').map(t => t.id)).not.toContain('rest')
+    expect(holderStripTiles(rows, all, 'USDT').map(t => t.name)).not.toContain('Everyone else')
   })
 })
 

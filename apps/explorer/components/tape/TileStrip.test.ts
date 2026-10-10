@@ -4,11 +4,12 @@ import { describe, expect, it } from 'vitest'
 import { TileStrip } from './TileStrip'
 import type { StripTile } from '@/lib/tape'
 
+// No ids: a linked tile is known by its lowercase href, the remainder by its name (components/tape/TileStrip.tsx).
 const tiles: StripTile[] = [
-  { id: '/address/0xa', href: '/address/0xa', w: 30, f: 100, name: 'Alpha', read: 'Alpha · 30' },
-  { id: '/address/0xb', href: '/address/0xb', w: 0, f: 0, name: 'Beta', read: 'Beta · not priced', hatch: true },
-  { id: '/address/0xc', href: '/address/0xc', w: 10, f: 40, name: 'Gamma', read: 'Gamma · 10' },
-  { id: 'rest', w: 60, f: 0, name: 'All other holders', read: 'Everyone else', rest: true },
+  { href: '/address/0xa', w: 30, f: 100, name: 'Alpha', read: '30 blocks' },
+  { href: '/address/0xb', w: 0, f: 0, name: 'Beta', read: 'not priced', hatch: true },
+  { href: '/address/0xC', w: 10, f: 40, name: 'Gamma', read: '10 blocks' },
+  { w: 60, f: 0, name: 'All other holders', read: '60% of supply', rest: true },
 ]
 const draw = (props: Record<string, unknown> = {}) =>
   renderToStaticMarkup(createElement(TileStrip, {
@@ -39,17 +40,34 @@ describe('TileStrip markup', () => {
     const h = draw()
     expect(h.match(/tabindex="0"/g)).toHaveLength(1)
     expect(h.match(/tabindex="-1"/g)).toHaveLength(2)
-    expect(h).toMatch(/<a href="\/address\/0xa" tabindex="0" aria-label="Alpha">/)
+    expect(h).toMatch(/<a href="\/address\/0xa" tabindex="0" aria-label="Alpha · 30 blocks">/)
   })
 
   it('can enter at the newest (last) tile instead', () => {
-    expect(draw({ entry: 'last' })).toMatch(/<a href="\/address\/0xc" tabindex="0" aria-label="Gamma">/)
+    expect(draw({ entry: 'last' })).toMatch(/<a href="\/address\/0xC" tabindex="0" aria-label="Gamma · 10 blocks">/)
   })
 
   it('draws the remainder as a named image, not a link', () => {
     const h = draw()
-    expect(h).toMatch(/<li class="r"[^>]*><i role="img" aria-label="All other holders"><\/i><\/li>/)
+    expect(h).toMatch(/<li class="r"[^>]*><i role="img" aria-label="All other holders · 60% of supply"><\/i><\/li>/)
     expect(h.match(/<a /g)).toHaveLength(3)
+  })
+
+  it('names every tile by what it is AND its value (name · measure), so a screen reader hears the number, not just the name', () => {
+    const h = draw()
+    expect([...h.matchAll(/aria-label="([^"]*)"/g)].map(m => m[1]).filter(l => l.includes(' · '))).toEqual([
+      'Alpha · 30 blocks', 'Beta · not priced', 'Gamma · 10 blocks', 'All other holders · 60% of supply',
+    ])
+  })
+
+  it('stays ONE tab stop when no tile has an id (ids default to the lowercase href, or the name for the remainder)', () => {
+    const noIds = draw({ tiles: tiles.map(({ id: _id, ...t }) => t) })
+    expect(noIds.match(/tabindex="0"/g)).toHaveLength(1)
+    // two linked tiles with the same href but different ids are still told apart by their ids
+    const twins = draw({ tiles: [
+      { id: 'a', href: '/tx/0x1', w: 1, f: 0, name: 'S1', read: 'x' }, { id: 'b', href: '/tx/0x1', w: 1, f: 0, name: 'S2', read: 'y' },
+    ] })
+    expect(twins.match(/tabindex="0"/g)).toHaveLength(1)
   })
 
   it('names the encoding on the list and points it at a text alternative', () => {
