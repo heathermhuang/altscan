@@ -176,6 +176,32 @@ describe('token page: metadata and breadcrumb JSON-LD', () => {
     expect(out.match(/<script type="application\/ld\+json">.*?<\/script>/)![0]).not.toContain('claim-bnb.xyz')
   })
 
+  // Names and symbols are typed by whoever deployed the contract, and the JSON-LD is a raw <script> block.
+  const HOSTILE = '</script><img src=x onerror=alert(1)> "q" \u2028 <!--'
+  const ldBlocks = (html: string) => [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => m[1])
+
+  it('a hostile link-like symbol never reaches the JSON-LD: the token is named by its short address', async () => {
+    h.row = tokenRow(`claim.xyz${HOSTILE}`, `Visit claim.xyz${HOSTILE}`)
+    const out = await render()
+    const [ld] = ldBlocks(out)
+    expect(ld).toBeDefined()
+    expect(ld).not.toContain('claim.xyz')
+    expect(JSON.parse(ld).itemListElement.at(-1).name).toBe(SHORT)
+    expect(out).not.toContain('<img src=x')   // the h1 prints the text escaped
+  })
+
+  it('a hostile name that is not link-like is escaped: the script block cannot be closed from inside it', async () => {
+    h.row = tokenRow('X', `Evil${HOSTILE}`)
+    const out = await render()
+    const blocks = ldBlocks(out)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).not.toContain('<')                       // every "<" is \u003c
+    expect(blocks[0]).toContain('\\u003c/script>')
+    expect(JSON.parse(blocks[0]).itemListElement.at(-1).name).toBe(`Evil${HOSTILE} (X)`)   // and it still parses to the exact text
+    expect(out).not.toContain('<img src=x')
+    expect(out.match(/<\/script>/g) ?? []).toHaveLength(1)    // the one that closes the JSON-LD block
+  })
+
   it('a token read live from the node (not indexed yet) is named the same way in the metadata and the page', async () => {
     h.indexed = false
     const m = JSON.parse(await meta())

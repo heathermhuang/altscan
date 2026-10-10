@@ -167,8 +167,7 @@ describe('NFTs tab (cards in NftsLazy)', () => {
 
   it('the image\'s alt text, shown if the picture fails and read by a screen reader, does not repeat the URL', () => {
     const html = card('Visit claim-bnb.xyz', 'APE', 'https://img.example/ape.png')
-    const alt = html.match(/alt="([^"]*)"/)?.[1] ?? ''
-    expect(alt).not.toContain('claim-bnb.xyz')
+    expect(html.match(/<img[^>]* alt="([^"]*)"/)?.[1]).toBe(SHORT)
     expect(card('Cool Apes', 'APE', 'https://img.example/ape.png')).toContain('alt="Cool Apes"')
   })
 })

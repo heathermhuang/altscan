@@ -68,10 +68,22 @@ describe('/dex swap legs', () => {
     }
   })
 
-  it('the strip and the table agree: the strip\'s read names the same token the same way', async () => {
+  // The strip draws the same swap as the table row ("... · A -> B"), from its own code path (dexStripTiles). It must name each
+  // token exactly as the table's two legs do, so a regression in either one alone breaks the match.
+  it('the strip and the table name each token the same way', async () => {
+    const stripPair = (html: string) => html.match(/[^<>"]*· ([^<>"·]*→[^<>"·]*)/)?.[1]?.trim()
+    for (const symbols of [
+      { [A]: 'claim-bnb.xyz', [B]: 'WBNB' },
+      { [A]: 'CAKE', [B]: '@airdrop_bot' },
+      { [A]: 'CAKE', [B]: 'WBNB' },
+      { [A]: '???', [B]: 'USDT.z' },
+    ]) {
+      h.symbols = symbols
+      const out = await render()
+      const [inLeg, outLeg] = legs(out).map((l) => l[1])
+      expect(stripPair(out), JSON.stringify(symbols)).toBe(`${inLeg} → ${outLeg}`)
+    }
     h.symbols = { [A]: 'claim-bnb.xyz', [B]: 'WBNB' }
-    const out = await render()
-    expect(out).toContain(shortenAddress(A))
-    expect(out).not.toContain('claim-bnb.xyz')
+    expect(stripPair(await render())).toBe(`${shortenAddress(A)} → WBNB`)
   })
 })
