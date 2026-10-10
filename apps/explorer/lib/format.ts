@@ -300,14 +300,18 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
 }
 
 /**
- * An amount that arrives already scaled, as a decimal string (a provider's `valueFormatted`), for
- * display: grouped, at most 6 fraction digits. A non-zero amount below 0.0001 reads "<0.0001" (the
- * `tinyAmount` rule) instead of its digits, or a "0" that says nothing moved; zero stays "0".
+ * An amount that arrives already scaled, as a decimal string (a provider's `valueFormatted`), through
+ * `formatTokenAmount` at six places: the helper, rounding and floor every other amount on the address
+ * page uses, so a non-zero amount that rounds away reads "<0.000001" instead of "0", and zero stays "0".
+ * The string is converted to base units without floating point (so nothing is lost on a large amount)
+ * and without the row's `tokenDecimals`, which the backfill table records as '0' when it has none.
+ * Text that is not a plain non-negative decimal ("1e-8", "") is returned as it came.
  */
 export function formatDecimalAmount(valueFormatted: string): string {
-  const n = parseFloat(valueFormatted)
-  if (n > 0 && n < 0.0001) return tinyAmount(4)
-  return n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(valueFormatted)
+  if (!m) return valueFormatted
+  const fraction = m[2] ?? ''
+  return formatTokenAmount(BigInt(m[1] + fraction), fraction.length, 6)
 }
 
 /** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th … 21st. */

@@ -440,22 +440,44 @@ describe('unitsToDecimal', () => {
 })
 
 // The transfers tab (a client component) used parseFloat(valueFormatted).toLocaleString(.., { maximumFractionDigits: 6 }),
-// which prints any amount under 0.0000005 as "0" -- the same as a zero-value transfer.
+// which prints any amount under 0.0000005 as "0" -- the same as a zero-value transfer. It now reads the amount through
+// formatTokenAmount at six places, the helper and floor the Holdings tab on the same page uses.
 describe('formatDecimalAmount', () => {
   const inline = (v: string) => parseFloat(v).toLocaleString('en-US', { maximumFractionDigits: 6 })
 
-  it.each(['0.00009999', '0.00001', '0.000001', '0.0000004', '0.00000001', '1e-8'])('reads the dust amount %s as "<0.0001", not "0"', (v) => {
-    expect(formatDecimalAmount(v)).toBe('<0.0001')
+  it.each(['0.0000004', '0.00000049', '0.00000001', '0.000000000000000001'])('reads the dust amount %s as "<0.000001", not "0"', (v) => {
+    expect(formatDecimalAmount(v)).toBe('<0.000001')
   })
 
   it('keeps zero as "0", whatever its spelling', () => {
     for (const v of ['0', '0.0', '0.000000000000000000']) expect(formatDecimalAmount(v)).toBe('0')
   })
 
-  it('prints every amount from 0.0001 up exactly as the inline expression did', () => {
-    for (const v of ['0.0001', '0.000123456789', '0.5', '1', '1234.5', '999999.9999999', '1234567.1234567', '123456789012345680000']) {
+  it('gives the same text as the Holdings tab for the same amount', () => {
+    // Holdings formats raw base units: formatTokenAmount(raw, decimals, 6). Same floor, rounding, grouping and trimming.
+    const cases: Array<[string, string, number]> = [
+      ['0.000000000000000001', '1', 18],
+      ['0.0000004', '400000000000', 18],
+      ['0.0000005', '500000000000', 18],
+      ['0.000001', '1000000000000', 18],
+      ['0.00001', '10000000000000', 18],
+      ['0.000123456789', '123456789000000', 18],
+      ['1234567.1234567', '1234567123456700000000000', 18],
+      ['1234.5', '1234500000', 6],
+      ['25', '25', 0],
+      ['123456789012345680000', '123456789012345680000', 0],
+    ]
+    for (const [decimal, raw, decimals] of cases) expect(formatDecimalAmount(decimal), decimal).toBe(formatTokenAmount(raw, decimals, 6))
+  })
+
+  it('prints every amount from 0.000001 up exactly as the inline expression did', () => {
+    for (const v of ['0.000001', '0.00001', '0.0001', '0.000123456', '0.5', '1', '1234.5', '999999.9999999', '1234567.1234567', '123456789012345680000']) {
       expect(formatDecimalAmount(v), v).toBe(inline(v))
     }
     expect(formatDecimalAmount('1234567.1234567')).toBe('1,234,567.123457')
+  })
+
+  it('returns text it cannot read as a plain decimal unchanged, rather than a made-up number', () => {
+    for (const v of ['1e-8', '', 'n/a', '-1.5']) expect(formatDecimalAmount(v)).toBe(v)
   })
 })
