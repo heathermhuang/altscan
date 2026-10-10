@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
-import { exactMatchQuery, suggestQuery } from './token-suggest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { SQL } from 'drizzle-orm'
+import { exactMatchQuery, suggestQuery, suggestRows, SUGGEST_POPULAR_ROWS, SUGGEST_PREFIX_ROWS } from './token-suggest'
 
 /**
  * The two token lookups behind the header typeahead and /search's exact matches, against a REAL Postgres,
@@ -49,7 +51,10 @@ const FIXTURE = `
   ANALYZE tokens;
 `
 
-type PlanNode = { 'Node Type': string; 'Index Name'?: string; 'Relation Name'?: string; Plans?: PlanNode[] }
+type PlanNode = {
+  'Node Type': string; 'Index Name'?: string; 'Relation Name'?: string; 'Actual Rows'?: number; 'Actual Loops'?: number
+  'Rows Removed by Filter'?: number; Plans?: PlanNode[]
+}
 const walk = (n: PlanNode): PlanNode[] => [n, ...(n.Plans ?? []).flatMap(walk)]
 
 describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a real Postgres', () => {
@@ -69,14 +74,22 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
     await conn?.end({ timeout: 5 })
   })
 
-  /** The plan Postgres picks for the exact statement drizzle sends, as { index names used, any seq scan }. */
-  async function planOf(q: { toSQL(): { sql: string; params: unknown[] } }) {
-    const { sql: text, params } = q.toSQL()
-    const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (FORMAT JSON) ${text}`, params as never[])
+  const toText = (q: SQL | { toSQL(): { sql: string; params: unknown[] } }) =>
+    'toSQL' in q ? q.toSQL() : new PgDialect().sqlToQuery(q)
+
+  /**
+   * The plan Postgres picks for the exact statement drizzle sends: the index names used, whether it seq-scans,
+   * and how many tokens rows it read (returned, or read and thrown away by a filter).
+   */
+  async function planOf(q: SQL | { toSQL(): { sql: string; params: unknown[] } }) {
+    const { sql: text, params } = toText(q)
+    const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
     const nodes = walk(explained.Plan as PlanNode)
+    const scans = nodes.filter((n) => /Scan$/.test(n['Node Type']) && n['Node Type'] !== 'Bitmap Index Scan' && n['Relation Name'] === 'tokens')
     return {
       indexes: [...new Set(nodes.map((n) => n['Index Name']).filter(Boolean))],
       seqScan: nodes.some((n) => n['Node Type'] === 'Seq Scan'),
+      rowsRead: scans.reduce((n, s) => n + ((s['Actual Rows'] ?? 0) + (s['Rows Removed by Filter'] ?? 0)) * (s['Actual Loops'] ?? 1), 0),
     }
   }
 
@@ -87,27 +100,51 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
   it('runs the lookups unprepared: executing them leaves no named prepared statement behind', async () => {
     const count = async () => Number((await conn.unsafe('SELECT count(*) AS n FROM pg_prepared_statements'))[0].n)
     const before = await count()
-    for (let i = 0; i < 8; i++) { await suggestQuery(db, 'zq'); await exactMatchQuery(db, 'zq', 10) }
+    for (let i = 0; i < 8; i++) { await suggestRows(db, 'zq'); await exactMatchQuery(db, 'zq', 10) }
     expect(await count()).toBe(before)
   })
 
   describe('suggestQuery', () => {
-    it.each(['zq', 'rn', 'abc', 'us'])('reads tokens_lower_symbol_idx, not the table, for the prefix %s', async (prefix) => {
-      const plan = await planOf(suggestQuery(db, prefix))
+    it.each(['zq', 'rn', 'abc', 'us'])('reads both indexes, never the table, for the prefix %s', async (prefix) => {
+      const plan = await planOf(suggestQuery(prefix))
       expect(plan.seqScan).toBe(false)
-      expect(plan.indexes).toContain('tokens_lower_symbol_idx')
+      expect(plan.indexes).toEqual(expect.arrayContaining(['tokens_lower_symbol_idx', 'tokens_holder_count_idx']))
     })
 
+    // The point of the two arms: whatever the planner guesses for a prefix, it reads at most 5,000 tokens by
+    // holders plus 300 by symbol. The plain `LIKE p ORDER BY holder_count DESC LIMIT 50` walks the WHOLE
+    // holder_count index for a prefix the planner over-estimates (100,065 rows read for under 50 results, in this
+    // 100,065-row fixture; ~2% of three-letter prefixes do it, which ones depends on ANALYZE's random sample).
+    // So this sweeps every two-letter prefix and one three-letter prefix in thirteen.
+    it('reads at most 5,300 rows for every one of 572 prefixes', async () => {
+      const L = 'abcdefghijklmnop'
+      const prefixes = [...L].flatMap((a) => [...L].map((b) => a + b))
+      let i = 0
+      for (const a of L) for (const b of L) for (const c of L) if (i++ % 13 === 0) prefixes.push(a + b + c)
+      const worst = { prefix: '', rows: 0 }
+      for (const prefix of prefixes) {
+        const { rowsRead } = await planOf(suggestQuery(prefix))
+        if (rowsRead > worst.rows) { worst.prefix = prefix; worst.rows = rowsRead }
+      }
+      expect(prefixes).toHaveLength(572)
+      expect(worst.rows).toBeLessThanOrEqual(SUGGEST_POPULAR_ROWS + SUGGEST_PREFIX_ROWS)
+    }, 60_000)
+
     it('returns the most-held tokens with that symbol prefix, case-insensitively', async () => {
-      const rows = await suggestQuery(db, 'usd')
+      const rows = await suggestRows(db, 'usd')
       expect(rows).toHaveLength(50)
       expect(rows[0]).toMatchObject({ symbol: 'USDT', holderCount: 9000000 - 1 })
       expect(rows.map((r) => r.holderCount)).toEqual([...rows.map((r) => r.holderCount)].sort((a, b) => b - a))
     })
 
+    it('finds a rare low-holder ticker (by symbol) and a well-held one (by holders) alike', async () => {
+      expect((await suggestRows(db, 'zq')).map((r) => r.symbol)).toEqual(['ZQ'])
+      expect((await suggestRows(db, 'rnc')).map((r) => r.symbol)).toEqual(['RNC'])
+    })
+
     it('matches the visitor\'s % and _ literally, not as wildcards', async () => {
-      expect((await suggestQuery(db, '100%')).map((r) => r.symbol)).toEqual(['100%'])
-      expect((await suggestQuery(db, 'a_b')).map((r) => r.symbol)).toEqual(['A_B'])
+      expect((await suggestRows(db, '100%')).map((r) => r.symbol)).toEqual(['100%'])
+      expect((await suggestRows(db, 'a_b')).map((r) => r.symbol)).toEqual(['A_B'])
     })
   })
 

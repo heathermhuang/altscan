@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { drizzle } from 'drizzle-orm/postgres-js'
-import { schema, type Db } from '@altscan/db'
-import { likePrefixPattern, shapeSuggestions, suggestPrefix, suggestQuery, SUGGEST_LIMIT } from '@/lib/token-suggest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { Db } from '@altscan/db'
+import { likePrefixPattern, shapeSuggestions, suggestPrefix, suggestQuery, suggestRows, SUGGEST_LIMIT } from '@/lib/token-suggest'
 
 const addr = (i: number) => `0x${i.toString(16).padStart(40, '0')}`
 const row = (i: number, symbol: string, name: string, holderCount: number) => ({ address: addr(i), symbol, name, holderCount })
@@ -35,14 +35,32 @@ describe('likePrefixPattern', () => {
 })
 
 describe('suggestQuery', () => {
-  // drizzle.mock builds queries with no connection, so the SQL the driver would send can be read off.
-  const db = drizzle.mock({ schema }) as unknown as Db
+  const rendered = new PgDialect().sqlToQuery(suggestQuery('us_'))
+  const flat = rendered.sql.replace(/\s+/g, ' ')
 
-  it('is lower(symbol) LIKE prefix%, most-held first (plain DESC), 50 candidates (as /search), four columns', () => {
-    expect(suggestQuery(db, 'us_').toSQL()).toEqual({
-      sql: 'select "address", "symbol", "name", "holder_count" from "tokens" where lower("tokens"."symbol") like $1 order by "tokens"."holder_count" desc limit $2',
-      params: ['us\\_%', 50],
-    })
+  it('looks the escaped prefix up in both arms, as lower(symbol) LIKE', () => {
+    expect(rendered.params).toEqual(['us\\_%', 'us\\_%'])
+    expect(flat.match(/lower\(symbol\) LIKE \$\d/g)).toHaveLength(2)
+  })
+
+  // Neither arm may depend on the planner's guess of how many rows match (see the module comment).
+  it('bounds both arms: the 5000 most-held tokens, and 300 matches read in index order', () => {
+    expect(flat).toContain('ORDER BY holder_count DESC LIMIT 5000) popular')
+    expect(flat).toContain('ORDER BY lower(symbol) USING ~<~ LIMIT 300)')
+  })
+
+  it('ranks the union by holders, plain DESC, over 50 candidates (as /search)', () => {
+    expect(flat).toMatch(/\) matches ORDER BY holder_count DESC LIMIT 50$/)
+    expect(flat).not.toMatch(/nulls last/i)
+  })
+})
+
+describe('suggestRows', () => {
+  it('runs the query and maps the snake_case columns', async () => {
+    const execute = async () => [{ address: '0xa', symbol: 'CAKE', name: 'PancakeSwap Token', holder_count: 7 }]
+    expect(await suggestRows({ execute } as unknown as Db, 'cak')).toEqual([
+      { address: '0xa', symbol: 'CAKE', name: 'PancakeSwap Token', holderCount: 7 },
+    ])
   })
 })
 

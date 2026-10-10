@@ -23,13 +23,10 @@ async function load() {
     return {
       schema,
       db: {
-        select: (cols: unknown) => {
-          h.queries.push(cols)
-          const q: Record<string, unknown> = {}
-          for (const m of ['from', 'where', 'orderBy', 'limit']) q[m] = (...a: unknown[]) => { h.queries.push([m, ...a]); return q }
-          q.then = (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) =>
-            h.rows === 'hang' ? undefined : h.rows instanceof Error ? reject(h.rows) : resolve(h.rows)
-          return q
+        execute: (q: unknown) => {
+          h.queries.push(q)
+          if (h.rows === 'hang') return new Promise(() => {})
+          return h.rows instanceof Error ? Promise.reject(h.rows) : Promise.resolve(h.rows.map((r) => ({ ...r, holder_count: r.holderCount })))
         },
       },
     }

@@ -10,8 +10,16 @@
  * to be a constant when the query is planned. It is: drizzle's postgres-js driver sends every statement
  * unprepared, so each execution is planned with its parameter values (token-suggest.pg.test.ts proves
  * it through that driver). Do not switch these queries to named prepared statements.
+ *
+ * WHY suggestQuery IS TWO BOUNDED ARMS, NOT `WHERE lower(symbol) LIKE p ORDER BY holder_count DESC LIMIT 50`.
+ * That plain query has two plans, and which one Postgres picks rides on its row estimate for the prefix:
+ * read the symbol index (cost grows with the MATCHES) or walk tokens_holder_count_idx from the top and
+ * filter (cost grows with the rows passed before 50 match). The estimate for a prefix narrower than a
+ * histogram bucket is a fraction of a bucket, whatever the truth, so on a 1.9M-row table 31 of the 4,096
+ * three-letter prefixes chose the walk, each took 150 ms to 1.0 s, and a prefix with under 50 matches
+ * walks the whole table. Each arm below has a ceiling that no estimate can raise.
  */
-import { desc, or, sql } from 'drizzle-orm'
+import { or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 import type { ChainKey } from '@altscan/chain-config'
 import { lookalikeOf } from '@/lib/lookalike'
@@ -38,18 +46,42 @@ export function likePrefixPattern(prefix: string): string {
   return `${prefix.replace(/[%_\\]/g, '\\$&')}%`
 }
 
+/** Arm 1 reads this many of the most-held tokens and keeps those matching the prefix: every well-known token. */
+export const SUGGEST_POPULAR_ROWS = 5000
+/** Arm 2 reads this many matches in symbol order: every match of a prefix long enough to be rare. */
+export const SUGGEST_PREFIX_ROWS = 300
+
 /**
- * Plain DESC on holder_count, like /search: the column is NOT NULL, and NULLS LAST would not match the
- * holder_count index. `prefix` comes from suggestPrefix.
+ * Candidates for the prefix, most-held first, plain DESC like /search (the column is NOT NULL). `prefix` comes
+ * from suggestPrefix. Two arms, each bounded, unioned (see the module comment):
+ *  - popular: the 5,000 most-held tokens, filtered. A subquery with its own LIMIT cannot be flattened, so this
+ *    is always the holder_count walk, stopped at 5,000 rows (~3 ms). It finds the real USDT among thousands of
+ *    USDT-named copies, which the arm below cannot (it reads them in no useful order).
+ *  - by prefix: `ORDER BY lower(symbol) USING ~<~` is the text_pattern_ops index's own order, so it is read
+ *    straight off tokens_lower_symbol_idx and stopped at 300 matches. It finds a rare, low-holder ticker.
+ * Whatever the prefix, no more than 5,300 index entries are read.
  */
-export function suggestQuery(db: Db, prefix: string) {
-  const t = schema.tokens
-  return db
-    .select({ address: t.address, symbol: t.symbol, name: t.name, holderCount: t.holderCount })
-    .from(t)
-    .where(sql`lower(${t.symbol}) like ${likePrefixPattern(prefix)}`)
-    .orderBy(desc(t.holderCount))
-    .limit(SUGGEST_CANDIDATES)
+export function suggestQuery(prefix: string) {
+  const like = likePrefixPattern(prefix)
+  return sql`
+    SELECT address, symbol, name, holder_count FROM (
+      (SELECT address, symbol, name, holder_count
+         FROM (SELECT address, symbol, name, holder_count FROM tokens ORDER BY holder_count DESC LIMIT ${sql.raw(String(SUGGEST_POPULAR_ROWS))}) popular
+        WHERE lower(symbol) LIKE ${like})
+      UNION
+      (SELECT address, symbol, name, holder_count FROM tokens
+        WHERE lower(symbol) LIKE ${like}
+        ORDER BY lower(symbol) USING ~<~ LIMIT ${sql.raw(String(SUGGEST_PREFIX_ROWS))})
+    ) matches
+    ORDER BY holder_count DESC LIMIT ${sql.raw(String(SUGGEST_CANDIDATES))}`
+}
+
+/** suggestQuery's rows, in the shape rankTokenMatches reads. */
+export async function suggestRows(db: Db, prefix: string) {
+  const rows = await db.execute(suggestQuery(prefix))
+  return Array.from(rows, (r) => ({
+    address: String(r.address), symbol: String(r.symbol), name: String(r.name), holderCount: Number(r.holder_count),
+  }))
 }
 
 /**

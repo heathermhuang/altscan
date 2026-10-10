@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
-import { shapeSuggestions, suggestPrefix, suggestQuery } from '@/lib/token-suggest'
+import { shapeSuggestions, suggestPrefix, suggestRows } from '@/lib/token-suggest'
 import { withTimeout } from '@/lib/with-timeout'
 import { swallow } from '@/lib/observability'
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const rows = await withTimeout(suggestQuery(db, prefix), TIMEOUT_MS)
+    const rows = await withTimeout(suggestRows(db, prefix), TIMEOUT_MS)
     return NextResponse.json(
       { tokens: shapeSuggestions(rows, prefix, chainConfig.key) },
       { headers: { 'cache-control': 'public, max-age=30' } },
