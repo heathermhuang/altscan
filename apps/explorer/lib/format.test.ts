@@ -20,6 +20,7 @@ import {
   tokenTextOr,
   tokenLabel,
   tokenText,
+  tokenUnit,
   UNKNOWN_TOKEN,
   formatHolders,
   formatEstimate,
@@ -295,6 +296,19 @@ describe('tokenText', () => {
     expect(t.symbol).toBe(SHORT)
   })
 
+  it('judges the NAME as the page would print it too: a symbol that reads fine, a name whose Cyrillic letters sanitise into a URL', () => {
+    const disguised = 'ex\u0430mple.\u0441om'
+    expect(looksLikeRaw(disguised)).toBe(false)
+    expect(tokenText('CLAIM', disguised, ADDR)).toEqual({ symbol: 'CLAIM', name: 'CLAIM', linkLike: true })
+    expect(tokenText(null, disguised, ADDR).linkLike).toBe(true)
+  })
+
+  it('does not flag legitimate names (the sanitised name is judged too, so ordinary and non-ASCII names must stay clean)', () => {
+    for (const name of ['Tether USD', 'Wrapped BNB', 'USD Coin', 'PancakeSwap Token', 'Binance-Peg Ethereum Token', '币安人生', 'Ondo U.S. Dollar Token', 'Wrapped Ether (Wormhole)']) {
+      expect(tokenText('TKN', name, ADDR).linkLike, name).toBe(false)
+    }
+  })
+
   it('judges the raw text too: fullwidth and invisible characters sanitise away, the URL is still an advert', () => {
     const t = tokenText('ｗｗｗ．scam．ｃｏｍ', 'Scam', ADDR)
     expect(t.linkLike).toBe(true)
@@ -308,6 +322,29 @@ describe('tokenText', () => {
 
   it('a real symbol that sanitises away is not unknown and not a link: no unit, the short address as the label', () => {
     expect(tokenText('躺赢', '躺赢人生', ADDR)).toEqual({ symbol: '', name: SHORT, linkLike: false })
+  })
+})
+
+// The token page, its holders table and /dex print a symbol exactly as they always did; only the URL rule is new.
+describe('tokenUnit', () => {
+  const ADDR = '0x0291bcbffc61d96f288e635d6ce3a31be03dff8e'
+
+  it('is the symbol as given for anything that is not a URL or handle, even what the sanitiser would change or strip', () => {
+    for (const symbol of ['CAKE', 'USDT.z', '???', 'Unknown', '币安', 'BTCΞ', 'BAN人生', 'U\u202eSDT', ' USDT ']) {
+      expect(tokenUnit(symbol, ADDR), symbol).toBe(symbol)
+    }
+  })
+
+  it('is the short token address for a symbol that reads as a URL or handle, as typed or once sanitised', () => {
+    for (const symbol of ['claim-bnb.xyz', '@airdrop_bot', 'ｗｗｗ．scam．ｃｏｍ', 'ex\u0430mple.\u0441om']) {
+      expect(tokenUnit(symbol, ADDR), symbol).toBe(shortenAddress(ADDR))
+    }
+  })
+
+  it('agrees with tokenText on which symbols are links, so the sites cannot drift', () => {
+    for (const symbol of ['CAKE', 'USDT.z', 'claim-bnb.xyz', '@airdrop_bot', 'ex\u0430mple.\u0441om', '币安']) {
+      expect(tokenUnit(symbol, ADDR) !== symbol).toBe(tokenText(symbol, null, ADDR).linkLike)
+    }
   })
 })
 

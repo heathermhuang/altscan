@@ -4,7 +4,7 @@ import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
-import { timeAgo, formatAmountCompact, formatEstimate, tokenText, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
@@ -67,8 +67,7 @@ export default async function DexPage({
   const symbolText = (address: string | null) => {
     const symbol = tokenSymbolMap.get(address?.toLowerCase() ?? '')
     if (symbol === undefined) return ''
-    const token = address ?? ''
-    return tokenText(symbol, null, token).linkLike ? shortenAddress(token) : tokenTextOr(symbol, UNKNOWN_TOKEN)
+    return tokenTextOr(tokenUnit(symbol, address ?? ''), UNKNOWN_TOKEN)
   }
 
   // The strip draws the same trades as the table below it, sized from the cached trades and the cached

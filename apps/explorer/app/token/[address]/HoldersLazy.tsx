@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatHolders, tokenText } from '@/lib/format'
+import { formatHolders, tokenUnit } from '@/lib/format'
 import { HOLDER_LABELS, holdersPhrase, type HolderSource } from '@/lib/holder-labels'
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -111,7 +111,7 @@ export function HoldersLazy({
 
   // What the table calls the token. A symbol that reads as a URL or handle (lib/link-in-name) is the token's short address
   // (the strip says "tokens" for it); any other is printed exactly as it always was.
-  const unit = tokenText(symbol, null, address).linkLike ? shortenAddress(address) : symbol
+  const unit = tokenUnit(symbol, address)
 
   // The table's % column and the strip read the SAME shares (lib/holder-share.ts), so a tile and its row agree.
   // In the live state the provider's supply (read with these balances) is the denominator, not the token row's, which

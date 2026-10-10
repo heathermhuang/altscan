@@ -3,7 +3,7 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr } from '@/lib/format'
+import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Icon } from '@/components/ui/Icon'
@@ -268,7 +268,7 @@ export default async function TokenDetailPage({
   // holders table), a symbol that reads as a URL or handle (lib/link-in-name) is the token's short address, and any other
   // is printed exactly as the page always did (even CJK, or the indexer's '???'): only the URL rule is applied here.
   const shown = tokenText(token.symbol, token.name, addr)
-  const unit = tokenText(token.symbol, null, addr).linkLike ? shortenAddress(addr) : token.symbol
+  const unit = tokenUnit(token.symbol, addr)
   // DexScreener names the pair from the tokens' own symbols, so the same advert can be in it, as the text of an outbound link.
   const pairLabel = marketData?.pairLabel && anyLinkLike(marketData.pairLabel) ? `${shortenAddress(addr)} pair` : marketData?.pairLabel
 

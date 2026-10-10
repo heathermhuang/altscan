@@ -266,12 +266,21 @@ export function tokenText(
   address: string,
 ): { symbol: string; name: string; linkLike: boolean } {
   const printable = sanitizeSymbolOr(symbol, '')
-  const label = tokenLabel(symbol, name, address)
   return {
     symbol: anyLinkLike(symbol, printable) ? shortenAddress(address) : printable,
-    name: label,
-    linkLike: anyLinkLike(symbol, printable, name, label),
+    name: tokenLabel(symbol, name, address),
+    // The label is the sanitised symbol or the sanitised name (or an address), so judging both sanitised forms covers it.
+    linkLike: anyLinkLike(symbol, printable, name, sanitizeSymbolOr(name, '')),
   }
+}
+
+/**
+ * A token's symbol as inline text where the page prints it exactly as it always did (the token page, its holders table, a
+ * /dex leg): the symbol as given, except a symbol that reads as a URL or handle is the token's short address. Only the URL
+ * rule is applied, unlike `tokenText().symbol`, which also sanitises. The symbol side of `tokenText`, without the label.
+ */
+export function tokenUnit(symbol: string, address: string): string {
+  return anyLinkLike(symbol, sanitizeSymbolOr(symbol, '')) ? shortenAddress(address) : symbol
 }
 
 /**

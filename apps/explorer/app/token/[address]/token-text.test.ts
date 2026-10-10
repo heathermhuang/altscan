@@ -137,6 +137,23 @@ describe('token page: a URL or handle as the symbol', () => {
   })
 })
 
+describe('token page: a name that only sanitises into a URL', () => {
+  const NAME = 'ex\u0430mple.\u0441om'   // Cyrillic a and c: not a URL as typed, "example.com" once sanitised
+
+  it('the header badges it, and the metadata and the breadcrumb JSON-LD name the token by its short address', async () => {
+    h.row = tokenRow('CLAIM', NAME)
+    const out = await render()
+    expect(out.match(/>link in name<\/span>/g)).toHaveLength(1)
+    const m = JSON.parse(await meta())
+    expect(m.title).toBe(SHORT)
+    expect(m.openGraph.title).toBe(SHORT)
+    expect(JSON.stringify(m)).not.toContain(NAME)
+    const ld = out.match(/<script type="application\/ld\+json">.*?<\/script>/)![0]
+    expect(ld).toContain(SHORT)
+    expect(ld).not.toContain(NAME)
+  })
+})
+
 describe('token page: metadata and breadcrumb JSON-LD', () => {
   it.each([
     ['claim-bnb.xyz', 'Claim'],
