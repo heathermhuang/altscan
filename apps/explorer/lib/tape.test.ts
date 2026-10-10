@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TAPE_AFTER, TAPE_BEFORE, TAPE_LATEST, avgTilePx, chipFraction, decodeTape, encodeTape, gasPct, ratePerMin, stripFills, stripWeight, tapeBlocks, tapeWeight, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
+import { TAPE_AFTER, TAPE_BEFORE, TAPE_LATEST, TAPE_TRACK_LG, TAPE_TRACK_SM, avgTilePx, chipFraction, decodeTape, encodeTape, gasPct, layoutTiles, ratePerMin, stripFills, stripWeight, tapeBlocks, tapeWeight, toTapeTuple, txShareOfBlock, type StripTx, type TapeTuple } from '@/lib/tape'
 
 const t = (n: number, s: number, tx = 0, gas = 0): TapeTuple => [n, s, tx, gas]
 
@@ -95,34 +95,115 @@ describe('tapeWeight (a tile\'s share of the width = its transaction count)', ()
   })
 })
 
-describe('chipFraction (where the ringed tile sits, 0 = left end, 1 = right end)', () => {
+// The flex layout the tape uses: `flex: var(--w) 1 0` per tile, 2px gaps, min-width 2px (3px for the ringed tile).
+const LAYOUT = { gapPx: 2, floorPx: 2, ringFloorPx: 3 }
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+// The Codex fixture: a block page whose 24 older neighbours and the ringed block hold 1 tx each and whose 6 newer hold 100.
+const CODEX = [...Array(25).fill(1), ...Array(6).fill(100)] as number[]
+
+describe('layoutTiles (the tape\'s flexbox, modelled)', () => {
+  it('shares the track out by weight, less the gaps, when no tile is under its floor', () => {
+    const t = layoutTiles([1, 2, 3, 4], 100, LAYOUT)
+    // free = 100 - 3 gaps * 2 = 94; shares 9.4 / 18.8 / 28.2 / 37.6
+    expect(t.map(x => x.width)).toEqual([expect.closeTo(9.4, 9), expect.closeTo(18.8, 9), expect.closeTo(28.2, 9), expect.closeTo(37.6, 9)])
+    expect(t.map(x => x.left)).toEqual([0, expect.closeTo(11.4, 9), expect.closeTo(32.2, 9), expect.closeTo(62.4, 9)])
+  })
+
+  it('widths plus gaps fill the track exactly, with and without floors engaged', () => {
+    for (const w of [[1, 2, 3, 4, 5], CODEX, [57, 44, 36, 253, 20], [1, 1, 1000]]) {
+      const t = layoutTiles(w, 343, { ...LAYOUT, ringIndex: 1 })
+      expect(sum(t.map(x => x.width)) + 2 * (w.length - 1)).toBeCloseTo(343, 9)
+      const last = t[t.length - 1]
+      expect(last.left + last.width).toBeCloseTo(343, 9)
+    }
+  })
+
+  it('puts the Codex example\'s ringed tile 96px in: 24 floored tiles and 24 gaps before it, whatever the track', () => {
+    for (const track of [TAPE_TRACK_SM, TAPE_TRACK_LG]) {
+      const t = layoutTiles(CODEX, track, { ...LAYOUT, ringIndex: 24 })
+      expect(t[24].left).toBe(96)
+      expect(t[24].width).toBe(3)                                  // the ringed floor
+      for (let i = 0; i < 24; i++) expect(t[i].width).toBe(2)       // weight 1 against 100: the floor
+      // the six heavy tiles share what is left: track - 60 gaps - 48 - 3
+      for (let i = 25; i < 31; i++) expect(t[i].width).toBeCloseTo((track - 60 - 48 - 3) / 6, 9)
+    }
+  })
+
+  it('freezes a tile at its floor and shares the rest again, until nothing is under its floor (like the CSS algorithm)', () => {
+    // floor 4.5, no gaps, track 15: shares 2.5 / 5 / 7.5 -> tile 0 is under, frozen at 4.5; the remaining 10.5 over 2:3 is
+    // 4.2 / 6.3 -> tile 1 is now under, frozen at 4.5; tile 2 gets the 6 that is left
+    const t = layoutTiles([1, 2, 3], 15, { gapPx: 0, floorPx: 4.5 })
+    expect(t.map(x => x.width)).toEqual([4.5, 4.5, 6])
+  })
+
+  it('never goes under a floor, even for an all-zero window (flex-grow 0: tiles stay at their floor, free space is left over)', () => {
+    const t = layoutTiles([0, 0, 0, 0], 343, { ...LAYOUT, ringIndex: 2 })
+    expect(t.map(x => x.width)).toEqual([2, 2, 3, 2])
+    expect(t.map(x => x.left)).toEqual([0, 4, 8, 13])
+    for (const w of [CODEX, [0, 5, 0], [1, 1, 1]]) {
+      layoutTiles(w, 343, { ...LAYOUT, ringIndex: 0 }).forEach((x, i) => expect(x.width).toBeGreaterThanOrEqual(i === 0 ? 3 : 2))
+    }
+  })
+
+  it('lets floors overflow a track too narrow for them (min-width wins), and treats a bad weight as 0', () => {
+    const t = layoutTiles(Array(10).fill(1), 20, LAYOUT)
+    expect(t.map(x => x.width)).toEqual(Array(10).fill(2))
+    expect(t[9].left + t[9].width).toBe(38)   // 10 * 2 + 9 * 2: past the 20px track, as the browser would
+    expect(layoutTiles([NaN, -3, 5], 100, { gapPx: 0, floorPx: 0 }).map(x => x.width)).toEqual([0, 0, 100])
+  })
+
+  it('shares out only the fraction of the free space that the grow factors add up to when they sum under 1 (the CSS rule)', () => {
+    const t = layoutTiles([0.2, 0.3], 100, { gapPx: 2, floorPx: 0 })
+    expect(t[0].width).toBeCloseTo(98 * 0.5 * 0.4, 9)
+    expect(t[1].width).toBeCloseTo(98 * 0.5 * 0.6, 9)
+  })
+
+  it('is empty for no tiles', () => {
+    expect(layoutTiles([], 343, LAYOUT)).toEqual([])
+  })
+})
+
+describe('chipFraction (where the ringed tile\'s centre sits in the track, 0 = left end, 1 = right end)', () => {
   it('is the middle for a lone tile', () => {
-    expect(chipFraction([5], 0)).toBe(0.5)
+    expect(chipFraction([5], 0, 343)).toBe(0.5)
   })
 
-  it('is the tile\'s centre as a share of the total weight', () => {
-    // weights 10 | 20 | 10: tile 1 spans 10..30 of 40, centre 20 -> 0.5; tile 0 centre 5 -> 0.125; tile 2 centre 35 -> 0.875
-    expect(chipFraction([10, 20, 10], 1)).toBe(0.5)
-    expect(chipFraction([10, 20, 10], 0)).toBe(0.125)
-    expect(chipFraction([10, 20, 10], 2)).toBe(0.875)
+  it('is the centre of the tile the flexbox gives it, as a fraction of the track', () => {
+    // weights 2 | 3 | 4 on 343px: free = 339, tile 1 spans 77.33..190.33, centre 133.83
+    expect(chipFraction([2, 3, 4], 1, 343)).toBeCloseTo(133.83 / 343, 4)
+    expect(chipFraction([2, 3, 4], 0, 343)).toBeCloseTo(37.67 / 343, 4)
+    expect(chipFraction([2, 3, 4], 2, 343)).toBeCloseTo(267.67 / 343, 4)
   })
 
-  it('stays inside 0..1 at both ends however heavy the neighbours are', () => {
+  it('accounts for the floors: the Codex example is 97.5px in (96 + half the 3px ringed tile), not at 4% of the track', () => {
+    // by weight alone the ringed tile (1 of 625) would be at 0.04
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_SM)).toBeCloseTo(97.5 / 343, 4)
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_SM)).toBeGreaterThan(0.25)
+    expect(chipFraction(CODEX, 24, TAPE_TRACK_LG)).toBeCloseTo(97.5 / 1248, 4)
+  })
+
+  it('stays inside 0..1 at both ends however heavy the neighbours are, and when the floors overflow the track', () => {
     const w = [1, 1000, 1, 1000, 1]
     for (let k = 0; k < w.length; k++) {
-      const p = chipFraction(w, k)
+      const p = chipFraction(w, k, 343)
       expect(p).toBeGreaterThanOrEqual(0)
       expect(p).toBeLessThanOrEqual(1)
     }
-    expect(chipFraction([1, 500, 500], 0)).toBeLessThan(0.01)
-    expect(chipFraction([500, 500, 1], 2)).toBeGreaterThan(0.99)
+    expect(chipFraction([1, 500, 500], 0, 343)).toBeLessThan(0.01)
+    expect(chipFraction([500, 500, 1], 2, 343)).toBeGreaterThan(0.99)
+    expect(chipFraction(Array(200).fill(1), 199, 343)).toBe(1)
   })
 
-  it('falls back to the middle for an index that is not a tile or weights that sum to nothing', () => {
-    expect(chipFraction([3, 3], -1)).toBe(0.5)
-    expect(chipFraction([3, 3], 2)).toBe(0.5)
-    expect(chipFraction([], 0)).toBe(0.5)
-    expect(chipFraction([0, 0], 1)).toBe(0.5)
+  it('falls back to the middle for an index that is not a tile or a track that is not a width', () => {
+    expect(chipFraction([3, 3], -1, 343)).toBe(0.5)
+    expect(chipFraction([3, 3], 2, 343)).toBe(0.5)
+    expect(chipFraction([], 0, 343)).toBe(0.5)
+    expect(chipFraction([3, 3], 1, 0)).toBe(0.5)
+  })
+
+  it('has two reference tracks: the content of a 375px phone and of a 1440px desktop (max-w-7xl less the gutters)', () => {
+    expect(TAPE_TRACK_SM).toBe(375 - 2 * 16)
+    expect(TAPE_TRACK_LG).toBe(1280 - 2 * 16)
   })
 })
 

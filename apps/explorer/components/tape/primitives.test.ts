@@ -79,6 +79,12 @@ describe('shared tape primitives', () => {
   })
 
   it('clamps the ringed block\'s label by its own width, so no px or viewport maths can leave the track', () => {
-    expect(tapeCss).toMatch(/\.bt-chip\s*{[^}]*left:\s*calc\(var\(--p\) \* 100%\)[^}]*transform:\s*translateX\(calc\(var\(--p\) \* -100%\)\)/)
+    expect(tapeCss).toMatch(/\.bt-chip\s*{[^}]*left:\s*calc\(var\(--q\) \* 100%\)[^}]*transform:\s*translateX\(calc\(var\(--q\) \* -100%\)\)/)
+  })
+
+  it('picks the label\'s fraction (--q) from the phone reference (--p-sm), and the desktop one (--p) from the sm breakpoint up', () => {
+    expect(tapeCss).toMatch(/\.bt-chip\s*{[^}]*--q:\s*var\(--p-sm(?:,\s*var\(--p\))?\)/)
+    expect(tapeCss).toMatch(/@media \(min-width: 640px\)\s*{\s*\.bt-chip\s*{\s*--q:\s*var\(--p\);?\s*}/)
+    expect(tapeCss).toMatch(/\.bt-chip::after\s*{[^}]*left:\s*clamp\(4px,\s*calc\(var\(--q\) \* 100%\),\s*calc\(100% - 4px\)\)/)
   })
 })

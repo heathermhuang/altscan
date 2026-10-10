@@ -139,21 +139,40 @@ describe('BlockTape ringed block and its label', () => {
     expect(h).not.toContain('aria-current')
   })
 
-  it('places the label at the tile\'s fraction of the track (--p), from the tiles\' weights', () => {
-    // weights 2 | 3 | 4 (total 9): centres 1/9, 3.5/9, 7/9
-    expect(html({ current: 10 })).toContain('--p:0.111')
-    expect(html({ current: 11 })).toContain('--p:0.389')
-    expect(html({ current: 12 })).toContain('--p:0.778')
+  // Two reference tracks, from the tiles' flexbox (lib/tape.ts layoutTiles): --p-sm at the 343px content of a 375px
+  // phone, --p at the 1248px content of a 1440px desktop; the CSS picks one at the sm breakpoint.
+  const ps = (h: string) => ({ sm: +h.match(/--p-sm:([\d.]+)/)![1], lg: +h.match(/--p:([\d.]+)/)![1] })
+
+  it('places the label at the tile\'s fraction of the track, at two reference widths, from the tiles\' weights and floors', () => {
+    // weights 2 | 3 | 4: the centres by flexbox (2px gaps) are 37.67 / 133.83 / 267.67 of 343 and 138.2 / 485.7 / 971.5 of 1248
+    const near = (h: string, sm: number, lg: number) => { expect(ps(h).sm).toBeCloseTo(sm, 3); expect(ps(h).lg).toBeCloseTo(lg, 3) }
+    near(html({ current: 10 }), 0.1098, 0.1107)
+    near(html({ current: 11 }), 0.3902, 0.3892)
+    near(html({ current: 12 }), 0.7804, 0.7784)
   })
 
-  it('keeps --p inside 0..1 for a ringed tile at either end of a lopsided tape', () => {
+  it('puts the label over the tile when floors engage, not at its share of the weight (Codex fixture: 24 one-tx tiles before the ring)', () => {
+    const tx = (k: number) => (k <= 24 ? 1 : 100)   // the ringed tile (k = 24) and everything older: 1 tx; the 6 newer: 100
+    const tuples: TapeTuple[] = Array.from({ length: 31 }, (_, k) => [1000 + k, 5000 + k, tx(k), 10])
+    const h = draw(tuples, { current: 1024 })
+    expect(ps(h).sm).toBeCloseTo(97.5 / 343, 3)    // 96px of floored tiles and gaps + half the 3px ringed tile
+    expect(ps(h).lg).toBeCloseTo(97.5 / 1248, 3)
+    expect(ps(h).sm).toBeGreaterThan(0.25)          // by weight alone it was 0.04
+  })
+
+  it('emits the two vars on the ringed label only, nothing per tile', () => {
+    const h = html({ current: 11 })
+    expect(h.match(/--p-sm:/g)).toHaveLength(1)
+    expect(h.match(/--p:/g)).toHaveLength(1)
+    expect(h).toMatch(/<span class="tp-chip bt-chip" style="--p-sm:[\d.]+;--p:[\d.]+"/)
+  })
+
+  it('keeps both inside 0..1 for a ringed tile at either end of a lopsided tape', () => {
     const first = draw([[1, 1, 1, 0], [2, 2, 500, 0], [3, 3, 500, 0]], { current: 1 })
     const last = draw([[1, 1, 500, 0], [2, 2, 500, 0], [3, 3, 1, 0]], { current: 3 })
-    const p = (h: string) => +h.match(/--p:([\d.]+)/)![1]
-    expect(p(first)).toBeGreaterThanOrEqual(0)
-    expect(p(first)).toBeLessThan(0.01)
-    expect(p(last)).toBeLessThanOrEqual(1)
-    expect(p(last)).toBeGreaterThan(0.99)
+    for (const h of [first, last]) for (const v of Object.values(ps(h))) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(1) }
+    expect(ps(first).sm).toBeLessThan(0.02)
+    expect(ps(last).sm).toBeGreaterThan(0.98)
   })
 
   it('ignores a current block that is not on the tape: no ring, no label', () => {

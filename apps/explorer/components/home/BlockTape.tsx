@@ -1,6 +1,6 @@
 'use client'
 import { useState, type CSSProperties, type KeyboardEvent, type SyntheticEvent } from 'react'
-import { chipFraction, decodeTape, ratePerMin, tapeBlocks, tapeWeight, type TapeBlock } from '@/lib/tape'
+import { TAPE_TRACK_LG, TAPE_TRACK_SM, chipFraction, decodeTape, ratePerMin, tapeBlocks, tapeWeight, type TapeBlock } from '@/lib/tape'
 
 const LEGEND = 'width = transactions · fill = gas used · newest on the right'
 // Kept to two lines at 320px (.tp-leg is two lines tall there): a third line would make the band jump when the
@@ -106,9 +106,13 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
                     // Just the number: the live readout below announces txns and gas on focus.
                     aria-label={`Block ${fmt(b.n)}`}
                   />
-                  {/* The ringed tile's label floats above the row, placed by --p so it never leaves the track. */}
+                  {/* The ringed tile's label floats above the row, placed by --p-sm (phone) / --p (desktop) so it never leaves the track. */}
                   {isCurrent && (
-                    <span className="tp-chip bt-chip" style={{ '--p': +chipFraction(weights, k).toFixed(3) } as CSSProperties} aria-hidden="true">
+                    <span
+                      className="tp-chip bt-chip"
+                      style={{ '--p-sm': +chipFraction(weights, k, TAPE_TRACK_SM).toFixed(3), '--p': +chipFraction(weights, k, TAPE_TRACK_LG).toFixed(3) } as CSSProperties}
+                      aria-hidden="true"
+                    >
                       #{fmt(b.n)}
                     </span>
                   )}

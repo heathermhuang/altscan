@@ -701,11 +701,15 @@
 }
 
 /* Block tape (components/home/BlockTape.tsx) on the primitives: rounded tiles 2px apart, none under
-   2px wide (an empty block stays visible), and the ringed block's label, which is placed by --p (its
-   tile's fraction of the row) and shifted left by the same fraction of its own width: at 0 it starts
-   at the row's left edge, at 1 it ends at the right edge, in between it sits over its tile. So it
-   is inside the track at every width, wherever the block is. Every cell is a real block: there are
-   no placeholder cells, so nothing is faded. */
+   2px wide (an empty block stays visible), and the ringed block's label. The label is placed by --q
+   (its tile's centre as a fraction of the row) and shifted left by the same fraction of its own
+   width: at 0 it starts at the row's left edge, at 1 it ends at the right edge, in between it sits
+   over its tile. So it is inside the track at every width, wherever the block is. --q is computed
+   by the page (lib/tape.ts layoutTiles, the flexbox below modelled with its floors) for two tracks,
+   --p-sm for a 375px phone (343px) and --p for a 1440px desktop (1248px), so no layout is measured
+   in the browser; the `sm` breakpoint picks between them (about where the two are equally far off for
+   a tape whose floors engage). Every cell is a real block: there are no placeholder cells, so
+   nothing is faded. */
 @layer components {
   .tp-gap {
     gap: 2px;
@@ -721,20 +725,27 @@
     border-radius: 3px;
   }
   .bt-chip {
-    left: calc(var(--p) * 100%);
+    --q: var(--p-sm, var(--p));   /* HTML cached by the previous build carries --p only */
+    left: calc(var(--q) * 100%);
     bottom: calc(100% - 27px);
-    transform: translateX(calc(var(--p) * -100%));
+    transform: translateX(calc(var(--q) * -100%));
   }
-  /* The label is always inside the row (see above). A pointer at the same --p of the label's OWN width
-     points at the tile: label left = p * (row - label), so pointer = label left + p * label = p * row,
-     the tile's centre by weight. --p ignores the 2px / 3px floors and the 2px gaps, so where a floor
-     engages (a tile much lighter than its neighbours) the pointer is approximate, a few px off. It
-     takes the label's background, so forced colours need no rule. */
+  @media (min-width: 640px) {
+    .bt-chip {
+      --q: var(--p);
+    }
+  }
+  /* The label is always inside the row (see above). A pointer at the same --q of the label's OWN width
+     points at the tile: label left = q * (row - label), so pointer = label left + q * label = q * row,
+     the tile's centre. That is exact at the two reference tracks (the tile's flexbox, floors and gaps
+     included); between them it is approximate, and for a tape whose floors engage (many near-empty
+     blocks) it can be tens of px off at the widths furthest from both. It stays 4px inside the label
+     (half its own width), and takes the label's background, so forced colours need no rule. */
   .bt-chip::after {
     content: "";
     position: absolute;
     top: 100%;
-    left: clamp(6px, calc(var(--p) * 100%), calc(100% - 6px));
+    left: clamp(4px, calc(var(--q) * 100%), calc(100% - 4px));
     width: 8px;
     height: 4px;
     margin-left: -4px;

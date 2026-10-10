@@ -23,6 +23,16 @@ export const TAPE_BEFORE = 24
 export const TAPE_AFTER = 6
 /** The gap between tiles (the `gap` in app/globals.css, ".tp-gap"). */
 const TAPE_GAP_PX = 2
+/** The smallest a tile gets (`min-width` in ".tp-gap"), and the ringed one (`min-width` of ".tp-row > .c"). */
+const TAPE_FLOOR_PX = 2
+const TAPE_RING_FLOOR_PX = 3
+/**
+ * The two widths the ringed label is placed for: the tape's content at a 375px viewport (the 16px page
+ * gutters off each side, measured: 343) and at 1440px (max-w-7xl, 1280, less the gutters: 1248). Between
+ * them the CSS picks one at the `sm` breakpoint.
+ */
+export const TAPE_TRACK_SM = 343
+export const TAPE_TRACK_LG = 1248
 
 /** The average tile width, in px, of `count` tiles sharing a track `trackPx` wide. */
 export function avgTilePx(count: number, trackPx: number): number {
@@ -39,16 +49,50 @@ export function tapeWeight(txs: number): number {
 }
 
 /**
- * Where tile `k` sits along the tape as a fraction of its width (0 = left end, 1 = right end),
- * going by the tiles' weights. The ringed tile's label is placed at this fraction of the track and
- * shifted left by the same fraction of its OWN width, which keeps the label inside the track at both
- * ends and over its tile in the middle (app/globals.css, ".bt-chip"). The middle for no such tile.
+ * The tape's flexbox, modelled: where each tile's left edge lands and how wide it is on a track `trackPx`
+ * wide. Every tile is `flex: var(--w) 1 0` with a `min-width` floor (`floorPx`, `ringFloorPx` for the
+ * ringed one) and `gapPx` between them. As in the CSS algorithm: the free space (track less gaps) is shared
+ * out by flex-grow, a tile that comes out under its floor is frozen at the floor, and what is left is
+ * shared again among the rest, until none is under its floor. Grow factors that sum under 1 share out only
+ * that fraction of the space; a zero factor stays at its floor. Floors that do not fit overflow the track.
  */
-export function chipFraction(weights: number[], k: number): number {
-  const total = weights.reduce((s, w) => s + w, 0)
-  if (!(total > 0) || k < 0 || k >= weights.length) return 0.5
-  const before = weights.slice(0, k).reduce((s, w) => s + w, 0)
-  return (before + weights[k] / 2) / total
+export function layoutTiles(
+  weights: number[],
+  trackPx: number,
+  { gapPx, floorPx, ringIndex = -1, ringFloorPx = floorPx }: { gapPx: number; floorPx: number; ringIndex?: number; ringFloorPx?: number },
+): { left: number; width: number }[] {
+  const floor = weights.map((_, i) => (i === ringIndex ? ringFloorPx : floorPx))
+  const grow = weights.map(w => (w > 0 && Number.isFinite(w) ? w : 0))
+  const width: (number | null)[] = weights.map(() => null)   // null = still flexible
+  for (;;) {
+    const open = width.flatMap((w, i) => (w === null ? [i] : []))
+    if (!open.length) break
+    const space = trackPx - gapPx * (weights.length - 1) - width.reduce<number>((s, w) => s + (w ?? 0), 0)
+    const total = open.reduce((s, i) => s + grow[i], 0)
+    const target = (i: number) => (total > 0 ? (space * Math.min(1, total) * grow[i]) / total : 0)
+    const under = open.filter(i => target(i) < floor[i])
+    if (!under.length) { for (const i of open) width[i] = target(i); break }
+    for (const i of under) width[i] = floor[i]
+  }
+  let left = 0
+  return width.map(w => {
+    const tile = { left, width: w ?? 0 }
+    left += tile.width + gapPx
+    return tile
+  })
+}
+
+/**
+ * Where tile `k`'s centre sits along a tape `trackPx` wide, as a fraction of it (0 = left end, 1 = right
+ * end), from the flexbox model above (so the floors count: 24 one-transaction tiles before a ringed one
+ * put it ~96px in, not at its 4% of the weight). The ringed tile's label is placed at this fraction of the
+ * track and shifted left by the same fraction of its OWN width, which keeps the label inside the track at
+ * both ends and over its tile in the middle (app/globals.css, ".bt-chip"). The middle for no such tile.
+ */
+export function chipFraction(weights: number[], k: number, trackPx: number): number {
+  if (k < 0 || k >= weights.length || !(trackPx > 0)) return 0.5
+  const tile = layoutTiles(weights, trackPx, { gapPx: TAPE_GAP_PX, floorPx: TAPE_FLOOR_PX, ringIndex: k, ringFloorPx: TAPE_RING_FLOOR_PX })[k]
+  return Math.min(1, Math.max(0, (tile.left + tile.width / 2) / trackPx))
 }
 
 /** Blocks per minute measured from the oldest and newest block received. */
