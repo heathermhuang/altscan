@@ -53,7 +53,7 @@ describe('token page standard label', () => {
   it('BNB: the page and OpenGraph descriptions say BEP-20', async () => {
     const meta = await (await load()).generateMetadata({ params })
     expect(meta.description).toContain('BEP-20 token on')
-    expect(meta.openGraph?.description).toBe('BEP-20 · 1,234 holders')
+    expect(meta.openGraph?.description).toBe('BEP-20 · 1,234 indexed holders')
   })
 
   it('Ethereum: the header badge says ERC-20, not BEP20', async () => {
@@ -65,6 +65,6 @@ describe('token page standard label', () => {
   it('Ethereum: the page and OpenGraph descriptions say ERC-20', async () => {
     const meta = await (await load('eth')).generateMetadata({ params })
     expect(meta.description).toContain('ERC-20 token on')
-    expect(meta.openGraph?.description).toBe('ERC-20 · 1,234 holders')
+    expect(meta.openGraph?.description).toBe('ERC-20 · 1,234 indexed holders')
   })
 })

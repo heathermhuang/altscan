@@ -9,6 +9,7 @@ import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
+import { HOLDER_LABELS } from '@/lib/holder-labels'
 
 export const metadata: Metadata = {
   title: `${chainConfig.tokenStandard} Tokens`,
@@ -135,7 +136,7 @@ export default async function TokenListPage({
               <th scope="col">#</th>
               <th scope="col">Token</th>
               <th scope="col">Symbol</th>
-              <th scope="col">Holders</th>
+              <th scope="col" title={HOLDER_LABELS.indexed.title}>{HOLDER_LABELS.indexed.heading}</th>
               <th scope="col">Total Supply</th>
             </tr>
           </thead>

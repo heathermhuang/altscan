@@ -35,3 +35,12 @@ describe('HoldersLazy note slot', () => {
     expect(live).toMatch(/invisible">Estimated from the net flow/)
   })
 })
+
+describe('HoldersLazy header count', () => {
+  it('labels the provider total as holders (Moralis), not a bare "total"', () => {
+    expect(live).toContain('42 holders (Moralis)')
+    expect(live).not.toContain('(42 total)')
+    // The estimate has no count to label.
+    expect(local).not.toMatch(/holders \(Moralis\)/)
+  })
+})

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatHolders, formatNumber } from '@/lib/format'
+import { formatHolders } from '@/lib/format'
+import { HOLDER_LABELS, holdersPhrase, type HolderSource } from '@/lib/holder-labels'
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { Icon } from '@/components/ui/Icon'
@@ -29,10 +30,24 @@ function loadHolders(address: string): Promise<HoldersResult | null> {
 }
 
 /**
- * The Holders stat-card number. Shows the indexed/local fallback until the live Moralis count
- * arrives, then the accurate total — keeping it consistent with the "N total via Moralis" header.
+ * The Holders fact, as a view: the number with the label of the source it came from. The two sources
+ * disagree by orders of magnitude (see lib/holder-labels.ts), so the label is part of the fact.
+ * Markup matches the page's `Fact`.
  */
-export function HoldersCountLazy({ address, fallback }: { address: string; fallback: number }) {
+export function HoldersFactView({ count, source }: { count: number | null; source: HolderSource }) {
+  return (
+    <div>
+      <dt className="k">{HOLDER_LABELS[source].heading}</dt>
+      <dd className="mt-1 break-words font-mono text-[15px] text-ink" title={HOLDER_LABELS[source].title}>{formatHolders(count)}</dd>
+    </div>
+  )
+}
+
+/**
+ * The Holders stat-card. Shows the indexed count (the server render) until the live Moralis total
+ * arrives, then that total under its own label, consistent with the "via Moralis" Top Holders header.
+ */
+export function HoldersFact({ address, fallback }: { address: string; fallback: number }) {
   const [count, setCount] = useState<number | null>(null)
   useEffect(() => {
     let alive = true
@@ -43,7 +58,9 @@ export function HoldersCountLazy({ address, fallback }: { address: string; fallb
       alive = false
     }
   }, [address])
-  return <>{formatHolders(count ?? fallback)}</>
+  return count === null
+    ? <HoldersFactView count={fallback} source="indexed" />
+    : <HoldersFactView count={count} source="provider" />
 }
 
 /** The two notes are about the same length on purpose: the slot is sized by the longer one. */
@@ -94,7 +111,7 @@ export function HoldersLazy({
           Top Holders
           {data.source === 'moralis' && data.holderCount != null && (
             <span className="text-mut font-normal text-sm">
-              {' '}({formatNumber(data.holderCount)} total)
+              {' · '}{holdersPhrase(data.holderCount, 'provider')}
             </span>
           )}
         </h2>

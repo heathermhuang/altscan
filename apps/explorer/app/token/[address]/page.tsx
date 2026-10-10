@@ -21,7 +21,8 @@ import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
+import { HoldersLazy, HoldersFact } from './HoldersLazy'
+import { holdersPhrase } from '@/lib/holder-labels'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, toChecksumAddress } from '@/lib/address-display'
@@ -136,11 +137,11 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${token.name} (${token.symbol})`,
     // A holder count of 0 is a lagging reading (the Holders card shows "—"), so it is not stated.
-    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${token.holderCount.toLocaleString()} holders.` : ''}`,
+    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${holdersPhrase(token.holderCount, 'indexed')}.` : ''}`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
-      description: token.holderCount > 0 ? `${standard} · ${token.holderCount.toLocaleString()} holders` : standard,
+      description: token.holderCount > 0 ? `${standard} · ${holdersPhrase(token.holderCount, 'indexed')}` : standard,
     },
   }
 }
@@ -326,9 +327,7 @@ export default async function TokenDetailPage({
         <Fact label="Decimals">{token.decimals}</Fact>
         <Fact label="Total Supply">{hasSupply(token.totalSupply) ? displaySupply : '—'}</Fact>
         {!isLive && (
-          <Fact label="Holders">
-            <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
-          </Fact>
+          <HoldersFact address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
         )}
       </dl>
 

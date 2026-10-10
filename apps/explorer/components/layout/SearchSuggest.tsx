@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { holdersPhrase } from '@/lib/holder-labels'
 import {
   hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
 } from '@/lib/search-suggest'
@@ -132,7 +133,7 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
                   {o.token.lookalikeOf && (
                     <span className="badge badge-bad">lookalike<span className="sr-only"> of {o.token.lookalikeOf}</span></span>
                   )}
-                  <span className="ml-auto text-mut">{o.token.holders.toLocaleString('en-US')} holders</span>
+                  <span className="ml-auto text-mut">{holdersPhrase(o.token.holders, 'indexed')}</span>
                 </span>
                 <span className="block truncate text-mut">{o.token.name}</span>
               </>
