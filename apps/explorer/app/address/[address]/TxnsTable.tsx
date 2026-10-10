@@ -56,7 +56,7 @@ export function TxnsTable({ caption, rows, currency, detailHeading, detailClass,
             <td className={detailClass}>{r.detail}</td>
             <td>
               {formatNativeToken(r.value)}
-              {unitInHeading ? <span className="sm:hidden"> {currency}</span> : ` ${currency}`}
+              {unitInHeading ? <span className="sm:hidden"> {currency}</span> : <> {currency}</>}
             </td>
           </tr>
         ))}
