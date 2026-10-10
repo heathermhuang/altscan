@@ -78,8 +78,8 @@ export default function AboutPage() {
         >
           Measurable Data Token (MDT)
         </a>
-        . We index every block, transaction, token transfer, and smart-contract event so you can
-        explore on-chain activity in real-time.
+        . We index new blocks as they arrive and keep recent history — transactions, token transfers,
+        and smart-contract events — so you can explore recent on-chain activity.
       </p>
       <p className="mb-8 leading-relaxed text-ink2">
         Our goal is to provide a fast, reliable, and open-source alternative explorer that anyone can
@@ -93,7 +93,6 @@ export default function AboutPage() {
         <li>Real-time block and transaction indexing</li>
         <li>Address portfolio view with token balances and transfer history</li>
         <li>Token analytics, top holders, and DEX trade tracking</li>
-        <li>Gas tracker with historical gas price charts</li>
         <li>Validator and staking dashboard</li>
         <li>Free public REST API with interactive documentation</li>
         <li>Open-source codebase on GitHub</li>
