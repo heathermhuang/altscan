@@ -6,7 +6,7 @@
 import { indexerConfig } from './config-instance'
 import { getDb, dbErrorMessage, unwrapDbError } from './db'
 import { sql } from 'drizzle-orm'
-import { getChainConfig } from '@altscan/chain-config'
+import { getChainConfig, type WhaleConfig } from '@altscan/chain-config'
 
 export async function ensureSchema(): Promise<void> {
   const db = getDb()
@@ -643,6 +643,9 @@ export async function ensureSchema(): Promise<void> {
     } catch (err) {
       console.warn('[indexer] Could not retire tokens_holder_count_address_idx:', dbErrorMessage(err))
     }
+    // Last, so it can never delay the steps above: on BNB this is one CONCURRENTLY
+    // build per (partition, token) if the production build script has not already run.
+    if (ttPartitioned) await ensurePartitionedTtWhaleIndexes()
     console.log('[indexer] All indexes ready.')
   })().catch(() => { /* individual errors already logged */ })
 }
@@ -762,6 +765,85 @@ export function buildPartitionedWhaleIndexSql(partition: string): {
   }
 }
 
+export const TT_WHALE_COLUMNS = 'token_address, value DESC'
+
+/** One per-token whale-size partial index on `token_transfers`. */
+export type TtWhaleIndex = {
+  /** `tt_whale_<symbol>_idx`: the name on the monolithic table or the partitioned parent. */
+  name: string
+  /** Lowercase ticker; names the per-partition children. */
+  symbol: string
+  /** `token_address = '<addr>' AND value > <floor>`, both LITERALS (see ttWhaleIndexes). */
+  predicate: string
+}
+
+/**
+ * The partial indexes behind "largest transfers of token X": one per tracked token,
+ * `(token_address, value DESC) WHERE token_address = '<addr>' AND value > <indexFloor>`.
+ * The floor is 100x the token's display threshold (chain-config `indexFloor`), so an
+ * index holds only whale-size rows and the write overhead is limited to them — a full
+ * `(token_address, value)` index would add a b-tree insert to EVERY transfer, the very
+ * cost BNB's throughput cannot spare.
+ *
+ * Pure, and the single source of the statements: the flat CONCURRENTLY list (ETH, a
+ * monolithic table), the partitioned builder (BNB) and the production build script all
+ * render from here. Postgres only uses a partial index when it can PROVE the query
+ * implies the predicate, so the address and floor are literals in the DDL and must be
+ * literals in the query too (partial-index-needs-literal-predicate).
+ *
+ * Spliced into DDL, so each piece is proven here rather than trusting config. The
+ * address must be lowercase: `token_transfers.token_address` is stored lowercase, and
+ * a mixed-case literal would build an index that is valid, empty, and never matches.
+ */
+export function ttWhaleIndexes(
+  whales: Pick<WhaleConfig, 'wrapped' | 'stablecoins'> = getChainConfig().whales,
+): TtWhaleIndex[] {
+  const specs = [whales.wrapped, ...whales.stablecoins].map((t): TtWhaleIndex => {
+    if (!/^0x[0-9a-f]{40}$/.test(t.address)) {
+      throw new Error(`ttWhaleIndexes: token address must be 0x + 40 lowercase hex, got ${JSON.stringify(t.address)}`)
+    }
+    if (!/^[0-9]+$/.test(t.indexFloor)) {
+      throw new Error(`ttWhaleIndexes: ${t.symbol} indexFloor must be digits, got ${JSON.stringify(t.indexFloor)}`)
+    }
+    if (!/^[A-Za-z0-9]+$/.test(t.symbol)) {
+      throw new Error(`ttWhaleIndexes: token symbol must be alphanumeric, got ${JSON.stringify(t.symbol)}`)
+    }
+    const symbol = t.symbol.toLowerCase()
+    return {
+      name: `tt_whale_${symbol}_idx`,
+      symbol,
+      predicate: `token_address = '${t.address}' AND value > ${t.indexFloor}`,
+    }
+  })
+  const names = specs.map(w => w.name)
+  if (new Set(names).size !== names.length) {
+    throw new Error(`ttWhaleIndexes: duplicate index name in ${names.join(', ')}`)
+  }
+  return specs
+}
+
+/**
+ * The statements that add one whale index to one partition of a partitioned
+ * `token_transfers`: the same recipe as buildPartitionedWhaleIndexSql (parent ON ONLY,
+ * child CONCURRENTLY, ATTACH), with the child name `<partition>_whale_<symbol>_idx`.
+ * `ATTACH PARTITION` adopts a child only if its definition matches the parent's, so the
+ * columns and predicate come from the one spec for both.
+ */
+export function buildPartitionedTtWhaleIndexSql(w: TtWhaleIndex, partition: string): {
+  parent: string
+  child: string
+  childName: string
+  attach: string
+} {
+  const childName = `${partition}_whale_${w.symbol}_idx`
+  return {
+    parent: `CREATE INDEX IF NOT EXISTS ${w.name} ON ONLY token_transfers(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`,
+    child: `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${childName} ON ${partition}(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`,
+    childName,
+    attach: `ALTER INDEX ${w.name} ATTACH PARTITION ${childName}`,
+  }
+}
+
 /**
  * Full background-build index list. Pure (no DB) so the guardrail test can
  * assert against the exact shipped statements. token_transfers index DDL is
@@ -771,6 +853,7 @@ export function buildPartitionedWhaleIndexSql(partition: string): {
 export function buildConcurrentIndexList(
   ttPartitioned: boolean,
   nativeWhaleFloorWei: string,
+  ttWhale: readonly TtWhaleIndex[] = ttWhaleIndexes(),
 ): string[] {
   // Spliced into DDL, so prove it is a bare integer rather than trusting config.
   if (!/^[0-9]+$/.test(nativeWhaleFloorWei)) {
@@ -787,6 +870,10 @@ export function buildConcurrentIndexList(
     // ensurePartitionedWhaleIndex() builds the identical index on BNB, where
     // CONCURRENTLY is rejected on a partitioned parent.
     `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${TT_TOKEN_TS_IDX}        ON token_transfers(${TT_TOKEN_TS_COLUMNS})`,
+    // Per-token whale-size partial indexes (see ttWhaleIndexes). Monolithic only;
+    // ensurePartitionedTtWhaleIndexes() builds the identical ones on BNB.
+    ...ttWhale.map(w =>
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${w.name} ON token_transfers(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`),
     // tt_tx_idx(tx_hash) intentionally NOT created here — on the monolithic table it's
     // covered by tt_tx_log_unique(tx_hash, log_index) leftmost column.
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_block_idx            ON token_transfers(block_number)',
@@ -857,6 +944,13 @@ export function buildConcurrentIndexList(
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tb_holder_idx           ON token_balances(holder_address)',
     // Top-N tokens by holders (explorer sitemap top-5000, token directory)
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_holder_count_idx ON tokens(holder_count DESC)',
+    // Token search by symbol / name: `lower(symbol) = $1` (exact) and
+    // `lower(symbol) LIKE $1 || '%'` (prefix) had no index, so both seq-scanned the
+    // whole table (4.66M rows on BNB, 460k on ETH). text_pattern_ops is what lets the
+    // prefix form use a b-tree under a non-C collation; the same opclass serves
+    // equality, so one index per column covers both. ~200 MB on BNB, ~20 MB on ETH.
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_lower_symbol_idx ON tokens(lower(symbol) text_pattern_ops)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_lower_name_idx   ON tokens(lower(name) text_pattern_ops)',
     // The token-metadata healer pages through its candidates by keyset, resuming at
     // a (holder_count, address) cursor. That is an Index Cond only as a row
     // comparison, and a row comparison needs every column in ONE direction — so
@@ -1049,6 +1143,81 @@ export async function ensurePartitionedWhaleIndex(): Promise<void> {
   // run must not read as a completed one.
   const valid = await partitionedIndexIsValid(TT_TOKEN_TS_IDX)
   console.log(`[indexer] ${TT_TOKEN_TS_IDX}: ${done}/${parts.length} partitions indexed, parent valid=${valid}`)
+}
+
+/** Partitions (by table name) that already carry a child attached to the partitioned index `parent`. */
+async function listPartitionsWithAttachedIndex(parent: string): Promise<Set<string>> {
+  const res = await getDb().execute(sql`
+    SELECT t.relname AS name
+    FROM pg_inherits inh
+    JOIN pg_class pc ON pc.oid = inh.inhparent
+    JOIN pg_index ci ON ci.indexrelid = inh.inhrelid
+    JOIN pg_class t ON t.oid = ci.indrelid
+    WHERE pc.relname = ${parent} AND pc.relkind = 'I'
+  `)
+  return new Set(Array.from(res).map(r => String((r as Record<string, unknown>).name)))
+}
+
+/**
+ * Build the per-token whale indexes (ttWhaleIndexes) across a partitioned
+ * `token_transfers` (BNB). No-op on a monolithic table, where buildConcurrentIndexList()
+ * emits them inline. Same recipe and same guarantees as ensurePartitionedWhaleIndex:
+ * a valid parent returns before any DDL (steady state costs one catalog read per
+ * index and takes no lock), a partial run resumes where it stopped, and once the
+ * parent is valid `CREATE TABLE … PARTITION OF` gives every new partition its child.
+ *
+ * Differs in one way, on purpose: it asks Postgres which partitions already have an
+ * attached child instead of going by child NAME. A partition created while the parent
+ * is still invalid is cloned an index under Postgres's own name
+ * (`<partition>_token_address_value_idx`) — verified on PG16 — and going by name would
+ * build a second, unattachable duplicate beside it.
+ *
+ * Never throws: it runs last in the background pass and an index that failed here is
+ * retried by the next boot, so it must not take later steps down with it.
+ */
+export async function ensurePartitionedTtWhaleIndexes(
+  specs: readonly TtWhaleIndex[] = ttWhaleIndexes(),
+): Promise<void> {
+  try {
+    if (!(await isPartitioned('token_transfers'))) return
+    for (const w of specs) await ensurePartitionedTtWhaleIndex(w)
+  } catch (err) {
+    console.warn('[indexer] tt_whale_* indexes failed:', dbErrorMessage(err))
+  }
+}
+
+async function ensurePartitionedTtWhaleIndex(w: TtWhaleIndex): Promise<void> {
+  const db = getDb()
+  if (await partitionedIndexIsValid(w.name)) return
+
+  const parts = await listTokenTransferPartitions()
+  if (parts.length === 0) return  // migration not run yet — nothing to index
+
+  try {
+    await db.execute(sql.raw(buildPartitionedTtWhaleIndexSql(w, parts[0].name).parent))
+  } catch (err) {
+    console.warn(`[indexer] ${w.name} parent create failed:`, dbErrorMessage(err))
+    return
+  }
+
+  const covered = await listPartitionsWithAttachedIndex(w.name)
+  let done = 0
+  for (const part of parts) {
+    if (covered.has(part.name)) { done++; continue }
+    const { child, attach } = buildPartitionedTtWhaleIndexSql(w, part.name)
+    try {
+      await db.execute(sql.raw(child))
+      await db.execute(sql.raw(attach))
+      done++
+    } catch (err) {
+      // Logged, never swallowed: a failed partition leaves the parent invalid and
+      // the next boot resumes from exactly here.
+      console.warn(`[indexer] ${w.name} on ${part.name} failed:`, dbErrorMessage(err))
+    }
+  }
+
+  const valid = await partitionedIndexIsValid(w.name)
+  console.log(`[indexer] ${w.name}: ${done}/${parts.length} partitions indexed, parent valid=${valid}`)
 }
 
 /**

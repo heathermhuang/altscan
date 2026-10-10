@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildConcurrentIndexList,
+  buildPartitionedTtWhaleIndexSql,
   buildPartitionedWhaleIndexSql,
+  TT_WHALE_COLUMNS,
+  ttWhaleIndexes,
   TT_TOKEN_TS_COLUMNS,
   TT_TOKEN_TS_IDX,
   INVALID_INDEX_SWEEP_SQL,
@@ -344,5 +347,173 @@ describe('partitionRangesToCreate — the ladder for a table partitioned from da
     const ranges = partitionRangesToCreate(existing, W, 100 * W, 102 * W)
     for (const r of ranges) expect(r.lo).toBeGreaterThanOrEqual(100 * W + 3_000)
     expect(ranges[0]).toEqual({ lo: 100 * W + 3_000, hi: 100 * W + 3_000 + W })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-5 indexes. Two jobs, both found by reading prod's plans:
+//  - token search: `lower(symbol) = $1` / `LIKE $1 || '%'` had no index, so exact
+//    and prefix lookups seq-scanned 4.66M BNB tokens;
+//  - the value-ordered whale arm: token_transfers has no index on `value`, so
+//    "largest transfers of USDT" read 10-39 s on ETH and minutes on BNB.
+// A statement that is only ever executed by a human is a statement that never
+// runs (ddl-in-a-file-nothing-executes), so these live in ensureSchema, and the
+// production build script is generated from the same shapes.
+// ---------------------------------------------------------------------------
+describe('tokens_lower_symbol_idx / tokens_lower_name_idx', () => {
+  // text_pattern_ops is what makes LIKE 'q%' indexable under a non-C collation
+  // (prod's is en_US.UTF-8); equality is supported by the same opclass, so one
+  // index serves both the exact and the prefix lookup.
+  const EXPECTED = [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_lower_symbol_idx ON tokens(lower(symbol) text_pattern_ops)',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tokens_lower_name_idx ON tokens(lower(name) text_pattern_ops)',
+  ]
+
+  it('emits both, exactly, on BOTH chains and in both partition modes (tokens is never partitioned)', () => {
+    for (const ttPartitioned of [false, true]) {
+      const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR).map(s => s.replace(/\s+/g, ' '))
+      for (const expected of EXPECTED) {
+        expect(stmts.filter(s => s === expected), `partitioned=${ttPartitioned}: ${expected}`).toHaveLength(1)
+      }
+    }
+  })
+
+  it('sits beside the other tokens indexes and replaces none of them', () => {
+    const stmts = buildConcurrentIndexList(false, FLOOR)
+    expect(stmts.some(s => /tokens_holder_count_idx\s+ON tokens\(holder_count DESC\)$/.test(s))).toBe(true)
+    expect(stmts.some(s => s.includes(TOKENS_HEAL_IDX))).toBe(true)
+    expect(stmts.filter(s => /ON tokens\(/.test(s))).toHaveLength(4)
+  })
+})
+
+describe('ttWhaleIndexes — one partial index per tracked token', () => {
+  it.each(['bnb', 'eth'] as const)('%s: one per tracked token, named from its symbol, predicate = literal address AND literal floor', (key: ChainKey) => {
+    const { wrapped, stablecoins } = getChainConfig(key).whales
+    const specs = ttWhaleIndexes(getChainConfig(key).whales)
+    const tokens = [wrapped, ...stablecoins]
+    expect(specs.map(w => w.name)).toEqual(tokens.map(t => `tt_whale_${t.symbol.toLowerCase()}_idx`))
+    specs.forEach((w, i) => {
+      expect(w.predicate).toBe(`token_address = '${tokens[i].address}' AND value > ${tokens[i].indexFloor}`)
+      // A bound parameter cannot prove a partial-index predicate; this must be literals only.
+      expect(w.predicate).not.toMatch(/[$?]/)
+    })
+  })
+
+  it('names exactly the four production indexes', () => {
+    expect(ttWhaleIndexes(getChainConfig('bnb').whales).map(w => w.name))
+      .toEqual(['tt_whale_wbnb_idx', 'tt_whale_usdt_idx', 'tt_whale_usdc_idx'])
+    expect(ttWhaleIndexes(getChainConfig('eth').whales).map(w => w.name))
+      .toEqual(['tt_whale_weth_idx', 'tt_whale_usdt_idx', 'tt_whale_usdc_idx'])
+  })
+
+  it('defaults to the running chain', () => {
+    expect(ttWhaleIndexes()).toEqual(ttWhaleIndexes(getChainConfig().whales))
+  })
+
+  // Everything in the predicate is spliced into DDL unescaped.
+  it('refuses a token that cannot be spliced safely', () => {
+    const base = getChainConfig('bnb').whales
+    const bad = (patch: Partial<typeof base.wrapped>) => ttWhaleIndexes({ ...base, wrapped: { ...base.wrapped, ...patch } })
+    expect(() => bad({ indexFloor: "1'; DROP TABLE token_transfers --" })).toThrow(/digits/)
+    expect(() => bad({ indexFloor: '1e23' })).toThrow(/digits/)
+    expect(() => bad({ indexFloor: '' })).toThrow(/digits/)
+    expect(() => bad({ address: "0x'; DROP TABLE x --" })).toThrow(/address/)
+    expect(() => bad({ address: base.wrapped.address.toUpperCase().replace('0X', '0x') })).toThrow(/address/)  // stored lowercase
+    expect(() => bad({ symbol: 'W BNB' })).toThrow(/symbol/)
+    expect(() => bad({ symbol: "x'; --" })).toThrow(/symbol/)
+  })
+
+  it('refuses two tokens that would share an index name', () => {
+    const base = getChainConfig('bnb').whales
+    expect(() => ttWhaleIndexes({ ...base, stablecoins: [base.stablecoins[0], { ...base.stablecoins[1], symbol: 'usdt' }] }))
+      .toThrow(/duplicate/i)
+  })
+})
+
+describe('tt_whale_*_idx on a MONOLITHIC token_transfers (ETH)', () => {
+  it.each(['bnb', 'eth'] as const)('%s config: emits one exact CONCURRENTLY statement per token', (key: ChainKey) => {
+    const specs = ttWhaleIndexes(getChainConfig(key).whales)
+    const stmts = buildConcurrentIndexList(false, FLOOR, specs).map(s => s.replace(/\s+/g, ' '))
+    for (const w of specs) {
+      expect(stmts.filter(s => s.includes(` ${w.name} `)), w.name).toEqual([
+        `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${w.name} ON token_transfers(${TT_WHALE_COLUMNS}) WHERE ${w.predicate}`,
+      ])
+    }
+  })
+
+  it('leads on token_address then value DESC, so a per-token value-ordered scan can stop at LIMIT', () => {
+    expect(TT_WHALE_COLUMNS).toBe('token_address, value DESC')
+  })
+
+  it('spells ETH\'s USDT index with its real address and the $100k floor in 6-decimal units', () => {
+    const stmts = buildConcurrentIndexList(false, FLOOR, ttWhaleIndexes(getChainConfig('eth').whales))
+    expect(stmts).toContain(
+      "CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_whale_usdt_idx ON token_transfers(token_address, value DESC) " +
+      "WHERE token_address = '0xdac17f958d2ee523a2206206994597c13d831ec7' AND value > 100000000000",
+    )
+  })
+
+  // CONCURRENTLY is rejected on a partitioned parent: BNB takes the ON ONLY +
+  // per-partition route below, so the flat list must not carry these there.
+  it('are absent from the flat list when partitioned', () => {
+    const stmts = buildConcurrentIndexList(true, FLOOR, ttWhaleIndexes(getChainConfig('bnb').whales))
+    expect(stmts.filter(s => s.includes('tt_whale_'))).toEqual([])
+  })
+})
+
+describe('tt_whale_*_idx on a PARTITIONED token_transfers (BNB)', () => {
+  const [wbnb, usdt] = ttWhaleIndexes(getChainConfig('bnb').whales)
+
+  it('emits the exact parent / child / attach statements', () => {
+    expect(buildPartitionedTtWhaleIndexSql(usdt, 'token_transfers_p_118938552')).toEqual({
+      parent:
+        "CREATE INDEX IF NOT EXISTS tt_whale_usdt_idx ON ONLY token_transfers(token_address, value DESC) " +
+        "WHERE token_address = '0x55d398326f99059ff775485246999027b3197955' AND value > 100000000000000000000000",
+      child:
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS token_transfers_p_118938552_whale_usdt_idx ON token_transfers_p_118938552(token_address, value DESC) " +
+        "WHERE token_address = '0x55d398326f99059ff775485246999027b3197955' AND value > 100000000000000000000000",
+      childName: 'token_transfers_p_118938552_whale_usdt_idx',
+      attach: 'ALTER INDEX tt_whale_usdt_idx ATTACH PARTITION token_transfers_p_118938552_whale_usdt_idx',
+    })
+    expect(buildPartitionedTtWhaleIndexSql(wbnb, 'token_transfers_legacy').child).toContain(
+      "ON token_transfers_legacy(token_address, value DESC) WHERE token_address = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' AND value > 100000000000000000000",
+    )
+  })
+
+  it('creates the parent ON ONLY and each child CONCURRENTLY (rejected outright on a partitioned parent)', () => {
+    const { parent, child } = buildPartitionedTtWhaleIndexSql(usdt, 'token_transfers_p_1')
+    expect(parent).toMatch(/^CREATE INDEX IF NOT EXISTS \S+ ON ONLY token_transfers\(/)
+    expect(parent).not.toContain('CONCURRENTLY')
+    expect(child).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS \S+ ON token_transfers_p_1\(/)
+  })
+
+  // ATTACH PARTITION adopts a child only when its definition matches the parent's
+  // exactly, and the two are built from separate strings.
+  it('builds a child whose definition (columns + predicate) is byte-identical to the parent\'s', () => {
+    for (const w of [wbnb, usdt]) {
+      const { parent, child } = buildPartitionedTtWhaleIndexSql(w, 'token_transfers_p_7')
+      const tail = (s: string) => s.slice(s.indexOf('('))
+      expect(tail(child).replace('token_transfers_p_7', 'token_transfers')).toBe(tail(parent))
+    }
+  })
+
+  it('names children uniquely per (partition, token), stably, inside the 63-byte identifier limit', () => {
+    const names = new Set<string>()
+    for (const w of ttWhaleIndexes(getChainConfig('bnb').whales)) {
+      for (const part of ['token_transfers_legacy', 'token_transfers_p_118938552', 'token_transfers_p_118842552', 'token_transfers_p_9999999999999']) {
+        const { childName } = buildPartitionedTtWhaleIndexSql(w, part)
+        expect(childName.length, childName).toBeLessThanOrEqual(63)
+        expect(childName).toBe(buildPartitionedTtWhaleIndexSql(w, part).childName)
+        names.add(childName)
+      }
+    }
+    expect(names.size).toBe(12)
+  })
+
+  it('never reuses the parent names of the existing token_transfers indexes', () => {
+    const taken = new Set([TT_TOKEN_TS_IDX, 'tt_token_idx', 'tt_from_ts_idx', 'tt_to_ts_idx', 'tt_block_idx', 'tt_tx_idx', 'tx_whale_value_idx'])
+    for (const key of ['bnb', 'eth'] as const) {
+      for (const w of ttWhaleIndexes(getChainConfig(key).whales)) expect(taken.has(w.name), w.name).toBe(false)
+    }
   })
 })
