@@ -188,3 +188,27 @@ export function stripFills(prices: number[]): number[] {
   const hi = Math.log(Math.max(...pos))
   return prices.map(p => (p <= 0 ? 0 : hi === lo ? 100 : Math.round(30 + (70 * (Math.log(p) - lo)) / (hi - lo))))
 }
+
+/**
+ * A tile of a TileStrip (components/tape/TileStrip.tsx): the strips on /gas, /validators, /dex and a
+ * token's top holders. Plain data, so a page can hand it to the client component; the pure builders
+ * (lib/gas-tape.ts, lib/producers.ts, lib/dex-size.ts, lib/holder-share.ts) make them.
+ */
+export interface StripTile {
+  /** Unique within the strip. A tile that pairs with a table row carries that row's link, lowercased. */
+  id: string
+  /** The tile's width: its flex-grow. 0 = a fixed floor width (a hatched tile, which has no measurement). */
+  w: number
+  /** Fill height, 0-100. */
+  f: number
+  /** Where the tile goes. Omitted for a tile that is not one thing (the "others" remainder): not focusable. */
+  href?: string
+  /** The link's accessible name; the measure is read out by `read`. */
+  name: string
+  /** What hovering or focusing the tile reads in the legend line. */
+  read: string
+  /** Hatched: its width is not a measurement (a swap with no USD price). */
+  hatch?: boolean
+  /** The remainder tile: neutral colour, no link. */
+  rest?: boolean
+}

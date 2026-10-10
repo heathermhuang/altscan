@@ -1,5 +1,6 @@
 'use client'
-import { useState, type CSSProperties, type KeyboardEvent, type SyntheticEvent } from 'react'
+import { useState, type CSSProperties, type SyntheticEvent } from 'react'
+import { onArrowKeys } from '@/components/tape/roving'
 import { TAPE_TRACK_LG, TAPE_TRACK_SM, chipFraction, decodeTape, ratePerMin, tapeBlocks, tapeWeight, type TapeBlock } from '@/lib/tape'
 
 const LEGEND = 'width = transactions · fill = gas used · newest on the right'
@@ -46,17 +47,6 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
   const roving = focusN !== null && blocks.some(b => b.n === focusN) ? focusN : currentN ?? newest
   const active = blocks.find(b => b.n === activeN)
 
-  const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
-    const dir = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0
-    if (!dir) return
-    e.preventDefault()
-    const li = (e.target as HTMLElement).closest('li')
-    // No neighbour at the oldest and newest tile, so focus stops there.
-    const a = (dir < 0 ? li?.previousElementSibling : li?.nextElementSibling)?.querySelector('a')
-    a?.focus()
-  }
-
   return (
     <div className="tp-box">
       <div className="tp-head">
@@ -85,7 +75,7 @@ export function BlockTape({ tape, chainName, current, heading }: { tape: string;
             role="list"
             aria-label={`${chainName} ${current !== undefined ? 'indexed blocks around this one' : heading ? 'recent indexed blocks' : 'latest indexed blocks'}, width is transactions, fill is gas used`}
             className="tp-row tp-gap"
-            onKeyDown={onKeyDown}
+            onKeyDown={onArrowKeys}
             onMouseOver={e => setActiveN(blockOf(e))}
             onMouseLeave={() => setActiveN(null)}
             onFocus={e => { const n = blockOf(e); setFocusN(n); setActiveN(n) }}
