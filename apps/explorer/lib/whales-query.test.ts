@@ -4,7 +4,8 @@ const { execute, fetchNativeUsd } = vi.hoisted(() => ({ execute: vi.fn(), fetchN
 vi.mock('@/lib/db', () => ({ db: { execute } }))
 vi.mock('@/lib/native-price', () => ({ fetchNativeUsd, NATIVE_PRICE_BUDGET_MS: 11_000 }))
 
-import { queryWhales } from '@/lib/whales'
+import { chainConfig } from '@/lib/chain'
+import { queryWhales, WHALES_SHOWN } from '@/lib/whales'
 
 const NATIVE_ROW = {
   hash: '0xn', fromAddress: '0xf', toAddress: '0xt', value: String(10n * 10n ** 18n), blockNumber: 1,
@@ -56,5 +57,46 @@ describe('queryWhales and the native price', () => {
     fetchNativeUsd.mockResolvedValue(730)
     const out = await queryWhales('24h', '1', [])
     expect(() => JSON.stringify(out)).not.toThrow()
+  })
+})
+
+describe('queryWhales: rank every candidate, then show the top 50', () => {
+  const E18 = 10n ** 18n
+  const stable = chainConfig.whales.stablecoins[0]
+  const nativeRow = (i: number) => ({ ...NATIVE_ROW, hash: `0xn${i}`, value: String(BigInt(i) * E18) })
+  const tokenRow = (hash: string, whole: bigint, timestamp: string) => ({
+    hash, fromAddress: '0xf', toAddress: '0xt', value: String(whole * 10n ** BigInt(stable.decimals)), blockNumber: 1,
+    timestamp, transferType: 'token', tokenSymbol: 'USDT', tokenAddress: stable.address,
+  })
+  const filters = [{ address: stable.address, minValue: '1' }]
+
+  it('caps the list at 50 AFTER the USD sort, so the cut keeps the largest, not the first 50 fetched', async () => {
+    fetchNativeUsd.mockResolvedValue(730)
+    // 60 native candidates, smallest first in the fetch order, so a cut before ranking would keep the wrong 50.
+    execute.mockReset()
+      .mockResolvedValueOnce(Array.from({ length: 60 }, (_, i) => nativeRow(i + 1)))
+      .mockResolvedValueOnce([])
+
+    const out = await queryWhales('24h', '1', filters)
+
+    expect(WHALES_SHOWN).toBe(50)
+    expect(out.rows).toHaveLength(50)
+    expect(out.rows[0].hash).toBe('0xn60')
+    expect(out.rows[49].hash).toBe('0xn11') // 1..10 BNB are the ten cut
+  })
+
+  it('an older large stablecoin transfer among the candidates outranks recent small ones', async () => {
+    fetchNativeUsd.mockResolvedValue(730)
+    execute.mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        tokenRow('0xs1', 1_000n, '2026-10-10T11:00:00Z'),
+        tokenRow('0xs2', 1_000n, '2026-10-10T10:59:00Z'),
+        tokenRow('0xbig', 1_000_000n, '2026-10-09T15:00:00Z'),
+      ])
+
+    const out = await queryWhales('24h', '1', filters)
+
+    expect(out.rows.map(r => r.hash)).toEqual(['0xbig', '0xs1', '0xs2'])
   })
 })

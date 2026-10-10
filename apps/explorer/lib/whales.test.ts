@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { getChainConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
-import { buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rankWhalesByUsd, rankingNote, rawWeiLiteral, type WhaleTx } from '@/lib/whales'
+import {
+  buildTokenWhaleQuery, buildNativeWhaleQuery, settleWhaleQueries, mergeWhaleRows, rankWhalesByUsd, rankingNote, rawWeiLiteral,
+  WHALE_NATIVE_CANDIDATES, WHALE_TOKEN_CANDIDATES, WHALES_SHOWN, type WhaleTx,
+} from '@/lib/whales'
 
 const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
@@ -21,14 +24,18 @@ describe('buildTokenWhaleQuery', () => {
     expect(text).not.toMatch(/ANY\s*\(\s*\(/)
   })
 
-  it('emits one UNION ALL arm per token, each independently limited', () => {
+  it('emits one UNION ALL arm per token, each independently limited to its 100 newest', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
-    // The whole latency fix rests on this shape: one early-stopping index walk
-    // per token instead of a single OR-ed scan that has to sort every candidate.
-    // Two tokens => one UNION ALL, and a LIMIT inside each arm plus the outer one.
+    // The whole latency fix rests on this shape: one early-stopping index walk per token instead of a
+    // single OR-ed scan that has to sort every candidate. Two tokens => one UNION ALL and a LIMIT 100 in
+    // each arm. There is NO outer cap: the page ranks every candidate by USD value, so a "newest 25 across
+    // all tokens" cut here would decide the ranking by recency before it ever saw a price.
+    expect(WHALE_TOKEN_CANDIDATES).toBe(100)
     expect(text.match(/UNION ALL/g)).toHaveLength(FILTERS.length - 1)
-    expect(text.match(/LIMIT 25/g)).toHaveLength(FILTERS.length + 1)
+    expect(text.match(/LIMIT 100/g)).toHaveLength(FILTERS.length)
+    expect(text.match(/\bLIMIT\b/g)).toHaveLength(FILTERS.length)
+    expect(text).not.toMatch(/LIMIT 25/)
     expect(text.match(/FROM token_transfers/g)).toHaveLength(FILTERS.length)
   })
 
@@ -40,14 +47,14 @@ describe('buildTokenWhaleQuery', () => {
     ])
   })
 
-  it('sorts every arm and the merge by the same deterministic key', () => {
+  it('sorts every arm and the final select by the same deterministic key', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
-    // Per-arm LIMIT 25 only yields a correct global top-25 if the arms and the
-    // merge agree on the ordering. Timestamp alone is not deterministic — a
-    // timestamp is a block, and a hot token moves many times per block.
+    // Which 100 rows an arm keeps, and the order the result comes back in, must not move between ISR
+    // regenerations. Timestamp alone is not deterministic: a timestamp is a block, and a hot token moves
+    // many times per block.
     const orders = text.match(/ORDER BY [^\n]+/g) ?? []
-    expect(orders).toHaveLength(FILTERS.length + 2) // one per arm, merge, outer
+    expect(orders).toHaveLength(FILTERS.length + 1) // one per arm, plus the final select
     for (const o of orders) {
       expect(o).toMatch(/timestamp DESC, [\w.]*tx_hash DESC, [\w.]*log_index DESC/)
     }
@@ -65,7 +72,8 @@ describe('buildTokenWhaleQuery', () => {
   it('joins the token symbol after the limit, not before it', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
     // Joining first made the lookup run against every candidate row.
-    expect(text.indexOf('LEFT JOIN tokens')).toBeGreaterThan(text.lastIndexOf('LIMIT 25'))
+    expect(text.lastIndexOf('LIMIT 100')).toBeGreaterThan(-1)
+    expect(text.indexOf('LEFT JOIN tokens')).toBeGreaterThan(text.lastIndexOf('LIMIT 100'))
   })
 })
 
@@ -84,6 +92,15 @@ describe('whale thresholds stay below the measured display floor', () => {
     const min = BigInt(cfg.whales.nativeMinWei)
     expect(min).toBeGreaterThan(0n)
     expect(min).toBeLessThan(FLOOR_WEI[key])
+  })
+})
+
+describe('buildNativeWhaleQuery candidates', () => {
+  it('takes the 50 largest by value (the ranking candidates), not 25', () => {
+    const { sql: text } = toQuery(buildNativeWhaleQuery('24h', '1'))
+    expect(WHALE_NATIVE_CANDIDATES).toBe(50)
+    expect(text).toMatch(/ORDER BY value DESC\s+LIMIT 50\b/)
+    expect(text).not.toMatch(/LIMIT 25/)
   })
 })
 
@@ -302,6 +319,19 @@ describe('rankWhalesByUsd', () => {
     expect(rankWhalesByUsd([plain, scaled], 700, BNB_CFG).map(r => r.hash)).toEqual(['0xs', '0xp'])
   })
 
+  it('ranks an older large stablecoin transfer above a hundred recent small ones', () => {
+    // What the candidate query hands over: each token's newest 100, newest first. The $1M transfer is hours
+    // older than every $1K one, which is exactly where a recency cut would have dropped it.
+    const recent = Array.from({ length: 100 }, (_, i) => token(`0xs${i}`, BNB_CFG.stablecoins[0].address, String(1_000n * E18), 60 + i, 'USDT'))
+    const old = token('0xbig', BNB_CFG.stablecoins[1].address, String(1_000_000n * E18), 20 * 3600, 'USDC')
+
+    const ranked = rankWhalesByUsd([...recent, old], 730, BNB_CFG)
+
+    expect(ranked[0].hash).toBe('0xbig')
+    expect(ranked[0].usd).toBe(1_000_000)
+    expect(ranked).toHaveLength(101) // the cap is not rankWhalesByUsd's job: queryWhales applies it after
+  })
+
   it('returns plain JSON: no BigInt can reach the page cache', () => {
     const ranked = rankWhalesByUsd([native('0xbnb', 5n), token('0xt', BNB_CFG.stablecoins[0].address, '5')], 700, BNB_CFG)
 
@@ -350,16 +380,31 @@ describe('buildNativeWhaleQuery carries the partial-index floor as a literal', (
 })
 
 describe('rankingNote', () => {
+  it('states the candidate basis from the constants and the chain names, not from a hardcoded BNB', () => {
+    for (const [currency, wrapped] of [['BNB', 'WBNB'], ['ETH', 'WETH']] as const) {
+      for (const priced of [true, false]) {
+        const note = rankingNote(currency, wrapped, priced)
+        expect(note).toContain(`the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers`)
+        expect(note).toContain(`the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token in this period`)
+        expect(note).toContain(`top ${WHALES_SHOWN}`)
+        const other = currency === 'BNB' ? 'ETH' : 'BNB'
+        expect(note).not.toContain(other)
+      }
+    }
+  })
+
   it('states the live-price basis only when a native price is known', () => {
     const note = rankingNote('BNB', 'WBNB', true)
     expect(note).toContain('at the live BNB price')
-    expect(note).toContain('stablecoins at $1')
+    expect(note).toContain('Stablecoins are priced at $1')
+    expect(note).toContain('with no price is listed last')
   })
 
   it('says plainly that the native price is unavailable, and that native rows are unranked, when it is not', () => {
     const note = rankingNote('ETH', 'WETH', false)
     expect(note).not.toMatch(/live/i)
     expect(note).toContain('ETH price is unavailable')
-    expect(note).toMatch(/ETH and WETH transfers .*unranked/)
+    expect(note).toMatch(/ETH and WETH transfers are unranked/)
+    expect(note).toContain('stablecoins are ranked by estimated USD value at $1')
   })
 })
