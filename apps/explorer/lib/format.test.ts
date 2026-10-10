@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { formatUnits } from 'ethers'
+import { holdingFromProvider } from '@/lib/holdings'
 import {
   formatNativeToken,
   formatBNB,
@@ -454,7 +455,9 @@ describe('formatDecimalAmount', () => {
   })
 
   it('gives the same text as the Holdings tab for the same amount', () => {
-    // Holdings formats raw base units: formatTokenAmount(raw, decimals, 6). Same floor, rounding, grouping and trimming.
+    // The Holdings tab's real provider path: holdingFromProvider with the balanceFormatted Moralis always sends.
+    const holdings = (decimal: string, raw: string, decimals: number) =>
+      holdingFromProvider({ tokenAddress: '0x' + '1'.repeat(40), symbol: 'X', name: 'X', logo: null, decimals, balance: raw, balanceFormatted: decimal, usdValue: null }).amount
     const cases: Array<[string, string, number]> = [
       ['0.000000000000000001', '1', 18],
       ['0.0000004', '400000000000', 18],
@@ -465,9 +468,11 @@ describe('formatDecimalAmount', () => {
       ['1234567.1234567', '1234567123456700000000000', 18],
       ['1234.5', '1234500000', 6],
       ['25', '25', 0],
+      ['0', '0', 18],
       ['123456789012345680000', '123456789012345680000', 0],
     ]
-    for (const [decimal, raw, decimals] of cases) expect(formatDecimalAmount(decimal), decimal).toBe(formatTokenAmount(raw, decimals, 6))
+    for (const [decimal, raw, decimals] of cases) expect(formatDecimalAmount(decimal), decimal).toBe(holdings(decimal, raw, decimals))
+    expect(formatDecimalAmount('0.000000000000000001')).toBe('<0.000001')
   })
 
   it('prints every amount from 0.000001 up exactly as the inline expression did', () => {
@@ -477,7 +482,20 @@ describe('formatDecimalAmount', () => {
     expect(formatDecimalAmount('1234567.1234567')).toBe('1,234,567.123457')
   })
 
-  it('returns text it cannot read as a plain decimal unchanged, rather than a made-up number', () => {
-    for (const v of ['1e-8', '', 'n/a', '-1.5']) expect(formatDecimalAmount(v)).toBe(v)
+  it.each([['1e-7', '<0.000001'], ['1.5e-7', '<0.000001'], ['4.9e-7', '<0.000001'], ['1E-18', '<0.000001'], ['1e-400', '<0.000001']])(
+    'floors exponent form, where JS prints small numbers: %s reads %s, not the text itself', (v, out) => {
+      expect(formatDecimalAmount(v)).toBe(out)
+    })
+
+  it('reads exponent form exactly: the same text as the plain decimal for the same amount', () => {
+    for (const [exp, plain] of [['5e-7', '0.0000005'], ['1e-6', '0.000001'], ['1.5e-6', '0.0000015'], ['2.5e-3', '0.0025'], ['1.5e3', '1500'], ['2E+2', '200'], ['12.5e0', '12.5']]) {
+      expect(formatDecimalAmount(exp), exp).toBe(formatDecimalAmount(plain))
+    }
+    expect(formatDecimalAmount('1.5e3')).toBe('1,500')
+    expect(formatDecimalAmount('5e-7')).toBe('0.000001') // rounds half-up to the floor, like formatTokenAmount
+  })
+
+  it('returns text it cannot read as a non-negative number unchanged, rather than a made-up one', () => {
+    for (const v of ['', 'n/a', '-1.5', '1e', '1e999999', '1e-999999']) expect(formatDecimalAmount(v)).toBe(v)
   })
 })

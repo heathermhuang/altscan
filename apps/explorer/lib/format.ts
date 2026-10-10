@@ -300,18 +300,25 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
 }
 
 /**
- * An amount that arrives already scaled, as a decimal string (a provider's `valueFormatted`), through
- * `formatTokenAmount` at six places: the helper, rounding and floor every other amount on the address
- * page uses, so a non-zero amount that rounds away reads "<0.000001" instead of "0", and zero stays "0".
- * The string is converted to base units without floating point (so nothing is lost on a large amount)
- * and without the row's `tokenDecimals`, which the backfill table records as '0' when it has none.
- * Text that is not a plain non-negative decimal ("1e-8", "") is returned as it came.
+ * An amount that arrives already scaled, as a decimal string (a provider's `valueFormatted` or
+ * `balanceFormatted`), through `formatTokenAmount` at six places: the helper, rounding and floor every
+ * other amount on the address page uses, so a non-zero amount that rounds away reads "<0.000001"
+ * instead of "0", and zero stays "0". The string is converted to base units without floating point
+ * (so nothing is lost on a large amount), exponent form included ("1e-7", the way JS prints a small
+ * number), and without the row's `tokenDecimals`, which the backfill table records as '0' when it has
+ * none. Text that is not a non-negative number ("", "n/a", "-1.5") is returned as it came.
  */
 export function formatDecimalAmount(valueFormatted: string): string {
-  const m = /^(\d+)(?:\.(\d+))?$/.exec(valueFormatted)
+  const m = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(valueFormatted)
   if (!m) return valueFormatted
   const fraction = m[2] ?? ''
-  return formatTokenAmount(BigInt(m[1] + fraction), fraction.length, 6)
+  const exponent = Number(m[3] ?? 0)
+  if (!(Math.abs(exponent) <= 400)) return valueFormatted
+  const digits = BigInt(m[1] + fraction)
+  const places = fraction.length - exponent
+  return places >= 0
+    ? formatTokenAmount(digits, places, 6)
+    : formatTokenAmount(digits * 10n ** BigInt(-places), 0, 6)
 }
 
 /** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th … 21st. */
