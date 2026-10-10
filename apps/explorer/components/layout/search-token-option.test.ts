@@ -25,3 +25,28 @@ describe('typeahead token row', () => {
     expect(bad).toContain('lookalike')
   })
 })
+
+// Same neutral chip as the tables, beside the symbol; the text stays text.
+describe('typeahead token row: link in name', () => {
+  const row = (symbol: string, name: string) =>
+    renderToStaticMarkup(createElement(TokenOption, { token: { address: '0x' + '3'.repeat(40), symbol, name, holders: 5, lookalikeOf: null } }))
+
+  it('badges a URL or handle in the symbol or the name', () => {
+    expect(row('claim-bnb.xyz', 'Claim')).toMatch(/>link in name<\/span>/)
+    expect(row('FREE', 'Visit t.me/freebnb')).toMatch(/>link in name<\/span>/)
+    expect(row('FOMO', '@FOMO')).toMatch(/>link in name<\/span>/)
+  })
+
+  it('leaves tickers with dots alone, and adds nothing to the markup', () => {
+    for (const [s, n] of [['USDT.z', 'Tether USD Bridged'], ['BTC.b', 'Bitcoin'], ['CAKE', 'PancakeSwap Token']]) {
+      expect(row(s, n)).not.toContain('link in name')
+      expect(row(s, n)).not.toContain('badge')
+    }
+  })
+
+  it('shows the text and renders no link of its own', () => {
+    const html = row('claim-bnb.xyz', 'Claim')
+    expect(html).toContain('claim-bnb.xyz')
+    expect(html).not.toContain('<a ')
+  })
+})

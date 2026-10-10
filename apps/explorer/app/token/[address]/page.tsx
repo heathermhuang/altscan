@@ -13,6 +13,8 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { LinkInName } from '@/components/ui/LinkInName'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { Contract } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
@@ -299,6 +301,7 @@ export default async function TokenDetailPage({
               lookalike<span className="sr-only"> of {lookalike.symbol}</span>
             </span>
           )}
+          {(looksLikeUrlOrHandle(token.name) || looksLikeUrlOrHandle(token.symbol)) && <LinkInName />}
           <Badge variant="default">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</Badge>
           <a
             href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
