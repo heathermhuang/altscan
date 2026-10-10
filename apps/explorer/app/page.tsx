@@ -10,7 +10,7 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { swallow, swallowed } from '@/lib/observability'
-import { fetchNativeQuote } from '@/lib/native-price'
+import { fetchNativeQuote, type NativeQuote } from '@/lib/native-price'
 import { encodeTape, gasPct, TAPE_LATEST, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
@@ -139,16 +139,16 @@ let refinedSupply: number | null = null
 /** Market cap = reliable native price × circulating supply. `capRaw` is a best-effort
  *  fresh market-cap fetch, used ONLY to refine the supply estimate — never for the value. */
 function deriveMarketCap(
-  price: { usd: number; change24h: number } | null,
+  price: NativeQuote | null,
   capRaw: { value: number; change24h: number } | null,
-): { value: number; change24h: number } | null {
-  if (!price || price.usd <= 0) return null
+): { value: number; change24h: number | null } | null {
+  if (!price || price.price <= 0) return null
   if (capRaw && capRaw.value > 0) {
     // Refine supply from a fresh cap, but reject outliers so one bad/stale/wrong-unit
     // provider response can't poison the process-wide estimate (a stale Next Data Cache
     // replay or a value off by orders of magnitude). A real circulating supply sits near
     // the seed — it only drifts with slow burns — so accept only within [0.5×, 2×].
-    const implied = capRaw.value / price.usd
+    const implied = capRaw.value / price.price
     const seed = chainConfig.nativeCirculatingSupply
     if (Number.isFinite(implied) && implied >= seed * 0.5 && implied <= seed * 2) {
       refinedSupply = implied
@@ -157,7 +157,12 @@ function deriveMarketCap(
   const supply = refinedSupply ?? chainConfig.nativeCirculatingSupply
   if (!(supply > 0)) return null
   // Supply is ~constant over 24h, so the cap's 24h change tracks the price's.
-  return { value: price.usd * supply, change24h: price.change24h }
+  return { value: price.price * supply, change24h: price.change24h }
+}
+
+/** "+1.23%" or "-0.50%"; null when there is no change to show (a source that gave none is not 0%). */
+function percentText(change: number | null | undefined): string | null {
+  return change == null ? null : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`
 }
 
 export default async function HomePage() {
@@ -172,7 +177,7 @@ export default async function HomePage() {
   const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
     dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(TAPE_LATEST).catch(swallowed('home/blocks', [])), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(swallowed('home/txs', [])), []),
-    fetchNativeQuote(),
+    fetchNativeQuote(60), // the page's own cache window (see `revalidate`), not the lib's five minutes
     fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
   ])
 
@@ -193,12 +198,10 @@ export default async function HomePage() {
   const txCount24h = await dbTimeout(fetchTxCount24h(latestBlock), null)
 
   const priceDisplay = nativePrice
-    ? `$${nativePrice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `$${nativePrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '—'
-  const changeDisplay = nativePrice
-    ? `${nativePrice.change24h >= 0 ? '+' : ''}${nativePrice.change24h.toFixed(2)}%`
-    : null
-  const changePositive = nativePrice ? nativePrice.change24h >= 0 : null
+  const changeDisplay = percentText(nativePrice?.change24h)
+  const changePositive = nativePrice?.change24h == null ? null : nativePrice.change24h >= 0
 
   return (
     <>
@@ -250,8 +253,8 @@ export default async function HomePage() {
           <StatCard
             label={`${chainConfig.currency} Market Cap`}
             value={marketCap ? formatCompactUsd(marketCap.value) : '—'}
-            subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
-            subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
+            subtext={percentText(marketCap?.change24h)}
+            subtextPositive={marketCap?.change24h == null ? null : marketCap.change24h >= 0}
           />
           <StatCard
             label={`${chainConfig.currency} Price`}

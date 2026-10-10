@@ -41,20 +41,28 @@ describe('HomePage price path', () => {
   const CAP = `${chainConfig.currency} Market Cap`
 
   it('shows the price and 24h change from lib/native-price', async () => {
-    fetchNativeQuote.mockResolvedValue({ usd: 612.5, change24h: -1.234 })
+    fetchNativeQuote.mockResolvedValue({ price: 612.5, change24h: -1.234 })
     const c = await home()
     expect(fetchNativeQuote).toHaveBeenCalledTimes(1)
+    expect(fetchNativeQuote).toHaveBeenCalledWith(60) // the page's own cache window, not the lib's five minutes
     expect(c[PRICE]).toMatchObject({ value: '$612.50', subtext: '-1.23%', subtextPositive: false })
   })
 
   it('writes a rise with a plus sign', async () => {
-    fetchNativeQuote.mockResolvedValue({ usd: 1234.5, change24h: 2 })
+    fetchNativeQuote.mockResolvedValue({ price: 1234.5, change24h: 2 })
     expect((await home())[PRICE]).toMatchObject({ value: '$1,234.50', subtext: '+2.00%', subtextPositive: true })
   })
 
   it('derives the market cap from that price and carries its 24h change', async () => {
-    fetchNativeQuote.mockResolvedValue({ usd: 600, change24h: 4 })
+    fetchNativeQuote.mockResolvedValue({ price: 600, change24h: 4 })
     expect((await home())[CAP]).toMatchObject({ value: expect.stringMatching(/^\$[\d.]+[KMBT]$/), subtext: '+4.00%', subtextPositive: true })
+  })
+
+  it('shows the price with no change line when the source gave no change, rather than "+0.00%"', async () => {
+    fetchNativeQuote.mockResolvedValue({ price: 612.5, change24h: null })
+    const c = await home()
+    expect(c[PRICE]).toMatchObject({ value: '$612.50', subtext: null, subtextPositive: null })
+    expect(c[CAP]).toMatchObject({ value: expect.stringMatching(/^\$[\d.]+[KMBT]$/), subtext: null, subtextPositive: null })
   })
 
   it('labels a price it does not have: "—" and no change, never a made-up number', async () => {
