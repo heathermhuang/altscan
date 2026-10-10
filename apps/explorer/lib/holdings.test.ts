@@ -186,7 +186,7 @@ describe('holdingsNote', () => {
     expect(holdingsNote({ ...base, trackedKnown: true, others: 'index' })).toBe(
       "USDT, USDC and WBNB are read from the chain just now: stablecoins at $1, WBNB at the live BNB price. Other balances come from this explorer's index: approximate, and not priced.",
     )
-    expect(holdingsNote({ ...base, trackedKnown: true, others: 'moralis' })).toContain('Other balances are from Moralis, priced only where it has a price.')
+    expect(holdingsNote({ ...base, trackedKnown: true, others: 'moralis' })).toContain('Other balances come from Moralis where it answers, priced only where it has a price.')
     expect(holdingsNote({ ...base, trackedKnown: true, others: 'none' })).not.toContain('Other balances')
   })
 

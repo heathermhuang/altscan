@@ -187,7 +187,7 @@ export function holdingsNote(o: {
     : `${names} could not be read from the chain right now.`
   const rest = {
     index: ' Other balances come from this explorer\'s index: approximate, and not priced.',
-    moralis: ' Other balances are from Moralis, priced only where it has a price.',
+    moralis: ' Other balances come from Moralis where it answers, priced only where it has a price.',
     none: '',
   }[o.others]
   return lead + rest

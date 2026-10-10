@@ -107,16 +107,13 @@ export function HoldersLazy({
   return (
     <div className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
       <div className="px-4 py-3 border-b border-hair flex items-center justify-between gap-2">
-        <h2 className="font-semibold tracking-[-0.02em] text-ink">
-          Top Holders
-          {data.source === 'moralis' && data.holderCount != null && (
-            <span className="text-mut font-normal text-sm">
-              {' · '}{holdersPhrase(data.holderCount, 'provider')}
-            </span>
-          )}
-        </h2>
+        <h2 className="font-semibold tracking-[-0.02em] text-ink">Top Holders</h2>
+        {/* The Moralis total sits where the source label used to: the same single line as "Estimated from
+            recent transfers", so the estimate -> live swap does not re-wrap the header on a phone. */}
         <span className="text-[11px] text-mut">
-          {data.source === 'moralis' ? 'via Moralis' : 'Estimated from recent transfers'}
+          {data.source === 'moralis'
+            ? data.holderCount != null ? holdersPhrase(data.holderCount, 'provider') : 'via Moralis'
+            : 'Estimated from recent transfers'}
         </span>
       </div>
       {/* The note slot renders in BOTH states with the same box, and both notes sit in one grid
