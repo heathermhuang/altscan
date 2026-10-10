@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
-import { or, ilike, sql } from 'drizzle-orm'
+import { or, ilike, desc } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
@@ -46,6 +46,9 @@ export default async function SearchPage({
     try {
       // The SQL only finds rows that CONTAIN the query, biggest first; rankTokenMatches decides which
       // 10 a visitor sees (exact symbol/name before prefix before contains, lookalikes after real tokens).
+      // Plain DESC, never NULLS LAST: holder_count is NOT NULL, so the order is the same, and plain DESC
+      // matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops at the
+      // limit. NULLS LAST cannot use that index and forced a seq scan + sort on every search (~3.6 s on BNB).
       const candidates = await db.select().from(schema.tokens)
         .where(
           or(
@@ -53,7 +56,7 @@ export default async function SearchPage({
             ilike(schema.tokens.symbol, `%${safeQuery}%`),
           )
         )
-        .orderBy(sql`${schema.tokens.holderCount} DESC NULLS LAST`)
+        .orderBy(desc(schema.tokens.holderCount))
         .limit(SEARCH_CANDIDATE_LIMIT)
       const tokenMatches = rankTokenMatches(candidates, query, (t) => lookalikeOf(t, chainConfig.key) !== null)
 
