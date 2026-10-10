@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatHolders } from '@/lib/format'
+import { formatHolders, tokenText } from '@/lib/format'
 import { HOLDER_LABELS, holdersPhrase, type HolderSource } from '@/lib/holder-labels'
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -109,6 +109,10 @@ export function HoldersLazy({
   // Nothing to show yet (empty local estimate + Moralis not loaded / also empty).
   if (data.holders.length === 0) return null
 
+  // What the table calls the token. A symbol that reads as a URL or handle (lib/link-in-name) is the token's short address
+  // (the strip says "tokens" for it); any other is printed exactly as it always was.
+  const unit = tokenText(symbol, null, address).linkLike ? shortenAddress(address) : symbol
+
   // The table's % column and the strip read the SAME shares (lib/holder-share.ts), so a tile and its row agree.
   // In the live state the provider's supply (read with these balances) is the denominator, not the token row's, which
   // is captured at discovery and healed only when 0 (a minting, burning or rebasing token drifts).
@@ -174,7 +178,7 @@ export function HoldersLazy({
       </div>
       <div className="overflow-x-auto">
       <table className="dt dt-2l">
-        <caption className="sr-only">Top holders of {symbol}</caption>
+        <caption className="sr-only">Top holders of {unit}</caption>
         <thead>
           <tr>
             <th scope="col">#</th>
@@ -198,7 +202,7 @@ export function HoldersLazy({
                   <span className="hidden sm:inline"><AddressLink address={holder.addr} short={false} /></span>
                 </td>
                 <td>
-                  {holderAmount} {symbol}
+                  {holderAmount} {unit}
                 </td>
                 <td className="text-mut">{pct}</td>
               </tr>
