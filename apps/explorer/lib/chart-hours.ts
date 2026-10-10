@@ -38,8 +38,9 @@ export function completeUtcHours<T extends { hourMs: number; firstTs: number }>(
   const currentHour = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS
   const past = hours.filter(h => h.hourMs < currentHour)
   const first = past[0]
-  // Written so an unknown start (NaN) fails the test and the hour is dropped, never plotted as whole.
-  const startsWithTheHour = first !== undefined && first.firstTs - first.hourMs <= FIRST_HOUR_TOLERANCE_MS
+  // Written so an unknown start fails the test and the hour is dropped, never plotted as whole. NaN does,
+  // and so does the null it becomes in the page cache's JSON (null - hourMs would read as "starts early").
+  const startsWithTheHour = first !== undefined && Number.isFinite(first.firstTs) && first.firstTs - first.hourMs <= FIRST_HOUR_TOLERANCE_MS
   return first === undefined || startsWithTheHour ? past : past.slice(1)
 }
 

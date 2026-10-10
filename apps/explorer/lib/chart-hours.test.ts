@@ -47,6 +47,13 @@ describe('completeUtcHours', () => {
     expect(completeUtcHours([unknown, hour('2026-10-10T09:00:00Z', 8000)], NOW).map(h => h.hourMs)).toEqual([at('2026-10-10T09:00:00Z')])
   })
 
+  it('still drops it after a trip through the page cache, where JSON turns NaN into null', () => {
+    const unknown = toHourRow({ hour_ts: at('2026-10-10T08:00:00Z') / 1000, first_ts: null, tx: 1, blocks: 1, gas: null })
+    const cached = JSON.parse(JSON.stringify([unknown, hour('2026-10-10T09:00:00Z', 1)]))
+    expect(cached[0].firstTs).toBeNull()
+    expect(completeUtcHours(cached, NOW).map((h: { hourMs: number }) => h.hourMs)).toEqual([at('2026-10-10T09:00:00Z')])
+  })
+
   it('returns nothing for an empty series, or one that is only the current hour', () => {
     expect(completeUtcHours([], NOW)).toEqual([])
     expect(completeUtcHours([hour('2026-10-10T12:00:00Z', 4500, 0)], NOW)).toEqual([])
