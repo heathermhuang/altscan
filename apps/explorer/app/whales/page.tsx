@@ -145,7 +145,7 @@ export default async function WhalesPage({
                   <td className="font-semibold text-right">
                     {displayAmount}{' '}
                     <span className="text-mut font-normal text-xs">{symbol}</span>
-                    <span className="block text-mut font-normal text-xs">
+                    <span className="block whitespace-nowrap text-mut font-normal text-xs">
                       {w.usd === null ? 'no price' : `≈ ${formatCompactUsd(w.usd)}`}
                     </span>
                   </td>
