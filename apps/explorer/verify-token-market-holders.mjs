@@ -88,6 +88,15 @@ console.log('3. market-data pure helpers')
     const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN
     return Number.isFinite(n) ? n : null
   }
+  const DEX_NAMES = {
+    pancakeswap: 'PancakeSwap', uniswap: 'Uniswap', sushiswap: 'SushiSwap', biswap: 'BiSwap',
+    apeswap: 'ApeSwap', thena: 'Thena', mdex: 'MDEX', curve: 'Curve', balancer: 'Balancer',
+  }
+  const dexName = (dexId) => {
+    const known = DEX_NAMES[dexId.split('-')[0]]
+    if (known) return known
+    return dexId.split(/[-_]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+  }
   const buildMarketData = (pair, cg) => ({
     priceUsd: num(pair.priceUsd),
     priceChange24h: num(pair.priceChange?.h24),
@@ -97,7 +106,7 @@ console.log('3. market-data pure helpers')
     marketCap: cg?.marketCap ?? num(pair.marketCap),
     circulatingSupply: cg?.circulatingSupply ?? null,
     dexUrl: pair.url ?? null,
-    pairLabel: `${pair.baseToken?.symbol}/${pair.quoteToken?.symbol} · ${pair.dexId}`,
+    pairLabel: `${pair.baseToken?.symbol}/${pair.quoteToken?.symbol} pair${pair.dexId ? ` on ${dexName(pair.dexId)}` : ''}`,
     source: cg ? 'dexscreener+coingecko' : 'dexscreener',
   })
   const T = '0xAAA0000000000000000000000000000000000001'
@@ -116,7 +125,7 @@ console.log('3. market-data pure helpers')
   eq(md.fdv, 50000, '3.fdv parsed')
   eq(md.marketCap, 12345, '3.coingecko marketCap overrides')
   eq(md.circulatingSupply, 678, '3.coingecko circulating supply')
-  eq(md.pairLabel, 'AAA/USDT · pancakeswap', '3.pairLabel composed')
+  eq(md.pairLabel, 'AAA/USDT pair on PancakeSwap', '3.pairLabel composed')
   eq(md.source, 'dexscreener+coingecko', '3.source reflects cg')
   eq(buildMarketData(best, null).source, 'dexscreener', '3.source dex-only when no cg')
   eq(buildMarketData(best, null).marketCap, null, '3.no marketCap when absent both')

@@ -7,7 +7,7 @@
  * cache (shared via Redis) with negative caching, under the page's ISR(300s) + withTimeout.
  * Mirrors the keyless goplus.ts client; KV layer mirrors moralis.ts.
  *
- * The pure helpers (pickBestPair, buildMarketData) are kept byte-for-byte identical to
+ * The pure helpers (pickBestPair, dexName, buildMarketData) are kept byte-for-byte identical to
  * verify-token-market-holders.mjs section 3 — that case table is their contract.
  */
 import { chainConfig } from './chain'
@@ -29,7 +29,7 @@ export type TokenMarketData = {
   marketCap: number | null
   circulatingSupply: number | null
   dexUrl: string | null
-  pairLabel: string | null        // e.g. "AAA/USDT · pancakeswap"
+  pairLabel: string | null        // e.g. "AAA/USDT pair on PancakeSwap"
   source: 'dexscreener' | 'dexscreener+coingecko'
 }
 
@@ -65,6 +65,22 @@ export function pickBestPair(pairs: DexPair[], tokenAddr: string, chainId: strin
   )
 }
 
+const DEX_NAMES: Record<string, string> = {
+  pancakeswap: 'PancakeSwap', uniswap: 'Uniswap', sushiswap: 'SushiSwap', biswap: 'BiSwap',
+  apeswap: 'ApeSwap', thena: 'Thena', mdex: 'MDEX', curve: 'Curve', balancer: 'Balancer',
+}
+
+/**
+ * A DexScreener `dexId` as a name: "pancakeswap" -> "PancakeSwap". A versioned id ("pancakeswap-v3")
+ * reads as its DEX; one we have no name for is title-cased ("kyber-elastic" -> "Kyber Elastic").
+ * Pure — keep body identical to the .mjs.
+ */
+export function dexName(dexId: string): string {
+  const known = DEX_NAMES[dexId.split('-')[0]]
+  if (known) return known
+  return dexId.split(/[-_]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+
 /**
  * Combine a DexScreener pair + optional CoinGecko enrichment into the card model.
  * Pure — keep body identical to the .mjs.
@@ -83,7 +99,7 @@ export function buildMarketData(pair: DexPair, cg: CoinGeckoMarket | null): Toke
     marketCap: cg?.marketCap ?? num(pair.marketCap),
     circulatingSupply: cg?.circulatingSupply ?? null,
     dexUrl: pair.url ?? null,
-    pairLabel: `${pair.baseToken?.symbol}/${pair.quoteToken?.symbol} · ${pair.dexId}`,
+    pairLabel: `${pair.baseToken?.symbol}/${pair.quoteToken?.symbol} pair${pair.dexId ? ` on ${dexName(pair.dexId)}` : ''}`,
     source: cg ? 'dexscreener+coingecko' : 'dexscreener',
   }
 }
@@ -128,7 +144,7 @@ async function fetchCoinGecko(addr: string): Promise<CoinGeckoMarket | null> {
 
 /** Top-level: cached, best-effort. null ⇒ the page hides the Market card. */
 export async function getTokenMarketData(addr: string): Promise<TokenMarketData | null> {
-  const cacheKey = `market:v1:${chainConfig.key}:${addr}`
+  const cacheKey = `market:v2:${chainConfig.key}:${addr}`
   const cached = await kvGet(cacheKey)
   if (cached === NULL_SENTINEL) return null
   if (cached) {

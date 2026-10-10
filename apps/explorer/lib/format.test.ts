@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { formatUnits } from 'ethers'
 import {
   formatNativeToken,
   formatBNB,
@@ -11,6 +12,7 @@ import {
   tinyAmount,
   formatPercent,
   formatTokenAmount,
+  unitsToDecimal,
   formatUtc,
   sanitizeSymbolOr,
   tokenTextOr,
@@ -415,5 +417,23 @@ describe('formatAmountCompact', () => {
 
   it('reads a bad amount rather than throwing', () => {
     expect(formatAmountCompact('not a number', 18)).toBe('0')
+  })
+})
+
+// formatTokenAmount used ethers' formatUnits, which put ethers' units code into every client chunk that merely
+// imports lib/format once the address Holdings tab (a client component) started formatting amounts: +5 kB First
+// Load JS on /address and +4 kB on /token/[a]. unitsToDecimal is the same conversion in plain BigInt.
+describe('unitsToDecimal', () => {
+  const units = [0n, 1n, 9n, 10n, 999999n, 1_000_000n, 1_500_000_000_000_000_000n, 2n * 10n ** 18n, 123456789012345678901234567890n, 10n ** 40n, -1n, -1_500_000n, -(10n ** 18n)]
+  const places = [0, 1, 2, 4, 6, 8, 18, 24]
+
+  it('equals ethers formatUnits for whole, fractional, tiny, huge and negative values at every precision', () => {
+    for (const u of units) for (const p of places) expect(unitsToDecimal(u, p), `${u} @ ${p}`).toBe(formatUnits(u, p))
+  })
+
+  it('formatTokenAmount keeps its output', () => {
+    expect(formatTokenAmount('1500000000000000000', 18)).toBe('1.5')
+    expect(formatTokenAmount('4787630158322188632852549', 18, 6)).toBe('4,787,630.158322')
+    expect(formatTokenAmount('1', 18, 6)).toBe('<0.000001')
   })
 })

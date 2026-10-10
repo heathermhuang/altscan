@@ -35,3 +35,24 @@ describe('HoldersLazy note slot', () => {
     expect(live).toMatch(/invisible">Estimated from the net flow/)
   })
 })
+
+describe('HoldersLazy header count', () => {
+  it('labels the provider total as holders (Moralis), not a bare "total"', () => {
+    expect(live).toContain('42 holders (Moralis)')
+    expect(live).not.toContain('(42 total)')
+    // The estimate has no count to label.
+    expect(local).not.toMatch(/holders \(Moralis\)/)
+  })
+})
+
+// The header is one line in both states: the Moralis total takes the place of "Estimated from recent
+// transfers" on the right, so the swap does not re-wrap it on a phone (CLS gate, 412 px: 0.0048 vs 0.0010).
+describe('HoldersLazy header shape', () => {
+  const heading = (html: string) => html.match(/<h2[^>]*>(.*?)<\/h2>/)?.[1]
+  it('keeps the title short and puts the count on the right', () => {
+    expect(heading(local)).toBe('Top Holders')
+    expect(heading(live)).toBe('Top Holders')
+    expect(live).toContain('<span class="text-[11px] text-mut">42 holders (Moralis)</span>')
+    expect(local).toContain('<span class="text-[11px] text-mut">Estimated from recent transfers</span>')
+  })
+})

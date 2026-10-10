@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { holdersChip } from '@/lib/holder-labels'
 import {
   hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
 } from '@/lib/search-suggest'
@@ -126,21 +127,29 @@ export function SearchSuggest({ id, query, onCombo }: SuggestProps) {
                 <span className="font-mono text-ink truncate">{o.hint.value}</span>
               </span>
             ) : (
-              <>
-                <span className="flex items-baseline gap-2">
-                  <span className="font-mono font-semibold text-ink">{o.token.symbol}</span>
-                  {o.token.lookalikeOf && (
-                    <span className="badge badge-bad">lookalike<span className="sr-only"> of {o.token.lookalikeOf}</span></span>
-                  )}
-                  <span className="ml-auto text-mut">{o.token.holders.toLocaleString('en-US')} holders</span>
-                </span>
-                <span className="block truncate text-mut">{o.token.name}</span>
-              </>
+              <TokenOption token={o.token} />
             )}
           </li>
         ))}
       </ul>
       <div role="status" className="sr-only">{open ? `${options.length} suggestion${options.length === 1 ? '' : 's'}` : ''}</div>
+    </>
+  )
+}
+
+/** A token suggestion's two lines. The holder count is the explorer's frozen index count, so its visible text says "indexed". */
+export function TokenOption({ token }: { token: TokenSuggestion }) {
+  const holders = holdersChip(token.holders)
+  return (
+    <>
+      <span className="flex items-baseline gap-2">
+        <span className="font-mono font-semibold text-ink">{token.symbol}</span>
+        {token.lookalikeOf && (
+          <span className="badge badge-bad">lookalike<span className="sr-only"> of {token.lookalikeOf}</span></span>
+        )}
+        <span className="ml-auto text-mut" title={holders.title}>{holders.text}</span>
+      </span>
+      <span className="block truncate text-mut">{token.name}</span>
     </>
   )
 }

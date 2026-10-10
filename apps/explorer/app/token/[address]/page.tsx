@@ -21,7 +21,7 @@ import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
-import { HoldersLazy, HoldersCountLazy } from './HoldersLazy'
+import { HoldersLazy, HoldersFact } from './HoldersLazy'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, toChecksumAddress } from '@/lib/address-display'
@@ -135,12 +135,12 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${token.name} (${token.symbol})`,
-    // A holder count of 0 is a lagging reading (the Holders card shows "—"), so it is not stated.
-    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${token.holderCount.toLocaleString()} holders.` : ''}`,
+    // No holder count: tokens.holder_count is a frozen snapshot (see lib/holder-labels.ts), not something to publish as current.
+    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
-      description: token.holderCount > 0 ? `${standard} · ${token.holderCount.toLocaleString()} holders` : standard,
+      description: standard,
     },
   }
 }
@@ -326,9 +326,7 @@ export default async function TokenDetailPage({
         <Fact label="Decimals">{token.decimals}</Fact>
         <Fact label="Total Supply">{hasSupply(token.totalSupply) ? displaySupply : '—'}</Fact>
         {!isLive && (
-          <Fact label="Holders">
-            <HoldersCountLazy address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
-          </Fact>
+          <HoldersFact address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
         )}
       </dl>
 
@@ -336,7 +334,7 @@ export default async function TokenDetailPage({
         <div className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold tracking-[-0.02em] text-ink">Market</h2>
-            {marketData.dexUrl && (
+            {marketData.dexUrl ? (
               <a
                 href={marketData.dexUrl}
                 target="_blank"
@@ -345,6 +343,8 @@ export default async function TokenDetailPage({
               >
                 {marketData.pairLabel} ↗
               </a>
+            ) : marketData.pairLabel && (
+              <span className="text-xs text-mut">{marketData.pairLabel}</span>
             )}
           </div>
           <dl className="ledger">
@@ -362,10 +362,10 @@ export default async function TokenDetailPage({
                 </span>
               )}
             </Fact>
-            <Fact label="24h Volume">
+            <Fact label="24h Volume (pair)">
               {marketData.volume24h != null ? formatCompactUsd(marketData.volume24h) : '—'}
             </Fact>
-            <Fact label="Liquidity">
+            <Fact label="Liquidity (pair)">
               {marketData.liquidityUsd != null ? formatCompactUsd(marketData.liquidityUsd) : '—'}
             </Fact>
             <Fact label={marketData.marketCap != null ? 'Market Cap' : 'FDV'}>
@@ -379,6 +379,11 @@ export default async function TokenDetailPage({
           {marketData.circulatingSupply != null && (
             <p className="text-xs text-mut mt-3">
               Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {token.symbol}
+            </p>
+          )}
+          {marketData.pairLabel && (
+            <p className="text-[11px] text-mut mt-2">
+              Price, 24h volume and liquidity are for the {marketData.pairLabel}; market cap and FDV are for the whole token.
             </p>
           )}
           <p className="text-[11px] text-mut mt-2">

@@ -170,9 +170,13 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
 
 ## Known issues (accepted)
 
-- `holder_count` is eventually consistent — recomputed by `recomputeHolderCounts()` on an
-  interval (default 15 min, `HOLDER_COUNT_INTERVAL_MIN`) rather than per block. Worth ~6x
-  ETH throughput.
+- `tokens.holder_count` and `token_balances` are a **frozen snapshot**: per-block holder tracking is
+  hard-disabled (`holderBalanceTrackingEnabled: false`, `apps/indexer/src/config.ts`), so
+  `recomputeHolderCounts()` skips and nothing updates either. Measured on prod BNB: no USDT row for
+  the real #1 USDT holder; `holder_count` == `COUNT(token_balances)` (835,871 vs Moralis's 79.8M).
+  So the UI labels the count "indexed holders" (`lib/holder-labels.ts`), and never reads a live
+  balance from `token_balances` — the address page reads the tracked tokens (stablecoins +
+  wrapped) from the chain (`lib/tracked-balances.ts`).
 - `token_balances_token_address_holder_address_key` (~519 MB, 0 scans) is dead weight but
   backs a UNIQUE constraint — removal needs care.
 
