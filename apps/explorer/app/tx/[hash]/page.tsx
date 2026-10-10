@@ -437,8 +437,9 @@ export default async function TxDetailPage({
 
   // The block strip's view of this tx (null for an RPC tx or a block that is not fully indexed).
   const stripAt = strip ? txShareOfBlock(strip.txs, tx.txIndex) : null
-  const stripPos = stripAt ? stripAt.pos : -1
   const blockShare = stripAt && stripAt.pct !== null ? formatShare(stripAt.pct) : null
+  // 1-based, and one number for the eyebrow and the table row (tx_index is 0-based, and an identifier: the API keeps it).
+  const place = strip && stripAt ? { n: stripAt.pos + 1, of: strip.txs.length } : null
   const headline = decoded?.summary
     ? (pending ? pendingSummary(decoded.summary) : tx.status ? decoded.summary : attemptedSummary(decoded.summary))
     : `Transaction ${tx.hash.slice(0, 8)}…${tx.hash.slice(-6)}`
@@ -450,7 +451,7 @@ export default async function TxDetailPage({
       <div className="mb-5">
         <p className="k">
           {'// '}transaction
-          {strip && stripPos >= 0 && ` · ${ordinal(stripPos + 1)} of ${strip.txs.length} in block ${formatNumber(tx.blockNumber)}`}
+          {place && ` · ${ordinal(place.n)} of ${place.of} in block ${formatNumber(tx.blockNumber)}`}
         </p>
         <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-2">
           <h1 className="min-w-0 break-words text-[clamp(24px,2.6vw,34px)] font-bold leading-[1.1] tracking-[-0.02em] text-ink">{headline}</h1>
@@ -658,7 +659,7 @@ export default async function TxDetailPage({
         {nonce != null && (
           <Row label="Nonce" value={String(nonce)} mono />
         )}
-        {placed && <Row label="Position In Block" value={String(tx.txIndex)} mono />}
+        {placed && <Row label="Position In Block" value={place ? `${place.n} of ${place.of}` : String(tx.txIndex + 1)} mono />}
         {txType != null && (
           <Row label="Transaction Type" value={TX_TYPE_LABELS[txType] ?? `Type ${txType}`} />
         )}

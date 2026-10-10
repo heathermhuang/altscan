@@ -5,6 +5,7 @@ import type { ChainKey } from '@altscan/chain-config'
 import { getAddressLabel } from './known-addresses'
 import { safeBigInt, formatTokenAmount, sanitizeSymbolOr } from './format'
 import { lookalikeOf } from './lookalike'
+import { looksLikeUrlOrHandle } from './link-in-name'
 
 export interface DecodedTx {
   summary: string
@@ -27,7 +28,8 @@ export interface TxTransferInfo {
  * USDT" repeats the lie in the page's largest type. So a token that lookalikeOf flags (it reads as
  * a well-known token but is not that contract) gets no symbol, and any other symbol is sanitised
  * (control/bidi/non-ASCII stripped) and treated as missing when nothing printable survives; the
- * lookalike test runs on the sanitised text (what would be shown) as well as the raw. The
+ * lookalike test runs on the sanitised text (what would be shown) as well as the raw. A symbol that
+ * reads as a URL or a handle ("claim-bnb.xyz") is an advert, not a name, and gets none either. The
  * chain is a parameter: pass `chainConfig.key`.
  */
 export function safeTransferSymbol(
@@ -43,6 +45,7 @@ export function safeTransferSymbol(
   const clean = sanitizeSymbolOr(symbol, '')
   if (!clean) return undefined
   if (lookalikeOf({ address, symbol: clean }, chain) || lookalikeOf({ address, symbol }, chain)) return undefined
+  if (looksLikeUrlOrHandle(clean) || looksLikeUrlOrHandle(symbol)) return undefined
   return clean
 }
 

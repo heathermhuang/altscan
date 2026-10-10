@@ -8,6 +8,7 @@
  */
 import { shortenAddress } from '@/lib/address-display'
 import { safeBigInt } from '@/lib/format'
+import { blocksProduced } from '@/lib/validator-blocks'
 
 export type ValidatorRow = {
   address: string
@@ -28,14 +29,27 @@ const PLACEHOLDER_MONIKER = /^Validator \d+$/
 
 const noPower = (v: ValidatorRow) => safeBigInt(v.votingPower) === 0n
 
-function statusOf(v: ValidatorRow, powerUnknown: boolean): ValidatorDisplay['status'] {
+function statusOf(v: ValidatorRow, powerUnknown: boolean, idle: boolean): ValidatorDisplay['status'] {
   // Jailed is a stronger fact than "no stake", so it is never overwritten.
   if (v.status === 'jailed') return { label: 'jailed', variant: 'fail' }
   if (noPower(v) && !powerUnknown) return { label: 'No stake', variant: 'default' }
+  // The indexer stores 'active' for the whole set, so the stored word proves nothing about the last 24h.
+  if (idle && v.status === 'active') return { label: 'Standby', variant: 'default' }
   return { label: v.status, variant: v.status === 'active' ? 'success' : 'default' }
 }
 
-export function validatorDisplays(rows: readonly ValidatorRow[]): ValidatorDisplay[] {
+/**
+ * `blocks24h` is the page's miner counts (lib/validator-blocks), or null when that query failed. A
+ * validator is idle only when its own count is 0 AND some validator in this table produced blocks: with
+ * no counts, or none from anyone, the window says nothing, so Standby is never inferred from it.
+ */
+export function validatorDisplays(
+  rows: readonly ValidatorRow[],
+  blocks24h: ReadonlyMap<string, number> | null = null,
+): ValidatorDisplay[] {
+  const setProduced = rows.some(v => (blocksProduced(blocks24h, v.address) ?? 0) > 0)
+  const idle = (v: ValidatorRow) => setProduced && blocksProduced(blocks24h, v.address) === 0
+
   // When StakeHub fails, the syncer falls back to the ValidatorSet contract (validator-syncer.ts) and
   // upserts the whole set with voting power 0 in a single run, so all of those rows share one
   // updatedAt. If every row from the newest run is 0, that is a fallback run: their power is unknown,
@@ -64,7 +78,7 @@ export function validatorDisplays(rows: readonly ValidatorRow[]): ValidatorDispl
     const duplicated = !placeholder && (seen.get(name.toLowerCase()) ?? 0) > 1
     return {
       name: duplicated ? `${name} ${shortenAddress(v.address)}` : name,
-      status: statusOf(v, powerUnknown(v)),
+      status: statusOf(v, powerUnknown(v), idle(v)),
       powerUnknown: powerUnknown(v),
     }
   })

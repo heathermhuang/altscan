@@ -27,7 +27,7 @@ export async function analyzeTokenRisk(tokenAddress: string): Promise<RiskSignal
   signals.push({
     label: 'Source Verified',
     ok: !!contractData?.verifiedAt,
-    description: contractData?.verifiedAt ? 'Source code is verified and public' : 'Source code is not verified — cannot audit',
+    description: contractData?.verifiedAt ? 'Source code is verified and public' : 'No verified source recorded here — check Sourcify',
     severity: contractData?.verifiedAt ? 'info' : 'danger',
   })
 

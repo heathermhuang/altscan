@@ -45,6 +45,7 @@ vi.mock('@/lib/observability', async (orig) => ({
 
 import { schema } from '@/lib/db'
 import { Badge } from '@/components/ui/Badge'
+import { getBlockStrip } from '@/lib/block-strip'
 import TxDetailPage from './page'
 
 const HASH = '0x' + 'ab'.repeat(32)
@@ -123,5 +124,58 @@ describe('/tx/[hash] status badge', () => {
     expect(find(await render(), Badge)?.props.variant).toBe('success')
     state.dbTx = { ...indexedTx(), status: false }
     expect(find(await render(), Badge)?.props.variant).toBe('fail')
+  })
+})
+
+// ---- position in block ---------------------------------------------------------------------------
+
+// All the text under a node (function components are not called, so this is what the page itself wrote).
+function textOf(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  return textOf((node as { props?: { children?: ReactNode } }).props?.children)
+}
+
+function findAll(node: ReactNode, pred: (props: Record<string, unknown>) => boolean, out: Record<string, unknown>[] = []) {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) { for (const n of node) findAll(n, pred, out); return out }
+  const props = (node as { props?: Record<string, unknown> }).props
+  if (props && pred(props)) out.push(props)
+  findAll(props?.children as ReactNode, pred, out)
+  return out
+}
+
+const stripOf = (indices: number[]) => ({ gasLimit: 30_000_000, txs: indices.map(i => ({ i, gas: 21_000, price: 5e9, ok: true })) })
+const eyebrow = (tree: ReactNode) => textOf(findAll(tree, p => p.className === 'k')[0]?.children as ReactNode)
+const positionRow = (tree: ReactNode) => findAll(tree, p => p.label === 'Position In Block')[0]?.value
+
+describe('/tx/[hash] position in block', () => {
+  it('says the same 1-based place in the eyebrow and the table, against one fixture', async () => {
+    state.dbTx = { ...indexedTx(), txIndex: 25 }              // tx_index is 0-based: this is the 26th
+    vi.mocked(getBlockStrip).mockResolvedValueOnce(stripOf(Array.from({ length: 75 }, (_, i) => i)))
+    const tree = await render()
+    expect(eyebrow(tree)).toContain('26th of 75 in block 777')
+    expect(positionRow(tree)).toBe('26 of 75')
+  })
+
+  it('counts by the strip position, so both agree even where tx_index skips', async () => {
+    state.dbTx = { ...indexedTx(), txIndex: 3 }                // indices 0,1,3,4: the 3rd of 4
+    vi.mocked(getBlockStrip).mockResolvedValueOnce(stripOf([0, 1, 3, 4]))
+    const tree = await render()
+    expect(eyebrow(tree)).toContain('3rd of 4 in block 777')
+    expect(positionRow(tree)).toBe('3 of 4')
+  })
+
+  it('without the block strip the table is still 1-based, with no total it cannot know', async () => {
+    state.dbTx = { ...indexedTx(), txIndex: 3 }                // getBlockStrip is null by default
+    const tree = await render()
+    expect(eyebrow(tree)).not.toContain(' in block ')
+    expect(positionRow(tree)).toBe('4')
+  })
+
+  it('a pending tx has no position', async () => {
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 0, pending: true }))
+    expect(positionRow(await render())).toBeUndefined()
   })
 })

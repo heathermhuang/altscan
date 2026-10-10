@@ -10,6 +10,7 @@
  * Storage stays lowercase. Only the render boundary changes.
  */
 import { getAddress } from 'ethers'
+import { looksLikeUrlOrHandle } from './link-in-name'
 
 /**
  * EIP-55 checksummed form of `address`.
@@ -60,12 +61,14 @@ export function shortHash(hash: string, lead = 6, tail = 5): string {
  *
  * Deliberately takes no resolved (ENS / .bnb) name. Those are self-chosen — anyone can register
  * "binance-hot-wallet.bnb" — so promoting one to the page's headline would let an address name
- * itself. It stays a badge. `||`, not `??`: an empty label is no label.
+ * itself. It stays a badge. `||`, not `??`: an empty label is no label. Neither is a label that
+ * reads as a URL or a handle (lib/link-in-name): that is an advert, not what the address is.
  */
 export function addressHeadline(args: {
   label: string | null | undefined
   kind: string
   checksummed: string
 }): string {
-  return args.label || `${args.kind} ${shortenAddress(args.checksummed)}`
+  const label = looksLikeUrlOrHandle(args.label) ? null : args.label
+  return label || `${args.kind} ${shortenAddress(args.checksummed)}`
 }

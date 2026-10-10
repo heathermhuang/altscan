@@ -75,3 +75,32 @@ describe('HoldingsLazy shell', () => {
     expect(note(view({ tokens: [], limited: true, reason: 'rate_limited' }))).toBe(note(loading))
   })
 })
+
+// A name or symbol that reads as a URL or handle is an advert (lib/link-in-name): the row keeps its text,
+// with a neutral badge, and nothing in the table becomes a link to it.
+describe('HoldingsView: link in name', () => {
+  const html = view({
+    tokens: [
+      prov('CAKE', '12.5', '0x' + '2'.repeat(40)),
+      prov('claim-bnb.xyz', null, '0x' + '3'.repeat(40)),
+      prov('@airdrop_bot', null, '0x' + '4'.repeat(40)),
+      // The table shows this row's symbol, not its name, so no URL is on screen to flag.
+      { ...prov('FREE', null, '0x' + '5'.repeat(40)), name: 'Visit t.me/freebnb' },
+    ],
+  })
+  const row = (needle: string) => html.match(new RegExp(`<tr class="hover:bg-canvas transition-colors">(?:(?!</tr>).)*${needle}(?:(?!</tr>).)*</tr>`))?.[0] ?? ''
+
+  it('badges the rows whose shown text looks like a URL or handle, and only those', () => {
+    expect(html.match(/>link in name<\/span>/g)).toHaveLength(2)
+    expect(row('CAKE')).not.toContain('link in name')
+    expect(row('claim-bnb.xyz')).toContain('link in name')
+    expect(row('airdrop_bot')).toContain('link in name')
+    expect(row('FREE')).not.toContain('link in name')
+  })
+
+  it('keeps the text and links only to the explorer\'s own token pages', () => {
+    expect(html).toContain('claim-bnb.xyz')
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1])
+    expect(hrefs.filter((h) => !h.startsWith('/token/'))).toEqual([])
+  })
+})

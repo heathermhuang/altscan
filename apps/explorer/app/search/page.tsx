@@ -4,6 +4,8 @@ import { db, schema } from '@/lib/db'
 import { or, ilike, desc } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { LinkInName } from '@/components/ui/LinkInName'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_EXACT_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
 import { normaliseSearchQuery } from '@/lib/search-route'
 import { exactMatchQuery } from '@/lib/token-suggest'
@@ -123,15 +125,19 @@ export default async function SearchPage({
                     )
                     // Same badge as the /token list, on flagged rows only: an unflagged row's cell is the bare link.
                     const lookalike = lookalikeOf(token, chainConfig.key)
+                    const inName = looksLikeUrlOrHandle(token.name) || looksLikeUrlOrHandle(token.symbol)
                     return (
                       <tr key={token.address}>
                         <td>
-                          {lookalike ? (
+                          {lookalike || inName ? (
                             <>
                               {nameLink}
-                              <span className="badge badge-bad ml-2" title={lookalikeNote(lookalike)}>
-                                lookalike<span className="sr-only"> of {lookalike.symbol}</span>
-                              </span>
+                              {lookalike && (
+                                <span className="badge badge-bad ml-2" title={lookalikeNote(lookalike)}>
+                                  lookalike<span className="sr-only"> of {lookalike.symbol}</span>
+                                </span>
+                              )}
+                              {inName && <LinkInName className="ml-2" />}
                             </>
                           ) : nameLink}
                         </td>

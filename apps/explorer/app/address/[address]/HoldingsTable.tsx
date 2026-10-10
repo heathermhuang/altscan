@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { sanitizeSymbolOr, tokenLabel } from '@/lib/format'
 import { usdText, type HoldingRow } from '@/lib/holdings'
+import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { LinkInName } from '@/components/ui/LinkInName'
 
 // Kicker-style column header, matching components/transactions/TxTable.
 const TH = 'text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut'
@@ -41,23 +43,26 @@ export function HoldingsTable({ rows, caption, nativeSymbol }: { rows: readonly 
           </tr>
         </thead>
         <tbody className="divide-y divide-hair">
-          {rows.map((r) => (
-            <tr key={r.tokenAddress} className="hover:bg-canvas transition-colors">
-              <td className="px-3 sm:px-4 py-2">
-                <Link href={`/token/${r.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
-                  {tokenLabel(r.symbol, r.name, r.tokenAddress)}
-                </Link>
-              </td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(r.symbol, '—')}</td>
-              <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">{r.amount}</td>
-              <td
-                className={`px-3 sm:px-4 py-2 font-mono text-[13px]${r.usd === null ? ' text-mut' : ''}`}
-                title={basisTitle(r, nativeSymbol)}
-              >
-                {usdText(r)}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const label = tokenLabel(r.symbol, r.name, r.tokenAddress)
+            const link = <Link href={`/token/${r.tokenAddress}`} className="text-acc-ink hover:underline font-medium">{label}</Link>
+            return (
+              <tr key={r.tokenAddress} className="hover:bg-canvas transition-colors">
+                {/* Flagged rows only (judged on the text this row shows: the label and the symbol column): an unflagged row's cell is the bare link. */}
+                <td className="px-3 sm:px-4 py-2">
+                  {looksLikeUrlOrHandle(label) || looksLikeUrlOrHandle(r.symbol) ? <>{link}<LinkInName className="ml-2" /></> : link}
+                </td>
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(r.symbol, '—')}</td>
+                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">{r.amount}</td>
+                <td
+                  className={`px-3 sm:px-4 py-2 font-mono text-[13px]${r.usd === null ? ' text-mut' : ''}`}
+                  title={basisTitle(r, nativeSymbol)}
+                >
+                  {usdText(r)}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
       </div>
