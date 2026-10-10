@@ -33,6 +33,7 @@ describe('/token list cell contract', () => {
     token('0x55d398326f99059ff775485246999027b3197955', 'Tether USD', 'USDT', 835871, '4760000000000000000000000000'),
     token('0x1111111111111111111111111111111111111111', 'Tether USD', 'USDT', 12, '1000000000000000000'),
     token('0x2222222222222222222222222222222222222222', 'Unknown', '???', 0, '0'),
+    token('0x3333333333333333333333333333333333333333', 'Claim at free-bnb.xyz', 'AIRDROP', 5, '1000000000000000000000'),
   )
 
   it('is a dt-tk table whose headers go visually hidden on a phone, with every column kept at every width', async () => {
@@ -54,6 +55,15 @@ describe('/token list cell contract', () => {
     expect(clone[1].inner).toContain('lookalike')
     expect(unknown[3].inner).toBe('—')
     expect(unknown[4].inner).toBe('—')
+  })
+
+  it('keeps the "link in name" badge in the name cell (the cell the phone grid lets wrap), and no other cell gets one', async () => {
+    const rows = bodyRows(await render()).map(cells)
+    const advert = rows[3]
+    expect(advert[1].inner).toContain('Claim at free-bnb.xyz')
+    expect(advert[1].inner).toContain('link in name')
+    expect(advert.filter((_, i) => i !== 1).some(c => c.inner.includes('link in name'))).toBe(false)
+    expect(rows.slice(0, 3).some(r => r[1].inner.includes('link in name'))).toBe(false)
   })
 
   it('gives the cells no utility classes, so the phone layout is not beaten by a later layer', async () => {
