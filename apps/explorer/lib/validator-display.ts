@@ -14,23 +14,37 @@ export type ValidatorRow = {
   moniker: string | null
   votingPower: string | null
   status: string
+  updatedAt: Date
 }
 
 export type ValidatorDisplay = {
   name: string
   status: { label: string; variant: 'success' | 'fail' | 'default' }
+  /** The stored voting power is a placeholder 0 from the ValidatorSet fallback: show no number. */
+  powerUnknown: boolean
 }
 
 const PLACEHOLDER_MONIKER = /^Validator \d+$/
 
-function statusOf(v: ValidatorRow): ValidatorDisplay['status'] {
+const noPower = (v: ValidatorRow) => safeBigInt(v.votingPower) === 0n
+
+function statusOf(v: ValidatorRow, powerUnknown: boolean): ValidatorDisplay['status'] {
   // Jailed is a stronger fact than "no stake", so it is never overwritten.
   if (v.status === 'jailed') return { label: 'jailed', variant: 'fail' }
-  if (safeBigInt(v.votingPower) === 0n) return { label: 'No stake', variant: 'default' }
+  if (noPower(v) && !powerUnknown) return { label: 'No stake', variant: 'default' }
   return { label: v.status, variant: v.status === 'active' ? 'success' : 'default' }
 }
 
 export function validatorDisplays(rows: readonly ValidatorRow[]): ValidatorDisplay[] {
+  // When StakeHub fails, the syncer falls back to the ValidatorSet contract (validator-syncer.ts) and
+  // upserts the whole set with voting power 0 in a single run, so all of those rows share one
+  // updatedAt. If every row from the newest run is 0, that is a fallback run: their power is unknown,
+  // not "No stake". A 0 row from an older run, or beside rows with power, is a real stake-less one.
+  const newest = rows.reduce((max, v) => Math.max(max, v.updatedAt.getTime()), -Infinity)
+  const newestRun = rows.filter(v => v.updatedAt.getTime() === newest)
+  const fallbackRun = newestRun.length > 0 && newestRun.every(noPower)
+  const powerUnknown = (v: ValidatorRow) => fallbackRun && noPower(v) && v.updatedAt.getTime() === newest
+
   const named = rows.map(v => {
     const moniker = (v.moniker ?? '').trim()
     const placeholder = moniker === '' || PLACEHOLDER_MONIKER.test(moniker)
@@ -50,7 +64,8 @@ export function validatorDisplays(rows: readonly ValidatorRow[]): ValidatorDispl
     const duplicated = !placeholder && (seen.get(name.toLowerCase()) ?? 0) > 1
     return {
       name: duplicated ? `${name} ${shortenAddress(v.address)}` : name,
-      status: statusOf(v),
+      status: statusOf(v, powerUnknown(v)),
+      powerUnknown: powerUnknown(v),
     }
   })
 }

@@ -5,8 +5,10 @@ import { shortenAddress } from '@/lib/address-display'
 const A = '0x75b851a27d7101438f45fce31816501193239a83'
 const B = '0x37e9627a91dd13e453246856d58797ad6583d762'
 const C = '0xd3b0d838ccceae7ebf1781d11d1bb741db7fe1a7'
-const row = (address: string, moniker: string | null, votingPower = '5000000000000000000', status = 'active') =>
-  ({ address, moniker, votingPower, status })
+const RUN = new Date('2026-10-10T10:00:00Z')    // one syncer run: every row it wrote shares this updatedAt
+const OLDER = new Date('2026-10-09T10:00:00Z')  // a row an earlier run wrote and a later one no longer touches
+const row = (address: string, moniker: string | null, votingPower = '5000000000000000000', status = 'active', updatedAt = RUN) =>
+  ({ address, moniker, votingPower, status, updatedAt })
 
 describe('validatorDisplays: names', () => {
   it('shows a real moniker as stored', () => {
@@ -55,7 +57,8 @@ describe('validatorDisplays: status', () => {
 
   it('reads "No stake" with a neutral badge, never active, at voting power 0', () => {
     for (const power of ['0', '0.0000', '']) {
-      expect(validatorDisplays([row(A, 'Squirrel', power)])[0].status).toEqual({ label: 'No stake', variant: 'default' })
+      // beside a row with power, so this is an ordinary run and not the ValidatorSet fallback
+      expect(validatorDisplays([row(A, 'Squirrel', power), row(B, 'Figment')])[0].status).toEqual({ label: 'No stake', variant: 'default' })
     }
   })
 
@@ -66,5 +69,62 @@ describe('validatorDisplays: status', () => {
 
   it('shows any other stored status as a neutral badge', () => {
     expect(validatorDisplays([row(A, 'x', '9', 'inactive')])[0].status).toEqual({ label: 'inactive', variant: 'default' })
+  })
+})
+
+// apps/indexer/src/validator-syncer.ts falls back to the ValidatorSet contract when StakeHub fails and
+// upserts the whole active set with votingPower 0 in one run, so every row shares one updatedAt. Those
+// zeros are "unknown", not "no stake": a table whose newest rows are all 0 is such a run.
+describe('validatorDisplays: voting power 0 in the ValidatorSet fallback run', () => {
+  const ZERO = '0'
+  const power = '5000000000000000000'
+  const unknown = (stored: string) => ({ label: stored, variant: stored === 'active' ? 'success' : 'default' })
+
+  it('normal run: stale zero rows read "No stake"; current rows with power are unchanged', () => {
+    const out = validatorDisplays([row(A, 'Figment', power, 'active', RUN), row(B, 'Stale', ZERO, 'active', OLDER), row(C, 'Old', ZERO, 'active', OLDER)])
+    expect(out.map(d => d.status)).toEqual([
+      { label: 'active', variant: 'success' },
+      { label: 'No stake', variant: 'default' },
+      { label: 'No stake', variant: 'default' },
+    ])
+    expect(out.map(d => d.powerUnknown)).toEqual([false, false, false])
+  })
+
+  it('fallback run: every newest row is 0, so those read their stored status and an unknown power', () => {
+    const out = validatorDisplays([
+      row(A, 'Figment', ZERO, 'active', RUN),
+      row(B, 'Ankr', ZERO, 'inactive', RUN),
+      row(C, 'Earlier', power, 'active', OLDER),   // an older row with real power keeps it
+    ])
+    expect(out.map(d => d.status.label)).toEqual(['active', 'inactive', 'active']) // not 'No stake' on all ~50
+    expect(out[0]).toMatchObject({ powerUnknown: true, status: unknown('active') })
+    expect(out[1]).toMatchObject({ powerUnknown: true, status: unknown('inactive') })
+    expect(out[2]).toMatchObject({ powerUnknown: false, status: unknown('active') })
+  })
+
+  it('fallback run: an older zero row is still a stale "No stake", not part of the run', () => {
+    const out = validatorDisplays([row(A, 'Figment', ZERO, 'active', RUN), row(B, 'Stale', ZERO, 'active', OLDER)])
+    expect(out[0]).toMatchObject({ powerUnknown: true, status: unknown('active') })
+    expect(out[1]).toMatchObject({ powerUnknown: false, status: { label: 'No stake', variant: 'default' } })
+  })
+
+  it('a jailed row keeps its status in a fallback run too', () => {
+    expect(validatorDisplays([row(A, 'x', ZERO, 'jailed')])[0]).toMatchObject({ powerUnknown: true, status: { label: 'jailed', variant: 'fail' } })
+  })
+
+  it('a single-row table is its own newest run', () => {
+    expect(validatorDisplays([row(A, 'Solo', ZERO)])[0]).toMatchObject({ powerUnknown: true, status: unknown('active') })
+    expect(validatorDisplays([row(A, 'Solo', power)])[0]).toMatchObject({ powerUnknown: false, status: unknown('active') })
+  })
+
+  it('a zero row tied at the newest updatedAt with rows that have power is "No stake" (a normal run)', () => {
+    const sameInstant = new Date(RUN.getTime()) // a different Date object for the same instant: compared by time
+    const out = validatorDisplays([row(A, 'Figment', power, 'active', RUN), row(B, 'Squirrel', ZERO, 'active', sameInstant)])
+    expect(out[1]).toMatchObject({ powerUnknown: false, status: { label: 'No stake', variant: 'default' } })
+    expect(out[0]).toMatchObject({ powerUnknown: false, status: unknown('active') })
+  })
+
+  it('an empty table has nothing to show', () => {
+    expect(validatorDisplays([])).toEqual([])
   })
 })

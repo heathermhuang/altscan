@@ -92,7 +92,7 @@ export default async function ValidatorsPage() {
                 <td className="whitespace-nowrap">
                   <Badge variant={display[i].status.variant}>{display[i].status.label}</Badge>
                 </td>
-                <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
+                <td className="whitespace-nowrap">{display[i].powerUnknown ? '—' : `${formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} ${chainConfig.currency}`}</td>
                 <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
                 <td>{blocksCell(v.address)}</td>
               </tr>
