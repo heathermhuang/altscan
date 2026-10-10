@@ -9,7 +9,7 @@ import { Icon } from '@/components/ui/Icon'
 import { TileStrip } from '@/components/tape/TileStrip'
 import { shortenAddress } from '@/lib/address-display'
 import { getAddressLabel } from '@/lib/known-addresses'
-import { bpText, holderShares, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
+import { bpText, holderShares, holdersSupply, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
 
 /**
  * Client-side holders enhancement. SSR renders the labeled local net-flow estimate (0 Moralis
@@ -110,7 +110,9 @@ export function HoldersLazy({
   if (data.holders.length === 0) return null
 
   // The table's % column and the strip read the SAME shares (lib/holder-share.ts), so a tile and its row agree.
-  const shares = holderShares(data.holders.map((h) => h.balance), totalSupply)
+  // In the live state the provider's supply (read with these balances) is the denominator, not the token row's, which
+  // is captured at discovery and healed only when 0 (a minting, burning or rebasing token drifts).
+  const shares = holderShares(data.holders.map((h) => h.balance), holdersSupply(data.source, data.totalSupply, totalSupply))
   const strip = shares
     ? holderStripTiles(
         data.holders.map((h) => ({

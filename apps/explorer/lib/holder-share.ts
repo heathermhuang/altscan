@@ -45,6 +45,25 @@ export function bpText(bp: number | null): string {
   return bp === null ? '—' : `${(bp / 100).toFixed(2)}%`
 }
 
+export type HoldersSource = 'moralis' | 'local'
+
+const isSupply = (v: string | null | undefined): v is string => v != null && /^\d+$/.test(v) && BigInt(v) > 0n
+
+/**
+ * The supply the shares divide by. In the live (moralis) state the provider's own total supply, which was read with
+ * the balances; otherwise, or when it is missing or not a positive integer, the token row's. null when neither is
+ * usable: no supply is invented, so no shares. The table's "% of Supply" and the strip both take their shares from
+ * this one choice, so they cannot disagree.
+ */
+export function holdersSupply(
+  source: HoldersSource,
+  providerSupply: string | null | undefined,
+  rowSupply: string | null | undefined,
+): string | null {
+  if (source === 'moralis' && isSupply(providerSupply)) return providerSupply
+  return isSupply(rowSupply) ? rowSupply : null
+}
+
 export interface HolderRow {
   addr: string
   /** What the row calls the address (its label or the short form). */
@@ -76,8 +95,6 @@ export function holderStripTiles(rows: readonly HolderRow[], shares: HolderShare
   }
   return tiles
 }
-
-export type HoldersSource = 'moralis' | 'local'
 
 /** The measure, said exactly. Both fit the legend's two lines on a phone (the estimate swaps for the live holders over it). */
 export function holdersLegend(source: HoldersSource): string {

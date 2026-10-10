@@ -130,3 +130,48 @@ describe('HoldersLazy strip', () => {
     expect(live.match(new RegExp(`href="/address/${addr}"`, 'g'))!.length).toBeGreaterThanOrEqual(2)
   })
 })
+
+// The live holders arrive with the provider's own total supply, read with the balances; the token row's was captured at
+// discovery and only healed when 0, so a minting, burning or rebasing token would show wrong shares forever.
+describe('HoldersLazy supply basis', () => {
+  const draw = (initial: HoldersResult, rowSupply: string | null = '100000000') =>
+    renderToStaticMarkup(createElement(HoldersLazy, { address: '0xabc', symbol: 'USDT', decimals: 6, totalSupply: rowSupply, initial }))
+  const pcts = (html: string) => [...html.matchAll(/<td class="text-mut">([\d.]+%|—)<\/td>/g)].map(m => m[1])
+  const widths = (html: string) => [...html.matchAll(/<li( class="r")? style="--w:(\d+);/g)].map(m => +m[2])
+  const liveWith = (totalSupply?: string | null): HoldersResult => ({ holders: holders(3), holderCount: 42, source: 'moralis', ...(totalSupply === undefined ? {} : { totalSupply }) })
+
+  it('divides by the provider\'s supply in the live state: the table and the strip both move', () => {
+    const html = draw(liveWith('50000000'))        // half the row's supply: each 1,000,000 holder is 2.00%, not 1.00%
+    expect(pcts(html)).toEqual(['2.00%', '2.00%', '2.00%'])
+    expect(widths(html)).toEqual([20_000, 20_000, 20_000, 940_000])
+    expect(html).toContain('the largest holds 2.00%.')
+  })
+
+  it('falls back to the token row\'s supply when the provider\'s is missing, null, zero or not a number', () => {
+    for (const bad of [undefined, null, '0', 'abc', '12.5']) {
+      const html = draw(liveWith(bad))
+      expect(pcts(html), String(bad)).toEqual(['1.00%', '1.00%', '1.00%'])
+      expect(widths(html), String(bad)).toEqual([10_000, 10_000, 10_000, 970_000])
+    }
+  })
+
+  it('shows no shares, and no strip, when neither supply is usable: nothing is invented', () => {
+    const html = draw(liveWith('0'), null)
+    expect(pcts(html)).toEqual(['—', '—', '—'])
+    expect(html).not.toContain('tp-row')
+  })
+
+  it('keeps the token row\'s supply in the local-estimate state', () => {
+    const html = draw({ holders: holders(3), holderCount: null, source: 'local', totalSupply: '50000000' })
+    expect(pcts(html)).toEqual(['1.00%', '1.00%', '1.00%'])
+  })
+
+  it('table % and strip basis points are the same number, for either basis', () => {
+    for (const supply of ['50000000', '100000000', undefined]) {
+      const html = draw(liveWith(supply))
+      const table = pcts(html)[0]
+      const said = html.match(/the largest holds ([\d.]+%)\./)![1]
+      expect(said).toBe(table)
+    }
+  })
+})

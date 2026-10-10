@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bpText, holderShares, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
+import { bpText, holderShares, holdersSupply, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
 import { legendLines } from '@/test-support/legend-lines'
 
 const SUPPLY = '1000000000000000000000' // 1,000 tokens of 18 decimals
@@ -126,5 +126,41 @@ describe('holders text', () => {
   // holders over it; a legend that wraps to a third line in one state moves the table by a line.
   it('keeps both legends inside the two-line slot at 320px (39 mono columns)', () => {
     for (const s of ['moralis', 'local'] as const) expect(legendLines(holdersLegend(s)), s).toBeLessThanOrEqual(2)
+  })
+})
+
+// A minting, burning or rebasing token's supply moves; the token row's is captured at discovery and healed only when 0.
+// The provider's owners response carries a contemporaneous one, so in the live state it is the denominator.
+describe('holdersSupply: which supply the shares divide by', () => {
+  const ROW = '1000000000000000000000'
+  const PROVIDER = '2000000000000000000000'
+
+  it('uses the provider\'s supply in the live (moralis) state', () => {
+    expect(holdersSupply('moralis', PROVIDER, ROW)).toBe(PROVIDER)
+  })
+
+  it('keeps the token row\'s supply in the local-estimate state, whatever a result carries', () => {
+    expect(holdersSupply('local', PROVIDER, ROW)).toBe(ROW)
+    expect(holdersSupply('local', undefined, ROW)).toBe(ROW)
+  })
+
+  it('falls back to the row\'s supply when the provider\'s is missing or not a positive integer', () => {
+    for (const bad of [undefined, null, '', '0', '00', 'abc', '12.5', '-5', '1e21', ' 5']) {
+      expect(holdersSupply('moralis', bad, ROW), String(bad)).toBe(ROW)
+    }
+  })
+
+  it('is null when neither is usable: no supply is invented, so no shares', () => {
+    for (const row of [null, undefined, '', '0', 'x']) {
+      expect(holdersSupply('moralis', null, row), String(row)).toBeNull()
+      expect(holdersSupply('local', PROVIDER, row), String(row)).toBeNull()
+    }
+    expect(holderShares(['5'], holdersSupply('moralis', '0', '0'))).toBeNull()
+  })
+
+  it('moves the shares: the same balance is twice the share of half the supply', () => {
+    const bal = ['100000000000000000000']   // 100 tokens
+    expect(holderShares(bal, holdersSupply('moralis', ROW, PROVIDER))!.bp).toEqual([1000])   // 100 / 1,000
+    expect(holderShares(bal, holdersSupply('moralis', PROVIDER, ROW))!.bp).toEqual([500])    // 100 / 2,000
   })
 })
