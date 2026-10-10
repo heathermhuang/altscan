@@ -12,6 +12,8 @@ type Candidate = { address: string; name: string; symbol: string; holderCount: n
 
 /** Rows the page asks the database for, already ordered by holder count. */
 export const SEARCH_CANDIDATE_LIMIT = 50
+/** Rows the page also asks for whose symbol or name EQUALS the query, whatever their holder count. */
+export const SEARCH_EXACT_LIMIT = 10
 /** Rows the page shows. */
 export const SEARCH_RESULT_LIMIT = 10
 

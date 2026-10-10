@@ -4,7 +4,9 @@ import { db, schema } from '@/lib/db'
 import { or, ilike, desc } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
-import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
+import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_EXACT_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
+import { normaliseSearchQuery } from '@/lib/search-route'
+import { exactMatchQuery } from '@/lib/token-suggest'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
@@ -26,7 +28,8 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string }>
 }) {
   const { q } = await searchParams
-  const query = (q?.trim() ?? '').slice(0, 200) // Cap length to prevent abuse
+  // Normalised (a pasted "#125,761,128", "0X…" or a hex without its 0x); it caps the length first, to prevent abuse.
+  const query = normaliseSearchQuery(q ?? '')
   const showReferral = isBinanceIntentQuery(query)
 
   // Server-side redirect for recognized query patterns
@@ -50,15 +53,32 @@ export default async function SearchPage({
       // Plain DESC, never NULLS LAST: holder_count is NOT NULL, so the order is the same, and plain DESC
       // matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops at the
       // limit. NULLS LAST cannot use that index and forced a seq scan + sort on every search (~3.6 s on BNB).
-      const candidates = await db.select().from(schema.tokens)
-        .where(
-          or(
-            ilike(schema.tokens.name, `%${safeQuery}%`),
-            ilike(schema.tokens.symbol, `%${safeQuery}%`),
+      // That top-50 can leave out a low-holder token whose ticker IS the query, so the rows whose lower(symbol)
+      // or lower(name) EQUALS it (tokens_lower_symbol_idx / tokens_lower_name_idx) are unioned in by address.
+      const exactQ = query.toLowerCase()
+      // The exact rows only add to the page: if their lookup fails, the by-holders results still show.
+      const exactRows = async () => {
+        try {
+          return await exactMatchQuery(db, exactQ, SEARCH_EXACT_LIMIT)
+        } catch (e) {
+          swallow('search/exact', e)
+          return []
+        }
+      }
+      const [byHolders, exact] = await Promise.all([
+        db.select().from(schema.tokens)
+          .where(
+            or(
+              ilike(schema.tokens.name, `%${safeQuery}%`),
+              ilike(schema.tokens.symbol, `%${safeQuery}%`),
+            )
           )
-        )
-        .orderBy(desc(schema.tokens.holderCount))
-        .limit(SEARCH_CANDIDATE_LIMIT)
+          .orderBy(desc(schema.tokens.holderCount))
+          .limit(SEARCH_CANDIDATE_LIMIT),
+        exactRows(),
+      ])
+      const seen = new Set<string>()
+      const candidates = [...byHolders, ...exact].filter((t) => !seen.has(t.address) && seen.add(t.address))
       const tokenMatches = rankTokenMatches(candidates, query, (t) => lookalikeOf(t, chainConfig.key) !== null)
 
       if (tokenMatches.length === 1) singleMatch = tokenMatches[0].address
@@ -70,7 +90,7 @@ export default async function SearchPage({
             <h1 className={H1}>Search results</h1>
             <p className="mt-3 mb-6 text-ink2">
               {candidates.length > SEARCH_RESULT_LIMIT
-                ? `Showing the top ${SEARCH_RESULT_LIMIT} of ${candidates.length}${candidates.length === SEARCH_CANDIDATE_LIMIT ? '+' : ''} tokens matching`
+                ? `Showing the top ${SEARCH_RESULT_LIMIT} of ${candidates.length}${byHolders.length === SEARCH_CANDIDATE_LIMIT ? '+' : ''} tokens matching`
                 : `Found ${candidates.length} tokens matching`}{' '}
               <span className="font-mono text-ink break-all">{query}</span>
             </p>
