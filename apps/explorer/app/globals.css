@@ -608,7 +608,7 @@
        (the holder count is never shown bare: lib/holder-labels.ts). The name may wrap, so the badge
        is never the part that is cut off. */
     .dt-tk tbody tr {
-      grid-template-columns: 24px minmax(0, 1fr) auto;
+      grid-template-columns: 24px minmax(0, 1fr) fit-content(35%);
     }
     .dt-tk td:nth-child(1) {
       grid-area: 1 / 1;

@@ -229,7 +229,7 @@ function ChartCards({ period, tx, gas, blocks }: { period: 'Daily' | 'Hourly'; t
         series={gas}
         noSeries={gas.values.length === 0 && BigInt(chainConfig.minGasPriceWei) > 0n ? (
           <div className="flex items-center justify-center h-32 text-center text-ink2 text-sm">
-            <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink hover:underline">Gas Tracker</a> for current rates.</p>
+            <p>{chainConfig.name} has a low minimum gas price of {formatGwei(BigInt(chainConfig.minGasPriceWei))} Gwei. See the <a href="/gas" className="text-acc-ink underline">Gas Tracker</a> for current rates.</p>
           </div>
         ) : undefined}
       >

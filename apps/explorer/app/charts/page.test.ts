@@ -112,6 +112,8 @@ describe('/charts with fewer than three whole UTC days', () => {
     const without = await render()
     expect(without.match(/role="img"/g)).toHaveLength(2)
     expect(without).toContain('has a low minimum gas price')
+    // Axe's link-in-text-block: a link inside a sentence must differ from the text by more than colour.
+    expect(without).toMatch(/<a href="\/gas" class="(?:[^"]* )?underline[ "]/)
   })
 })
 
