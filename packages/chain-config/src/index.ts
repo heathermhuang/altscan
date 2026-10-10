@@ -101,9 +101,11 @@ export type WhaleToken = {
   /** Minimum transfer size in the token's base units, as a decimal string.
    *  A string, not a bigint, because ChainConfig is JSON-serialised in places. */
   minValue: string
-  /** Predicate floor of this token's `token_transfers` whale partial index
-   *  (`tt_whale_<symbol>_idx`, ensure-schema.ts), in base units as a decimal
-   *  string: 100x `minValue`, i.e. $100k for the stablecoins, 100 WBNB, 50 WETH.
+  /** This token's arm of the predicate of the ONE combined `token_transfers`
+   *  whale partial index per chain (`tt_whale_idx`, ensure-schema.ts: an OR of
+   *  per-token `(token_address = '<address>' AND value > <indexFloor>)` arms), in
+   *  base units as a decimal string: 100x `minValue`, i.e. $100k for the
+   *  stablecoins, 100 WBNB, 50 WETH.
    *
    *  The index holds only transfers above it, so write overhead is limited to
    *  whale-size rows. Two things must render it as the SAME LITERAL: the index

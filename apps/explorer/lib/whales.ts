@@ -323,8 +323,10 @@ function usablePrice(price: number | null): number | null {
  * largest of a candidate set, not a proven top of the whole window (see buildTokenWhaleQuery), so the
  * set is named from the same constants the queries use: the largest native transfers, and per tracked token
  * both its largest whale-size transfers and its latest qualifying ones. It names the live native price only
- * when one was used: the ranking (and this text) is cached for the window, so a price that failed to load is
- * a fact about the window, not something to paper over with "live".
+ * when one was used. This function is not itself cached: the page calls it on every request, with
+ * `nativeUsd !== null` from the cached `fetchWhales` value. The ranking and the `nativeUsd` it was priced with
+ * are one snapshot for the window, so a price that failed to load is a fact about the window, not something to
+ * paper over with "live".
  */
 export function rankingNote(currency: string, wrappedSymbol: string, nativePriced: boolean): string {
   const basis = `the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers, the ${WHALE_TOKEN_CANDIDATES} largest whale-size transfers of each tracked token, and the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token, all in this period`

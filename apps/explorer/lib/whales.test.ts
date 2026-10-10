@@ -369,8 +369,9 @@ describe('rankWhalesByUsd', () => {
   })
 
   it('ranks an older large stablecoin transfer above recent small ones', () => {
-    // What the candidate query hands over: each token's newest 25, newest first. The $1M transfer is hours
-    // older than every $1K one, which is exactly where a recency cut across tokens would have dropped it.
+    // What the candidate query hands over: per token, its 25 largest whale-size transfers and its 25 latest
+    // qualifying ones, unioned. These rows are the latest arm's newest-first $1K transfers plus a $1M one from
+    // hours earlier, which only the whale arm can reach: a recency cut across tokens would have dropped it.
     const recent = Array.from({ length: 25 }, (_, i) => token(`0xs${i}`, BNB_CFG.stablecoins[0].address, String(1_000n * E18), 60 + i, 'USDT'))
     const old = token('0xbig', BNB_CFG.stablecoins[1].address, String(1_000_000n * E18), 20 * 3600, 'USDC')
 
