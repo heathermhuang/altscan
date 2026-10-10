@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AddressLedger, AddressLedgerShell } from './AddressLedger'
 import { BlockStrip } from './BlockStrip'
+import { TileStrip } from './TileStrip'
 import { BlockTape } from '@/components/home/BlockTape'
 import { encodeTape } from '@/lib/tape'
 
@@ -34,6 +35,10 @@ const markup = [
     currency: 'BNB',
   })),
   renderToStaticMarkup(createElement(AddressLedgerShell, { currency: 'BNB' })),
+  renderToStaticMarkup(createElement(TileStrip, {
+    tiles: [{ id: 'a', href: '/a', w: 1, f: 50, name: 'A', read: 'A' }, { id: 'b', w: 1, f: 0, name: 'B', read: 'B', rest: true }],
+    title: 'T', label: 'L', legend: 'G', summary: 'S',
+  })),
 ].join('')
 const classes = new Set([...markup.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/)))
 
@@ -88,3 +93,38 @@ describe('shared tape primitives', () => {
     expect(tapeCss).toMatch(/\.bt-chip::after\s*{[^}]*left:\s*clamp\(4px,\s*calc\(var\(--q\) \* 100%\),\s*calc\(100% - 4px\)\)/)
   })
 })
+
+// The tile strip (/gas, /validators, /dex, a token's holders) is drawn from the same primitives, plus a
+// few rules of its own for the two tiles that are not a plain measurement.
+const stripCss = between('/* Tile strip (', '/* Loading skeleton (')
+
+describe('tile strip on the primitives', () => {
+  it('draws its band, track, row and legend from .tp-*', () => {
+    const strip = renderToStaticMarkup(createElement(TileStrip, {
+      tiles: [{ id: 'a', href: '/a', w: 1, f: 50, name: 'A', read: 'A' }], title: 'T', label: 'L', legend: 'G', summary: 'S',
+    }))
+    for (const c of ['tp-box', 'tp-head', 'tp-dot', 'tp-track', 'tp-row tp-gap', 'tp-leg']) expect(strip, c).toContain(c)
+  })
+
+  it('draws the hatched tile at a fixed floor (8px) and the remainder neutral, neither with the accent fill', () => {
+    expect(stripCss).toMatch(/\.tp-gap > li\.h\s*{[^}]*min-width:\s*8px/)
+    expect(stripCss).toMatch(/\.tp-gap > li\.h :is\(a, i\)\s*{[^}]*repeating-linear-gradient/)
+    expect(stripCss).toMatch(/\.tp-gap > li\.r i\s*{[^}]*background:\s*var\(--hair3\)/)
+    expect(stripCss).toMatch(/\.tp-gap > li:is\(\.h, \.r\) :is\(a, i\)::before\s*{[^}]*display:\s*none/)
+  })
+
+  it('rings a paired tile by [data-hot] with the same ring a hovered one gets, and shades its table row', () => {
+    expect(tapeCss).toMatch(/\.tp-gap :is\(a, i\)\[data-hot\]\s*{[^}]*outline:\s*2px solid var\(--ink\)/)
+    expect(tapeCss).toMatch(/\.tp-row a:hover,[^{]*\.tp-gap :is\(a, i\)\[data-hot\]/)
+    expect(stripCss).toMatch(/\.dt tbody tr\[data-hot\]\s*{[^}]*background:\s*var\(--bg\)/)
+  })
+
+  it('redraws the hatch in system colours under forced colours, where the backgrounds are dropped', () => {
+    expect(stripCss).toMatch(/forced-colors: active\)\s*{\s*\.tp-gap > li\.h :is\(a, i\)\s*{[^}]*CanvasText[^}]*Canvas /)
+  })
+
+  it('keeps the remainder (an <i>) as round and clipped as a linked tile', () => {
+    expect(tapeCss).toMatch(/\.tp-gap :is\(a, i\)\s*{[^}]*overflow:\s*hidden;[^}]*border-radius:\s*3px/)
+  })
+})
+

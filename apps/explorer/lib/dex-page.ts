@@ -10,6 +10,8 @@ import { desc, sql } from 'drizzle-orm'
 import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { createPageCache } from '@/lib/page-cache'
+import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
+import { withTimeout } from '@/lib/with-timeout'
 
 export const DEX_PAGE_SIZE = 25
 export const DEX_REVALIDATE_SECONDS = 300
@@ -35,6 +37,21 @@ export type DexPageData = {
   totalTrades: number
   topPairs: TopPair[]
   tokens: TokenMeta[]
+  /**
+   * The native coin's USD price when the page was cached, or null (no source answered in time). It sizes
+   * the recent-swaps strip's wrapped-native legs (lib/dex-size.ts); null leaves those swaps unpriced, and
+   * the strip's legend says so. A plain number, so it is safe in the cache.
+   */
+  nativeUsd: number | null
+}
+
+/**
+ * The native price, or null when no source answered inside the helper's own budget (what its chain needs to reach a
+ * non-Binance fallback, the same bound /whales uses) or the read threw. The strip degrades visibly without a price
+ * and the table does not need it, but a smaller wait would make every fallback after Binance unreachable.
+ */
+export function readNativeUsd(fetchPrice: () => Promise<number | null> = fetchNativeUsd): Promise<number | null> {
+  return withTimeout(fetchPrice(), NATIVE_PRICE_BUDGET_MS).catch(() => null)
 }
 
 function estimate(result: unknown, key: string): number {
@@ -42,10 +59,14 @@ function estimate(result: unknown, key: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+// 'dex-priced', not 'dex': the cached value gained `nativeUsd`, and an entry written by the previous
+// build under the old name would hand this code the old shape (lib/page-cache.ts).
 export const fetchDexPage = createPageCache(
-  'dex',
+  'dex-priced',
   DEX_REVALIDATE_SECONDS,
   async (page: number): Promise<DexPageData> => {
+    // The price is network, not database: it runs beside the reads below without adding to their load.
+    const nativeUsd = readNativeUsd()
     // Sequential on purpose — these were concurrent full-table scans and OOMed
     // the 2GB web service.
     const trades = await db.select().from(schema.dexTrades)
@@ -107,6 +128,7 @@ export const fetchDexPage = createPageCache(
       trade_count: Number(r.trade_count),
     })),
     tokens,
+    nativeUsd: await nativeUsd,
     }
   },
 )

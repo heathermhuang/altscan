@@ -56,3 +56,122 @@ describe('HoldersLazy header shape', () => {
     expect(local).toContain('<span class="text-[11px] text-mut">Estimated from recent transfers</span>')
   })
 })
+
+// The top-holders strip sits in the same card as the table, from the same holders and the same shares.
+describe('HoldersLazy strip', () => {
+  const draw = (initial: HoldersResult, totalSupply: string | null = '100000000') =>
+    renderToStaticMarkup(createElement(HoldersLazy, { address: '0xabc', symbol: 'USDT', decimals: 6, totalSupply, initial }))
+  const tiles = (html: string) => [...html.matchAll(/<li( class="r")? style="--w:(\d+);--f:(\d+)%">/g)].map(m => ({ rest: !!m[1], w: +m[2], f: +m[3] }))
+
+  it('draws one tile per holder (width = ppm of supply) and one for everyone else, in the card, in both states', () => {
+    for (const html of [local, live]) {
+      // 3 holders x 1,000,000 of a 100,000,000 supply: 1% each, the other 97% is "others"
+      expect(tiles(html)).toEqual([
+        { rest: false, w: 10_000, f: 100 }, { rest: false, w: 10_000, f: 100 }, { rest: false, w: 10_000, f: 100 },
+        { rest: true, w: 970_000, f: 0 },
+      ])
+      expect(html).toContain('id="holders-rows"')
+    }
+  })
+
+  it('names the measure and which kind of balance it is, per state', () => {
+    expect(local).toContain('width = share of supply · others = the rest · estimated from transfers')
+    expect(live).toContain('width = share of supply · others = the rest · real balances')
+  })
+
+  it('has the same box in both states: same primitives, same stats, one tab stop each (the swap must not move the table)', () => {
+    const shape = (html: string) => html.replace(/<p id="[^"]*" class="sr-only">[^<]*<\/p>/, '').match(/<div class="border-b border-hair">.*?<div class="tp-leg">/s)![0]
+      .replace(/aria-describedby="[^"]*"/, '').replace(/estimated|real balances/g, 'X')
+    expect(shape(local)).toBe(shape(live))
+    for (const html of [local, live]) expect(html.match(/tabindex="0"/g)).toHaveLength(1)
+  })
+
+  it('shows the table the very same share as the strip\'s text alternative states for the largest holder', () => {
+    expect(live).toContain('<td class="text-mut">1.00%</td>')
+    expect(live).toContain('the largest holds 1.00%.')
+  })
+
+  it('draws no strip when the supply is unknown: a share of nothing is not 0%', () => {
+    for (const s of [null, '0']) {
+      const html = draw({ holders: holders(3), holderCount: null, source: 'local' }, s)
+      expect(html).not.toContain('tp-row')
+      expect(html).toContain('—')
+    }
+  })
+
+  // The strip and the table are one list: after the holder-count labelling (lib/holder-labels.ts) nothing changed about
+  // which rows both read.
+  it('reads exactly the rows the table shows, in the same order, in both states', () => {
+    for (const html of [local, live]) {
+      const strip = html.match(/<div class="border-b border-hair">.*?<div class="tp-leg">/s)![0]
+      const stripHrefs = [...strip.matchAll(/<a href="([^"]+)"/g)].map(m => m[1])
+      const table = html.slice(html.indexOf('<tbody>'))
+      const rowHrefs = [...table.matchAll(/<tr><td[^>]*>\d+<\/td><td><span class="sm:hidden"><a [^>]*href="([^"]+)"/g)].map(m => m[1])
+      expect(stripHrefs).toHaveLength(3)
+      expect(stripHrefs).toEqual(rowHrefs)
+    }
+  })
+
+  // tokens.holder_count is a frozen snapshot and the provider total is cached (lib/holder-labels.ts): the header and the
+  // Holders fact label them. The strip is about the rows and their shares of supply, and must not restate either count.
+  it('never presents a holder count (indexed or provider) in its name, summary, head or legend', () => {
+    for (const html of [local, live]) {
+      const strip = html.match(/<div class="border-b border-hair">.*?<div class="tp-leg">.*?<\/div><\/div>/s)![0]
+      expect(strip).not.toMatch(/\btotal\b|indexed|Moralis|holders \(|\b42\b|4,200/)
+      expect(strip).toMatch(/Top 3 holders/)   // it counts the rows it draws, not the token's holders
+    }
+    // while the header, outside the strip, carries the labelled provider total
+    expect(live).toContain('42 holders (Moralis)')
+  })
+
+  it('links each tile to its holder by the same href as the table row (that is how they pair)', () => {
+    const addr = '0x' + '1'.padStart(40, '0')
+    expect(live).toContain(`<a href="/address/${addr}" tabindex="0"`)
+    expect(live.match(new RegExp(`href="/address/${addr}"`, 'g'))!.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+// The live holders arrive with the provider's own total supply, read with the balances; the token row's was captured at
+// discovery and only healed when 0, so a minting, burning or rebasing token would show wrong shares forever.
+describe('HoldersLazy supply basis', () => {
+  const draw = (initial: HoldersResult, rowSupply: string | null = '100000000') =>
+    renderToStaticMarkup(createElement(HoldersLazy, { address: '0xabc', symbol: 'USDT', decimals: 6, totalSupply: rowSupply, initial }))
+  const pcts = (html: string) => [...html.matchAll(/<td class="text-mut">([\d.]+%|—)<\/td>/g)].map(m => m[1])
+  const widths = (html: string) => [...html.matchAll(/<li( class="r")? style="--w:(\d+);/g)].map(m => +m[2])
+  const liveWith = (totalSupply?: string | null): HoldersResult => ({ holders: holders(3), holderCount: 42, source: 'moralis', ...(totalSupply === undefined ? {} : { totalSupply }) })
+
+  it('divides by the provider\'s supply in the live state: the table and the strip both move', () => {
+    const html = draw(liveWith('50000000'))        // half the row's supply: each 1,000,000 holder is 2.00%, not 1.00%
+    expect(pcts(html)).toEqual(['2.00%', '2.00%', '2.00%'])
+    expect(widths(html)).toEqual([20_000, 20_000, 20_000, 940_000])
+    expect(html).toContain('the largest holds 2.00%.')
+  })
+
+  it('falls back to the token row\'s supply when the provider\'s is missing, null, zero or not a number', () => {
+    for (const bad of [undefined, null, '0', 'abc', '12.5']) {
+      const html = draw(liveWith(bad))
+      expect(pcts(html), String(bad)).toEqual(['1.00%', '1.00%', '1.00%'])
+      expect(widths(html), String(bad)).toEqual([10_000, 10_000, 10_000, 970_000])
+    }
+  })
+
+  it('shows no shares, and no strip, when neither supply is usable: nothing is invented', () => {
+    const html = draw(liveWith('0'), null)
+    expect(pcts(html)).toEqual(['—', '—', '—'])
+    expect(html).not.toContain('tp-row')
+  })
+
+  it('keeps the token row\'s supply in the local-estimate state', () => {
+    const html = draw({ holders: holders(3), holderCount: null, source: 'local', totalSupply: '50000000' })
+    expect(pcts(html)).toEqual(['1.00%', '1.00%', '1.00%'])
+  })
+
+  it('table % and strip basis points are the same number, for either basis', () => {
+    for (const supply of ['50000000', '100000000', undefined]) {
+      const html = draw(liveWith(supply))
+      const table = pcts(html)[0]
+      const said = html.match(/the largest holds ([\d.]+%)\./)![1]
+      expect(said).toBe(table)
+    }
+  })
+})

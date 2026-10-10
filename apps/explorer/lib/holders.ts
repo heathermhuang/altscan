@@ -30,6 +30,13 @@ export type HoldersResult = {
   holders: TokenHolder[]
   holderCount: number | null      // real total from Moralis; null when unknown
   source: 'moralis' | 'local'     // 'local' = net-flow estimate, NOT real balances
+  /**
+   * The provider's own total supply (raw base units, a decimal string: JSON-safe, never a bigint), read with the
+   * balances above. Only on 'moralis'. It is the denominator for their shares: the token row's supply was captured
+   * at discovery and is healed only when 0, so it is stale for a minting, burning or rebasing token. null/absent
+   * = the provider did not say; the consumer then falls back to the row's (lib/holder-share.ts holdersSupply).
+   */
+  totalSupply?: string | null
 }
 
 export const EMPTY_HOLDERS: HoldersResult = { holders: [], holderCount: null, source: 'local' }
@@ -116,6 +123,7 @@ export function holdersFromProvider(
     })),
     holderCount: count && count.ok ? count.data : null,
     source: 'moralis',
+    totalSupply: owners.data.totalSupply,
   }
 }
 

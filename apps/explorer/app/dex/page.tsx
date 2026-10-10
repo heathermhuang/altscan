@@ -12,7 +12,9 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
 import { AddressLink } from '@/components/ui/AddressLink'
-import { shortHash } from '@/lib/address-display'
+import { shortHash, shortenAddress } from '@/lib/address-display'
+import { dexLegend, dexStripTiles, dexSummary, type DexSwap } from '@/lib/dex-size'
+import { TileStrip } from '@/components/tape/TileStrip'
 
 export const metadata: Metadata = {
   title: `DEX Trades`,
@@ -41,6 +43,7 @@ export default async function DexPage({
   let trades: typeof schema.dexTrades.$inferSelect[] = []
   let totalTrades = 0
   let topPairs: TopPair[] = []
+  let nativeUsd: number | null = null
   const tokenDecimalsMap = new Map<string, number>()
   const tokenSymbolMap = new Map<string, string>()
 
@@ -49,6 +52,7 @@ export default async function DexPage({
     trades = data.trades.map(parseDexTrade)
     totalTrades = data.totalTrades
     topPairs = data.topPairs
+    nativeUsd = data.nativeUsd
     for (const t of data.tokens) {
       tokenDecimalsMap.set(t.address, t.decimals)
       tokenSymbolMap.set(t.address, t.symbol)
@@ -64,8 +68,22 @@ export default async function DexPage({
     return symbol === undefined ? '' : tokenTextOr(symbol, UNKNOWN_TOKEN)
   }
 
+  // The strip draws the same trades as the table below it, sized from the cached trades and the cached
+  // native price: nothing is fetched here (lib/dex-page.ts, lib/dex-size.ts).
+  const swaps: DexSwap[] = trades.map(t => ({
+    id: t.id, txHash: t.txHash, tokenIn: t.tokenIn, tokenOut: t.tokenOut,
+    amountIn: t.amountIn, amountOut: t.amountOut,
+  }))
+  const stripTiles = dexStripTiles(
+    swaps,
+    nativeUsd,
+    address => symbolText(address) || (address ? shortenAddress(address) : UNKNOWN_TOKEN),
+  )
+  const sized = stripTiles.filter(t => !t.hatch).length
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
+    <div className="max-w-7xl mx-auto px-4 pt-8">
       <BreadcrumbJsonLd items={[{ name: 'DEX Trades' }]} />
       <script
         type="application/ld+json"
@@ -85,7 +103,21 @@ export default async function DexPage({
           Decentralized exchange activity on {chainConfig.name}. {dexScope}
         </p>
       </div>
+    </div>
 
+    {stripTiles.length > 0 && (
+      <TileStrip
+        entry="last"
+        tiles={stripTiles}
+        title={`${stripTiles.length} swaps, oldest to newest`}
+        stats={{ main: `${sized} priced`, side: `${stripTiles.length - sized} not priced` }}
+        label={`${chainConfig.name} recent swaps, width is USD size, hatched tiles are not priced`}
+        legend={dexLegend(chainConfig.currency, nativeUsd !== null)}
+        summary={dexSummary(swaps, nativeUsd, chainConfig.currency)}
+      />
+    )}
+
+    <div className={`max-w-7xl mx-auto px-4 pb-8${stripTiles.length > 0 ? ' pt-6' : ''}`}>
       {/* Stats row */}
       <dl className="ledger [--cols:2] mb-6">
         <Fact label="Total trades (est.)" value={formatEstimate(totalTrades)} />
@@ -200,6 +232,7 @@ export default async function DexPage({
         className="mt-6"
       />
     </div>
+    </>
   )
 }
 

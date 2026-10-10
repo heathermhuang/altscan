@@ -15,7 +15,16 @@ describe('holdersFromProvider', () => {
       holders: [{ addr: '0xa', balance: '5', usdValue: '10', isContract: false, label: null }],
       holderCount: 42,
       source: 'moralis',
+      totalSupply: '100',
     })
+  })
+  it('carries the provider\'s own total supply (a string, JSON-safe on the wire) beside the balances it was read with', () => {
+    const r = holdersFromProvider({ ok: true, data: { holders: [H], totalSupply: '2500000000000000000000' } }, null)!
+    expect(r.totalSupply).toBe('2500000000000000000000')
+    expect(JSON.parse(JSON.stringify(r)).totalSupply).toBe('2500000000000000000000')
+  })
+  it('a missing provider supply stays null (the page then falls back to the token row\'s), never a made-up number', () => {
+    expect(holdersFromProvider({ ok: true, data: { holders: [H], totalSupply: null } }, null)!.totalSupply).toBeNull()
   })
   it('returns null on provider failure → caller falls back to the local estimate', () => {
     expect(holdersFromProvider({ ok: false, reason: 'rate_limited' }, null)).toBeNull()

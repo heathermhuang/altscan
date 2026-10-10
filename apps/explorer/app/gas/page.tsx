@@ -8,7 +8,12 @@ import { swallow } from '@/lib/observability'
 import { confirmationWindow } from '@/lib/confirmation-window'
 import { feeCard, GAS_TIER_BLOCKS, gasTiersNote, gasTiles } from '@/lib/gas-tiers'
 import { fetchGasTiers, GAS_REVALIDATE_SECONDS } from '@/lib/gas-percentiles'
+import { createPageCache } from '@/lib/page-cache'
+import { queryGasTape } from '@/lib/gas-tape-query'
+import { gasBasis, gasLegend, gasStats, gasStripTiles, gasSummary } from '@/lib/gas-tape'
+import { TileStrip } from '@/components/tape/TileStrip'
 
+// A literal, as Next requires; revalidate-parity.test.ts pins it to GAS_REVALIDATE_SECONDS, the TTL of both caches below.
 export const revalidate = 45
 
 export const metadata: Metadata = {
@@ -17,7 +22,21 @@ export const metadata: Metadata = {
   alternates: { canonical: '/gas' },
 }
 
+// The tape's one query, behind the data cache (module scope, so it is built once). A failure is swallowed
+// OUTSIDE the cache: a rejection is never stored, and the page just draws without the strip.
+const cachedTape = createPageCache('gas-tape', GAS_REVALIDATE_SECONDS, queryGasTape)
+
+async function readTape() {
+  try {
+    return await cachedTape()
+  } catch (e) {
+    swallow('gas/tape', e)
+    return null
+  }
+}
+
 export default async function GasPage() {
+  const tapeQuery = readTape()   // beside the RPC reads below; it never rejects
   // The tiers come from the indexed blocks (cached), the headline card from the node: start both together.
   let tiersFailed = false
   const tiersRead = fetchGasTiers().catch((e) => { swallow('gas/tiers', e); tiersFailed = true; return null })
@@ -41,8 +60,12 @@ export default async function GasPage() {
   const tiles = gasTiles(tiers)
   const card  = feeCard(baseFeePerGas, gasPrice)
 
+  const tapeRows = await tapeQuery
+  const fillBasis = tapeRows && tapeRows.length > 0 ? gasBasis(tapeRows) : null
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <>
+    <div className="max-w-7xl mx-auto px-4 pt-8">
       <BreadcrumbJsonLd items={[{ name: 'Gas Tracker' }]} />
       <script
         type="application/ld+json"
@@ -65,7 +88,21 @@ export default async function GasPage() {
           {chainConfig.features.hasEip1559 && ` ${chainConfig.name} gas fluctuates with network demand, using EIP-1559 base fee mechanics.`}
         </p>
       </div>
+    </div>
 
+    {tapeRows && fillBasis && (
+      <TileStrip
+        entry="last"
+        tiles={gasStripTiles(tapeRows, fillBasis)}
+        title={chainConfig.name}
+        stats={gasStats(tapeRows, fillBasis)}
+        label={`${chainConfig.name} latest ${tapeRows.length} blocks, width is transactions, fill is ${fillBasis === 'base-fee' ? 'base fee' : 'gas used'}`}
+        legend={gasLegend(fillBasis)}
+        summary={gasSummary(tapeRows, fillBasis)}
+      />
+    )}
+
+    <div className={`max-w-7xl mx-auto px-4 pb-8${fillBasis ? ' pt-6' : ''}`}>
       <dl className="ledger [--cols:3] mb-2">
         {tiles.map(t => <Fact key={t.label} label={t.label} gwei={t.gwei} basis={t.basis} />)}
       </dl>
@@ -100,6 +137,7 @@ export default async function GasPage() {
         </p>
       </div>
     </div>
+    </>
   )
 }
 
