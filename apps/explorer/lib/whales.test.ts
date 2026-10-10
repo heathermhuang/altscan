@@ -24,18 +24,17 @@ describe('buildTokenWhaleQuery', () => {
     expect(text).not.toMatch(/ANY\s*\(\s*\(/)
   })
 
-  it('emits one UNION ALL arm per token, each independently limited to its 100 newest', () => {
+  it('emits one UNION ALL arm per token, each independently limited to its 25 newest', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
     // The whole latency fix rests on this shape: one early-stopping index walk per token instead of a
-    // single OR-ed scan that has to sort every candidate. Two tokens => one UNION ALL and a LIMIT 100 in
+    // single OR-ed scan that has to sort every candidate. Two tokens => one UNION ALL and a LIMIT 25 in
     // each arm. There is NO outer cap: the page ranks every candidate by USD value, so a "newest 25 across
     // all tokens" cut here would decide the ranking by recency before it ever saw a price.
-    expect(WHALE_TOKEN_CANDIDATES).toBe(100)
+    expect(WHALE_TOKEN_CANDIDATES).toBe(25)
     expect(text.match(/UNION ALL/g)).toHaveLength(FILTERS.length - 1)
-    expect(text.match(/LIMIT 100/g)).toHaveLength(FILTERS.length)
-    expect(text.match(/\bLIMIT\b/g)).toHaveLength(FILTERS.length)
-    expect(text).not.toMatch(/LIMIT 25/)
+    expect(text.match(/LIMIT 25/g)).toHaveLength(FILTERS.length)   // one per arm, so the cap is NOT the outer 25 of old
+    expect(text.match(/\bLIMIT\b/g)).toHaveLength(FILTERS.length)  // and there is no LIMIT beyond the arms
     expect(text.match(/FROM token_transfers/g)).toHaveLength(FILTERS.length)
   })
 
@@ -50,7 +49,7 @@ describe('buildTokenWhaleQuery', () => {
   it('sorts every arm and the final select by the same deterministic key', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
-    // Which 100 rows an arm keeps, and the order the result comes back in, must not move between ISR
+    // Which 25 rows an arm keeps, and the order the result comes back in, must not move between ISR
     // regenerations. Timestamp alone is not deterministic: a timestamp is a block, and a hot token moves
     // many times per block.
     const orders = text.match(/ORDER BY [^\n]+/g) ?? []
@@ -72,8 +71,8 @@ describe('buildTokenWhaleQuery', () => {
   it('joins the token symbol after the limit, not before it', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
     // Joining first made the lookup run against every candidate row.
-    expect(text.lastIndexOf('LIMIT 100')).toBeGreaterThan(-1)
-    expect(text.indexOf('LEFT JOIN tokens')).toBeGreaterThan(text.lastIndexOf('LIMIT 100'))
+    expect(text.lastIndexOf('LIMIT 25')).toBeGreaterThan(-1)
+    expect(text.indexOf('LEFT JOIN tokens')).toBeGreaterThan(text.lastIndexOf('LIMIT 25'))
   })
 })
 
@@ -319,17 +318,17 @@ describe('rankWhalesByUsd', () => {
     expect(rankWhalesByUsd([plain, scaled], 700, BNB_CFG).map(r => r.hash)).toEqual(['0xs', '0xp'])
   })
 
-  it('ranks an older large stablecoin transfer above a hundred recent small ones', () => {
-    // What the candidate query hands over: each token's newest 100, newest first. The $1M transfer is hours
-    // older than every $1K one, which is exactly where a recency cut would have dropped it.
-    const recent = Array.from({ length: 100 }, (_, i) => token(`0xs${i}`, BNB_CFG.stablecoins[0].address, String(1_000n * E18), 60 + i, 'USDT'))
+  it('ranks an older large stablecoin transfer above recent small ones', () => {
+    // What the candidate query hands over: each token's newest 25, newest first. The $1M transfer is hours
+    // older than every $1K one, which is exactly where a recency cut across tokens would have dropped it.
+    const recent = Array.from({ length: 25 }, (_, i) => token(`0xs${i}`, BNB_CFG.stablecoins[0].address, String(1_000n * E18), 60 + i, 'USDT'))
     const old = token('0xbig', BNB_CFG.stablecoins[1].address, String(1_000_000n * E18), 20 * 3600, 'USDC')
 
     const ranked = rankWhalesByUsd([...recent, old], 730, BNB_CFG)
 
     expect(ranked[0].hash).toBe('0xbig')
     expect(ranked[0].usd).toBe(1_000_000)
-    expect(ranked).toHaveLength(101) // the cap is not rankWhalesByUsd's job: queryWhales applies it after
+    expect(ranked).toHaveLength(26) // the cap is not rankWhalesByUsd's job: queryWhales applies it after
   })
 
   it('returns plain JSON: no BigInt can reach the page cache', () => {

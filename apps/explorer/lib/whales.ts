@@ -63,7 +63,7 @@ const QUERY_TIMEOUT_MS = 15_000
 /** Native transfers fetched as ranking candidates: the largest by value. */
 export const WHALE_NATIVE_CANDIDATES = 50
 /** Per tracked token, the newest qualifying transfers fetched as ranking candidates. */
-export const WHALE_TOKEN_CANDIDATES = 100
+export const WHALE_TOKEN_CANDIDATES = 25
 /** Rows the page shows, after every candidate has been priced and ranked. */
 export const WHALES_SHOWN = 50
 
@@ -122,13 +122,16 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
 }
 
 /**
- * The `WHALE_TOKEN_CANDIDATES` (100) most recent transfers of each tracked token above its threshold:
+ * The `WHALE_TOKEN_CANDIDATES` (25) most recent transfers of each tracked token above its threshold:
  * the ranking candidates. The page prices and ranks all of them (rankWhalesByUsd) and shows the top 50.
  *
  * Newest-N, not value-ordered, on purpose: `token_transfers` has no index on `value`, and value-ordered
- * per-token reads measured 10-39 s each on prod ETH (USDT 24h 9.9 s, 30d 38.9 s; WETH 24h 20 s).
- * The list is therefore the largest of the recent candidates, not a proven top 50 of the whole window,
- * and the page's ranking note says so (`rankingNote`).
+ * per-token reads measured 10-39 s each on prod ETH (USDT 24h 9.9 s, 30d 38.9 s; WETH 24h 20 s) and
+ * 2-6 minutes on BNB, while the newest-N walk takes at most ~2 s (BNB WBNB, whose transfers over
+ * 1 WBNB are sparse in the index, is the slow one at 1.1-2.0 s). The limit is NOT raised past 25
+ * because that walk's cost scales with it: 100 would be about 4x, ~8 s, on a BNB cache miss.
+ * The list is therefore the largest of the recent candidates, not a proven top 50 of the whole
+ * window, and the page's ranking note says so (`rankingNote`).
  *
  * One arm per token, `UNION ALL`ed, rather than a single scan with
  * `token_address IN (…) AND (per-token OR arms)`. The OR form cannot use
@@ -136,7 +139,7 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
  * to gather every tracked-token transfer in the window and sort it. Each arm
  * here is instead an index walk that stops at its limit.
  *
- * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold; arms of 25, the walk is the same at 100):
+ * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold):
  *   24h   6,110 ms  ->    6.7 ms
  *    7d  28,916 ms  ->    0.3 ms
  *
@@ -145,7 +148,7 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
  * any price is seen, and could drop an older $1M transfer in favour of recent $1K ones.
  *
  * The `LEFT JOIN tokens` is applied AFTER the limits — joining before them made the
- * lookup run against every candidate row instead of the (at most 100 per token) that survive.
+ * lookup run against every candidate row instead of the (at most 25 per token) that survive.
  *
  * `(timestamp, tx_hash, log_index)` is the sort key, not `timestamp` alone. A
  * timestamp is a block, and a hot token moves many times per block, so ordering
@@ -167,7 +170,7 @@ export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly Toke
         WHERE token_address = ${f.address}
           AND timestamp >= ${cutoffFor(period)}
           AND value > ${f.minValue}
-        -- newest-N, not value-ordered: no value index; value ordering measured 10-39 s per token on prod ETH
+        -- newest-N, not value-ordered: no value index; value ordering measured 10-39 s per token on ETH, 2-6 min on BNB; this walk <= 2 s
         ORDER BY timestamp DESC, tx_hash DESC, log_index DESC
         LIMIT ${sql.raw(String(WHALE_TOKEN_CANDIDATES))}
       )`)
