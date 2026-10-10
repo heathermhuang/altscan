@@ -76,3 +76,36 @@ describe('isBackfillEnabled — per-chain config with a BACKFILL_ENABLED env ove
     expect(isBackfillEnabled(absent, { BACKFILL_ENABLED: 'true' })).toBe(true)
   })
 })
+
+// The token_transfers whale partial indexes (ensure-schema.ts) and the whale
+// queries read one field, `indexFloor`, and render it as a LITERAL: Postgres only
+// uses a partial index when it can prove the query implies the predicate, and a
+// bound parameter cannot prove it. The value is 100x the display threshold so the
+// index holds only whale-size rows. It is data, not a formula, because it is
+// spliced into DDL — but the formula is pinned here so an edit to minValue cannot
+// drift away from it.
+describe('whale token indexFloor', () => {
+  const tracked = (key: 'bnb' | 'eth') => [CHAINS[key].whales.wrapped, ...CHAINS[key].whales.stablecoins]
+
+  it.each(['bnb', 'eth'] as const)('%s: every tracked token floors at exactly 100x its minValue', (key) => {
+    for (const t of tracked(key)) {
+      expect(t.indexFloor, `${key} ${t.symbol}`).toMatch(/^[0-9]+$/)
+      expect(BigInt(t.indexFloor), `${key} ${t.symbol}`).toBe(100n * BigInt(t.minValue))
+    }
+  })
+
+  it('names the floors in whole tokens: $100k stables, 100 WBNB, 50 WETH', () => {
+    const bnb = CHAINS.bnb.whales
+    const eth = CHAINS.eth.whales
+    expect(bnb.stablecoins.map(s => [s.symbol, s.indexFloor])).toEqual([
+      ['USDT', '100000000000000000000000'], // 100,000 x 10^18
+      ['USDC', '100000000000000000000000'],
+    ])
+    expect(bnb.wrapped.indexFloor).toBe('100000000000000000000') // 100 WBNB
+    expect(eth.stablecoins.map(s => [s.symbol, s.indexFloor])).toEqual([
+      ['USDT', '100000000000'], // 100,000 x 10^6
+      ['USDC', '100000000000'],
+    ])
+    expect(eth.wrapped.indexFloor).toBe('50000000000000000000') // 50 WETH
+  })
+})

@@ -101,6 +101,18 @@ export type WhaleToken = {
   /** Minimum transfer size in the token's base units, as a decimal string.
    *  A string, not a bigint, because ChainConfig is JSON-serialised in places. */
   minValue: string
+  /** Predicate floor of this token's `token_transfers` whale partial index
+   *  (`tt_whale_<symbol>_idx`, ensure-schema.ts), in base units as a decimal
+   *  string: 100x `minValue`, i.e. $100k for the stablecoins, 100 WBNB, 50 WETH.
+   *
+   *  The index holds only transfers above it, so write overhead is limited to
+   *  whale-size rows. Two things must render it as the SAME LITERAL: the index
+   *  predicate, and any value-ordered query that wants the index — Postgres only
+   *  uses a partial index when it can prove the query implies the predicate, and
+   *  a bound parameter cannot prove it (see `WhaleConfig.nativeIndexFloorWei`).
+   *  A query threshold below this floor would silently truncate at it.
+   *  Pinned to `100n * BigInt(minValue)` by a test. */
+  indexFloor: string
 }
 
 /** Whale Tracker thresholds and tracked tokens. */
@@ -286,10 +298,11 @@ export const BSC: ChainConfig = {
       symbol: 'WBNB',
       decimals: 18,
       minValue: '1000000000000000000', // 1 WBNB
+      indexFloor: '100000000000000000000', // 100 WBNB
     },
     stablecoins: [
-      { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18, minValue: '1000000000000000000000' },
-      { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18, minValue: '1000000000000000000000' },
+      { address: '0x55d398326f99059ff775485246999027b3197955', symbol: 'USDT', decimals: 18, minValue: '1000000000000000000000', indexFloor: '100000000000000000000000' },
+      { address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', symbol: 'USDC', decimals: 18, minValue: '1000000000000000000000', indexFloor: '100000000000000000000000' },
     ],
   },
   theme: {
@@ -382,10 +395,11 @@ export const ETH: ChainConfig = {
       symbol: 'WETH',
       decimals: 18,
       minValue: '500000000000000000', // 0.5 WETH
+      indexFloor: '50000000000000000000', // 50 WETH
     },
     stablecoins: [
-      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6, minValue: '1000000000' },
-      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6, minValue: '1000000000' },
+      { address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', decimals: 6, minValue: '1000000000', indexFloor: '100000000000' },
+      { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6, minValue: '1000000000', indexFloor: '100000000000' },
     ],
   },
   theme: {
