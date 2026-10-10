@@ -79,6 +79,32 @@ describe('fetchNativeQuote', () => {
     expect(await fetchNativeQuote()).toBeNull()
   })
 
+  describe('the order of the sources', () => {
+    const answers = {
+      binance: [BINANCE, { ok: true, body: { lastPrice: '701', priceChangePercent: '1' } }],
+      cryptocompare: [CRYPTOCOMPARE, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: 702, CHANGEPCT24HOUR: 2 } } } } }],
+      coingecko: [COINGECKO, { ok: true, body: { [cgId]: { usd: 703, usd_24h_change: 3 } } }],
+      coincap: [COINCAP, { ok: true, body: { data: { priceUsd: '704', changePercent24Hr: '4' } } }],
+    } as const
+    const hit = (u: string) => (BINANCE.test(u) ? new URL(u).host : CRYPTOCOMPARE.test(u) ? 'cryptocompare' : COINGECKO.test(u) ? 'coingecko' : COINCAP.test(u) ? 'coincap' : u)
+
+    it('asks binance.us, binance.com, CryptoCompare, CoinGecko, CoinCap, in that order, when all are down', async () => {
+      await fetchNativeQuote()
+      expect(calls.map(hit)).toEqual(['api.binance.us', 'api.binance.com', 'cryptocompare', 'coingecko', 'coincap'])
+    })
+
+    it.each([
+      ['Binance', [], 701, ['api.binance.us']],
+      ['CryptoCompare', ['binance'], 702, ['api.binance.us', 'api.binance.com', 'cryptocompare']],
+      ['CoinGecko', ['binance', 'cryptocompare'], 703, ['api.binance.us', 'api.binance.com', 'cryptocompare', 'coingecko']],
+      ['CoinCap', ['binance', 'cryptocompare', 'coingecko'], 704, ['api.binance.us', 'api.binance.com', 'cryptocompare', 'coingecko', 'coincap']],
+    ] as const)('when every source would answer, %s wins once the ones before it are down, and none after it is asked', async (_name, down, price, asked) => {
+      replies = (Object.keys(answers) as Array<keyof typeof answers>).filter((k) => !(down as readonly string[]).includes(k)).map((k) => [answers[k][0], answers[k][1]])
+      expect((await fetchNativeQuote())?.price).toBe(price)
+      expect(calls.map(hit)).toEqual(asked)
+    })
+  })
+
   describe('a source that gives a price but no 24h change reports the change as null, never 0', () => {
     it.each([
       ['Binance, field missing', BINANCE, { lastPrice: '731.25' }],
