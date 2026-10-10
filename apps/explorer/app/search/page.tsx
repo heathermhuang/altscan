@@ -1,9 +1,11 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { db, schema } from '@/lib/db'
-import { or, ilike } from 'drizzle-orm'
+import { or, ilike, desc } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
+import { tokenTypeLabel } from '@/lib/token-type-label'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
@@ -42,14 +44,21 @@ export default async function SearchPage({
     // swallow it and a single-token match would fall through to "No results found".
     let singleMatch: string | null = null
     try {
-      const tokenMatches = await db.select().from(schema.tokens)
+      // The SQL only finds rows that CONTAIN the query, biggest first; rankTokenMatches decides which
+      // 10 a visitor sees (exact symbol/name before prefix before contains, lookalikes after real tokens).
+      // Plain DESC, never NULLS LAST: holder_count is NOT NULL, so the order is the same, and plain DESC
+      // matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops at the
+      // limit. NULLS LAST cannot use that index and forced a seq scan + sort on every search (~3.6 s on BNB).
+      const candidates = await db.select().from(schema.tokens)
         .where(
           or(
             ilike(schema.tokens.name, `%${safeQuery}%`),
             ilike(schema.tokens.symbol, `%${safeQuery}%`),
           )
         )
-        .limit(5)
+        .orderBy(desc(schema.tokens.holderCount))
+        .limit(SEARCH_CANDIDATE_LIMIT)
+      const tokenMatches = rankTokenMatches(candidates, query, (t) => lookalikeOf(t, chainConfig.key) !== null)
 
       if (tokenMatches.length === 1) singleMatch = tokenMatches[0].address
 
@@ -59,7 +68,9 @@ export default async function SearchPage({
             <p className="k">{'// '}search</p>
             <h1 className={H1}>Search results</h1>
             <p className="mt-3 mb-6 text-ink2">
-              Found {tokenMatches.length} tokens matching{' '}
+              {candidates.length > SEARCH_RESULT_LIMIT
+                ? `Showing the top ${SEARCH_RESULT_LIMIT} of ${candidates.length}${candidates.length === SEARCH_CANDIDATE_LIMIT ? '+' : ''} tokens matching`
+                : `Found ${candidates.length} tokens matching`}{' '}
               <span className="font-mono text-ink break-all">{query}</span>
             </p>
             {showReferral && (
@@ -104,7 +115,7 @@ export default async function SearchPage({
                           ) : nameLink}
                         </td>
                         <td className="text-ink">{token.symbol}</td>
-                        <td className="text-mut">{token.type}</td>
+                        <td className="text-mut">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</td>
                         <td>
                           <Link href={`/token/${token.address}`} className="text-acc-ink hover:underline">
                             {token.address.slice(0, 14)}…

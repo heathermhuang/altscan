@@ -13,6 +13,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { tokenTypeLabel } from '@/lib/token-type-label'
 import { Contract } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
@@ -130,15 +131,16 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   token = await healPlaceholderMeta(token, address.toLowerCase())
+  const standard = tokenTypeLabel(token.type, chainConfig.tokenStandard)
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${token.name} (${token.symbol})`,
     // A holder count of 0 is a lagging reading (the Holders card shows "—"), so it is not stated.
-    description: `${token.name} (${token.symbol}) ${token.type} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${token.holderCount.toLocaleString()} holders.` : ''}`,
+    description: `${token.name} (${token.symbol}) ${standard} token on ${chainConfig.name}.${token.holderCount > 0 ? ` ${token.holderCount.toLocaleString()} holders.` : ''}`,
     alternates: { canonical: `/token/${address.toLowerCase()}` },
     openGraph: {
       title: `${token.name} (${token.symbol})`,
-      description: token.holderCount > 0 ? `${token.type} · ${token.holderCount.toLocaleString()} holders` : token.type,
+      description: token.holderCount > 0 ? `${standard} · ${token.holderCount.toLocaleString()} holders` : standard,
     },
   }
 }
@@ -297,7 +299,7 @@ export default async function TokenDetailPage({
               lookalike<span className="sr-only"> of {lookalike.symbol}</span>
             </span>
           )}
-          <Badge variant="default">{token.type}</Badge>
+          <Badge variant="default">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</Badge>
           <a
             href={`${chainConfig.externalExplorerUrl}/token/${addr}`}
             target="_blank"
