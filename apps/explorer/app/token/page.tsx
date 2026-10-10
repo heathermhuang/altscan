@@ -171,7 +171,7 @@ export default async function TokenListPage({
                     ) : nameLink}
                   </td>
                   <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>
-                  <td title={HOLDER_LABELS.indexed.title}>{formatHolders(t.holderCount)}</td>
+                  <td>{formatHolders(t.holderCount)}</td>
                   <td className="text-mut">
                     {hasSupply(t.totalSupply) ? formatSupply(t.totalSupply, t.decimals) : '—'}
                   </td>
@@ -185,6 +185,12 @@ export default async function TokenListPage({
         </table>
         </div>
       </div>
+      {/* Phones hide the header (and touch screens show no title), so the count's qualifier is said once, in the open. */}
+      {tokens.length > 0 && (
+        <p className="mt-3 text-xs text-mut">
+          <span className="text-ink2">{HOLDER_LABELS.indexed.heading}.</span> {HOLDER_LABELS.indexed.title}
+        </p>
+      )}
     </div>
   )
 }

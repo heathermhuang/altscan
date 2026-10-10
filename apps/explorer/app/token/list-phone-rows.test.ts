@@ -58,17 +58,23 @@ describe('/token list cell contract', () => {
 
   it('gives the cells no utility classes, so the phone layout is not beaten by a later layer', async () => {
     for (const r of bodyRows(await render())) {
-      for (const c of cells(r).filter((_, i) => i !== 3)) expect(c.attrs).toMatch(/^( class="text-mut")?$/)
+      for (const c of cells(r)) expect(c.attrs).toMatch(/^( class="text-mut")?$/)
     }
   })
 
-  it('keeps the indexed-holders explanation reachable: the hidden header carries the title on phones, so the cell does too', async () => {
+  // Titles do not show on touch and 48 per-row copies cost +679 B gzip, so the explanation is one visible
+  // footnote under the table (and the hover title stays on the header, which phones hide).
+  it('explains the indexed-holders count once, in a footnote under the table, not in a title on every cell', async () => {
     const h = await render()
-    const title = HOLDER_LABELS.indexed.title.replace(/'/g, '&#x27;')
-    expect(h).toContain(`<th scope="col" title="${title}">`)
-    for (const r of bodyRows(h)) expect(cells(r)[3].attrs).toBe(` title="${title}"`)
-    // only the holders cell: the other columns say what they are
-    for (const r of bodyRows(h)) for (const i of [0, 1, 2, 4]) expect(cells(r)[i].attrs).not.toContain('title=')
+    const sentence = HOLDER_LABELS.indexed.title.replace(/'/g, '&#x27;')
+    expect(h).toContain(`<th scope="col" title="${sentence}">`)
+    for (const r of bodyRows(h)) expect(cells(r)[3].attrs).toBe('')
+    const notes = [...h.matchAll(/<p class="mt-3 text-xs text-mut">(.*?)<\/p>/g)]
+    expect(notes).toHaveLength(1)
+    expect(notes[0][1]).toContain(`${HOLDER_LABELS.indexed.heading}.`)
+    expect(notes[0][1]).toContain(sentence)
+    expect(h.split(sentence)).toHaveLength(3) // the header's title attribute and the footnote, nowhere else
+    expect(h.indexOf(notes[0][0])).toBeGreaterThan(h.indexOf('</table>')) // under the table
   })
 })
 
