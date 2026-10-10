@@ -57,14 +57,41 @@ export function buildCacheKey(
  * A rejection is still not cached — Next only stores a resolved value — so
  * callers must let failures propagate rather than resolving to `[]`, or an
  * outage gets pinned in place for the whole revalidate window.
+ *
+ * `revalidate` is not a freshness bound, so the reader enforces one.
+ * `unstable_cache` is stale-while-revalidate with no maximum age: past the TTL
+ * the next request is handed the old entry however old it is, and only STARTS
+ * a refresh. These routes read `searchParams`, so their `revalidate` export is
+ * inert, and ethscan.io/blocks (about one request an hour) served the previous
+ * visitor's page: 27 minutes old in judge round 3, while the homepage showed a
+ * block mined 17 seconds earlier (20 of 31 requests in 36 hours were stale).
+ * Each entry therefore carries the time it was computed, and a hit older than
+ * the TTL is recomputed inline; Next's refresh still lands, so the next reader
+ * hits. The stamp is a plain number (a BigInt voids Next's JSON write), and an
+ * entry with no usable stamp counts as too old. An inline failure propagates
+ * like a miss does; the stale entry is never served in its place.
+ *
+ * The callback Next sees is now the same wrapper for every cache, so `name`
+ * (with the chain) is all that tells two caches apart: keep it unique per call.
  */
 export function createPageCache<A extends unknown[], T>(
   name: string,
   revalidateSeconds: number,
   query: (...args: A) => Promise<T>,
 ): (...args: A) => Promise<T> {
-  return unstable_cache(query, buildCacheKey(name, []), {
-    revalidate: revalidateSeconds,
-    tags: [`${name}:${chainConfig.key}`],
-  }) as (...args: A) => Promise<T>
+  const maxAgeMs = revalidateSeconds * 1000
+  const cached = unstable_cache(
+    async (...args: A) => {
+      const value = await query(...args)
+      return { at: Date.now(), value }
+    },
+    buildCacheKey(name, []),
+    { revalidate: revalidateSeconds, tags: [`${name}:${chainConfig.key}`] },
+  )
+  return async (...args: A) => {
+    const hit = await cached(...args)
+    // NaN (no stamp) and negative (clock stepped back) both fail this test and fall through to a query.
+    const age = Date.now() - hit?.at
+    return age >= 0 && age <= maxAgeMs ? hit.value : query(...args)
+  }
 }

@@ -25,9 +25,18 @@ describe('the cache wrapper is built once, not per request', () => {
     expect(unstableCacheSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('hands unstable_cache the query itself, not a per-request closure', () => {
-    const query = async (page: number) => page
-    createPageCache('t2', 60, query)
-    expect(unstableCacheSpy).toHaveBeenCalledWith(query)
+  it('hands unstable_cache one stable function at construction, not a per-request closure', async () => {
+    // It used to be the query itself. It is now a module-scope wrapper that stamps the entry with the
+    // time it was computed (see page-cache.ts), so identity with `query` is no longer the property:
+    // what matters is that Next gets exactly one function, up front, and the same one forever.
+    const read = createPageCache('t2', 60, async (page: number) => page)
+    expect(unstableCacheSpy).toHaveBeenCalledTimes(1)
+    const handed = unstableCacheSpy.mock.calls[0][0]
+    expect(typeof handed).toBe('function')
+
+    await read(1)
+    await read(2)
+    expect(unstableCacheSpy).toHaveBeenCalledTimes(1)
+    expect(unstableCacheSpy.mock.calls[0][0]).toBe(handed)
   })
 })
