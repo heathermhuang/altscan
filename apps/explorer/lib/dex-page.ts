@@ -52,6 +52,11 @@ export type DexPageData = {
  */
 export const DEX_PRICE_WAIT_MS = 4000
 
+/** The native price, or null when no source answered inside the bound (or the read threw). */
+export function readNativeUsd(fetchPrice: () => Promise<number | null> = fetchNativeUsd): Promise<number | null> {
+  return withTimeout(fetchPrice(), DEX_PRICE_WAIT_MS).catch(() => null)
+}
+
 function estimate(result: unknown, key: string): number {
   const n = Number((Array.from(result as Iterable<unknown>)[0] as Record<string, unknown>)?.[key] ?? 0)
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -64,7 +69,7 @@ export const fetchDexPage = createPageCache(
   DEX_REVALIDATE_SECONDS,
   async (page: number): Promise<DexPageData> => {
     // The price is network, not database: it runs beside the reads below without adding to their load.
-    const nativeUsd = withTimeout(fetchNativeUsd(), DEX_PRICE_WAIT_MS).catch(() => null)
+    const nativeUsd = readNativeUsd()
     // Sequential on purpose — these were concurrent full-table scans and OOMed
     // the 2GB web service.
     const trades = await db.select().from(schema.dexTrades)
