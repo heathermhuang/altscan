@@ -166,8 +166,6 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
 - `holder_count` is eventually consistent — recomputed by `recomputeHolderCounts()` on an
   interval (default 15 min, `HOLDER_COUNT_INTERVAL_MIN`) rather than per block. Worth ~6x
   ETH throughput.
-- DEX "Unique Traders" shows 1 when there are 0 trades — `GREATEST(1, (reltuples / 10))`
-  estimate in `apps/explorer/app/dex/page.tsx:49`. Cosmetic.
 - `token_balances_token_address_holder_address_key` (~519 MB, 0 scans) is dead weight but
   backs a UNIQUE constraint — removal needs care.
 

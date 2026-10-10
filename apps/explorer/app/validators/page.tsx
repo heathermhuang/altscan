@@ -8,10 +8,11 @@ import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { blocksIn24h, blocksProduced, minerCounts, type MinerCount } from '@/lib/validator-blocks'
+import { validatorDisplays } from '@/lib/validator-display'
 
 export const metadata: Metadata = {
   title: `Validators`,
-  description: `${chainConfig.name} validator set — view active validators, voting power, and commission rates on ${chainConfig.brandDomain}.`,
+  description: `${chainConfig.name} validator set — view validators, voting power, and commission rates on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/validators' },
 }
 
@@ -42,6 +43,7 @@ export default async function ValidatorsPage() {
       .limit(100)
   } catch (e) { swallow('validators/query', e) }  // DB not connected
   const blockCounts = validators.length > 0 ? await fetchBlocks24h() : null
+  const display = validatorDisplays(validators)
   const blocksCell = (address: string) => {
     const n = blocksProduced(blockCounts, address)
     return n === null ? '—' : formatNumber(n)
@@ -84,18 +86,13 @@ export default async function ValidatorsPage() {
                 <td className="text-mut">{i + 1}</td>
                 <td>
                   <Link href={`/address/${v.address}`} className="text-acc-ink font-medium hover:underline">
-                    {v.moniker}
+                    {display[i].name}
                   </Link>
                 </td>
-                <td>
-                  <Badge variant={
-                    v.status === 'active'   ? 'success' :
-                    v.status === 'jailed'   ? 'fail'    : 'default'
-                  }>
-                    {v.status}
-                  </Badge>
+                <td className="whitespace-nowrap">
+                  <Badge variant={display[i].status.variant}>{display[i].status.label}</Badge>
                 </td>
-                <td className="whitespace-nowrap">{formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} {chainConfig.currency}</td>
+                <td className="whitespace-nowrap">{display[i].powerUnknown ? '—' : `${formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} ${chainConfig.currency}`}</td>
                 <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
                 <td>{blocksCell(v.address)}</td>
               </tr>

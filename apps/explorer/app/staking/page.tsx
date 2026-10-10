@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { getWebProvider } from '@/lib/rpc'
-import { formatNumber } from '@/lib/format'
 import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
@@ -9,7 +8,7 @@ import { swallow } from '@/lib/observability'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
-  description: `Ethereum staking dashboard — view active validators, total ETH staked, and staking APY on ${chainConfig.brandDomain}.`,
+  description: `Ethereum staking — the total ETH ever deposited to the ETH2 deposit contract, and how staking works, on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/staking' },
 }
 
@@ -19,25 +18,14 @@ if (!chainConfig.features.hasStaking) {
   // Static guard -- will 404 at build time for non-staking chains
 }
 
-async function fetchBeaconStats(): Promise<{
-  validatorCount: number | null
-  totalStaked: number | null
-  apy: number | null
-} | null> {
+// The deposit contract only ever receives ETH (withdrawals are paid by the beacon chain, not
+// from it), so its balance is everything ever deposited. It is not the amount staked today.
+async function fetchDepositedEth(): Promise<number | null> {
   try {
-    // Beacon chain deposit contract holds staked ETH
     const DEPOSIT_CONTRACT = '0x00000000219ab540356cbb839cbe05303d7705fa'
     const provider = await getWebProvider()
     const balance = await provider.getBalance(DEPOSIT_CONTRACT)
-    // Each validator stakes 32 ETH
-    const totalStakedETH = Number(balance) / 1e18
-    const validatorCount = Math.floor(totalStakedETH / 32)
-
-    return {
-      validatorCount,
-      totalStaked: totalStakedETH,
-      apy: null, // Requires external API call
-    }
+    return Number(balance) / 1e18
   } catch (e) {
     swallow('staking/query', e)
     return null
@@ -47,13 +35,13 @@ async function fetchBeaconStats(): Promise<{
 export default async function StakingPage() {
   if (!chainConfig.features.hasStaking) return notFound()
 
-  const stats = await fetchBeaconStats()
+  const deposited = await fetchDepositedEth()
 
   const stakingFaqJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
     mainEntity: [
-      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY). Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
+      { '@type': 'Question', name: 'What is Ethereum staking?', acceptedAnswer: { '@type': 'Answer', text: 'Validators stake at least 32 ETH to participate in block validation and earn rewards. Ethereum uses Proof of Stake consensus since The Merge (September 2022).' } },
       { '@type': 'Question', name: 'How much ETH do I need to stake?', acceptedAnswer: { '@type': 'Answer', text: 'Running your own validator requires at least 32 ETH.' } },
     ],
   }
@@ -69,29 +57,19 @@ export default async function StakingPage() {
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">Ethereum Staking</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink2">
           Ethereum uses Proof of Stake consensus since The Merge (September 2022).
-          Validators stake at least 32 ETH to participate in block validation and earn rewards (~3-4% APY).
-          This page shows live staking statistics derived from the ETH2 deposit contract.
+          Validators stake at least 32 ETH to participate in block validation and earn rewards.
+          This page shows the total ETH ever deposited to the ETH2 deposit contract.
         </p>
       </div>
 
       {/* Stats */}
-      <dl className="ledger [--cols:3] mb-6">
+      <dl className="ledger [--cols:1] mb-6">
         <StatCard
-          label="Active Validators"
-          value={stats?.validatorCount ? formatNumber(stats.validatorCount) : '—'}
-          note="Approx. based on deposit contract balance"
-        />
-        <StatCard
-          label="Total ETH Staked"
-          value={stats?.totalStaked
-            ? `${(stats.totalStaked / 1e6).toFixed(2)}M ETH`
+          label="Deposited to the deposit contract (all time)"
+          value={deposited
+            ? `${(deposited / 1e6).toFixed(2)}M ETH`
             : '—'}
-          note="Balance of ETH2 Deposit Contract"
-        />
-        <StatCard
-          label="Current Staking APY"
-          value="~3-4%"
-          note="Varies with total staked ETH"
+          note="Balance of the ETH2 deposit contract, which only receives deposits"
         />
       </dl>
 
