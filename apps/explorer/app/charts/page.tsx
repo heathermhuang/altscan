@@ -18,10 +18,10 @@ export const metadata: Metadata = {
   alternates: { canonical: '/charts' },
 }
 
-/** `firstTs`: epoch ms of the day's earliest block, so a day that starts mid-day can be told from a whole one. */
 /** Days of data a chart needs before it is worth drawing. */
 const MIN_DAYS = 3
 
+/** `firstTs`: epoch ms of the day's earliest block, so a day that starts mid-day can be told from a whole one. */
 type DataPoint = { date: string; value: number; firstTs: number }
 
 function toPoint(row: unknown): DataPoint {
