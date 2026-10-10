@@ -10,6 +10,8 @@ import { desc, sql } from 'drizzle-orm'
 import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { createPageCache } from '@/lib/page-cache'
+import { fetchNativeUsd } from '@/lib/native-price'
+import { withTimeout } from '@/lib/with-timeout'
 
 export const DEX_PAGE_SIZE = 25
 export const DEX_REVALIDATE_SECONDS = 300
@@ -35,17 +37,34 @@ export type DexPageData = {
   totalTrades: number
   topPairs: TopPair[]
   tokens: TokenMeta[]
+  /**
+   * The native coin's USD price when the page was cached, or null (no source answered in time). It sizes
+   * the recent-swaps strip's wrapped-native legs (lib/dex-size.ts); null leaves those swaps unpriced, and
+   * the strip's legend says so. A plain number, so it is safe in the cache.
+   */
+  nativeUsd: number | null
 }
+
+/**
+ * How long the cached read waits for the native price. Binance is 3 s a host and a miss falls through to
+ * slower sources; the strip degrades visibly without a price, the table does not need it, so a hung
+ * provider must not hold the cache fill (and the page behind it) for the helper's full 11 s.
+ */
+export const DEX_PRICE_WAIT_MS = 4000
 
 function estimate(result: unknown, key: string): number {
   const n = Number((Array.from(result as Iterable<unknown>)[0] as Record<string, unknown>)?.[key] ?? 0)
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+// 'dex-priced', not 'dex': the cached value gained `nativeUsd`, and an entry written by the previous
+// build under the old name would hand this code the old shape (lib/page-cache.ts).
 export const fetchDexPage = createPageCache(
-  'dex',
+  'dex-priced',
   DEX_REVALIDATE_SECONDS,
   async (page: number): Promise<DexPageData> => {
+    // The price is network, not database: it runs beside the reads below without adding to their load.
+    const nativeUsd = withTimeout(fetchNativeUsd(), DEX_PRICE_WAIT_MS).catch(() => null)
     // Sequential on purpose — these were concurrent full-table scans and OOMed
     // the 2GB web service.
     const trades = await db.select().from(schema.dexTrades)
@@ -107,6 +126,7 @@ export const fetchDexPage = createPageCache(
       trade_count: Number(r.trade_count),
     })),
     tokens,
+    nativeUsd: await nativeUsd,
     }
   },
 )
