@@ -38,10 +38,10 @@ describe('suggestQuery', () => {
   // drizzle.mock builds queries with no connection, so the SQL the driver would send can be read off.
   const db = drizzle.mock({ schema }) as unknown as Db
 
-  it('is lower(symbol) LIKE prefix%, most-held first (plain DESC), 20 candidates, four columns', () => {
+  it('is lower(symbol) LIKE prefix%, most-held first (plain DESC), 50 candidates (as /search), four columns', () => {
     expect(suggestQuery(db, 'us_').toSQL()).toEqual({
       sql: 'select "address", "symbol", "name", "holder_count" from "tokens" where lower("tokens"."symbol") like $1 order by "tokens"."holder_count" desc limit $2',
-      params: ['us\\_%', 20],
+      params: ['us\\_%', 50],
     })
   })
 })

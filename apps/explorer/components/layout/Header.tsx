@@ -162,7 +162,7 @@ export function Header() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.isComposing) return
+      if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return
       const t = e.target as Node
       if (menuButton.current?.contains(t) || menuPanel.current?.contains(t)) menuButton.current?.focus()
       setOpen(false)

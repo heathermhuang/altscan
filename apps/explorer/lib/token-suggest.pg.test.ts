@@ -33,9 +33,9 @@ const FIXTURE = `
          upper(translate(substr(md5('s' || i), 1, 5), '0123456789', 'ghijklmnop')),
          (hashint4(i)::bigint + 2147483648) % 500
   FROM generate_series(1, 100000) i;
-  -- 40 USDT-named airdrops out-holding everything, one low-holder exact ticker, and symbols with LIKE wildcards.
+  -- 60 USDT-named airdrops out-holding everything, one low-holder exact ticker, and symbols with LIKE wildcards.
   INSERT INTO tokens (address, name, symbol, holder_count)
-  SELECT '0x' || md5('u' || i) || '00000000', 'Tether USD', 'USDT', 9000000 - i FROM generate_series(1, 40) i;
+  SELECT '0x' || md5('u' || i) || '00000000', 'Tether USD', 'USDT', 9000000 - i FROM generate_series(1, 60) i;
   INSERT INTO tokens (address, name, symbol, holder_count) VALUES
     ('${'0x' + '0'.repeat(37) + 'abc'}', 'Zq Rare Token', 'ZQ', 3),
     ('${'0x' + '0'.repeat(37) + 'abd'}', 'Rare Name Coin', 'RNC', 2),
@@ -80,6 +80,17 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
     }
   }
 
+  // The prefix LIKE is only index-able with the pattern known at plan time. A NAMED prepared statement is
+  // planned generically after five executions, and then walks tokens_holder_count_idx filtering every row
+  // (measured on 1.5M rows: ~500k rows removed per worker for a one-row answer). drizzle's postgres-js
+  // calls `unsafe(query, params)`, which is unprepared, so every execution is planned with its values.
+  it('runs the lookups unprepared: executing them leaves no named prepared statement behind', async () => {
+    const count = async () => Number((await conn.unsafe('SELECT count(*) AS n FROM pg_prepared_statements'))[0].n)
+    const before = await count()
+    for (let i = 0; i < 8; i++) { await suggestQuery(db, 'zq'); await exactMatchQuery(db, 'zq', 10) }
+    expect(await count()).toBe(before)
+  })
+
   describe('suggestQuery', () => {
     it.each(['zq', 'rn', 'abc', 'us'])('reads tokens_lower_symbol_idx, not the table, for the prefix %s', async (prefix) => {
       const plan = await planOf(suggestQuery(db, prefix))
@@ -89,7 +100,7 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
 
     it('returns the most-held tokens with that symbol prefix, case-insensitively', async () => {
       const rows = await suggestQuery(db, 'usd')
-      expect(rows).toHaveLength(20)
+      expect(rows).toHaveLength(50)
       expect(rows[0]).toMatchObject({ symbol: 'USDT', holderCount: 9000000 - 1 })
       expect(rows.map((r) => r.holderCount)).toEqual([...rows.map((r) => r.holderCount)].sort((a, b) => b - a))
     })
