@@ -72,9 +72,11 @@ export function HoldingsLazy({ addr, tracked }: { addr: string; tracked: Holding
     return (
       <div>
         <HoldingsNote tracked={tracked} />
-        <div className="animate-pulse space-y-2">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-9 bg-hair2 rounded" />
+        {/* The table's own box and row height (header + 5 rows of 37 px), so a five-row answer replaces it
+            without moving what is below. */}
+        <div className="animate-pulse bg-card rounded-xl border border-hair overflow-hidden divide-y divide-hair">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-[37px] bg-hair2" />
           ))}
         </div>
       </div>
