@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
 import { shortenAddress } from '@/lib/address-display'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { tokenTypeLabel } from '@/lib/token-type-label'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
@@ -65,11 +66,13 @@ export default async function TokenListPage({
   // standard so a new chain gets its own prefix instead of silently inheriting
   // BNB's. (This also hyphenates the BNB tab labels, matching the headings.)
   const std = chainConfig.tokenStandard.split('-')[0]
-  const typeLabels = {
-    BEP20: `${std}-20 Tokens`, BEP721: `${std}-721 NFTs`, BEP1155: `${std}-1155 Multi-Tokens`,
-  }
   const tabLabels = {
-    BEP20: `${std}-20`, BEP721: `${std}-721`, BEP1155: `${std}-1155`,
+    BEP20: tokenTypeLabel('BEP20', chainConfig.tokenStandard),
+    BEP721: tokenTypeLabel('BEP721', chainConfig.tokenStandard),
+    BEP1155: tokenTypeLabel('BEP1155', chainConfig.tokenStandard),
+  }
+  const typeLabels = {
+    BEP20: `${tabLabels.BEP20} Tokens`, BEP721: `${tabLabels.BEP721} NFTs`, BEP1155: `${tabLabels.BEP1155} Multi-Tokens`,
   }
 
   return (
