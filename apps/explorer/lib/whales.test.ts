@@ -405,6 +405,7 @@ describe('rankingNote', () => {
     expect(note).not.toMatch(/live/i)
     expect(note).toContain('ETH price is unavailable')
     expect(note).toMatch(/ETH and WETH transfers are unranked/)
+    expect(note).toContain('may not fit in the 50 shown') // with every stablecoin row ahead of them, the cap can cut them all
     expect(note).toContain('stablecoins are ranked by estimated USD value at $1')
   })
 })

@@ -286,7 +286,7 @@ export function rankingNote(currency: string, wrappedSymbol: string, nativePrice
   const basis = `the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers and the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token in this period`
   return nativePriced
     ? `Showing the top ${WHALES_SHOWN} by estimated USD value among ${basis}. Stablecoins are priced at $1, ${currency} and ${wrappedSymbol} at the live ${currency} price; a transfer with no price is listed last.`
-    : `The ${currency} price is unavailable right now, so ${currency} and ${wrappedSymbol} transfers are unranked and come after the stablecoin transfers, newest first. Showing the top ${WHALES_SHOWN} among ${basis}; stablecoins are ranked by estimated USD value at $1.`
+    : `The ${currency} price is unavailable right now, so ${currency} and ${wrappedSymbol} transfers are unranked: they follow the stablecoin transfers, newest first, and may not fit in the ${WHALES_SHOWN} shown. Showing the top ${WHALES_SHOWN} among ${basis}; stablecoins are ranked by estimated USD value at $1.`
 }
 
 /**
