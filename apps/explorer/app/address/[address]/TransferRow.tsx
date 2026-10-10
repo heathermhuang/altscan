@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import type { schema } from '@/lib/db'
-import { formatNumber, formatTokenAmount, sanitizeSymbolOr, tokenLabel } from '@/lib/format'
+import { formatNumber, formatTokenAmount, tokenText } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { LinkInName } from '@/components/ui/LinkInName'
 
 export type TransferTokenInfo = { name: string; symbol: string; decimals: number }
 
@@ -10,6 +11,17 @@ type Transfer = Pick<typeof schema.tokenTransfers.$inferSelect, 'txHash' | 'bloc
 
 /** One row of the address page's Transfers tab (the server render; TransfersLazy has its own for the provider's rows). */
 export function TransferRow({ t, addr, info }: { t: Transfer; addr: string; info: TransferTokenInfo | undefined }) {
+  // A symbol or name that reads as a URL or handle (lib/link-in-name) keeps its text in the Token cell, badged, and is
+  // named by the token's short address after the amount. Flagged rows only: an unflagged cell is the bare link.
+  const text = tokenText(info?.symbol, info?.name, t.tokenAddress)
+  const token = (
+    <Link
+      href={`/token/${t.tokenAddress}`}
+      className={text.linkLike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}
+    >
+      {text.name}
+    </Link>
+  )
   return (
     <tr className="hover:bg-canvas transition-colors">
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
@@ -25,12 +37,7 @@ export function TransferRow({ t, addr, info }: { t: Transfer; addr: string; info
         <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-        <Link
-          href={`/token/${t.tokenAddress}`}
-          className="text-acc-ink hover:underline"
-        >
-          {tokenLabel(info?.symbol, info?.name, t.tokenAddress)}
-        </Link>
+        {text.linkLike ? <>{token}<LinkInName className="ml-2" /></> : token}
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
         {(() => {
@@ -41,10 +48,7 @@ export function TransferRow({ t, addr, info }: { t: Transfer; addr: string; info
           }
           return raw.slice(0, 12)
         })()}
-        {(() => {
-          const sym = sanitizeSymbolOr(info?.symbol, '')
-          return sym ? ` ${sym}` : ''
-        })()}
+        {text.symbol ? ` ${text.symbol}` : ''}
       </td>
     </tr>
   )
