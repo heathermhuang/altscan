@@ -18,7 +18,7 @@ import { isBotRequest } from '@/lib/providers'
 import { getRetentionFloor, isLocalHistoryIncomplete } from '@/lib/retention'
 import { TxnsLazy } from './TxnsLazy'
 import { TransfersLazy } from './TransfersLazy'
-import { HoldingsLazy } from './HoldingsLazy'
+import { HoldingsTab, getTrackedBalances } from './HoldingsTab'
 import { NftsLazy } from './NftsLazy'
 import { getWebProvider } from '@/lib/rpc'
 import { chainConfig } from '@/lib/chain'
@@ -31,6 +31,8 @@ import { AddressLedger } from '@/components/tape/AddressLedger'
 import { toLedgerRows } from '@/lib/ledger'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
+import { fetchNativeUsd } from '@/lib/native-price'
+import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
 
 export const revalidate = 300
 
@@ -175,41 +177,18 @@ export default async function AddressPage({
   const [resolvedName, riskData, nativePrice] = await Promise.all([
     resolveName(addr),
     getAddressRisk(addr),
-    (async () => {
-      const sym = chainConfig.market.binanceSymbol
-      const ccSym = chainConfig.market.cryptoCompareSymbol
-      // Try Binance US first (Render servers are US-based), then Binance global
-      for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
-        try {
-          const r = await fetch(`${host}/api/v3/ticker/price?symbol=${sym}`, { signal: AbortSignal.timeout(3000), next: { revalidate: 300 } })
-          if (r.ok) { const d = await r.json(); const p = parseFloat(d.price); if (p > 0) return p }
-        } catch { /* try next */ }
-      }
-      // Fallback: CryptoCompare
-      try {
-        const r = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${ccSym}&tsyms=USD`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
-        if (r.ok) { const d = await r.json(); if (d?.USD > 0) return d.USD }
-      } catch { /* try next */ }
-      // Fallback: CoinGecko
-      try {
-        const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
-        if (r.ok) { const d = await r.json(); return d[chainConfig.coingeckoId]?.usd ?? null }
-      } catch { /* try next */ }
-      // Fallback: CoinCap
-      const ccId = chainConfig.market.coincapId
-      try {
-        const r = await fetch(`https://api.coincap.io/v2/assets/${ccId}`, { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } })
-        if (r.ok) { const d = await r.json(); const p = parseFloat(d?.data?.priceUsd); if (p > 0) return p }
-      } catch (e) { swallow('addr/price-all-failed', e) }
-      return null
-    })(),
+    fetchNativeUsd(),
   ])
 
   // Batch 2: heavier RPC calls (after batch 1 frees its memory).
   // Moralis txn history is now fetched lazily on the client via TxnsLazy — no SSR prefetch,
   // so HTML scrapers (fake browser UAs, no JS) never trigger getWalletHistory during render.
-  const { contract: contractResult, status: contractStatus, balance, nonce: rpcTxCount } =
-    await getAddressChainState(addr)
+  // The tracked tokens' live balances ride in the same batch (one more RPC read, no Moralis); the
+  // lead sentence and the Holdings tab share it through cache().
+  const [{ contract: contractResult, status: contractStatus, balance, nonce: rpcTxCount }, trackedBalances] =
+    await Promise.all([getAddressChainState(addr), getTrackedBalances(addr)])
+  const trackedRows = trackedBalances ? priceTracked(trackedTokens(chainConfig.whales), trackedBalances, nativePrice) : []
+  const trackedText = trackedClause(trackedRows)
   // ⚠ No fallback to addressInfo.balance: that column is a literal '0' nothing
   // maintains, so falling back turned an RPC blip into a confident wrong zero.
   const displayBalance = balance.value
@@ -301,6 +280,7 @@ export default async function AddressPage({
           <p className="mt-3 max-w-[60rem] text-[15px] leading-relaxed text-ink2">
             Holds <span className="font-semibold text-ink">{groupDigits(formatNativeToken(displayBalance, 2))} {chainConfig.currency}</span>
             {nativeUsd !== null && nativeUsd >= 0.1 ? ` (${formatCompactUsd(nativeUsd)})` : ''}
+            {trackedText && ` ${trackedText}`}
             {txCountText !== '—' && <> across {txCountText} {displayTxCount === 1 ? 'transaction' : 'transactions'}</>}.
           </p>
         )}
@@ -420,7 +400,7 @@ export default async function AddressPage({
         <TxnsTab addr={addr} page={page} total={displayTxCount} cursor={cursor} isBot={isBot} firstSeen={firstTxTimestamp} />
       )}
       {activeTab === 'transfers' && <TransfersTab addr={addr} page={page} isBot={isBot} firstSeen={firstTxTimestamp} />}
-      {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} />}
+      {activeTab === 'holdings' && <HoldingsTab addr={addr} isBot={isBot} nativeUsd={nativePrice} />}
       {activeTab === 'analytics' && <AnalyticsTab addr={addr} addressInfo={addressInfo} />}
       {activeTab === 'nfts' && <NftsTab addr={addr} isBot={isBot} />}
     </div>
@@ -714,104 +694,6 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
         perPage={PAGE_SIZE}
         baseUrl={`/address/${addr}?tab=transfers`}
       />
-    </div>
-  )
-}
-
-// ---- Holdings Tab ----
-
-type HoldingRow = { tokenAddress: string; balance: string; name: string | null; symbol: string | null; decimals: number | null }
-
-async function HoldingsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
-  let holdings: HoldingRow[] = []
-
-  try {
-    // Use pre-computed token_balances table (indexed, instant) instead of
-    // scanning token_transfers with SUM aggregation (millions of rows, OOM risk).
-    const result = await db.execute(sql`
-      SELECT tb.token_address, tb.balance::text as balance
-      FROM token_balances tb
-      WHERE tb.holder_address = ${addr} AND tb.balance::numeric > 0
-      ORDER BY tb.balance::numeric DESC
-      LIMIT 50
-    `)
-
-    const rows = Array.from(result) as Record<string, unknown>[]
-    const tokenAddresses = rows.map(r => String(r.token_address))
-    const tokenInfos = tokenAddresses.length > 0
-      ? await db.select({
-          address: schema.tokens.address,
-          name: schema.tokens.name,
-          symbol: schema.tokens.symbol,
-          decimals: schema.tokens.decimals,
-        }).from(schema.tokens).where(inArray(schema.tokens.address, tokenAddresses))
-      : []
-    const tokenMap = new Map(tokenInfos.map(t => [t.address, t]))
-    holdings = rows.map((row) => {
-      const tokenAddress = String(row.token_address)
-      const balance = String(row.balance)
-      const tok = tokenMap.get(tokenAddress)
-      return {
-        tokenAddress,
-        balance,
-        name: tok?.name ?? null,
-        symbol: tok?.symbol ?? null,
-        decimals: tok?.decimals ?? null,
-      }
-    })
-  } catch (e) {
-    swallow('addr/holdings', e)
-    // DB error
-  }
-
-  if (holdings.length === 0) {
-    if (isBot) {
-      return <p className="text-mut">No token holdings found for this address.</p>
-    }
-    return <HoldingsLazy addr={addr} />
-  }
-
-  return (
-    <div className="bg-card rounded-xl border border-hair overflow-hidden">
-      <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <caption className="sr-only">{chainConfig.name} token holdings for this address</caption>
-        <thead className="bg-canvas border-b border-hair">
-          <tr>
-            <th scope="col" className={TH}>Token</th>
-            <th scope="col" className={TH}>Symbol</th>
-            <th scope="col" className={TH}>Approx. Balance</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-hair">
-          {holdings.map((h) => {
-            const displayBalance = (() => {
-              try {
-                if (h.decimals !== null) {
-                  return formatTokenAmount(h.balance, h.decimals, 6)
-                }
-                return h.balance.slice(0, 18)
-              } catch {
-                return h.balance.slice(0, 18)
-              }
-            })()
-            return (
-              <tr key={h.tokenAddress} className="hover:bg-canvas transition-colors">
-                <td className="px-3 sm:px-4 py-2">
-                  <Link href={`/token/${h.tokenAddress}`} className="text-acc-ink hover:underline font-medium">
-                    {tokenLabel(h.name, h.symbol, h.tokenAddress)}
-                  </Link>
-                </td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(h.symbol, '—')}</td>
-                <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                  {displayBalance} {sanitizeSymbolOr(h.symbol, '')}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      </div>
     </div>
   )
 }
