@@ -1216,7 +1216,10 @@ async function listPartitionsWithAttachedIndex(parent: string): Promise<Map<stri
  *  - it re-validates a parent that is invalid only because retention DROPPED the last
  *    uncovered partition mid-build. Postgres re-evaluates validity on ATTACH alone, so the
  *    parent would otherwise stay invalid for ever with every partition indexed; a repeated
- *    ATTACH of an already-attached child counts (verified on PG16).
+ *    ATTACH of an already-attached child counts on PG 16.14, 18.4 and 18.6 (measured) but
+ *    NOT on 18.1 and 18.3, where the parent stays invalid. That is harmless — the planner
+ *    uses the leaf indexes, never the parent's flag — and costs one repeated no-op ATTACH
+ *    per boot. (Production: BNB, the only partitioned chain, is 18.4.)
  *
  * Never throws: it runs last in the background pass and an index that failed here is
  * retried by the next boot, so it must not take later steps down with it.
