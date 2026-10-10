@@ -79,9 +79,33 @@ export function suggestQuery(prefix: string) {
     ORDER BY holder_count DESC LIMIT ${sql.raw(String(SUGGEST_CANDIDATES))}`
 }
 
+/**
+ * How long the typeahead's query may run. The route waits this long (withTimeout), and the SERVER cancels the
+ * statement at the same mark (withStatementTimeout), so a request the visitor has been told is over is not still
+ * running.
+ */
+export const SUGGEST_TIMEOUT_MS = 1500
+
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+
+/**
+ * Run `run` in a transaction whose statements the database cancels after `ms` (SQLSTATE 57014, and the
+ * transaction rolls back). withTimeout only stops WAITING: the query itself keeps running on the server and
+ * holds one of the web service's few pooled connections (DB_POOL_SIZE, 5) until it finishes, so a burst of
+ * requests during a slowdown piles up abandoned queries and delays unrelated pages. `SET LOCAL` lasts for this
+ * transaction only, so the pool's other statements keep the service's own (opt-in) limit.
+ */
+export async function withStatementTimeout<T>(db: Db, ms: number, run: (tx: Tx) => Promise<T>): Promise<T> {
+  if (!Number.isInteger(ms) || ms <= 0) throw new RangeError(`statement timeout must be a positive whole number of ms, got ${ms}`)
+  return db.transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${ms}ms'`)) // SET takes no bind parameters; ms is an integer
+    return run(tx)
+  })
+}
+
 /** suggestQuery's rows, in the shape rankTokenMatches reads. */
-export async function suggestRows(db: Db, prefix: string) {
-  const rows = await db.execute(suggestQuery(prefix))
+export async function suggestRows(db: Db, prefix: string, timeoutMs: number = SUGGEST_TIMEOUT_MS) {
+  const rows = await withStatementTimeout(db, timeoutMs, (tx) => tx.execute(suggestQuery(prefix)))
   return Array.from(rows, (r) => ({
     address: String(r.address), symbol: String(r.symbol), name: String(r.name), holderCount: Number(r.holder_count),
   }))

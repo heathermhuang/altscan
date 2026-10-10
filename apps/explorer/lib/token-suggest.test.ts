@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import type { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import type { Db } from '@altscan/db'
-import { likePrefixPattern, shapeSuggestions, suggestPrefix, suggestQuery, suggestRows, SUGGEST_LIMIT } from '@/lib/token-suggest'
+import { likePrefixPattern, shapeSuggestions, suggestPrefix, suggestQuery, suggestRows, SUGGEST_LIMIT, SUGGEST_TIMEOUT_MS } from '@/lib/token-suggest'
 
 const addr = (i: number) => `0x${i.toString(16).padStart(40, '0')}`
 const row = (i: number, symbol: string, name: string, holderCount: number) => ({ address: addr(i), symbol, name, holderCount })
@@ -56,9 +57,46 @@ describe('suggestQuery', () => {
 })
 
 describe('suggestRows', () => {
-  it('runs the query and maps the snake_case columns', async () => {
-    const execute = async () => [{ address: '0xa', symbol: 'CAKE', name: 'PancakeSwap Token', holder_count: 7 }]
-    expect(await suggestRows({ execute } as unknown as Db, 'cak')).toEqual([
+  const dialect = new PgDialect()
+  const ROWS = [{ address: '0xa', symbol: 'CAKE', name: 'PancakeSwap Token', holder_count: 7 }]
+  /** A db that records what the transaction runs, in order, as SQL text. */
+  function fakeDb() {
+    const calls: string[] = []
+    const db = {
+      transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
+        calls.push('BEGIN')
+        const out = await cb({ execute: async (q: SQL) => { calls.push(dialect.sqlToQuery(q).sql.replace(/\s+/g, ' ').trim()); return ROWS } })
+        calls.push('COMMIT')
+        return out
+      },
+      execute: async () => { calls.push('OUTSIDE A TRANSACTION'); return ROWS },
+    }
+    return { db: db as unknown as Db, calls }
+  }
+
+  // withTimeout only stops WAITING: the query itself kept running on the server, holding one of the web service's
+  // few pooled connections, so a burst of typeahead requests during a slowdown piled up abandoned queries.
+  // SET LOCAL statement_timeout makes the SERVER cancel it (SQLSTATE 57014) and release the connection.
+  it('runs the query in a transaction that first sets statement_timeout, the same 1.5 s the route waits', async () => {
+    const { db, calls } = fakeDb()
+    await suggestRows(db, 'cak')
+    expect(SUGGEST_TIMEOUT_MS).toBe(1500)
+    expect(calls).toHaveLength(4)
+    expect(calls[0]).toBe('BEGIN')
+    expect(calls[1]).toBe("SET LOCAL statement_timeout = '1500ms'")
+    expect(calls[2]).toMatch(/^SELECT address, symbol, name, holder_count FROM \(/)
+    expect(calls[3]).toBe('COMMIT')
+  })
+
+  it('takes the timeout as a parameter, and refuses one that is not a positive whole number of milliseconds', async () => {
+    const { db, calls } = fakeDb()
+    await suggestRows(db, 'cak', 250)
+    expect(calls[1]).toBe("SET LOCAL statement_timeout = '250ms'")
+    for (const bad of [0, -5, 1.5, NaN]) await expect(suggestRows(fakeDb().db, 'cak', bad)).rejects.toThrow(RangeError)
+  })
+
+  it('maps the snake_case columns', async () => {
+    expect(await suggestRows(fakeDb().db, 'cak')).toEqual([
       { address: '0xa', symbol: 'CAKE', name: 'PancakeSwap Token', holderCount: 7 },
     ])
   })

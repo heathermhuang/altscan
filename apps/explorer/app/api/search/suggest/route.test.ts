@@ -3,6 +3,8 @@
  * (the in-memory fallback); the database and Redis are faked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DrizzleQueryError } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 
 const h = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[] | Error | 'hang',
@@ -23,11 +25,15 @@ async function load() {
     return {
       schema,
       db: {
-        execute: (q: unknown) => {
-          h.queries.push(q)
-          if (h.rows === 'hang') return new Promise(() => {})
-          return h.rows instanceof Error ? Promise.reject(h.rows) : Promise.resolve(h.rows.map((r) => ({ ...r, holder_count: r.holderCount })))
-        },
+        // The route's DB path is a transaction (SET LOCAL statement_timeout, then the query); both go through tx.execute.
+        transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({
+          execute: (q: unknown) => {
+            h.queries.push(new PgDialect().sqlToQuery(q as Parameters<PgDialect['sqlToQuery']>[0]).sql.replace(/\s+/g, ' ').trim())
+            if (h.queries.length === 1) return Promise.resolve([]) // the SET LOCAL
+            if (h.rows === 'hang') return new Promise(() => {})
+            return h.rows instanceof Error ? Promise.reject(h.rows) : Promise.resolve(h.rows.map((r) => ({ ...r, holder_count: r.holderCount })))
+          },
+        }),
       },
     }
   })
@@ -82,6 +88,25 @@ describe('GET /api/search/suggest', () => {
     expect((await get(route, '?q=ab', '198.51.100.10')).status).toBe(200)
     const { checkIpRateLimit } = await import('@/lib/api-rate-limit')
     expect(await checkIpRateLimit(new Headers({ 'x-forwarded-for': '198.51.100.9' }))).toBe(true)
+  })
+
+  it('has the SERVER cancel a slow query: SET LOCAL statement_timeout, in the same transaction, before the query', async () => {
+    h.rows = [row(1, 'CAKE', 'PancakeSwap Token', 9)]
+    await get(await load(), '?q=ca')
+    expect(h.queries).toHaveLength(2)
+    expect(h.queries[0]).toBe("SET LOCAL statement_timeout = '1500ms'")
+    expect(h.queries[1]).toMatch(/^SELECT address, symbol, name, holder_count FROM/)
+  })
+
+  // What drizzle >= 0.44 throws when Postgres cancels the statement: a wrapper, the reason and SQLSTATE on .cause.
+  it('a statement the server cancelled (57014) is the same 503, not cached, logged with the database\'s reason', async () => {
+    const cause = Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })
+    h.rows = new DrizzleQueryError('select …', [], cause)
+    const res = await get(await load(), '?q=ab')
+    expect(res.status).toBe(503)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json()).toEqual({ error: 'Suggestions unavailable' })
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain('canceling statement due to statement timeout')
   })
 
   it('a database error is a 503 that is not cached, and is logged', async () => {

@@ -2,15 +2,12 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
-import { shapeSuggestions, suggestPrefix, suggestRows } from '@/lib/token-suggest'
+import { shapeSuggestions, suggestPrefix, suggestRows, SUGGEST_TIMEOUT_MS } from '@/lib/token-suggest'
 import { withTimeout } from '@/lib/with-timeout'
 import { swallow } from '@/lib/observability'
 
 // An API route may be dynamic; a page may not (AGENTS.md: ISR only).
 export const dynamic = 'force-dynamic'
-
-/** The typeahead is not worth a visitor's wait: past this it shows nothing rather than a late list. */
-const TIMEOUT_MS = 1500
 
 /**
  * GET /api/search/suggest?q=: the top five tokens whose symbol starts with q, for the header search
@@ -26,7 +23,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const rows = await withTimeout(suggestRows(db, prefix), TIMEOUT_MS)
+    // The typeahead is not worth a visitor's wait: past SUGGEST_TIMEOUT_MS it shows nothing rather than a late
+    // list. withTimeout stops the wait; the statement_timeout set inside suggestRows has the server stop the query
+    // at the same mark (it answers 57014, caught below like any other failure).
+    const rows = await withTimeout(suggestRows(db, prefix), SUGGEST_TIMEOUT_MS)
     return NextResponse.json(
       { tokens: shapeSuggestions(rows, prefix, chainConfig.key) },
       { headers: { 'cache-control': 'public, max-age=30' } },

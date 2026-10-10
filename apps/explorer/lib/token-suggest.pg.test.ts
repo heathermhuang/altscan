@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { createMaintenanceConnection, schema } from '@altscan/db'
+import { createMaintenanceConnection, schema, unwrapDbError } from '@altscan/db'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import type { SQL } from 'drizzle-orm'
-import { exactMatchQuery, suggestQuery, suggestRows } from './token-suggest'
+import { sql, type SQL } from 'drizzle-orm'
+import { exactMatchQuery, suggestQuery, suggestRows, SUGGEST_TIMEOUT_MS, withStatementTimeout } from './token-suggest'
+import { withTimeout } from './with-timeout'
 
 /**
  * The two token lookups behind the header typeahead and /search's exact matches, against a REAL Postgres,
@@ -59,6 +60,7 @@ const walk = (n: PlanNode): PlanNode[] => [n, ...(n.Plans ?? []).flatMap(walk)]
 
 describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a real Postgres', () => {
   let conn: ReturnType<typeof createMaintenanceConnection>
+  let observer: ReturnType<typeof createMaintenanceConnection> // a second session, to look at the first from outside
   let db: ReturnType<typeof drizzle<typeof schema>>
 
   beforeAll(async () => {
@@ -66,12 +68,14 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
       throw new Error(`${ENV} must name a disposable database (its name must contain "test")`)
     }
     conn = createMaintenanceConnection(PG_URL as string)
+    observer = createMaintenanceConnection(PG_URL as string)
     db = drizzle(conn, { schema })
     await conn.unsafe(FIXTURE)
   }, 120_000)
 
   afterAll(async () => {
     await conn?.end({ timeout: 5 })
+    await observer?.end({ timeout: 5 })
   })
 
   const toText = (q: SQL | { toSQL(): { sql: string; params: unknown[] } }) =>
@@ -96,12 +100,57 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
   // The prefix LIKE is only index-able with the pattern known at plan time. A NAMED prepared statement is
   // planned generically after five executions, and then walks tokens_holder_count_idx filtering every row
   // (measured on 1.5M rows: ~500k rows removed per worker for a one-row answer). drizzle's postgres-js
-  // calls `unsafe(query, params)`, which is unprepared, so every execution is planned with its values.
-  it('runs the lookups unprepared: executing them leaves no named prepared statement behind', async () => {
-    const count = async () => Number((await conn.unsafe('SELECT count(*) AS n FROM pg_prepared_statements'))[0].n)
-    const before = await count()
+  // calls `unsafe(query, params)`, which is unprepared, so every execution is planned with its values. (Inside
+  // the typeahead's transaction postgres.js prepares its own COMMIT, which is why this looks at what is prepared,
+  // not how many.)
+  it('runs the lookups unprepared: executing them leaves no named prepared statement of theirs behind', async () => {
+    const prepared = async () => (await conn.unsafe('SELECT statement FROM pg_prepared_statements')).map((r) => String(r.statement))
+    const before = await prepared()
     for (let i = 0; i < 8; i++) { await suggestRows(db, 'zq'); await exactMatchQuery(db, 'zq', 10) }
-    expect(await count()).toBe(before)
+    const added = (await prepared()).filter((q) => !before.includes(q))
+    expect(added.filter((q) => /tokens|statement_timeout/i.test(q))).toEqual([])
+    expect(added.filter((q) => q.trim().toLowerCase() !== 'commit')).toEqual([])
+  })
+
+  // withTimeout only stops WAITING; the query kept running on the server, holding a pooled connection. The wrapper
+  // has the database cancel it. Observed from a second session: nothing here calls cancel or closes a connection.
+  describe('withStatementTimeout: the server cancels a slow typeahead query', () => {
+    const SLEEP = sql`SELECT pg_sleep(30)`
+    const backends = async (where: string) => Number((await observer.unsafe(
+      `SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND ${where}`,
+    ))[0].n)
+    const sleeping = () => backends(`state = 'active' AND query LIKE '%pg_sleep(30)%'`)
+    const stuckOpen = () => backends(`state LIKE 'idle in transaction%'`)
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+    it('rejects with 57014 at the timeout, and the backend is gone', async () => {
+      const t0 = Date.now()
+      const run = withStatementTimeout(db, SUGGEST_TIMEOUT_MS, (tx) => tx.execute(SLEEP)).then(() => null, (e: unknown) => e)
+      await pause(300)
+      expect(await sleeping()).toBe(1) // it is running: this is not a query that returned early
+      const err = await run
+      expect((unwrapDbError(err) as { code?: string }).code).toBe('57014')
+      expect(Date.now() - t0).toBeLessThan(SUGGEST_TIMEOUT_MS + 200)
+      expect(await sleeping()).toBe(0)
+      expect(await stuckOpen()).toBe(0) // rolled back, not left idle in transaction
+    }, 15_000)
+
+    it('keeps cancelling after the caller has stopped waiting (the route abandons it at the same mark)', async () => {
+      const t0 = Date.now()
+      const run = withStatementTimeout(db, SUGGEST_TIMEOUT_MS, (tx) => tx.execute(SLEEP)).then(() => null, (e: unknown) => e)
+      await expect(withTimeout(run, 500)).rejects.toThrow('query timeout') // the route's wait is over at 0.5 s...
+      expect(await sleeping()).toBe(1) // ...and the query is still running, as before this fix: it is bounded now, not gone
+      await run
+      expect(Date.now() - t0).toBeLessThan(SUGGEST_TIMEOUT_MS + 200)
+      expect(await sleeping()).toBe(0) // ...until the server stops it
+      expect(await stuckOpen()).toBe(0)
+    }, 15_000)
+
+    it('leaves the connection usable, and the next query is not under the timeout', async () => {
+      expect((await suggestRows(db, 'zq')).map((r) => r.symbol)).toEqual(['ZQ'])
+      const [{ t }] = await conn.unsafe(`SHOW statement_timeout`)
+      expect(t ?? (await conn.unsafe(`SHOW statement_timeout`))[0].statement_timeout).not.toBe(`${SUGGEST_TIMEOUT_MS}ms`)
+    })
   })
 
   describe('suggestQuery', () => {
