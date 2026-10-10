@@ -176,6 +176,14 @@ jobs:
           WHALES_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/explorer/lib/whales.pg.test.ts
 
+      # /gas' tiers: percentile_disc over the transactions of the newest 20 blocks. Asserts the values
+      # (window, zero-price and negative-tip rules) and that the plan is the 20-row primary-key walk plus
+      # tx_block_idx, not a table scan. Its tables are TEMP, so it shares worker_test.
+      - name: PG-gated explorer suite (/gas percentile tiers)
+        env:
+          GAS_TIERS_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/explorer/lib/gas-percentiles.pg.test.ts
+
       # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
       # on the server to reproduce a full noeviction instance, so it needs the
       # throwaway service and must never be pointed at a shared Redis.
