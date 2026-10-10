@@ -51,8 +51,8 @@ importers:
         specifier: ^7.3.6
         version: 7.3.6(@types/node@24.19.0)(ioredis@5.9.3)(jiti@1.21.7)(tsx@4.23.15)(yaml@2.9.1)
       drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.3
+        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       jose:
         specifier: ^5.9.0
         version: 5.10.0
@@ -128,8 +128,8 @@ importers:
         specifier: ^1.20.0
         version: 1.20.0
       drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.3
+        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       ethers:
         specifier: ^6.17.0
         version: 6.17.0
@@ -195,8 +195,8 @@ importers:
         specifier: ^16.4.0
         version: 16.6.1
       drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.3
+        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       ethers:
         specifier: ^6.17.0
         version: 6.17.0
@@ -239,15 +239,15 @@ importers:
   packages/db:
     dependencies:
       drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.3
+        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       postgres:
         specifier: ^3.4.0
         version: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
     devDependencies:
       drizzle-kit:
-        specifier: ^0.31.10
-        version: 0.31.10
+        specifier: ^0.31.11
+        version: 0.31.11
 
   packages/explorer-core:
     dependencies:
@@ -2713,12 +2713,12 @@ packages:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
 
-  drizzle-kit@0.31.10:
-    resolution: {integrity: sha512-7OZcmQUrdGI+DUNNsKBn1aW8qSoKuTH7d0mYgSP8bAzdFzKoovxEFnoGQp2dVs82EOJeYycqRtciopszwUf8bw==}
+  drizzle-kit@0.31.11:
+    resolution: {integrity: sha512-YCYqxTLIB2OCqf6w9/Vef13baBVbwQIPcbT4Y56AfO6B9ajZhDhD8Jkveg/hJvT/iuMloKD/IYYkyMMNhr7Kqg==}
     hasBin: true
 
-  drizzle-orm@0.45.2:
-    resolution: {integrity: sha512-kY0BSaTNYWnoDMVoyY8uxmyHjpJW1geOmBMdSSicKo9CIIWkSxMIj2rkeSR51b8KAPB7m+qysjuHme5nKP+E5Q==}
+  drizzle-orm@0.45.3:
+    resolution: {integrity: sha512-CAloER21cDdcgZ1OmjrZX82EeRNsdP+y0onX/eyoYDaYzki/adrAa91lzM5jWh7zZPK4qUbw/6LGv9J+A+uizA==}
     peerDependencies:
       '@aws-sdk/client-rds-data': '>=3'
       '@cloudflare/workers-types': '>=4'
@@ -2726,6 +2726,7 @@ packages:
       '@libsql/client': '>=0.10.0'
       '@libsql/client-wasm': '>=0.10.0'
       '@neondatabase/serverless': '>=0.10.0'
+      '@netlify/db': '>=0.4.0'
       '@op-engineering/op-sqlite': '>=2'
       '@opentelemetry/api': ^1.4.1
       '@planetscale/database': '>=1.13'
@@ -2761,6 +2762,8 @@ packages:
       '@libsql/client-wasm':
         optional: true
       '@neondatabase/serverless':
+        optional: true
+      '@netlify/db':
         optional: true
       '@op-engineering/op-sqlite':
         optional: true
@@ -6626,14 +6629,14 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  drizzle-kit@0.31.10:
+  drizzle-kit@0.31.11:
     dependencies:
       '@drizzle-team/brocli': 0.10.2
       '@esbuild-kit/esm-loader': 2.6.5
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.2(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)):
+  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261006.1
       postgres: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
