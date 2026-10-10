@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Interface } from 'ethers'
 import { BSC } from '@altscan/chain-config'
 import { trackedTokens } from './holdings'
 import { MULTICALL3, readTrackedBalances } from './tracked-balances'
+import { resetSwallowThrottle } from './observability'
 
 const iface = new Interface([
   'function aggregate3((address target, bool allowFailure, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[] returnData)',
@@ -38,5 +39,37 @@ describe('readTrackedBalances', () => {
 
   it('is null when the answer is not a multicall answer', async () => {
     expect(await readTrackedBalances({ call: async () => '0x' }, HOLDER, tokens)).toBeNull()
+  })
+})
+
+// A failed read is "unknown" to the page, so the only record that the RPC is failing is the log. It used to be
+// a bare `catch { return null }`: every failure rendered the plain lead sentence and left nothing to grep.
+describe('readTrackedBalances logs what it swallows', () => {
+  let err: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { resetSwallowThrottle(); err = vi.spyOn(console, 'error').mockImplementation(() => {}) })
+  afterEach(() => err.mockRestore())
+  const tags = () => err.mock.calls.map((c: unknown[]) => c[0])
+
+  it('logs under [addr/tracked-balances] when the call fails', async () => {
+    const provider = { call: async () => { throw new Error('rpc down') } }
+    expect(await readTrackedBalances(provider, HOLDER, tokens)).toBeNull()
+    expect(tags()).toEqual(['[addr/tracked-balances]'])
+    expect(String(err.mock.calls[0][1])).toContain('rpc down')
+  })
+
+  it('logs when the answer cannot be decoded', async () => {
+    expect(await readTrackedBalances({ call: async () => '0x' }, HOLDER, tokens)).toBeNull()
+    expect(tags()).toEqual(['[addr/tracked-balances]'])
+  })
+
+  it('logs when the answer has the wrong number of results', async () => {
+    expect(await readTrackedBalances({ call: async () => reply([1n, 2n]) }, HOLDER, tokens)).toBeNull()
+    expect(tags()).toEqual(['[addr/tracked-balances]'])
+    expect(String(err.mock.calls[0][1])).toMatch(/2 results for 3 tokens/)
+  })
+
+  it('logs nothing when the read works', async () => {
+    expect(await readTrackedBalances({ call: async () => reply([1n, 2n, 3n]) }, HOLDER, tokens)).not.toBeNull()
+    expect(err).not.toHaveBeenCalled()
   })
 })

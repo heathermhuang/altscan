@@ -9,10 +9,12 @@
  * priced from it would be a confident wrong number. The chain is exact, free (the web RPC, no
  * Moralis), and one more request on a page that already makes three.
  *
- * `null` means "could not read", never "holds nothing": callers label that, they do not print a zero.
+ * `null` means "could not read", never "holds nothing": callers label that, they do not print a zero. Every
+ * failure is logged under `[addr/tracked-balances]` (throttled): the page degrades quietly, the log must not.
  */
 import { Interface } from 'ethers'
 import type { TrackedToken } from './holdings'
+import { swallow } from './observability'
 
 /** Multicall3 is deployed at this address on every chain this explorer serves (checked BSC + Ethereum). */
 export const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11'
@@ -36,13 +38,17 @@ export async function readTrackedBalances(
     const balanceOf = iface.encodeFunctionData('balanceOf', [holder])
     const data = iface.encodeFunctionData('aggregate3', [tokens.map((t) => [t.address, false, balanceOf])])
     const answer = iface.decodeFunctionResult('aggregate3', await provider.call({ to: MULTICALL3, data }))[0] as [boolean, string][]
-    if (answer.length !== tokens.length) return null
+    if (answer.length !== tokens.length) {
+      swallow('addr/tracked-balances', new Error(`multicall returned ${answer.length} results for ${tokens.length} tokens`))
+      return null
+    }
     const out: Record<string, string> = {}
     tokens.forEach((t, i) => {
       out[t.address] = String(iface.decodeFunctionResult('balanceOf', answer[i][1])[0])
     })
     return out
-  } catch {
+  } catch (e) {
+    swallow('addr/tracked-balances', e)
     return null
   }
 }
