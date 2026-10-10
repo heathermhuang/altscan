@@ -112,7 +112,7 @@ export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
   // The raw balance and decimals are exact, so they come first. The provider's formatted string is for when
   // they are unusable, and goes through the same floor; it is never read through a float (that prints
   // dust as "0" and loses digits past 2^53).
-  const rawUsable = /^\d+$/.test(t.balance) && Number.isInteger(t.decimals) && t.decimals >= 0
+  const rawUsable = /^\d+$/.test(t.balance) && Number.isInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 255
   return {
     tokenAddress: t.tokenAddress.toLowerCase(),
     name: t.name,

@@ -164,6 +164,11 @@ describe('holdingFromProvider / holdingFromIndex', () => {
       expect(amount('', 18, '0.000000000000000001')).toBe('<0.000001')
       expect(amount('1000000', Number.NaN, '1')).toBe('1')
     })
+
+    it('treats decimals above 255 (an ERC-20 uint8) as unusable, so a spam token cannot make the tab compute 10n ** 1e8', () => {
+      expect(amount('1', 100_000_000, '0.5')).toBe('0.5')
+      expect(amount('1', 255, null)).toBe('<0.000001')
+    })
   })
 
   it('an index row has no price', () => {
