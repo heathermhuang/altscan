@@ -22,7 +22,7 @@ const cells = (r: string) => [...r.matchAll(/<td\b([^>]*)>(.*?)<\/td>/gs)].map(m
 describe('TxnsTable cell contract', () => {
   it('is a dt-ad table whose headers go visually hidden on a phone', () => {
     const h = html()
-    expect(h).toMatch(/<table class="dt dt-a dt-ad">/)
+    expect(h).toMatch(/<table class="dt dt-a dt-ad leading-5">/)
     expect(h).toMatch(/<thead class="max-sm:sr-only">/)
     expect(h).toContain('<caption class="sr-only">BNB Chain transactions</caption>')
   })

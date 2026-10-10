@@ -34,7 +34,9 @@ export function TxnsTable({ caption, rows, currency, detailHeading, detailClass,
   unitInHeading?: boolean
 }) {
   return (
-    <table className="dt dt-a dt-ad">
+    // leading-5: the 20px line height these tables always had (from `text-sm`), which `.dt` alone would
+    // drop to the page's, shrinking every desktop row by about a pixel.
+    <table className="dt dt-a dt-ad leading-5">
       <caption className="sr-only">{caption}</caption>
       <thead className="max-sm:sr-only">
         <tr>
