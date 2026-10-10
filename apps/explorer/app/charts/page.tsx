@@ -8,7 +8,7 @@ import { BlockTape } from '@/components/home/BlockTape'
 import { swallow } from '@/lib/observability'
 import { fetchRecentTape } from '@/lib/recent-tape'
 import { withTimeout } from '@/lib/with-timeout'
-import { completeUtcDays } from '@/lib/chart-days'
+import { completeUtcDays, dateLabelIndices, toDayPoint, type DataPoint } from '@/lib/chart-days'
 
 export const revalidate = 300
 
@@ -20,18 +20,6 @@ export const metadata: Metadata = {
 
 /** Days of data a chart needs before it is worth drawing. */
 const MIN_DAYS = 3
-
-/** `firstTs`: epoch ms of the day's earliest block, so a day that starts mid-day can be told from a whole one. */
-type DataPoint = { date: string; value: number; firstTs: number }
-
-function toPoint(row: unknown): DataPoint {
-  const r = row as Record<string, unknown>
-  return {
-    date: String(r.date).slice(0, 10),
-    value: Number(r.value),
-    firstTs: Math.round(Number(r.first_ts) * 1000),
-  }
-}
 
 async function fetchDailyTxCount(): Promise<DataPoint[]> {
   try {
@@ -47,7 +35,7 @@ async function fetchDailyTxCount(): Promise<DataPoint[]> {
       GROUP BY 1
       ORDER BY 1
     `))
-    return Array.from(result).map(toPoint)
+    return Array.from(result).map(toDayPoint)
   } catch (e) {
     swallow('charts/query', e)
     return []
@@ -69,7 +57,7 @@ async function fetchDailyGasHistory(): Promise<DataPoint[]> {
       GROUP BY 1
       ORDER BY 1
     `))
-    const data = Array.from(result).map(toPoint)
+    const data = Array.from(result).map(toDayPoint)
     if (data.length >= 3) return data
   } catch (e) { swallow('charts/fallback', e) }  // fall through
 
@@ -90,7 +78,7 @@ async function fetchDailyBlockCount(): Promise<DataPoint[]> {
       GROUP BY 1
       ORDER BY 1
     `))
-    return Array.from(result).map(toPoint)
+    return Array.from(result).map(toDayPoint)
   } catch (e) {
     swallow('charts/series', e)
     return []
@@ -236,9 +224,8 @@ function LineChart({
 
   // Top to bottom, max first: five rules and the five labels beside them.
   const ticks = [1, 0.75, 0.5, 0.25, 0]
-  // Five date labels, evenly spaced, first and last included, so they never touch.
-  const labelCount = Math.min(data.length, 5)
-  const dateIdx = Array.from({ length: labelCount }, (_, k) => Math.round((k * last) / (labelCount - 1)))
+  // Up to five date labels, a whole step apart (first and last included), so they do not overlap.
+  const dateIdx = dateLabelIndices(data.length)
 
   return (
     <div role="img" aria-label={label} className="flex gap-2 text-[11px] leading-[14px] text-mut">
