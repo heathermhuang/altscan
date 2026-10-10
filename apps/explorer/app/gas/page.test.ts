@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { GasTiers } from '@/lib/gas-tiers'
 
@@ -14,13 +14,17 @@ vi.mock('@/lib/rpc', () => ({
 }))
 vi.mock('@/components/ads/AdReserve', () => ({ AdReserve: () => null }))   // async in production; an empty box here
 
-import GasPage from './page'
-
-const html = async () => renderToStaticMarkup(await GasPage())
+// The page reads its chain from the environment when '@/lib/chain' loads, so each render imports it fresh.
+const html = async () => {
+  vi.resetModules()
+  const { default: GasPage } = await import('./page')
+  return renderToStaticMarkup(await GasPage())
+}
 const text = async () => (await html()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 const BNB: GasTiers = { slow: '50000000', standard: '55000000', fast: '84158933', baseFee: null }
 
 beforeEach(() => { h.tiers.mockReset() })
+afterEach(() => vi.unstubAllEnvs())
 
 describe('/gas tiers', () => {
   it('shows the percentile gas prices, labelled "from the last 20 blocks"', async () => {
@@ -56,5 +60,28 @@ describe('/gas tiers', () => {
   it('the headline card is still the node\'s reading', async () => {
     h.tiers.mockResolvedValue(BNB)
     expect(await text()).toMatch(/Current Gas Price 0\.05 Gwei/)
+  })
+})
+
+describe('/gas tiers on Ethereum', () => {
+  const ETH: GasTiers = { slow: '1000000000', standard: '2000000000', fast: '5000000000', baseFee: '10000000000' }
+
+  it('shows base fee + tip per tier, and says the tip is the percentile', async () => {
+    vi.stubEnv('CHAIN', 'eth')
+    h.tiers.mockResolvedValue(ETH)
+    const t = await text()
+    expect(t).toMatch(/Slow 11 Gwei · base 10 \+ tip 1/)
+    expect(t).toMatch(/Standard 12 Gwei · base 10 \+ tip 2/)
+    expect(t).toMatch(/Fast 15 Gwei · base 10 \+ tip 5/)
+    expect(t).toMatch(/base fee plus the priority fee \(tip\) paid by transactions from the last 20 blocks/)
+    expect(t).not.toMatch(/10%|30%/)
+  })
+
+  it('with no data it is "—" and still says what the tiers would be', async () => {
+    vi.stubEnv('CHAIN', 'eth')
+    h.tiers.mockResolvedValue(null)
+    const t = await text()
+    expect(t).toMatch(/Slow — Gwei · 25th percentile/)
+    expect(t).toMatch(/Not available right now\. The newest block(?:'|&#x27;)s base fee plus the priority fee/)
   })
 })
