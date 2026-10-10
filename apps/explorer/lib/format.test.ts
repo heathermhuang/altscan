@@ -19,6 +19,7 @@ import {
   sanitizeSymbolOr,
   tokenTextOr,
   tokenLabel,
+  tokenText,
   UNKNOWN_TOKEN,
   formatHolders,
   formatEstimate,
@@ -28,6 +29,7 @@ import {
   formatShare,
 } from './format'
 import { shortenAddress } from './address-display'
+import { looksLikeUrlOrHandle as looksLikeRaw } from './link-in-name'
 
 describe('formatNativeToken', () => {
   it('shows exact zero as "0", including for null/undefined wei', () => {
@@ -253,6 +255,59 @@ describe('tokenTextOr / tokenLabel', () => {
     const label = tokenLabel('躺赢', '躺赢人生', ADDR)
     expect(label).toBe(shortenAddress(ADDR))
     expect(label.toLowerCase()).toBe('0x0291bc…dff8e')
+  })
+})
+
+// One question for every place a token's symbol or name is printed: does it read as a URL or a handle
+// (lib/link-in-name)? It is asked once, here, so the sites cannot drift apart.
+describe('tokenText', () => {
+  const ADDR = '0x0291bcbffc61d96f288e635d6ce3a31be03dff8e'
+  const SHORT = shortenAddress(ADDR)
+
+  it('hands an ordinary token back as the sanitised symbol and the name-cell label, unflagged', () => {
+    expect(tokenText('USDT', 'Tether USD', ADDR)).toEqual({ symbol: 'USDT', name: 'USDT', linkLike: false })
+    expect(tokenText('USDT.z', 'Tether USD Bridged', ADDR).linkLike).toBe(false)
+  })
+
+  it('names a token whose SYMBOL is a URL or handle by its short address in an inline amount, and keeps the text for a name cell', () => {
+    const t = tokenText('claim-bnb.xyz', 'Claim', ADDR)
+    expect(t.symbol).toBe(SHORT)
+    expect(t.name).toBe('claim-bnb.xyz')
+    expect(t.linkLike).toBe(true)
+    expect(tokenText('@airdrop_bot', null, ADDR).symbol).toBe(SHORT)
+  })
+
+  it('flags a URL in the NAME for the badge, but the inline unit is still the symbol (it is the only text an amount prints)', () => {
+    const t = tokenText('CLAIM', 'Visit claim-bnb.xyz to claim', ADDR)
+    expect(t).toEqual({ symbol: 'CLAIM', name: 'CLAIM', linkLike: true })
+  })
+
+  it('keeps a link-like name that is itself the label (no symbol to show)', () => {
+    const t = tokenText('???', 'Visit claim-bnb.xyz', ADDR)
+    expect(t).toEqual({ symbol: '', name: 'Visit claim-bnb.xyz', linkLike: true })
+  })
+
+  it('judges what the page would print as well as the raw text: a Cyrillic letter in ".com" sanitises into a URL', () => {
+    const disguised = 'ex\u0430mple.\u0441om'
+    expect(looksLikeRaw(disguised)).toBe(false)
+    const t = tokenText(disguised, null, ADDR)
+    expect(t.linkLike).toBe(true)
+    expect(t.symbol).toBe(SHORT)
+  })
+
+  it('judges the raw text too: fullwidth and invisible characters sanitise away, the URL is still an advert', () => {
+    const t = tokenText('ｗｗｗ．scam．ｃｏｍ', 'Scam', ADDR)
+    expect(t.linkLike).toBe(true)
+    expect(t.symbol).toBe(SHORT)
+  })
+
+  it('reads the indexer placeholders as nothing to flag and nothing to print', () => {
+    expect(tokenText('???', 'Unknown', ADDR)).toEqual({ symbol: '', name: UNKNOWN_TOKEN, linkLike: false })
+    expect(tokenText(null, undefined, ADDR)).toEqual({ symbol: '', name: UNKNOWN_TOKEN, linkLike: false })
+  })
+
+  it('a real symbol that sanitises away is not unknown and not a link: no unit, the short address as the label', () => {
+    expect(tokenText('躺赢', '躺赢人生', ADDR)).toEqual({ symbol: '', name: SHORT, linkLike: false })
   })
 })
 

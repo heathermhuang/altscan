@@ -4,7 +4,7 @@ import { db, schema } from '@/lib/db'
 import { or, ilike, desc } from 'drizzle-orm'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
-import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_EXACT_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
 import { normaliseSearchQuery } from '@/lib/search-route'
@@ -125,7 +125,7 @@ export default async function SearchPage({
                     )
                     // Same badge as the /token list, on flagged rows only: an unflagged row's cell is the bare link.
                     const lookalike = lookalikeOf(token, chainConfig.key)
-                    const inName = looksLikeUrlOrHandle(token.name) || looksLikeUrlOrHandle(token.symbol)
+                    const inName = anyLinkLike(token.name, token.symbol)
                     return (
                       <tr key={token.address}>
                         <td>

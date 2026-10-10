@@ -1,5 +1,6 @@
 import { formatUnits } from 'ethers'
 import { shortenAddress } from './address-display'
+import { anyLinkLike } from './link-in-name'
 
 /** Safely convert a numeric string (possibly with decimals) to BigInt */
 export function safeBigInt(value: string | number | bigint | null | undefined): bigint {
@@ -247,6 +248,30 @@ export function tokenLabel(symbol: string | null | undefined, name: string | nul
   const printable = sanitizeSymbolOr(symbol, '') || sanitizeSymbolOr(name, '')
   if (printable) return printable
   return tokenTextOr(symbol, '') || tokenTextOr(name, '') ? shortenAddress(address) : UNKNOWN_TOKEN
+}
+
+/**
+ * Every text a page prints for a token, decided once. A symbol or name is typed by whoever deployed the contract,
+ * and one that reads as a URL or handle is an advert (lib/link-in-name), so:
+ *  - `symbol` is the inline unit ("1,000 SYM"): the sanitised symbol ('' when it has none, so the amount prints bare),
+ *    or the token's short address when the symbol reads as a URL or handle. An amount never repeats the advert.
+ *  - `name` is a name cell's text (`tokenLabel`). It is never replaced: a table keeps the text and badges it.
+ *  - `linkLike` is true when the symbol or the name (raw, or as sanitised: a Cyrillic "с" in ".сom" reads as
+ *    ".com" once mapped) reads as a URL or handle. It drives the badge, and metadata uses the short address.
+ * Nothing here, or at any caller, ever makes the text a link.
+ */
+export function tokenText(
+  symbol: string | null | undefined,
+  name: string | null | undefined,
+  address: string,
+): { symbol: string; name: string; linkLike: boolean } {
+  const printable = sanitizeSymbolOr(symbol, '')
+  const label = tokenLabel(symbol, name, address)
+  return {
+    symbol: anyLinkLike(symbol, printable) ? shortenAddress(address) : printable,
+    name: label,
+    linkLike: anyLinkLike(symbol, printable, name, label),
+  }
 }
 
 /**

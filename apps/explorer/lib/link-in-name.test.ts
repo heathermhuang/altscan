@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LINK_IN_NAME_NOTE, looksLikeUrlOrHandle } from './link-in-name'
+import { LINK_IN_NAME_NOTE, anyLinkLike, looksLikeUrlOrHandle } from './link-in-name'
 
 // A token's symbol and name are whatever its deployer typed. Airdrop spam puts a URL or a handle there
 // ("Visit claim-bnb.xyz to claim"), hoping the explorer's page becomes the advert. This decides which
@@ -61,5 +61,21 @@ describe('looksLikeUrlOrHandle', () => {
 describe('LINK_IN_NAME_NOTE', () => {
   it('says what the badge means, without repeating the text it flags', () => {
     expect(LINK_IN_NAME_NOTE).toMatch(/web address|handle/i)
+  })
+})
+
+// A token is judged on every text a page shows for it (its symbol, its name, the label a sanitised symbol leaves): the
+// "this one or that one" question was asked in six files, each with its own copy of the pair.
+describe('anyLinkLike', () => {
+  it('is true when any one of the texts reads as a URL or a handle', () => {
+    expect(anyLinkLike('CLAIM', 'Visit claim-bnb.xyz')).toBe(true)
+    expect(anyLinkLike('claim-bnb.xyz', 'Claim')).toBe(true)
+    expect(anyLinkLike('USDT', null, '@airdrop_bot')).toBe(true)
+  })
+
+  it('is false for tickers, names, and nothing', () => {
+    expect(anyLinkLike('USDT.z', 'Tether USD Bridged')).toBe(false)
+    expect(anyLinkLike(null, undefined, '')).toBe(false)
+    expect(anyLinkLike()).toBe(false)
   })
 })

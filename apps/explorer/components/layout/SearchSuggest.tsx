@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { holdersChip } from '@/lib/holder-labels'
-import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import {
   hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
@@ -149,7 +149,7 @@ export function TokenOption({ token }: { token: TokenSuggestion }) {
         {token.lookalikeOf && (
           <span className="badge badge-bad">lookalike<span className="sr-only"> of {token.lookalikeOf}</span></span>
         )}
-        {(looksLikeUrlOrHandle(token.symbol) || looksLikeUrlOrHandle(token.name)) && <LinkInName />}
+        {(anyLinkLike(token.symbol, token.name)) && <LinkInName />}
         <span className="ml-auto text-mut" title={holders.title}>{holders.text}</span>
       </span>
       <span className="block truncate text-mut">{token.name}</span>
