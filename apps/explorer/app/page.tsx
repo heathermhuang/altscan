@@ -1,7 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import Link from 'next/link'
-import { formatCompactUsd, formatNumber, timeAgo } from '@/lib/format'
+import { formatCompactUsd, formatNumber, formatPercent, timeAgo } from '@/lib/format'
 import { BlockTable } from '@/components/blocks/BlockTable'
 import { TxTable } from '@/components/transactions/TxTable'
 import { BlockTape } from '@/components/home/BlockTape'
@@ -10,6 +10,7 @@ import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { swallow, swallowed } from '@/lib/observability'
+import { fetchNativeQuote, type NativeQuote } from '@/lib/native-price'
 import { encodeTape, gasPct, TAPE_LATEST, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
@@ -49,75 +50,6 @@ const jsonLd = {
       ],
     },
   ],
-}
-
-async function fetchNativePrice(): Promise<{ usd: number; change24h: number } | null> {
-  const binanceSymbol = chainConfig.market.binanceSymbol
-  const ccSymbol = chainConfig.market.cryptoCompareSymbol
-
-  // Try multiple Binance endpoints (binance.us for US-based servers like Render)
-  for (const host of ['https://api.binance.us', 'https://api.binance.com']) {
-    try {
-      const res = await fetch(
-        `${host}/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
-        { next: { revalidate: 60 }, signal: AbortSignal.timeout(3000) }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const price = parseFloat(data.lastPrice)
-        const change = parseFloat(data.priceChangePercent)
-        if (price > 0) return { usd: price, change24h: change || 0 }
-      }
-    } catch { /* try next */ }
-  }
-
-  // Fallback: CryptoCompare (no API key needed, works from US)
-  try {
-    const res = await fetch(
-      `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${ccSymbol}&tsyms=USD`,
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const raw = data?.RAW?.[ccSymbol]?.USD
-      if (raw?.PRICE > 0) return { usd: raw.PRICE, change24h: raw.CHANGEPCT24HOUR ?? 0 }
-    }
-  } catch { /* try next */ }
-
-  // Fallback: CoinGecko
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${chainConfig.coingeckoId}&vs_currencies=usd&include_24hr_change=true`,
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const coin = data[chainConfig.coingeckoId]
-      if (coin?.usd) {
-        return {
-          usd: coin.usd,
-          change24h: coin.usd_24h_change ?? 0,
-        }
-      }
-    }
-  } catch { /* try next */ }
-
-  // Fallback: CoinCap
-  const coincapId = chainConfig.market.coincapId
-  try {
-    const res = await fetch(
-      `https://api.coincap.io/v2/assets/${coincapId}`,
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const price = parseFloat(data?.data?.priceUsd)
-      const change = parseFloat(data?.data?.changePercent24Hr)
-      if (price > 0) return { usd: price, change24h: change || 0 }
-    }
-  } catch (e) { swallow('home/price-all-failed', e) }
-
-  return null
 }
 
 /** Count transactions indexed in the last 24 hours.
@@ -197,7 +129,7 @@ async function fetchMarketCapFresh(): Promise<{ value: number; change24h: number
 // market-cap API response (impliedSupply = reportedCap / price) so it auto-tracks BNB's
 // quarterly burns, and seeded from the chain-config constant until/if one succeeds. The
 // three free cap APIs above fail persistently from Render's datacenter IPs, but the
-// Binance PRICE (fetchNativePrice) is reliable — so deriving cap = price × supply makes
+// Binance PRICE (fetchNativeQuote) is reliable — so deriving cap = price × supply makes
 // the homepage's flagship stat as dependable as the price (it only blanks if Binance
 // itself is down, vs. the old "—" whenever the cap APIs hiccuped). Only a FRESH cap value
 // refines supply: a stale cap ÷ the current price would distort it. In-memory + per
@@ -207,16 +139,16 @@ let refinedSupply: number | null = null
 /** Market cap = reliable native price × circulating supply. `capRaw` is a best-effort
  *  fresh market-cap fetch, used ONLY to refine the supply estimate — never for the value. */
 function deriveMarketCap(
-  price: { usd: number; change24h: number } | null,
+  price: NativeQuote | null,
   capRaw: { value: number; change24h: number } | null,
-): { value: number; change24h: number } | null {
-  if (!price || price.usd <= 0) return null
+): { value: number; change24h: number | null } | null {
+  if (!price || price.price <= 0) return null
   if (capRaw && capRaw.value > 0) {
     // Refine supply from a fresh cap, but reject outliers so one bad/stale/wrong-unit
     // provider response can't poison the process-wide estimate (a stale Next Data Cache
     // replay or a value off by orders of magnitude). A real circulating supply sits near
     // the seed — it only drifts with slow burns — so accept only within [0.5×, 2×].
-    const implied = capRaw.value / price.usd
+    const implied = capRaw.value / price.price
     const seed = chainConfig.nativeCirculatingSupply
     if (Number.isFinite(implied) && implied >= seed * 0.5 && implied <= seed * 2) {
       refinedSupply = implied
@@ -225,7 +157,7 @@ function deriveMarketCap(
   const supply = refinedSupply ?? chainConfig.nativeCirculatingSupply
   if (!(supply > 0)) return null
   // Supply is ~constant over 24h, so the cap's 24h change tracks the price's.
-  return { value: price.usd * supply, change24h: price.change24h }
+  return { value: price.price * supply, change24h: price.change24h }
 }
 
 export default async function HomePage() {
@@ -240,7 +172,7 @@ export default async function HomePage() {
   const [blocksResult, txsResult, nativePrice, capRaw] = await Promise.all([
     dbTimeout(db.select().from(schema.blocks).orderBy(desc(schema.blocks.number)).limit(TAPE_LATEST).catch(swallowed('home/blocks', [])), []),
     dbTimeout(db.select().from(schema.transactions).orderBy(desc(schema.transactions.timestamp)).limit(7).catch(swallowed('home/txs', [])), []),
-    fetchNativePrice(),
+    fetchNativeQuote(60), // the page's own cache window (see `revalidate`), not the lib's five minutes
     fetchMarketCapFresh(), // best-effort, only to refine the circulating-supply estimate
   ])
 
@@ -261,12 +193,10 @@ export default async function HomePage() {
   const txCount24h = await dbTimeout(fetchTxCount24h(latestBlock), null)
 
   const priceDisplay = nativePrice
-    ? `$${nativePrice.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `$${nativePrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '—'
-  const changeDisplay = nativePrice
-    ? `${nativePrice.change24h >= 0 ? '+' : ''}${nativePrice.change24h.toFixed(2)}%`
-    : null
-  const changePositive = nativePrice ? nativePrice.change24h >= 0 : null
+  const changeDisplay = nativePrice?.change24h == null ? null : formatPercent(nativePrice.change24h)
+  const changePositive = nativePrice?.change24h == null ? null : nativePrice.change24h >= 0
 
   return (
     <>
@@ -318,8 +248,8 @@ export default async function HomePage() {
           <StatCard
             label={`${chainConfig.currency} Market Cap`}
             value={marketCap ? formatCompactUsd(marketCap.value) : '—'}
-            subtext={marketCap ? `${marketCap.change24h >= 0 ? '+' : ''}${marketCap.change24h.toFixed(2)}%` : null}
-            subtextPositive={marketCap ? marketCap.change24h >= 0 : null}
+            subtext={marketCap?.change24h == null ? null : formatPercent(marketCap.change24h)}
+            subtextPositive={marketCap?.change24h == null ? null : marketCap.change24h >= 0}
           />
           <StatCard
             label={`${chainConfig.currency} Price`}

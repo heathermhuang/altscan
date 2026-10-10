@@ -137,6 +137,40 @@ describe('holdingFromProvider / holdingFromIndex', () => {
     expect(holdingFromProvider({ ...prov, balanceFormatted: null, balance: '1500000000000000000' }).amount).toBe('1.5')
   })
 
+  describe('the amount when the provider also sends balanceFormatted (Moralis always does)', () => {
+    // The raw balance and decimals are exact; the formatted string is a float-shaped courtesy. Dust must floor either way.
+    const amount = (balance: string, decimals: number, balanceFormatted: string | null) =>
+      holdingFromProvider({ ...prov, balance, decimals, balanceFormatted }).amount
+
+    it('floors dust: 1 wei of an 18-decimal token reads "<0.000001", not "0"', () => {
+      expect(amount('1', 18, '0.000000000000000001')).toBe('<0.000001')
+      expect(amount('400000000000', 18, '0.0000004')).toBe('<0.000001')
+    })
+
+    it('reads an ordinary balance as before', () => {
+      expect(amount('1500000000000000000', 18, '1.5')).toBe('1.5')
+      expect(amount('1234567890100000000000', 18, '1234.5678901')).toBe('1,234.56789')
+      expect(amount('0', 18, '0')).toBe('0')
+    })
+
+    it('keeps a large balance exact: it is not round-tripped through a float', () => {
+      // 2^53 + 1 does not survive parseFloat (it reads ...992); the raw balance does.
+      expect(amount('9007199254740993', 0, '9007199254740993')).toBe('9,007,199,254,740,993')
+      expect(amount('123456789012345678901234567890', 18, '123456789012.34567890123456789')).toBe('123,456,789,012.345679')
+    })
+
+    it('falls back to the formatted amount, floored the same way, only when the raw balance or decimals are unusable', () => {
+      expect(amount('', 18, '2.5')).toBe('2.5')
+      expect(amount('', 18, '0.000000000000000001')).toBe('<0.000001')
+      expect(amount('1000000', Number.NaN, '1')).toBe('1')
+    })
+
+    it('treats decimals above 255 (an ERC-20 uint8) as unusable, so a spam token cannot make the tab compute 10n ** 1e8', () => {
+      expect(amount('1', 100_000_000, '0.5')).toBe('0.5')
+      expect(amount('1', 255, null)).toBe('<0.000001')
+    })
+  })
+
   it('an index row has no price', () => {
     const r = holdingFromIndex({ tokenAddress: '0xabc', balance: String(2n * E18), name: 'Foo', symbol: 'FOO', decimals: 18 })
     expect(r.usd).toBeNull()

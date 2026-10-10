@@ -472,14 +472,18 @@ describe('createPageCache puts a deadline on the inline recompute', () => {
 
   it('lets a slow recompute that beats the deadline return its fresh value', async () => {
     refresh.on = false
+    // The value changes between the warm read and the recompute: with one fixed answer for both, a
+    // reader handed the old entry would be indistinguishable from one handed the fresh recompute.
+    const state = { tip: 'v1' }
     const query = vi.fn(async (page: number) => {
       await new Promise(resolve => setTimeout(resolve, 5 * SECOND))
-      return { page, tip: 'v2' }
+      return { page, tip: state.tip }
     })
     const read = createPageCache('slow-ok', 60, query)
     const warm = read(1)
     await vi.advanceTimersByTimeAsync(5 * SECOND)
     await warm
+    state.tip = 'v2'
     vi.setSystemTime(T0 + 30 * 60 * SECOND)
 
     const reader = read(1)

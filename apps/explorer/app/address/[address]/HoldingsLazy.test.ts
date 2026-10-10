@@ -10,8 +10,8 @@ import { HoldingsLazy, HoldingsView } from './HoldingsLazy'
 const E18 = 10n ** 18n
 const USDT = BSC.whales.stablecoins[0].address
 const tracked = priceTracked(trackedTokens(BSC.whales), { [USDT]: String(600_000_000n * E18) }, 750)
-const prov = (symbol: string, usdValue: string | null, address: string, balance = String(3n * E18)) =>
-  ({ tokenAddress: address, symbol, name: symbol, logo: null, decimals: 18, balance, balanceFormatted: null, usdValue })
+const prov = (symbol: string, usdValue: string | null, address: string, balance = String(3n * E18), balanceFormatted: string | null = null) =>
+  ({ tokenAddress: address, symbol, name: symbol, logo: null, decimals: 18, balance, balanceFormatted, usdValue })
 const view = (data: Parameters<typeof HoldingsView>[0]['data'], t: Parameters<typeof HoldingsView>[0]['tracked'] = tracked) =>
   renderToStaticMarkup(createElement(HoldingsView, { data, tracked: t, nativePriced: true }))
 const cells = (html: string) =>
@@ -34,6 +34,14 @@ describe('HoldingsView', () => {
       ['CAKE', 'CAKE', '3', '$12.50'],
       ['MEME', 'MEME', '3', 'no price'],
     ])
+  })
+
+  it('reads a dust balance as a floor, never as "0", whether or not the provider sent balanceFormatted', () => {
+    // 1 wei of an 18-decimal token. Moralis always sends balanceFormatted, so that is the production shape.
+    for (const formatted of ['0.000000000000000001', null]) {
+      const dust = { tokens: [prov('DUST', null, '0x' + '3'.repeat(40), '1', formatted)] }
+      expect(cells(view(dust, [])).map((r) => r[2]), String(formatted)).toEqual(['&lt;0.000001']) // renderToStaticMarkup escapes the '<'
+    }
   })
 
   it('names the sources', () => {

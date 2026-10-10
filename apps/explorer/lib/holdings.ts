@@ -12,7 +12,7 @@
  *
  * Pure and light: the Holdings tab (client) imports it. Nothing here holds a BigInt past a call.
  */
-import { formatCompactUsd, formatTokenAmount } from './format'
+import { formatCompactUsd, formatDecimalAmount, formatTokenAmount } from './format'
 import type { ProviderTokenBalance } from './providers'
 
 export type TrackedToken = { address: string; symbol: string; decimals: number; kind: 'stablecoin' | 'wrapped' }
@@ -109,16 +109,17 @@ export function holdingFromIndex(r: {
 export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
   const usd = t.usdValue == null || t.usdValue === '' ? NaN : Number(t.usdValue)
   const priced = Number.isFinite(usd) && usd >= 0
-  const shown = parseFloat(t.balanceFormatted ?? '')
+  // The raw balance and decimals are exact, so they come first. The provider's formatted string is for when
+  // they are unusable, and goes through the same floor; it is never read through a float (that prints
+  // dust as "0" and loses digits past 2^53).
+  const rawUsable = /^\d+$/.test(t.balance) && Number.isInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 255
   return {
     tokenAddress: t.tokenAddress.toLowerCase(),
     name: t.name,
     symbol: t.symbol,
     decimals: t.decimals,
     balance: t.balance,
-    amount: Number.isNaN(shown)
-      ? formatTokenAmount(t.balance, t.decimals, 6)
-      : shown.toLocaleString('en-US', { maximumFractionDigits: 6 }),
+    amount: !rawUsable && t.balanceFormatted ? formatDecimalAmount(t.balanceFormatted) : formatTokenAmount(t.balance, t.decimals, 6),
     usd: priced ? usd : null,
     basis: priced ? 'provider' : null,
     tracked: false,
