@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { TokenTransferRow } from '@/lib/providers'
-import { timeAgo, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
+import { formatDecimalAmount, timeAgo, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 
@@ -118,7 +118,7 @@ export function TransfersLazy({ addr }: { addr: string }) {
                     </Link>
                   </td>
                   <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-                    {parseFloat(t.valueFormatted).toLocaleString('en-US', { maximumFractionDigits: 6 })} {t.tokenSymbol}
+                    {formatDecimalAmount(t.valueFormatted)} {t.tokenSymbol}
                   </td>
                 </tr>
               ))}

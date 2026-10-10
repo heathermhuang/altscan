@@ -12,6 +12,7 @@ import {
   tinyAmount,
   formatPercent,
   formatTokenAmount,
+  formatDecimalAmount,
   unitsToDecimal,
   formatUtc,
   sanitizeSymbolOr,
@@ -435,5 +436,26 @@ describe('unitsToDecimal', () => {
     expect(formatTokenAmount('1500000000000000000', 18)).toBe('1.5')
     expect(formatTokenAmount('4787630158322188632852549', 18, 6)).toBe('4,787,630.158322')
     expect(formatTokenAmount('1', 18, 6)).toBe('<0.000001')
+  })
+})
+
+// The transfers tab (a client component) used parseFloat(valueFormatted).toLocaleString(.., { maximumFractionDigits: 6 }),
+// which prints any amount under 0.0000005 as "0" -- the same as a zero-value transfer.
+describe('formatDecimalAmount', () => {
+  const inline = (v: string) => parseFloat(v).toLocaleString('en-US', { maximumFractionDigits: 6 })
+
+  it.each(['0.00009999', '0.00001', '0.000001', '0.0000004', '0.00000001', '1e-8'])('reads the dust amount %s as "<0.0001", not "0"', (v) => {
+    expect(formatDecimalAmount(v)).toBe('<0.0001')
+  })
+
+  it('keeps zero as "0", whatever its spelling', () => {
+    for (const v of ['0', '0.0', '0.000000000000000000']) expect(formatDecimalAmount(v)).toBe('0')
+  })
+
+  it('prints every amount from 0.0001 up exactly as the inline expression did', () => {
+    for (const v of ['0.0001', '0.000123456789', '0.5', '1', '1234.5', '999999.9999999', '1234567.1234567', '123456789012345680000']) {
+      expect(formatDecimalAmount(v), v).toBe(inline(v))
+    }
+    expect(formatDecimalAmount('1234567.1234567')).toBe('1,234,567.123457')
   })
 })

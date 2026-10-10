@@ -36,6 +36,12 @@ describe('HoldingsView', () => {
     ])
   })
 
+  it('reads a dust balance as a floor, never as "0"', () => {
+    // 1 wei of an 18-decimal token: the tab's amounts go through formatTokenAmount at 6 places.
+    const dust = { tokens: [prov('DUST', null, '0x' + '3'.repeat(40), '1')] }
+    expect(cells(view(dust, [])).map((r) => r[2])).toEqual(['&lt;0.000001']) // renderToStaticMarkup escapes the '<'
+  })
+
   it('names the sources', () => {
     const html = view(data)
     expect(html).toContain('read from the chain just now')

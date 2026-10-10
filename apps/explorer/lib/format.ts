@@ -299,6 +299,17 @@ export function formatTokenAmount(value: string | bigint, decimals: number, maxF
   return frac ? `${grouped}.${frac}` : grouped
 }
 
+/**
+ * An amount that arrives already scaled, as a decimal string (a provider's `valueFormatted`), for
+ * display: grouped, at most 6 fraction digits. A non-zero amount below 0.0001 reads "<0.0001" (the
+ * `tinyAmount` rule) instead of its digits, or a "0" that says nothing moved; zero stays "0".
+ */
+export function formatDecimalAmount(valueFormatted: string): string {
+  const n = parseFloat(valueFormatted)
+  if (n > 0 && n < 0.0001) return tinyAmount(4)
+  return n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+}
+
 /** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th … 21st. */
 export function ordinal(n: number): string {
   const t = n % 100
