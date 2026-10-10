@@ -6,6 +6,10 @@ import { HOLDER_LABELS, holdersPhrase, type HolderSource } from '@/lib/holder-la
 import type { HoldersResult } from '@/lib/holders'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { Icon } from '@/components/ui/Icon'
+import { TileStrip } from '@/components/tape/TileStrip'
+import { shortenAddress } from '@/lib/address-display'
+import { getAddressLabel } from '@/lib/known-addresses'
+import { bpText, holderShares, holderStripTiles, holdersLegend, holdersSummary } from '@/lib/holder-share'
 
 /**
  * Client-side holders enhancement. SSR renders the labeled local net-flow estimate (0 Moralis
@@ -69,6 +73,15 @@ const NOTES = {
   moralis: "Real on-chain balances, ranked highest first, as reported by Moralis. Results are cached and refresh periodically, so the very latest transfers may not show yet.",
 }
 
+/** A balance in whole tokens, as the table prints it; the raw digits' head if it cannot be read. */
+function wholeTokens(balance: string, decimals: number): string {
+  try {
+    return (BigInt(balance) / 10n ** BigInt(decimals)).toLocaleString()
+  } catch {
+    return balance.slice(0, 12)
+  }
+}
+
 export function HoldersLazy({
   address,
   symbol,
@@ -96,16 +109,22 @@ export function HoldersLazy({
   // Nothing to show yet (empty local estimate + Moralis not loaded / also empty).
   if (data.holders.length === 0) return null
 
-  const totalSupplyBig = (() => {
-    try {
-      return BigInt(totalSupply ?? '0')
-    } catch {
-      return 0n
-    }
-  })()
+  // The table's % column and the strip read the SAME shares (lib/holder-share.ts), so a tile and its row agree.
+  const shares = holderShares(data.holders.map((h) => h.balance), totalSupply)
+  const strip = shares
+    ? holderStripTiles(
+        data.holders.map((h) => ({
+          addr: h.addr,
+          name: getAddressLabel(h.addr) ?? shortenAddress(h.addr),
+          amount: wholeTokens(h.balance, decimals),
+        })),
+        shares,
+        symbol,
+      )
+    : null
 
   return (
-    <div className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
+    <div id="holders-rows" className="bg-card rounded-xl border border-hair mb-6 overflow-hidden">
       <div className="px-4 py-3 border-b border-hair flex items-center justify-between gap-2">
         <h2 className="font-semibold tracking-[-0.02em] text-ink">Top Holders</h2>
         {/* The Moralis total sits where the source label used to: the same single line as "Estimated from
@@ -116,6 +135,21 @@ export function HoldersLazy({
             : 'Estimated from recent transfers'}
         </span>
       </div>
+      {/* Remounted on the swap from the SSR estimate to the live holders (key), so its tiles are new nodes
+          rather than the same ones resized: the box is the same height in both states. */}
+      {shares && strip && (
+        <TileStrip
+          key={data.source}
+          bare
+          rowsId="holders-rows"
+          tiles={strip}
+          title={`Top ${data.holders.length} holders`}
+          stats={{ main: `${(shares.topBp / 100).toFixed(1)}% of supply`, side: data.source === 'moralis' ? 'real balances' : 'estimated' }}
+          label={`Top ${data.holders.length} holders of ${symbol}, width is share of supply`}
+          legend={holdersLegend(data.source)}
+          summary={holdersSummary(data.holders.length, shares, data.source)}
+        />
+      )}
       {/* The note slot renders in BOTH states with the same box, and both notes sit in one grid
           cell (the one not shown is `invisible`), so the slot is as tall as the longer note at
           every width: the estimate -> live swap changes the note, never the rows' position. */}
@@ -151,26 +185,8 @@ export function HoldersLazy({
         </thead>
         <tbody>
           {data.holders.map((holder, i) => {
-            const holderAmount = (() => {
-              try {
-                const divisor = 10n ** BigInt(decimals)
-                const whole = BigInt(holder.balance) / divisor
-                return whole.toLocaleString()
-              } catch {
-                return holder.balance.slice(0, 12)
-              }
-            })()
-            const pct = (() => {
-              try {
-                if (totalSupplyBig === 0n) return '—'
-                const bal = BigInt(holder.balance)
-                // Integer math, scaled by 10000 for 2 decimal places.
-                const scaled = (bal * 10000n) / totalSupplyBig
-                return `${(Number(scaled) / 100).toFixed(2)}%`
-              } catch {
-                return '—'
-              }
-            })()
+            const holderAmount = wholeTokens(holder.balance, decimals)
+            const pct = bpText(shares?.bp[i] ?? null)
             return (
               <tr key={holder.addr}>
                 <td className="text-mut">{i + 1}</td>

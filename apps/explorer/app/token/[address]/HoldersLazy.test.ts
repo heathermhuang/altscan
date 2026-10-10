@@ -56,3 +56,52 @@ describe('HoldersLazy header shape', () => {
     expect(local).toContain('<span class="text-[11px] text-mut">Estimated from recent transfers</span>')
   })
 })
+
+// The top-holders strip sits in the same card as the table, from the same holders and the same shares.
+describe('HoldersLazy strip', () => {
+  const draw = (initial: HoldersResult, totalSupply: string | null = '100000000') =>
+    renderToStaticMarkup(createElement(HoldersLazy, { address: '0xabc', symbol: 'USDT', decimals: 6, totalSupply, initial }))
+  const tiles = (html: string) => [...html.matchAll(/<li( class="r")? style="--w:(\d+);--f:(\d+)%">/g)].map(m => ({ rest: !!m[1], w: +m[2], f: +m[3] }))
+
+  it('draws one tile per holder (width = ppm of supply) and one for everyone else, in the card, in both states', () => {
+    for (const html of [local, live]) {
+      // 3 holders x 1,000,000 of a 100,000,000 supply: 1% each, the other 97% is "others"
+      expect(tiles(html)).toEqual([
+        { rest: false, w: 10_000, f: 100 }, { rest: false, w: 10_000, f: 100 }, { rest: false, w: 10_000, f: 100 },
+        { rest: true, w: 970_000, f: 0 },
+      ])
+      expect(html).toContain('id="holders-rows"')
+    }
+  })
+
+  it('names the measure and which kind of balance it is, per state', () => {
+    expect(local).toContain('width = share of supply · others = the rest · estimated from transfers')
+    expect(live).toContain('width = share of supply · others = the rest · real balances')
+  })
+
+  it('has the same box in both states: same primitives, same stats, one tab stop each (the swap must not move the table)', () => {
+    const shape = (html: string) => html.replace(/<p id="[^"]*" class="sr-only">[^<]*<\/p>/, '').match(/<div class="border-b border-hair">.*?<div class="tp-leg">/s)![0]
+      .replace(/aria-describedby="[^"]*"/, '').replace(/estimated|real balances/g, 'X')
+    expect(shape(local)).toBe(shape(live))
+    for (const html of [local, live]) expect(html.match(/tabindex="0"/g)).toHaveLength(1)
+  })
+
+  it('shows the table the very same share as the strip\'s text alternative states for the largest holder', () => {
+    expect(live).toContain('<td class="text-mut">1.00%</td>')
+    expect(live).toContain('the largest holds 1.00%.')
+  })
+
+  it('draws no strip when the supply is unknown: a share of nothing is not 0%', () => {
+    for (const s of [null, '0']) {
+      const html = draw({ holders: holders(3), holderCount: null, source: 'local' }, s)
+      expect(html).not.toContain('tp-row')
+      expect(html).toContain('—')
+    }
+  })
+
+  it('links each tile to its holder by the same href as the table row (that is how they pair)', () => {
+    const addr = '0x' + '1'.padStart(40, '0')
+    expect(live).toContain(`<a href="/address/${addr}" tabindex="0"`)
+    expect(live.match(new RegExp(`href="/address/${addr}"`, 'g'))!.length).toBeGreaterThanOrEqual(2)
+  })
+})
