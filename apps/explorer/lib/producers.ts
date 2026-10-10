@@ -8,7 +8,8 @@
  * says so, when no shown validator has a known voting power (the ValidatorSet fallback writes 0).
  */
 import { formatNumber, formatShare } from '@/lib/format'
-import { clipText, type StripTile } from '@/lib/tape'
+import { clipText } from '@/lib/clip-text'
+import type { StripTile } from '@/lib/tape'
 
 export interface ProducerInput {
   address: string

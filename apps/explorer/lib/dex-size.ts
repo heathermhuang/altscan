@@ -15,7 +15,8 @@ import type { WhaleConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain'
 import { shortHash } from '@/lib/address-display'
 import { formatCompactUsd, formatNumber } from '@/lib/format'
-import { clipText, type StripTile } from '@/lib/tape'
+import { clipText } from '@/lib/clip-text'
+import type { StripTile } from '@/lib/tape'
 
 export interface DexSwap {
   id: number

@@ -6,7 +6,8 @@
  * row cannot disagree. Widths use parts per million, because a 0.004% holder is 0 bp but still a tile.
  * This module is imported by a client component, so it takes no heavy imports (lib/format pulls ethers).
  */
-import { clipText, type StripTile } from '@/lib/tape'
+import { clipText } from '@/lib/clip-text'
+import type { StripTile } from '@/lib/tape'
 
 export interface HolderShares {
   /** Per holder: share of supply in basis points (1/100 of a percent), floored; null for an unreadable balance. */
