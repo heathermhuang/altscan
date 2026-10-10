@@ -175,11 +175,11 @@ export default async function DexPage({
                   </td>
                   <td>
                     {amtIn > 1e6 ? `${(amtIn / 1e6).toFixed(2)}M` : amtIn > 1000 ? `${(amtIn / 1000).toFixed(2)}K` : amtIn.toFixed(4)}
-                    {inSymbol && <span className="text-mut ml-1 text-xs">{inSymbol}</span>}
+                    {inSymbol && <span className="inline-block text-mut ml-1 text-xs">{inSymbol}</span>}
                   </td>
                   <td>
                     {amtOut > 1e6 ? `${(amtOut / 1e6).toFixed(2)}M` : amtOut > 1000 ? `${(amtOut / 1000).toFixed(2)}K` : amtOut.toFixed(4)}
-                    {outSymbol && <span className="text-mut ml-1 text-xs">{outSymbol}</span>}
+                    {outSymbol && <span className="inline-block text-mut ml-1 text-xs">{outSymbol}</span>}
                   </td>
                   <td className="hidden sm:table-cell">
                     <AddressLink address={t.maker} />
