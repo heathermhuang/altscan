@@ -10,7 +10,7 @@ export const GAS_TIER_BLOCKS = 20
 /** Fewest transactions across that window that three percentiles can honestly be read from (one tx would be three copies of one price). */
 export const GAS_TIER_MIN_TXS = 20
 
-/** What the tier query returns: the counts it was computed over, the newest block's base fee, and the three percentile values (wei, numeric text). */
+/** What the tier query returns: the counts it was computed over, the newest indexed block's base fee, and the three percentile values (wei, numeric text). */
 export type GasTierRow = {
   blocks: number
   txs: number
@@ -55,7 +55,7 @@ export function gasTiles(tiers: GasTiers | null): GasTile[] {
 export function gasTiersNote(tiers: GasTiers | null, eip1559: boolean, failed = false): string {
   const withBase = tiers ? tiers.baseFee !== null : eip1559
   const what = withBase
-    ? `The newest block's base fee plus the priority fee (tip) paid by transactions from the last ${GAS_TIER_BLOCKS} blocks: Slow is the 25th percentile tip, Standard the 50th, Fast the 75th.`
+    ? `The newest indexed block's base fee plus the priority fee (tip) paid by transactions from the last ${GAS_TIER_BLOCKS} blocks: Slow is the 25th percentile tip, Standard the 50th, Fast the 75th.`
     : `The gas price paid by transactions from the last ${GAS_TIER_BLOCKS} blocks: Slow is the 25th percentile, Standard the 50th, Fast the 75th. System transactions at a zero gas price are left out.`
   if (tiers) return what
   return `${failed ? 'Not available right now.' : 'Not enough recent transactions.'} ${what}`

@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 // POST /api/v1/verify takes an address and nothing else: it asks Sourcify whether the contract is verified
 // there (lib/verifier.ts triggerSourcifyVerification: "Just check if already verified"). The form must say
-// that, and a contract it has no record of is "Not verified on Sourcify", not an unauditable one.
+// that. The risk signal knows only the local `contracts` table, so it says what is recorded HERE and points at
+// Sourcify: a contract can be verified there and never have been checked through this explorer.
 
 const h = vi.hoisted(() => ({ contract: null as Record<string, unknown> | null }))
 vi.mock('@/lib/db', async () => {
@@ -57,10 +58,11 @@ describe('/verify: the rest of the wording says "check" too', () => {
 })
 
 describe('token risk: Source Verified', () => {
-  it('an unknown contract is "Not verified on Sourcify", not "cannot audit"', async () => {
+  it('a contract with no local record says so and points at Sourcify; it does not claim Sourcify has no match', async () => {
     h.contract = null
     const signal = (await analyzeTokenRisk('0x' + '1'.repeat(40))).find(s => s.label === 'Source Verified')
-    expect(signal).toMatchObject({ ok: false, description: 'Not verified on Sourcify', severity: 'danger' })
+    expect(signal).toMatchObject({ ok: false, description: 'No verified source recorded here — check Sourcify', severity: 'danger' })
+    expect(signal?.description).not.toMatch(/not verified on sourcify|cannot audit/i)
   })
 
   it('a verified contract keeps its signal', async () => {

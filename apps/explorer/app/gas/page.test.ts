@@ -82,7 +82,10 @@ describe('/gas tiers on Ethereum', () => {
     expect(t).toMatch(/Slow 11 Gwei · base 10 \+ tip 1/)
     expect(t).toMatch(/Standard 12 Gwei · base 10 \+ tip 2/)
     expect(t).toMatch(/Fast 15 Gwei · base 10 \+ tip 5/)
-    expect(t).toMatch(/base fee plus the priority fee \(tip\) paid by transactions from the last 20 blocks/)
+    expect(t).toMatch(/newest indexed block(?:'|&#x27;)s base fee plus the priority fee \(tip\) paid by transactions from the last 20 blocks/)
+    expect(t).not.toMatch(/current base fee/i)
+    // The structured answer (JSON-LD) describes the same basis: the indexed block's base fee, not the live one.
+    expect(t).toMatch(/the priority fee \(tip\), added to the newest indexed block(?:'|&#x27;|\\u0027)s base fee/)
     expect(t).not.toMatch(/10%|30%/)
   })
 
@@ -91,6 +94,6 @@ describe('/gas tiers on Ethereum', () => {
     h.tiers.mockResolvedValue(null)
     const t = await text()
     expect(t).toMatch(/Slow — Gwei · 25th percentile/)
-    expect(t).toMatch(/Not enough recent transactions\. The newest block(?:'|&#x27;)s base fee plus the priority fee/)
+    expect(t).toMatch(/Not enough recent transactions\. The newest indexed block(?:'|&#x27;)s base fee plus the priority fee/)
   })
 })
