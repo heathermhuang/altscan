@@ -4,7 +4,7 @@ import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
-import { timeAgo, safeBigInt, formatEstimate } from '@/lib/format'
+import { timeAgo, safeBigInt, formatEstimate, tokenTextOr, UNKNOWN_TOKEN } from '@/lib/format'
 import { formatUnits } from 'ethers'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
@@ -29,6 +29,9 @@ export const metadata: Metadata = {
 // cannot drift.
 export const revalidate = 300
 
+// What this page covers, said once so the intro and the FAQ JSON-LD cannot drift apart.
+const dexScope = `Swaps from ${chainConfig.dex.primary} and compatible AMM pairs, indexed from on-chain Swap events.`
+
 export default async function DexPage({
   searchParams,
 }: {
@@ -38,7 +41,6 @@ export default async function DexPage({
 
   let trades: typeof schema.dexTrades.$inferSelect[] = []
   let totalTrades = 0
-  let uniqueMakers = 0
   let topPairs: TopPair[] = []
   const tokenDecimalsMap = new Map<string, number>()
   const tokenSymbolMap = new Map<string, string>()
@@ -47,7 +49,6 @@ export default async function DexPage({
     const data = await fetchDexPage(page)
     trades = data.trades.map(parseDexTrade)
     totalTrades = data.totalTrades
-    uniqueMakers = data.uniqueMakers
     topPairs = data.topPairs
     for (const t of data.tokens) {
       tokenDecimalsMap.set(t.address, t.decimals)
@@ -55,6 +56,13 @@ export default async function DexPage({
     }
   } catch (err) {
     console.error('[dex] page query failed:', dbErrorMessage(err))
+  }
+
+  // The indexer stores '???' for a symbol it could not read: that is an unknown token, not a ticker.
+  // A token with no metadata row at all keeps its bare amount.
+  const symbolText = (address: string | null) => {
+    const symbol = tokenSymbolMap.get(address?.toLowerCase() ?? '')
+    return symbol === undefined ? '' : tokenTextOr(symbol, UNKNOWN_TOKEN)
   }
 
   return (
@@ -67,7 +75,7 @@ export default async function DexPage({
           '@type': 'FAQPage',
           mainEntity: [
             { '@type': 'Question', name: `What are DEX trades on ${chainConfig.name}?`, acceptedAnswer: { '@type': 'Answer', text: `DEX (Decentralized Exchange) trades are token swaps executed directly on ${chainConfig.name} through automated market maker (AMM) protocols like ${chainConfig.dex.primary}. Unlike centralized exchanges, DEX trades happen on-chain — every swap is a blockchain transaction that anyone can verify.` } },
-            { '@type': 'Question', name: `Which DEXes does ${chainConfig.brandDomain} track?`, acceptedAnswer: { '@type': 'Answer', text: `${chainConfig.brandDomain} indexes swap events from all major ${chainConfig.name} DEXes including ${chainConfig.dex.others}. Trades are detected by monitoring Swap event logs emitted by pair contracts.` } },
+            { '@type': 'Question', name: `Which DEXes does ${chainConfig.brandDomain} track?`, acceptedAnswer: { '@type': 'Answer', text: `${dexScope} Trades are detected by monitoring Swap event logs emitted by pair contracts.` } },
           ],
         }) }}
       />
@@ -75,15 +83,14 @@ export default async function DexPage({
         <p className="k">{'// '}dex</p>
         <h1 className="mt-2 text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">DEX Trades</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink2">
-          Live decentralized exchange activity on {chainConfig.name}. Every swap from {chainConfig.dex.primary} and other AMMs is indexed in real-time as on-chain Swap events.
+          Decentralized exchange activity on {chainConfig.name}. {dexScope}
         </p>
       </div>
 
       {/* Stats row */}
-      <dl className="ledger [--cols:3] mb-6">
+      <dl className="ledger [--cols:2] mb-6">
         <Fact label="Total trades (est.)" value={formatEstimate(totalTrades)} />
-        <Fact label="Unique traders (est.)" value={formatEstimate(uniqueMakers)} />
-        <Fact label="DEXes Found" value={topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'} />
+        <Fact label="DEXes in top pairs" value={topPairs.length > 0 ? new Set(topPairs.map(p => p.dex)).size : '—'} />
       </dl>
 
       <AdReserve
@@ -153,8 +160,8 @@ export default async function DexPage({
               const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '') ?? 18
               const amtIn = Number(formatUnits(safeBigInt(t.amountIn), inDecimals))
               const amtOut = Number(formatUnits(safeBigInt(t.amountOut), outDecimals))
-              const inSymbol = tokenSymbolMap.get(t.tokenIn?.toLowerCase() ?? '') ?? ''
-              const outSymbol = tokenSymbolMap.get(t.tokenOut?.toLowerCase() ?? '') ?? ''
+              const inSymbol = symbolText(t.tokenIn)
+              const outSymbol = symbolText(t.tokenOut)
               return (
                 <tr key={t.id}>
                   <td className="whitespace-nowrap">

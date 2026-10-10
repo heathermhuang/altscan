@@ -33,7 +33,6 @@ export type CachedDexTrade =
 export type DexPageData = {
   trades: CachedDexTrade[]
   totalTrades: number
-  uniqueMakers: number
   topPairs: TopPair[]
   tokens: TokenMeta[]
 }
@@ -56,9 +55,6 @@ export const fetchDexPage = createPageCache(
 
     const tradeCount = await db.execute(
     sql`SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'dex_trades'`)
-    // reltuples/10 stands in for COUNT(DISTINCT maker), which is too expensive.
-    const makerCount = await db.execute(
-    sql`SELECT GREATEST(1, (reltuples / 10)::bigint) AS value FROM pg_class WHERE relname = 'dex_trades'`)
     // The window size is inlined, not bound: a generic plan cannot see a bound
     // LIMIT and would cost the scan as if it read a tenth of the table.
     const topPairsResult = await db.execute(sql`
@@ -105,7 +101,6 @@ export const fetchDexPage = createPageCache(
       timestamp: t.timestamp instanceof Date ? t.timestamp.toISOString() : String(t.timestamp),
     })),
     totalTrades: estimate(tradeCount, 'estimate'),
-    uniqueMakers: estimate(makerCount, 'value'),
     topPairs: (Array.from(topPairsResult) as Record<string, unknown>[]).map(r => ({
       pair_address: String(r.pair_address),
       dex: String(r.dex),
