@@ -61,8 +61,8 @@ describe('TileStrip markup', () => {
   })
 
   it('stays ONE tab stop when no tile has an id (ids default to the lowercase href, or the name for the remainder)', () => {
-    const noIds = draw({ tiles: tiles.map(({ id: _id, ...t }) => t) })
-    expect(noIds.match(/tabindex="0"/g)).toHaveLength(1)
+    expect(tiles.every(t => t.id === undefined)).toBe(true)   // the fixture has none
+    expect(draw().match(/tabindex="0"/g)).toHaveLength(1)
     // two linked tiles with the same href but different ids are still told apart by their ids
     const twins = draw({ tiles: [
       { id: 'a', href: '/tx/0x1', w: 1, f: 0, name: 'S1', read: 'x' }, { id: 'b', href: '/tx/0x1', w: 1, f: 0, name: 'S2', read: 'y' },
