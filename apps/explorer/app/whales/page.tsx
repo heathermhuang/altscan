@@ -1,5 +1,5 @@
 import { fetchWhales, type WhalePeriod } from '@/lib/whales'
-import { timeAgo, safeBigInt } from '@/lib/format'
+import { timeAgo, safeBigInt, formatCompactUsd } from '@/lib/format'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
@@ -68,6 +68,10 @@ export default async function WhalesPage({
           Large transfers on {chainConfig.name} — native (≥{formatTokenAmount(nativeMinWei, 18)} {chainConfig.currency}), {wrapped.symbol}
           {stablecoins.length > 0 && <>, and stablecoins (≥${formatTokenAmount(stablecoins[0].minValue, stablecoins[0].decimals)})</>}
         </p>
+        <p className="text-mut text-xs mt-1">
+          Ranked by estimated USD value: stablecoins at $1, {chainConfig.currency} and {wrapped.symbol} at the live {chainConfig.currency} price.
+          A transfer with no price is listed last.
+        </p>
         {period === 'all' && (
           <p className="text-mut text-xs mt-1">
             Max covers everything currently retained, which is a few days rather than the full chain history.
@@ -121,11 +125,8 @@ export default async function WhalesPage({
           </thead>
           <tbody>
             {whales.map((w, i) => {
-              // Native and wrapped are 18-decimal; stablecoins differ per chain
-              // (6 on Ethereum, 18 on BNB Chain), so resolve from config.
-              const decimals =
-                stablecoins.find(s => s.symbol === w.tokenSymbol)?.decimals ?? 18
-              const displayAmount = formatTokenAmount(w.value, decimals)
+              // w.decimals is resolved from the token's contract address (6 for ETH's stablecoins, 18 elsewhere).
+              const displayAmount = formatTokenAmount(w.value, w.decimals)
               const symbol = w.tokenSymbol ?? chainConfig.currency
 
               return (
@@ -151,6 +152,9 @@ export default async function WhalesPage({
                   <td className="font-semibold text-right">
                     {displayAmount}{' '}
                     <span className="text-mut font-normal text-xs">{symbol}</span>
+                    <span className="block text-mut font-normal text-xs">
+                      {w.usd === null ? 'no price' : `≈ ${formatCompactUsd(w.usd)}`}
+                    </span>
                   </td>
                 </tr>
               )
