@@ -1,8 +1,10 @@
 /**
  * The hourly series behind /charts when a chain has fewer than three whole UTC days to draw (BNB keeps
- * about two days of blocks). One aggregate over `blocks`, bounded to the last HOURLY_WINDOW_HOURS by
- * blocks_timestamp_idx, and cached (lib/page-cache.ts): the three series (transactions, average base
- * fee, blocks) come out of the same scan, so the page pays for one query, not three.
+ * about two days of blocks). One aggregate over `blocks`, filtered to the last HOURLY_WINDOW_HOURS and
+ * cached (lib/page-cache.ts): the three series (transactions, average base fee, blocks) come out of the
+ * same scan, so the page pays for one query, not three. The scan is bounded by that window and by the
+ * fallback itself, which only runs when the table holds under about four days of blocks; on that data
+ * Postgres seq-scans the table and hash-aggregates it (it does not need blocks_timestamp_idx).
  */
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'

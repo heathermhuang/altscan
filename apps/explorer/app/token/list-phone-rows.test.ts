@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mediaBlock } from '@/lib/css-media'
+import { mediaBlock } from '@/test-support/css-media'
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { HOLDER_LABELS } from '@/lib/holder-labels'
@@ -58,8 +58,17 @@ describe('/token list cell contract', () => {
 
   it('gives the cells no utility classes, so the phone layout is not beaten by a later layer', async () => {
     for (const r of bodyRows(await render())) {
-      for (const c of cells(r)) expect(c.attrs).toMatch(/^( class="text-mut")?$/)
+      for (const c of cells(r).filter((_, i) => i !== 3)) expect(c.attrs).toMatch(/^( class="text-mut")?$/)
     }
+  })
+
+  it('keeps the indexed-holders explanation reachable: the hidden header carries the title on phones, so the cell does too', async () => {
+    const h = await render()
+    const title = HOLDER_LABELS.indexed.title.replace(/'/g, '&#x27;')
+    expect(h).toContain(`<th scope="col" title="${title}">`)
+    for (const r of bodyRows(h)) expect(cells(r)[3].attrs).toBe(` title="${title}"`)
+    // only the holders cell: the other columns say what they are
+    for (const r of bodyRows(h)) for (const i of [0, 1, 2, 4]) expect(cells(r)[i].attrs).not.toContain('title=')
   })
 })
 

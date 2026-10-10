@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { mediaBlock } from '@/lib/css-media'
+import { mediaBlock } from '@/test-support/css-media'
 import { describe, expect, it } from 'vitest'
-import { TxnsTable, type TxnRow } from './TxnsTable'
+import { PROVIDER_DETAIL_CLASS, TxnsTable, type TxnRow } from './TxnsTable'
 
 // app/globals.css (.dt-ad) lays each row out under 640px by cell POSITION - hash, age, detail, value -
 // from the same cells the desktop table shows. These pin that order, and that no cell carries a
@@ -64,6 +64,13 @@ describe('TxnsTable cell contract', () => {
     }
     expect(a).not.toContain('opacity-50')
     expect(b).toMatch(/^<tr class="opacity-50">/)
+  })
+})
+
+describe('the provider table\'s summary cell class', () => {
+  it('caps its width from sm up only: a plain max-w-xs capped the stretched phone cell at 320px (376-639 wide phones)', () => {
+    expect(PROVIDER_DETAIL_CLASS.split(' ')).toContain('sm:max-w-xs')
+    expect(PROVIDER_DETAIL_CLASS.split(' ').filter(c => /^max-w-/.test(c))).toEqual([])
   })
 })
 

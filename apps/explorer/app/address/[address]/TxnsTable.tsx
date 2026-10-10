@@ -3,6 +3,13 @@ import type { ReactNode } from 'react'
 import { formatNativeToken, timeAgo } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 
+/**
+ * `detailClass` for the provider's summary cell: sans, muted, one truncated line. The width cap is
+ * from sm up only, because on a phone the cell is stretched across the card by `.dt-ad` and a plain
+ * `max-w-xs` (320px) would cap it on 376-639px phones.
+ */
+export const PROVIDER_DETAIL_CLASS = 'font-sans text-ink2 sm:max-w-xs truncate'
+
 export type TxnRow = {
   hash: string
   timestamp: Date | string | number

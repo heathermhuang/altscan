@@ -5,7 +5,7 @@ import { chainConfig } from '@/lib/chain-client'
 import type { HistoryRow } from '@/lib/providers'
 import { formatNumber } from '@/lib/format'
 import { AddressLedger, AddressLedgerShell } from '@/components/tape/AddressLedger'
-import { TxnsTable } from './TxnsTable'
+import { PROVIDER_DETAIL_CLASS, TxnsTable } from './TxnsTable'
 import { toLedgerRows } from '@/lib/ledger'
 
 type HistoryResponse = {
@@ -107,7 +107,7 @@ export function TxnsLazy({ addr, reserveLedger }: { addr: string; reserveLedger:
             caption={`${chainConfig.name} transaction history for this address`}
             currency={chainConfig.currency}
             detailHeading="Summary"
-            detailClass="font-sans text-ink2 max-w-xs truncate"
+            detailClass={PROVIDER_DETAIL_CLASS}
             unitInHeading
             rows={txs.map((tx) => ({
               hash: tx.hash,

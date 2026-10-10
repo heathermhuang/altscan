@@ -36,10 +36,15 @@ describe('completeUtcHours', () => {
   })
 
   it('judges the first hour by the named tolerance, inclusive at the edge', () => {
-    expect(FIRST_HOUR_TOLERANCE_MS).toBe(5 * MIN)
+    expect(FIRST_HOUR_TOLERANCE_MS).toBe(MIN)
     const first = (firstAt: number) => completeUtcHours([hour('2026-10-10T08:00:00Z', 8000, firstAt), hour('2026-10-10T09:00:00Z', 8000)], NOW)
     expect(first(FIRST_HOUR_TOLERANCE_MS)).toHaveLength(2)
     expect(first(FIRST_HOUR_TOLERANCE_MS + 1)).toHaveLength(1)
+  })
+
+  it('drops a first hour that starts 2 minutes late: it is missing 3% of its blocks, a visible dip on a chart that starts at 0', () => {
+    const series = [hour('2026-10-10T08:00:00Z', 7760, 2 * MIN), hour('2026-10-10T09:00:00Z', 8000), hour('2026-10-10T10:00:00Z', 8000)]
+    expect(completeUtcHours(series, NOW).map(h => h.hourMs)).toEqual([at('2026-10-10T09:00:00Z'), at('2026-10-10T10:00:00Z')])
   })
 
   it('drops a first hour whose start is unknown rather than plotting it as whole', () => {

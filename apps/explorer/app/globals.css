@@ -631,6 +631,8 @@
     .dt-tk td:nth-child(4),
     .dt-tk td:nth-child(5) {
       font-size: 12px;
+    }
+    .dt-tk td:nth-child(4) {
       color: var(--ink2);
     }
     .dt-tk td:nth-child(4)::after {

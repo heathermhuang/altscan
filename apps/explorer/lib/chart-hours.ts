@@ -10,10 +10,12 @@ export const HOUR_MS = 3_600_000
 /**
  * How far after the hour start the first hour's earliest block may land and still count as a whole
  * hour. Judged from the data, as the day is: the first hour is whole only if its earliest block is at
- * the start of the hour (a block lands every 0.45 s on BNB, 12 s on ETH). 5 minutes leaves room for
- * an indexer restart or RPC failover at the boundary.
+ * the start of the hour (a block lands every 0.45 s on BNB, 12 s on ETH). This is not the day's 5
+ * minutes: 5 minutes is 0.35% of a day but 8.3% of an hour, a dip of ~15 px on a 192 px plot that
+ * starts at 0. A minute is 1.7% (~3 px) and still covers a block gap at the boundary (RPC failover);
+ * a longer indexer outage at the cut drops the hour, which costs one point, not a false drop.
  */
-export const FIRST_HOUR_TOLERANCE_MS = 5 * 60_000
+export const FIRST_HOUR_TOLERANCE_MS = 60_000
 
 /** The fewest whole hours worth a chart; under it /charts keeps the block tape. */
 export const MIN_HOURS = 6

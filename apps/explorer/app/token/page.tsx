@@ -171,7 +171,7 @@ export default async function TokenListPage({
                     ) : nameLink}
                   </td>
                   <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>
-                  <td>{formatHolders(t.holderCount)}</td>
+                  <td title={HOLDER_LABELS.indexed.title}>{formatHolders(t.holderCount)}</td>
                   <td className="text-mut">
                     {hasSupply(t.totalSupply) ? formatSupply(t.totalSupply, t.decimals) : '—'}
                   </td>
