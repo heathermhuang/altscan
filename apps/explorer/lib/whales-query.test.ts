@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { execute, fetchNativeUsd } = vi.hoisted(() => ({ execute: vi.fn(), fetchNativeUsd: vi.fn() }))
+const { execute, fetchNativeUsd, createPageCache } = vi.hoisted(() => ({
+  execute: vi.fn(),
+  fetchNativeUsd: vi.fn(),
+  // The identity wrapper: what the page hands createPageCache (name, TTL, the query) is observable, and fetchWhales runs the query itself.
+  createPageCache: vi.fn((_name: string, _ttl: number, query: unknown) => query),
+}))
 vi.mock('@/lib/db', () => ({ db: { execute } }))
 vi.mock('@/lib/native-price', () => ({ fetchNativeUsd, NATIVE_PRICE_BUDGET_MS: 11_000 }))
+vi.mock('@/lib/page-cache', () => ({ createPageCache }))
 
 import { chainConfig } from '@/lib/chain'
-import { queryWhales, WHALES_SHOWN } from '@/lib/whales'
+import { fetchWhales, queryWhales, WHALES_SHOWN } from '@/lib/whales'
 
 const NATIVE_ROW = {
   hash: '0xn', fromAddress: '0xf', toAddress: '0xt', value: String(10n * 10n ** 18n), blockNumber: 1,
@@ -68,7 +74,7 @@ describe('queryWhales: rank every candidate, then show the top 50', () => {
     hash, fromAddress: '0xf', toAddress: '0xt', value: String(whole * 10n ** BigInt(stable.decimals)), blockNumber: 1,
     timestamp, transferType: 'token', tokenSymbol: 'USDT', tokenAddress: stable.address,
   })
-  const filters = [{ address: stable.address, minValue: '1' }]
+  const filters = [{ address: stable.address, minValue: '1', indexFloor: '2' }]
 
   it('caps the list at 50 AFTER the USD sort, so the cut keeps the largest, not the first 50 fetched', async () => {
     fetchNativeUsd.mockResolvedValue(730)
@@ -98,5 +104,31 @@ describe('queryWhales: rank every candidate, then show the top 50', () => {
     const out = await queryWhales('24h', '1', filters)
 
     expect(out.rows.map(r => r.hash)).toEqual(['0xbig', '0xs1', '0xs2'])
+  })
+})
+
+describe('the whales page cache', () => {
+  it('is named whales-usd-v2, once: the candidate set changed under the same value shape, and the cache outlives a deploy', () => {
+    // Next keys an entry by the cache NAME alone, across deploys. Under the old 'whales-usd' name the first
+    // visitors after this deploy would be handed the newest-25 candidate set for up to a revalidate window.
+    expect(createPageCache.mock.calls.map(c => c[0])).toEqual(['whales-usd-v2'])
+    expect(createPageCache.mock.calls[0][1]).toBe(300)
+  })
+
+  it('holds no BigInt: what reaches the cache is strings, numbers, null and booleans', async () => {
+    fetchNativeUsd.mockResolvedValue(730)
+    const stable = chainConfig.whales.stablecoins[0]
+    execute.mockReset()
+      .mockResolvedValueOnce([NATIVE_ROW])
+      .mockResolvedValueOnce([{
+        hash: '0xs', fromAddress: '0xf', toAddress: '0xt', value: String(1_000_000n * 10n ** BigInt(stable.decimals)), blockNumber: 1,
+        timestamp: '2026-10-09T15:00:00Z', transferType: 'token', tokenSymbol: 'USDT', tokenAddress: stable.address,
+      }])
+
+    const out = await fetchWhales('24h', '1', [{ address: stable.address, minValue: '1', indexFloor: '2' }])
+
+    expect(out.rows.map(r => r.hash)).toEqual(['0xs', '0xn'])
+    // Timestamps cross the cache as ISO strings and come back as Dates; nothing else may be exotic.
+    expect(() => JSON.stringify(out)).not.toThrow()
   })
 })

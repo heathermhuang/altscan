@@ -167,6 +167,14 @@ jobs:
         env:
           TOKEN_SUGGEST_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/explorer/lib/token-suggest.pg.test.ts
+      # /whales' token candidates: each tracked token's largest whale-size transfers must be served by the
+      # combined tt_whale_idx (BNB's partitioned shape and ETH's plain one, under a generic plan too), a
+      # $1M transfer older than the newest 25 must outrank recent small ones, and a transfer that qualifies
+      # for both arms must come out once. Its tables are TEMP, so it shares worker_test.
+      - name: PG-gated explorer suite (whales token candidates)
+        env:
+          WHALES_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/explorer/lib/whales.pg.test.ts
 
       # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
       # on the server to reproduce a full noeviction instance, so it needs the

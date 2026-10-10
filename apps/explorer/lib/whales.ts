@@ -34,6 +34,8 @@ export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 export type TokenFilter = {
   address: string
   minValue: string
+  /** The token's whale partial-index floor (chain-config `indexFloor`): the whale arm's `value >` literal. */
+  indexFloor: string
   symbol?: string
   decimals?: number
 }
@@ -62,7 +64,7 @@ const QUERY_TIMEOUT_MS = 15_000
 
 /** Native transfers fetched as ranking candidates: the largest by value. */
 export const WHALE_NATIVE_CANDIDATES = 50
-/** Per tracked token, the newest qualifying transfers fetched as ranking candidates. */
+/** Per tracked token and per arm, the transfers fetched as ranking candidates: its largest whale-size ones and its latest qualifying ones. */
 export const WHALE_TOKEN_CANDIDATES = 25
 /** Rows the page shows, after every candidate has been priced and ranked. */
 export const WHALES_SHOWN = 50
@@ -107,6 +109,19 @@ export function rawWeiLiteral(wei: string): SQL {
   return sql.raw(wei)
 }
 
+/**
+ * A tracked token's address as a quoted SQL literal, for the same reason `rawWeiLiteral` exists: `tt_whale_idx` is
+ * predicated on `(token_address = '<address>' AND value > <floor>)` per token, and a partial index is only used when
+ * the query spells that out. Lower case, because `token_transfers.token_address` is stored lower case: a mixed-case
+ * literal would be valid, match nothing, and fall back to the latest arm alone without a single error.
+ */
+function rawAddressLiteral(address: string): SQL {
+  if (!/^0x[0-9a-f]{40}$/.test(address)) {
+    throw new Error(`whales: token address must be 0x + 40 lowercase hex, got ${JSON.stringify(address)}`)
+  }
+  return sql.raw(`'${address}'`)
+}
+
 export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string): SQL {
   return sql`
       SELECT hash, from_address as "fromAddress", to_address as "toAddress",
@@ -122,58 +137,83 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
 }
 
 /**
- * The `WHALE_TOKEN_CANDIDATES` (25) most recent transfers of each tracked token above its threshold:
- * the ranking candidates. The page prices and ranks all of them (rankWhalesByUsd) and shows the top 50.
+ * The ranking candidates for each tracked token: TWO arms, `WHALE_TOKEN_CANDIDATES` (25) rows each. The page prices
+ * and ranks all of them (rankWhalesByUsd) and shows the top 50.
  *
- * Newest-N, not value-ordered, on purpose: `token_transfers` has no index on `value`, and value-ordered
- * per-token reads measured 10-39 s each on prod ETH (USDT 24h 9.9 s, 30d 38.9 s; WETH 24h 20 s) and
- * 2-6 minutes on BNB, while the newest-N walk takes at most ~2 s (BNB WBNB, whose transfers over
- * 1 WBNB are sparse in the index, is the slow one at 1.1-2.0 s). The limit is NOT raised past 25
- * because that walk's cost scales with it: 100 would be about 4x, ~8 s, on a BNB cache miss.
- * The list is therefore the largest of the recent candidates, not a proven top 50 of the whole
+ *   1. The WHALE arm: the token's 25 largest transfers above its `indexFloor`, by value, in the period. This is what
+ *      lets a $1M stablecoin transfer from hours ago compete at all: the latest arm below only ever sees the newest 25.
+ *      It is served by `tt_whale_idx ON token_transfers (token_address, value DESC)`, whose predicate is, per tracked
+ *      token, `(token_address = '<address>' AND value > <indexFloor>)`. Postgres uses a partial index only when it can
+ *      PROVE the query implies that predicate, so the token and the floor are LITERALS here (`rawAddressLiteral`,
+ *      `rawWeiLiteral`), never bound parameters: the same arm with them bound and planned generically does not use the
+ *      index (whales.pg.test.ts shows both). Equality on the leading column hands the `value DESC` order to the index
+ *      (a Merge Append across BNB's partitions); the `tx_hash`/`log_index` tie-break is an Incremental Sort on top, over
+ *      at most a handful of rows. Without the index this read took 10-39 s per token on ETH and 2-6 min on BNB.
+ *      `timestamp` is not an index column, so the period is a filter on the walk. That is bounded by the whale-size rows
+ *      the token has in the retained history, which is why the floor is 100x the display threshold.
+ *   2. The LATEST arm: the token's 25 newest transfers above its display threshold (`minValue`), unchanged. It walks
+ *      `tt_token_ts_idx (token_address, timestamp DESC)` and stops at its limit: at most ~2 s on prod (BNB WBNB, whose
+ *      transfers over 1 WBNB are sparse in the index, is the slow one at 1.1-2.0 s). The limit is NOT raised past 25
+ *      because that walk's cost scales with it: 100 would be about 4x, ~8 s, on a BNB cache miss. It is what shows a
+ *      busy hour's ordinary-sized transfers, which the whale arm cannot see below its floor.
+ *
+ * What is NOT a candidate: a transfer between the display threshold and the whale floor that is also older than the
+ * token's newest 25 qualifying ones. The list is the largest of the candidates, not a proven top 50 of the whole
  * window, and the page's ranking note says so (`rankingNote`).
  *
- * One arm per token, `UNION ALL`ed, rather than a single scan with
- * `token_address IN (…) AND (per-token OR arms)`. The OR form cannot use
- * `tt_token_ts_idx (token_address, timestamp DESC)` to stop early: Postgres has
- * to gather every tracked-token transfer in the window and sort it. Each arm
- * here is instead an index walk that stops at its limit.
+ * The arms are joined with `UNION`, not `UNION ALL`: a recent whale-size transfer is in both arms, and the page must
+ * list it once. Every selected column of a row is a function of the row, so two copies of the same
+ * `(tx_hash, log_index)` are identical in every column and the set operator collapses exactly those.
  *
- * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold):
+ * One pair of arms per token, rather than a single scan with `token_address IN (…) AND (per-token OR arms)`. The OR
+ * form cannot use an index to stop early: Postgres has to gather every tracked-token transfer in the window and sort
+ * it. Each arm here is instead an index walk that stops at its limit.
+ *
+ * Measured on prod ETH, 2026-08-27 (EXPLAIN ANALYZE, cold), for the latest arm:
  *   24h   6,110 ms  ->    6.7 ms
  *    7d  28,916 ms  ->    0.3 ms
  *
- * There is no cap across tokens: each arm contributes its own candidates and the ranking decides
- * which survive. A "newest 25 across all tokens" cut here would be a recency sample taken before
- * any price is seen, and could drop an older $1M transfer in favour of recent $1K ones.
+ * There is no cap across tokens: each arm contributes its own candidates and the ranking decides which survive. A
+ * "newest 25 across all tokens" cut here would be a recency sample taken before any price is seen, and could drop an
+ * older $1M transfer in favour of recent $1K ones.
  *
- * The `LEFT JOIN tokens` is applied AFTER the limits — joining before them made the
- * lookup run against every candidate row instead of the (at most 25 per token) that survive.
+ * The `LEFT JOIN tokens` is applied AFTER the limits — joining before them made the lookup run against every
+ * candidate row instead of the (at most 50 per token) that survive.
  *
- * `(timestamp, tx_hash, log_index)` is the sort key, not `timestamp` alone. A
- * timestamp is a block, and a hot token moves many times per block, so ordering
- * by timestamp alone leaves each arm's cut inside a tie group and the page
- * reshuffles between ISR regenerations. The arms and the final select use the same key.
+ * Every arm and the final select sort by a total key — `(value | timestamp, tx_hash, log_index)` — not by one column.
+ * A timestamp is a block, a hot token moves many times per block, and round-number transfers tie on value, so a single
+ * column leaves each arm's cut inside a tie group and the page reshuffles between ISR regenerations.
  */
 export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly TokenFilter[]): SQL {
   if (filters.length === 0) {
-    // sql.join([]) yields an empty fragment, i.e. `UNION ALL` with no arms —
+    // sql.join([]) yields an empty fragment, i.e. a `UNION` with no arms —
     // invalid SQL that would only fail at the database. fetchWhales skips the
     // token half entirely in this case; anything else calling in is a bug.
     throw new Error('buildTokenWhaleQuery: at least one token filter is required')
   }
 
-  const arms = filters.map(f => sql`(
+  const arms = filters.flatMap(f => [
+    sql`(
+        SELECT tx_hash, from_address, to_address, value, block_number, timestamp,
+               log_index, token_address
+        FROM token_transfers
+        WHERE token_address = ${rawAddressLiteral(f.address)}
+          AND value > ${rawWeiLiteral(f.indexFloor)}
+          AND timestamp >= ${cutoffFor(period)}
+        ORDER BY value DESC, tx_hash DESC, log_index DESC
+        LIMIT ${sql.raw(String(WHALE_TOKEN_CANDIDATES))}
+      )`,
+    sql`(
         SELECT tx_hash, from_address, to_address, value, block_number, timestamp,
                log_index, token_address
         FROM token_transfers
         WHERE token_address = ${f.address}
           AND timestamp >= ${cutoffFor(period)}
           AND value > ${f.minValue}
-        -- newest-N, not value-ordered: no value index; value ordering measured 10-39 s per token on ETH, 2-6 min on BNB; this walk <= 2 s
         ORDER BY timestamp DESC, tx_hash DESC, log_index DESC
         LIMIT ${sql.raw(String(WHALE_TOKEN_CANDIDATES))}
-      )`)
+      )`,
+  ])
 
   return sql`
       SELECT u.tx_hash as hash, u.from_address as "fromAddress", u.to_address as "toAddress",
@@ -181,7 +221,7 @@ export function buildTokenWhaleQuery(period: WhalePeriod, filters: readonly Toke
              'token' as "transferType",
              COALESCE(tk.symbol, 'TOKEN') as "tokenSymbol",
              u.token_address as "tokenAddress"
-      FROM (${sql.join(arms, sql` UNION ALL `)}) u
+      FROM (${sql.join(arms, sql` UNION `)}) u
       LEFT JOIN tokens tk ON tk.address = u.token_address
       ORDER BY u.timestamp DESC, u.tx_hash DESC, u.log_index DESC
   `
@@ -281,12 +321,13 @@ function usablePrice(price: number | null): number | null {
 /**
  * The sentence under the page intro that says how the list is ranked, and from what. The list is the
  * largest of a candidate set, not a proven top of the whole window (see buildTokenWhaleQuery), so the
- * set is named from the same constants the queries use. It names the live native price only when one
- * was used: the ranking (and this text) is cached for the window, so a price that failed to load is a
- * fact about the window, not something to paper over with "live".
+ * set is named from the same constants the queries use: the largest native transfers, and per tracked token
+ * both its largest whale-size transfers and its latest qualifying ones. It names the live native price only
+ * when one was used: the ranking (and this text) is cached for the window, so a price that failed to load is
+ * a fact about the window, not something to paper over with "live".
  */
 export function rankingNote(currency: string, wrappedSymbol: string, nativePriced: boolean): string {
-  const basis = `the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers and the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token in this period`
+  const basis = `the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers, the ${WHALE_TOKEN_CANDIDATES} largest whale-size transfers of each tracked token, and the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token, all in this period`
   return nativePriced
     ? `Showing the top ${WHALES_SHOWN} by estimated USD value among ${basis}. Stablecoins are priced at $1, ${currency} and ${wrappedSymbol} at the live ${currency} price; a transfer with no price is listed last.`
     : `The ${currency} price is unavailable right now, so ${currency} and ${wrappedSymbol} transfers are unranked: they follow the stablecoin transfers, newest first, and may not fit in the ${WHALES_SHOWN} shown. Showing the top ${WHALES_SHOWN} among ${basis}; stablecoins are ranked by estimated USD value at $1.`
@@ -413,10 +454,11 @@ export async function queryWhales(
  *  page words its ranking note from it (`rankingNote`) instead of always claiming a live price.
  *  Every field is a string, a number or null: no BigInt, which would make Next's cache write throw. */
 const fetchWhalesCached = createPageCache(
-  // 'whales-usd', not 'whales': the cached rows now carry `decimals` and `usd`, and the page reads both.
-  // The incremental cache outlives a deploy, so under the old name the page would be handed
-  // rows without them for up to a revalidate window.
-  'whales-usd',
+  // 'whales-usd-v2', not 'whales-usd': the value keeps its shape (rows with `decimals` and `usd`, `nativeUsd`,
+  // `degraded`) but the candidate set changed, because each token now also contributes its largest whale-size
+  // transfers. Next keys an entry by this name alone and the incremental cache outlives a deploy, so under the old
+  // name the first visitors after this one would be served the old, newest-25-only ranking for up to a revalidate window.
+  'whales-usd-v2',
   WHALES_REVALIDATE_SECONDS,
   async (period: WhalePeriod, minNativeWei: string, filters: readonly TokenFilter[]) => {
     const { rows, nativeUsd, degraded } = await queryWhales(period, minNativeWei, filters)

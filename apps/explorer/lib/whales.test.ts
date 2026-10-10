@@ -11,9 +11,10 @@ const dialect = new PgDialect()
 const toQuery = (q: Parameters<PgDialect['sqlToQuery']>[0]) => dialect.sqlToQuery(q)
 
 const FILTERS = [
-  { address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', minValue: '1000000000000000000' },
-  { address: '0x55d398326f99059ff775485246999027b3197955', minValue: '1000000000000000000000' },
+  { address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', minValue: '1000000000000000000', indexFloor: '100000000000000000000' },
+  { address: '0x55d398326f99059ff775485246999027b3197955', minValue: '1000000000000000000000', indexFloor: '100000000000000000000000' },
 ]
+const norm = (text: string) => text.replace(/\s+/g, ' ')
 
 describe('buildTokenWhaleQuery', () => {
   it('never renders a row constructor, which is what broke the page', () => {
@@ -24,21 +25,35 @@ describe('buildTokenWhaleQuery', () => {
     expect(text).not.toMatch(/ANY\s*\(\s*\(/)
   })
 
-  it('emits one UNION ALL arm per token, each independently limited to its 25 newest', () => {
+  it('emits two arms per token, each independently limited to 25: its largest whale-size transfers and its latest qualifying ones', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
-    // The whole latency fix rests on this shape: one early-stopping index walk per token instead of a
-    // single OR-ed scan that has to sort every candidate. Two tokens => one UNION ALL and a LIMIT 25 in
-    // each arm. There is NO outer cap: the page ranks every candidate by USD value, so a "newest 25 across
-    // all tokens" cut here would decide the ranking by recency before it ever saw a price.
+    // The page ranks every candidate by USD value, so each arm is an early-stopping walk of its own index and
+    // there is NO outer cap: a "newest 25 across all tokens" cut here would decide the ranking by recency
+    // before it ever saw a price.
     expect(WHALE_TOKEN_CANDIDATES).toBe(25)
-    expect(text.match(/UNION ALL/g)).toHaveLength(FILTERS.length - 1)
-    expect(text.match(/LIMIT 25/g)).toHaveLength(FILTERS.length)   // one per arm, so the cap is NOT the outer 25 of old
-    expect(text.match(/\bLIMIT\b/g)).toHaveLength(FILTERS.length)  // and there is no LIMIT beyond the arms
-    expect(text.match(/FROM token_transfers/g)).toHaveLength(FILTERS.length)
+    expect(text.match(/FROM token_transfers/g)).toHaveLength(2 * FILTERS.length)
+    expect(text.match(/LIMIT 25/g)).toHaveLength(2 * FILTERS.length)
+    expect(text.match(/\bLIMIT\b/g)).toHaveLength(2 * FILTERS.length)
   })
 
-  it('binds an address and a threshold per token, in order', () => {
+  it('joins the arms with UNION, never UNION ALL: a recent whale transfer sits in both arms and must come out once', () => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+    expect(text).not.toMatch(/UNION ALL/)
+    expect(text.match(/\bUNION\b/g)).toHaveLength(2 * FILTERS.length - 1)
+  })
+
+  it.each(FILTERS.map(f => [f.address, f] as const))('the whale arm of %s carries the token and its index floor as LITERALS, ordered by value', (_addr, f) => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+    // The partial index tt_whale_idx is predicated on `(token_address = '<a>' AND value > <floor>)`. Postgres only
+    // uses it when it can PROVE the query implies that, and a bound parameter cannot prove it under a generic plan.
+    expect(norm(text)).toContain(
+      `WHERE token_address = '${f.address}' AND value > ${f.indexFloor} AND timestamp >= NOW() - INTERVAL '24 hours' ` +
+      'ORDER BY value DESC, tx_hash DESC, log_index DESC LIMIT 25',
+    )
+  })
+
+  it('binds only the latest arm\'s address and display threshold per token, in order: the whale arm binds nothing', () => {
     const { params } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
     expect(params).toEqual([
       FILTERS[0].address, FILTERS[0].minValue,
@@ -46,21 +61,56 @@ describe('buildTokenWhaleQuery', () => {
     ])
   })
 
-  it('sorts every arm and the final select by the same deterministic key', () => {
+  it('leaves the latest arm as it was: bound token and threshold, newest first', () => {
+    const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
+    expect(norm(text).match(/WHERE token_address = \$\d+ AND timestamp >= NOW\(\) - INTERVAL '24 hours' AND value > \$\d+ ORDER BY timestamp DESC, tx_hash DESC, log_index DESC LIMIT 25/g))
+      .toHaveLength(FILTERS.length)
+  })
+
+  it('sorts every arm and the final select by a deterministic key', () => {
     const { sql: text } = toQuery(buildTokenWhaleQuery('24h', FILTERS))
 
     // Which 25 rows an arm keeps, and the order the result comes back in, must not move between ISR
-    // regenerations. Timestamp alone is not deterministic: a timestamp is a block, and a hot token moves
-    // many times per block.
-    const orders = text.match(/ORDER BY [^\n]+/g) ?? []
-    expect(orders).toHaveLength(FILTERS.length + 1) // one per arm, plus the final select
-    for (const o of orders) {
-      expect(o).toMatch(/timestamp DESC, [\w.]*tx_hash DESC, [\w.]*log_index DESC/)
-    }
+    // regenerations. A single column is not deterministic: a timestamp is a block, a round-number transfer ties
+    // on value, and a hot token moves many times per block. Per token: the whale arm, then the latest arm.
+    const orders = (text.match(/ORDER BY [^\n]+/g) ?? []).map(o => o.trim())
+    expect(orders).toEqual([
+      ...FILTERS.flatMap(() => [
+        'ORDER BY value DESC, tx_hash DESC, log_index DESC',
+        'ORDER BY timestamp DESC, tx_hash DESC, log_index DESC',
+      ]),
+      'ORDER BY u.timestamp DESC, u.tx_hash DESC, u.log_index DESC',
+    ])
   })
 
-  it('refuses an empty filter list rather than emitting a dangling UNION ALL', () => {
+  it('refuses an empty filter list rather than emitting a dangling UNION', () => {
     expect(() => buildTokenWhaleQuery('24h', [])).toThrow(/at least one token filter/)
+  })
+
+  // The whale arm splices both into the statement unescaped, so each is proven here rather than trusted from config.
+  it.each([
+    ["0xBB4CDB9CBD36B01BD1CBAEBF2DE08D9173BC095C"],   // upper case: stored lower case, so the arm would be valid and empty
+    ['0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095'],     // 39 digits
+    ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' OR 'a'='a"],
+    [''],
+  ])('refuses %j as a token address', (address) => {
+    expect(() => buildTokenWhaleQuery('24h', [{ ...FILTERS[0], address }])).toThrow(/token address/)
+  })
+
+  it.each([
+    ["1'; DROP TABLE token_transfers --"],
+    ['1e23'],
+    [''],
+    ['100 '],
+  ])('refuses %j as an index floor', (indexFloor) => {
+    expect(() => buildTokenWhaleQuery('24h', [{ ...FILTERS[0], indexFloor }])).toThrow(/must be digits/)
+  })
+
+  it.each(['bnb', 'eth'] as const)('accepts every tracked token of the %s config, with the config\'s own floor as the literal', (key) => {
+    const { wrapped, stablecoins } = getChainConfig(key).whales
+    const tokens = [wrapped, ...stablecoins]
+    const text = norm(toQuery(buildTokenWhaleQuery('24h', tokens)).sql)
+    for (const t of tokens) expect(text, t.symbol).toContain(`token_address = '${t.address}' AND value > ${t.indexFloor} AND`)
   })
 
   it('selects the token contract address, which is what a row is priced by', () => {
@@ -384,7 +434,9 @@ describe('rankingNote', () => {
       for (const priced of [true, false]) {
         const note = rankingNote(currency, wrapped, priced)
         expect(note).toContain(`the ${WHALE_NATIVE_CANDIDATES} largest ${currency} transfers`)
-        expect(note).toContain(`the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token in this period`)
+        expect(note).toContain(`the ${WHALE_TOKEN_CANDIDATES} largest whale-size transfers of each tracked token`)
+        expect(note).toContain(`the latest ${WHALE_TOKEN_CANDIDATES} qualifying transfers of each tracked token`)
+        expect(note).toContain('all in this period')
         expect(note).toContain(`top ${WHALES_SHOWN}`)
         const other = currency === 'BNB' ? 'ETH' : 'BNB'
         expect(note).not.toContain(other)
