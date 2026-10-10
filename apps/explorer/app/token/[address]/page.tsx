@@ -335,7 +335,7 @@ export default async function TokenDetailPage({
         <div className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold tracking-[-0.02em] text-ink">Market</h2>
-            {marketData.dexUrl && (
+            {marketData.dexUrl ? (
               <a
                 href={marketData.dexUrl}
                 target="_blank"
@@ -344,6 +344,8 @@ export default async function TokenDetailPage({
               >
                 {marketData.pairLabel} ↗
               </a>
+            ) : marketData.pairLabel && (
+              <span className="text-xs text-mut">{marketData.pairLabel}</span>
             )}
           </div>
           <dl className="ledger">
@@ -361,10 +363,10 @@ export default async function TokenDetailPage({
                 </span>
               )}
             </Fact>
-            <Fact label="24h Volume">
+            <Fact label="24h Volume (pair)">
               {marketData.volume24h != null ? formatCompactUsd(marketData.volume24h) : '—'}
             </Fact>
-            <Fact label="Liquidity">
+            <Fact label="Liquidity (pair)">
               {marketData.liquidityUsd != null ? formatCompactUsd(marketData.liquidityUsd) : '—'}
             </Fact>
             <Fact label={marketData.marketCap != null ? 'Market Cap' : 'FDV'}>
@@ -378,6 +380,11 @@ export default async function TokenDetailPage({
           {marketData.circulatingSupply != null && (
             <p className="text-xs text-mut mt-3">
               Circulating supply: {formatNumber(Math.round(marketData.circulatingSupply))} {token.symbol}
+            </p>
+          )}
+          {marketData.pairLabel && (
+            <p className="text-[11px] text-mut mt-2">
+              Price, 24h volume and liquidity are for the {marketData.pairLabel}; market cap and FDV are for the whole token.
             </p>
           )}
           <p className="text-[11px] text-mut mt-2">
