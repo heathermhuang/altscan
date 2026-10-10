@@ -1,0 +1,59 @@
+import { describe, expect, it, vi } from 'vitest'
+import { createElement, type ReactNode } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+// POST /api/v1/verify takes an address and nothing else: it asks Sourcify whether the contract is verified
+// there (lib/verifier.ts triggerSourcifyVerification: "Just check if already verified"). The form must say
+// that, and a contract it has no record of is "Not verified on Sourcify", not an unauditable one.
+
+const h = vi.hoisted(() => ({ contract: null as Record<string, unknown> | null }))
+vi.mock('@/lib/db', async () => {
+  const { schema } = await import('@altscan/db')
+  const q = { where: () => q, limit: () => q, then: (ok: (v: unknown[]) => unknown) => Promise.resolve(h.contract ? [h.contract] : []).then(ok) }
+  return { schema, db: { select: () => ({ from: () => q }) } }
+})
+vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => { throw new Error('no rpc in this test') } }))
+
+import { VerifyForm } from './VerifyForm'
+import VerifyPage from './page'
+import { metadata } from './layout'
+import { analyzeTokenRisk } from '@/lib/token-risk'
+
+const textOf = (node: ReactNode): string => {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  return textOf((node as { props?: { children?: ReactNode } }).props?.children)
+}
+
+describe('/verify wording matches what the form does', () => {
+  it('the button says it checks Sourcify, and never promises to publish', () => {
+    const html = renderToStaticMarkup(createElement(VerifyForm))
+    expect(html).toContain('>Check Sourcify</button>')
+    expect(html).not.toMatch(/publish/i)
+  })
+
+  it('the page says it looks for a verified match on Sourcify, and does not offer to take source code', () => {
+    const copy = textOf(VerifyPage())
+    expect(copy).toMatch(/Look up a contract on Sourcify/)
+    expect(copy).toMatch(/takes an address, not source code/)
+    expect(copy).not.toMatch(/publish/i)
+    const description = String(metadata.description)
+    expect(description).toMatch(/Sourcify/)
+    expect(description).not.toMatch(/publish|match deployed bytecode/i)
+  })
+})
+
+describe('token risk: Source Verified', () => {
+  it('an unknown contract is "Not verified on Sourcify", not "cannot audit"', async () => {
+    h.contract = null
+    const signal = (await analyzeTokenRisk('0x' + '1'.repeat(40))).find(s => s.label === 'Source Verified')
+    expect(signal).toMatchObject({ ok: false, description: 'Not verified on Sourcify', severity: 'danger' })
+  })
+
+  it('a verified contract keeps its signal', async () => {
+    h.contract = { verifiedAt: new Date('2026-10-01T00:00:00Z'), abi: null }
+    const signal = (await analyzeTokenRisk('0x' + '1'.repeat(40))).find(s => s.label === 'Source Verified')
+    expect(signal).toMatchObject({ ok: true, description: 'Source code is verified and public', severity: 'info' })
+  })
+})

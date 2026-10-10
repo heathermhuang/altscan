@@ -31,7 +31,7 @@ export function VerifyForm() {
       }
       if (data.success) {
         setStatus('success')
-        setMessage('Contract verified successfully via Sourcify!')
+        setMessage('Verified on Sourcify.')
       } else {
         setStatus('error')
         setMessage(data.error ?? 'Verification failed — contract may not be on Sourcify yet.')
@@ -78,7 +78,7 @@ export function VerifyForm() {
         disabled={status === 'loading'}
         className="w-full rounded-[9px] bg-ink px-4 py-2.5 font-semibold text-card transition-opacity hover:opacity-90 disabled:opacity-50"
       >
-        {status === 'loading' ? 'Verifying…' : 'Verify & Publish'}
+        {status === 'loading' ? 'Checking…' : 'Check Sourcify'}
       </button>
     </form>
   )

@@ -3,7 +3,7 @@ import { chainConfig } from '@/lib/chain'
 
 export const metadata: Metadata = {
   title: 'Verify Contract',
-  description: `Verify and publish smart contract source code on ${chainConfig.name}. Match deployed bytecode against Solidity source on ${chainConfig.brandDomain}.`,
+  description: `Check whether a ${chainConfig.name} contract is verified on Sourcify, and list it as verified on ${chainConfig.brandDomain} if it is.`,
   alternates: { canonical: '/verify' },
 }
 
