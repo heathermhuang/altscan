@@ -164,7 +164,7 @@ async function txMarkdown(hash: string): Promise<string | null> {
     `- Gas used: ${formatNumber(safeBigInt(tx.gasUsed))} / ${formatNumber(safeBigInt(tx.gas))} limit`,
     `- Gas price: ${gasPriceGwei} gwei`,
     `- Nonce: ${tx.nonce ?? 'unknown'}`,
-    `- Tx index in block: ${tx.txIndex}`,
+    `- Position in block: ${tx.txIndex + 1}`,
   ]
   if (tx.methodId) lines.push(`- Method id: \`${tx.methodId}\``)
   if (tx.txType !== null && tx.txType !== undefined) lines.push(`- Tx type: ${tx.txType}`)
