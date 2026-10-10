@@ -53,6 +53,17 @@ export function TransfersLazy({ addr }: { addr: string }) {
     )
   }
 
+  return <TransfersView data={data} addr={addr} cursor={cursor} activeCursor={activeCursor} onCursor={setActiveCursor} />
+}
+
+/** The tab's content once the provider has answered (or failed). Split from the fetching so a test can render it. */
+export function TransfersView({ data, addr, cursor, activeCursor, onCursor }: {
+  data: TransfersResponse | null
+  addr: string
+  cursor: string | null
+  activeCursor: string | null
+  onCursor: (cursor: string | null) => void
+}) {
   if (!data || data.limited) {
     const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
     return (
@@ -130,7 +141,7 @@ export function TransfersLazy({ addr }: { addr: string }) {
       <div className="flex justify-center gap-4 mt-4">
         {activeCursor && (
           <button
-            onClick={() => setActiveCursor(null)}
+            onClick={() => onCursor(null)}
             className="rounded-[9px] border border-hair bg-card px-3 py-1 font-mono text-[12.5px] text-ink transition-colors hover:border-hair3"
           >
             ← First Page
@@ -138,7 +149,7 @@ export function TransfersLazy({ addr }: { addr: string }) {
         )}
         {cursor && (
           <button
-            onClick={() => setActiveCursor(cursor)}
+            onClick={() => onCursor(cursor)}
             className="rounded-[9px] border border-hair bg-card px-3 py-1 font-mono text-[12.5px] text-ink transition-colors hover:border-hair3"
           >
             Next Page →
