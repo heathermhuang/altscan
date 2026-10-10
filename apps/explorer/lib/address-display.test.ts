@@ -103,6 +103,15 @@ describe('addressHeadline', () => {
     expect(addressHeadline({ label: '', kind: 'Wallet', checksummed: A })).toBe('Wallet 0x5aAeb6…BeAed')
   })
 
+  // A label that reads as a URL or a handle is an advert, not a name: the headline falls back to the kind + address.
+  it('a label that looks like a URL or a handle is not the headline', () => {
+    for (const bad of ['claim-bnb.xyz', 'https://x.io', '@airdrop_bot', 't.me/scam']) {
+      expect(addressHeadline({ label: bad, kind: 'Contract', checksummed: A })).toBe('Contract 0x5aAeb6…BeAed')
+    }
+    expect(addressHeadline({ label: 'Binance: Hot Wallet 6', kind: 'Wallet', checksummed: A })).toBe('Binance: Hot Wallet 6')
+    expect(addressHeadline({ label: 'USDT.z', kind: 'Contract', checksummed: A })).toBe('USDT.z')
+  })
+
   // ENS / .bnb names are self-chosen: anyone can register "binance-hot-wallet.bnb". The helper does
   // not even accept one, so a resolved name cannot reach the headline.
   it('takes no resolved name, so a self-chosen name cannot become the headline', () => {

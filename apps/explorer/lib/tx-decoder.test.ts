@@ -217,4 +217,49 @@ describe('safeTransferSymbol', () => {
     expect(safeTransferSymbol(SPAM, undefined, 'bnb')).toBeUndefined()
     expect(safeTransferSymbol(SPAM, '???', 'bnb')).toBeUndefined()
   })
+  // A symbol that is an advert ("claim-bnb.xyz", "@airdrop_bot") must not headline the page in its largest
+  // type: the headline names the token by its short address instead (decodeTx's fallback).
+  it('drops a symbol that reads as a URL or a handle, on any contract, the real one included', () => {
+    for (const bad of ['claim-bnb.xyz', 'https://claim.io', 'www.airdrop.com', 't.me/scam', '@airdrop_bot', 'Visit uniswap.org']) {
+      expect(safeTransferSymbol(SPAM, bad, 'bnb')).toBeUndefined()
+    }
+    expect(safeTransferSymbol(REAL_USDT_BNB, 'usdt.com', 'bnb')).toBeUndefined()
+  })
+
+  it('judges the sanitised and the raw symbol: a stray character or fullwidth letters cannot hide a URL', () => {
+    expect(safeTransferSymbol(SPAM, 'claim\u0007-bnb.xyz', 'bnb')).toBeUndefined()
+    expect(safeTransferSymbol(SPAM, 'claim-bnb\u200B.xyz', 'bnb')).toBeUndefined()
+    expect(safeTransferSymbol(SPAM, 'ｗｗｗ．ｃｌａｉｍ．ｃｏｍ', 'bnb')).toBeUndefined()
+  })
+
+  it('keeps tickers with dots and numbers', () => {
+    expect(safeTransferSymbol(SPAM, 'USDT.z', 'bnb')).toBe('USDT.z')
+    expect(safeTransferSymbol(SPAM, 'BTC.b', 'bnb')).toBe('BTC.b')
+    expect(safeTransferSymbol(SPAM, 'UBANK2.0', 'bnb')).toBe('UBANK2.0')
+  })
+})
+
+describe('headline of a transfer of a token whose symbol is a URL', () => {
+  const SPAM_TOKEN = '0x1234567890abcdef1234567890abcdef12345678'
+  const transfer = (symbol: string | undefined): TxTransferInfo =>
+    t({ tokenAddress: SPAM_TOKEN, fromAddress: base.toAddress, tokenSymbol: symbol, tokenDecimals: 18, value: '5000000000000000000' })
+
+  it('names the token by its short address, not by the advert', () => {
+    const tx = { ...base, methodId: '0xa9059cbb' }
+    const safe = safeTransferSymbol(SPAM_TOKEN, 'claim-bnb.xyz', 'bnb')
+    const { summary } = decodeTx(tx, [transfer(safe)])
+    expect(summary).toMatch(/^Transferred 5 0x123456 to /)
+    expect(summary).not.toMatch(/claim|xyz/)
+  })
+
+  it('a swap leg and a "N transfers of X" line do the same', () => {
+    const safe = safeTransferSymbol(SPAM_TOKEN, 'claim-bnb.xyz', 'bnb')
+    const swap = decodeTx({ ...base, methodId: '0x38ed1739' }, [
+      t({ fromAddress: base.fromAddress, tokenSymbol: 'USDC' }),
+      transfer(safe), // the received leg
+    ].map((x, i) => (i === 1 ? { ...x, fromAddress: '0x2222222222222222222222222222222222222222', toAddress: base.fromAddress } : x)))
+    expect(swap.summary).toMatch(/ for 5 0x123456 on /)
+    const many = decodeTx({ ...base, methodId: '0xa9059cbb' }, [transfer(safe), { ...transfer(safe), toAddress: '0x3333333333333333333333333333333333333333' }])
+    expect(many.summary).toBe('2 token transfers to 2 recipients')
+  })
 })
