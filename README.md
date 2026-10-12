@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshots/bnbscan-homepage.png" alt="Altscan — BNBScan explorer" width="720" />
+  <img src="docs/screenshots/explorer-home-bnb.png" alt="BNBScan homepage: a live tape of the latest BNB Chain blocks, where each bar's width is the block's transaction count and its fill is gas used" width="720" />
 </p>
 
 <h1 align="center">Altscan</h1>
@@ -35,40 +35,51 @@ A single `CHAIN` environment variable selects which chain a deployment serves �
 
 ## Screenshots
 
-| Homepage | Blocks |
+| EthScan homepage, dark mode | Block |
 |:---:|:---:|
-| ![Homepage](docs/screenshots/bnbscan-homepage.png) | ![Blocks](docs/screenshots/bnbscan-blocks.png) |
+| ![EthScan homepage in dark mode, with the live Ethereum block tape](docs/screenshots/explorer-home-eth-dark.png) | ![A BNB Chain block page: the block ringed on the chain tape, then its transactions drawn one bar each](docs/screenshots/explorer-block.png) |
 
-| DEX Trades | Status Page |
+| Transaction | Address |
 |:---:|:---:|
-| ![DEX](docs/screenshots/bnbscan-dex.png) | ![Status](docs/screenshots/status-page.png) |
+| ![An Ethereum swap, summarised in one line above its block's transaction strip](docs/screenshots/explorer-tx.png) | ![A BNB Chain address page leading with its holdings, its transactions drawn as a ledger](docs/screenshots/explorer-address.png) |
 
-> **Note:** To regenerate screenshots, visit the live sites and save full-page captures to `docs/screenshots/`.
+| Token | Status page |
+|:---:|:---:|
+| ![The USDT token page on BNB Chain, with market data and top holders](docs/screenshots/explorer-token.png) | ![status.altscan.io, tracking uptime, block lag and response time for both explorers](docs/screenshots/status-page.png) |
+
+<p align="center">
+  <img src="docs/screenshots/explorer-phone.png" alt="Phone layouts: the BNBScan homepage, an EthScan transaction in dark mode, and a BNBScan address page" width="720" />
+</p>
+
+Captured from production on 12 October 2026, with the sponsored slots switched off.
 
 ## Features
 
 ### Exploration
-- **Blocks** — browse the latest blocks with miner, gas, and transaction counts
-- **Transactions** — full transaction details with internal calls, logs, and token transfers
-- **Addresses** — balance overview, transaction history, token holdings, and NFT portfolio
-- **Tokens** — ERC-20 token pages with holder lists, transfers, and price data
+- **Block tape** — the latest blocks drawn as a live strip (width = transactions, fill = gas used), on the homepage and through the block, transaction, address and analytics pages
+- **Blocks** — the latest blocks with validator, gas, and transaction counts; each block page lists its transactions
+- **Transactions** — a one-line summary of what happened, the fee breakdown, logs, and token and NFT transfers; internal transactions when a trace endpoint is configured (off by default)
+- **Addresses** — balance and tracked-token holdings, transaction history drawn as a ledger, token transfers, and NFTs
+- **Tokens** — ERC-20 / BEP-20 pages with market data, holders, and transfers; lookalike (homoglyph) tokens are labelled
+- **Search** — addresses, transaction hashes, block numbers, and token names or symbols
 
 ### Analytics
-- **DEX Trade Tracker** — real-time PancakeSwap (BNB) and Uniswap V2/V3 (ETH) trades
-- **Whale Tracker** — large transfers and top holder analysis
-- **Gas Tracker** — current gas prices, historical gas price charts
-- **Network Charts** — daily transaction counts, block size trends, and more
+- **DEX Trades** — Uniswap-V2-style swaps (PancakeSwap V2 on BNB Chain, Uniswap V2 on Ethereum); V3-style pools are not indexed
+- **Whale Tracker** — the largest native, wrapped and stablecoin transfers in the last hour, the last day, or the whole retained window
+- **Gas Tracker** — slow, standard and fast prices from the percentiles of recent blocks
+- **Network Charts** — transaction count, blocks produced, and (on Ethereum) average base fee; hourly until the index holds three full days
+- **Validators** (BNB Chain) — the validator set with voting power, commission, and blocks produced in the last 24 hours
 
 ### Developer Tools
-- **Contract Verification** — verify and read contracts via Sourcify integration
-- **REST API** — v1 query API with key management and webhook support
-- **CSV Export** — export transaction history for any address
-- **Network Switcher** — one-click toggle between BNB Chain and Ethereum
+- **REST API** — a v1 query API, optional API keys minted by signing a message with your wallet, and webhooks
+- **CSV Export** — the latest 1,000 locally indexed transactions for an address
+- **Contract status** — shows whether a contract is verified on Sourcify; verify new source at [sourcify.dev](https://sourcify.dev)
 
-### Infrastructure
-- **Validators** (BNB) — active validator list with block production stats
-- **Watchlist** — save addresses and get alerts
-- **Independent Status Page** — real-time uptime, block lag, and response time monitoring
+### Also
+- **Dark mode** that follows the system setting, and layouts built for phones
+- **Watchlist** — save addresses in your browser (no account, nothing leaves the device)
+- **Network switcher** — links to the sister explorer on the other chain
+- **Status page** — [status.altscan.io](https://status.altscan.io) tracks uptime, block lag, and response time for the hosted explorers
 
 ## Architecture
 
@@ -81,8 +92,8 @@ altscan/
 │   ├── indexer/          Unified block indexer (direct polling loop)
 │   │                     CHAIN=bnb → indexes BNB Chain
 │   │                     CHAIN=eth → indexes Ethereum
-│   ├── status/           Independent Hono status page
-│   │                     Polls /api/health on both sites
+│   ├── status/           Hono status page for the hosted explorers
+│   │                     Polls /api/health on bnbscan.com and ethscan.io
 │   ├── altscan-site/     altscan.io umbrella site (Astro on Cloudflare Workers)
 │   └── admin/            Operator console behind Cloudflare Access (Astro on Cloudflare Workers)
 ├── packages/
@@ -114,9 +125,9 @@ altscan/
 ### How It Works
 
 1. **Indexer** connects to a chain's JSON-RPC endpoint, polls for new blocks, and writes block/transaction/token data to Postgres via Drizzle ORM.
-2. **Explorer** serves the Next.js frontend with ISR (Incremental Static Regeneration) — each page revalidates on its own schedule, from 45 seconds to an hour, for fresh data without server pressure.
+2. **Explorer** serves the Next.js frontend with ISR (Incremental Static Regeneration) — each page revalidates on its own schedule, from 45 seconds to five minutes, for fresh data without server pressure. Pages that depend on the request, such as search, render per request.
 3. **Chain Config** package centralizes all chain-specific differences (block time, currency, theme colors, RPC URLs, feature flags) so the same code runs both chains.
-4. **Status Page** independently monitors both explorers by polling their `/api/health` endpoints every 30 seconds, tracking uptime, block lag, and response time with a 24-hour timeline.
+4. **Status Page** independently monitors the two hosted explorers by polling their `/api/health` endpoints every 30 seconds, tracking uptime, block lag, and response time over 24 hours and 30 days. Its targets are fixed in `apps/status/src/server.ts`, and it is not part of the Docker stack or the Render blueprint.
 
 ## Getting Started
 
@@ -140,7 +151,7 @@ Full guide, including Render deployment, retention tuning, and limitations:
 
 #### Prerequisites
 
-- **Node.js** 22 — what CI, the Docker images, and the hosted explorers run
+- **Node.js** 22 — what CI and the Docker images run
 - **pnpm** 10 — pinned in `package.json`; `corepack enable` picks up the exact version
 - **PostgreSQL** 16
 - **Redis** 7 — optional: without `REDIS_URL`, rate limits and caches fall back to per-process memory
@@ -155,14 +166,20 @@ cd altscan
 # Install dependencies
 pnpm install
 
-# Set up environment
+# Start Postgres from the Docker stack (localhost:5432; user, password and database all "altscan")
+docker compose up -d postgres
+
+# Set up environment, then point DATABASE_URL at that Postgres:
+#   postgresql://altscan:altscan@localhost:5432/altscan
 cp apps/explorer/.env.example apps/explorer/.env.local
 
 # Start the BNB explorer
 CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev
 ```
 
-The BNB explorer will be available at `http://localhost:3000`. `pnpm dev` starts every
+The BNB explorer will be available at `http://localhost:3000`. The indexer creates the
+database schema on its first boot, so run it once (below) before expecting data; the
+explorer alone, against an empty database, has no tables to read. `pnpm dev` starts every
 app at once through Turborepo: the explorer, the indexer, the status page, and both
 Astro sites.
 
@@ -179,18 +196,24 @@ CHAIN=eth NEXT_PUBLIC_CHAIN=eth pnpm --filter @altscan/explorer dev -p 3001
 pnpm --filter @altscan/db build && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build
 CHAIN=bnb pnpm --filter @altscan/indexer dev
 
-# Status page only
-npx tsx apps/status/src/server.ts
+# Status page only (monitors the hosted sites)
+pnpm --filter @altscan/status dev
 ```
 
 `CHAIN` drives the server; `NEXT_PUBLIC_CHAIN` is inlined into the client bundle, so set
-both to the same chain. The explorer compiles the workspace packages from source, but the
-indexer loads their built `dist/` output, which is not committed — build them once after
-cloning and again after changing them.
+both to the same chain. The indexer reads its settings from the environment or from
+`apps/indexer/.env`: at least `DATABASE_URL` (or `ETH_DATABASE_URL`), the chain's RPC URL,
+and a `START_BLOCK` near the chain head — its built-in start is millions of blocks back.
+
+The explorer compiles the workspace packages from source, but the indexer loads their
+built `dist/` output, which is not committed — build them once after cloning and again
+after changing them.
 
 ## Environment Variables
 
-See `apps/explorer/.env.example` for the full list.
+These are the variables a deployment needs. [`apps/explorer/.env.example`](apps/explorer/.env.example)
+adds the optional provider caps, and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) covers the
+indexer's retention and disk settings.
 
 | Variable | Required | Description |
 |----------|:--------:|-------------|
@@ -202,8 +225,7 @@ See `apps/explorer/.env.example` for the full list.
 | `ETH_RPC_URL` | `CHAIN=eth` | Ethereum JSON-RPC endpoint, or a comma-separated list for failover |
 | `REDIS_URL` | Recommended | Redis connection string; without it, rate limits and caches are per-process |
 | `MORALIS_API_KEY` | No | Moralis API for balance and NFT enrichment |
-| `GOPLUS_API_KEY` | No | GoPlus security analysis for token pages |
-| `ADMIN_SECRET` | No | Bearer token for admin health/prune endpoints |
+| `ADMIN_SECRET` | No | Bearer token for the `/api/admin/*` endpoints; unset, they refuse every request |
 
 ### Free RPC Endpoints
 
@@ -212,19 +234,24 @@ You can get started without paid RPC providers:
 | Chain | Free Endpoint |
 |-------|--------------|
 | BNB Chain | `https://bsc-dataseed1.binance.org/` |
-| Ethereum | `https://eth.drpc.org` |
+| Ethereum | `https://ethereum-rpc.publicnode.com` |
 
-Both serve `eth_getBlockReceipts` for historical blocks, which the indexer depends on
-(checked September 2026). Check any other endpoint the same way — ask it for the receipts
-of a block a few thousand deep — before you rely on it. Some public RPCs answer at the
-chain tip but lack that method, and some return an empty list for it; the indexer rejects
-a block whose receipts don't cover its transactions, so it cannot make progress on either.
+These are the Docker stack's defaults. Both serve `eth_getBlockReceipts` for historical
+blocks, which the indexer depends on (checked October 2026). Check any other endpoint the
+same way — ask it for the receipts of a block a few thousand deep — before you rely on it.
+Some public RPCs answer at the chain tip but lack that method, and some return an empty
+list for it; the indexer rejects a block whose receipts don't cover its transactions, so it
+cannot make progress on either. Some free plans also cap JSON-RPC batch size:
+`eth.drpc.org`'s free tier rejects batches of more than three, so set
+`RPC_BATCH_MAX_COUNT=1` on the indexer if you use it.
 
 For production, use a paid RPC provider: free endpoints rate-limit under indexer load.
 
 ## API
 
-Both explorers expose a v1 REST API. Visit `/api-docs` on either site for interactive documentation, or `/developer` to create an API key.
+Both explorers expose a v1 REST API. `/api-docs` on either site is the endpoint reference,
+and `/developer` shows how to mint an API key by signing a message with your wallet. A key
+is optional: calls without one are rate-limited by IP.
 
 ```bash
 # Example: query transactions for an address
@@ -243,8 +270,8 @@ pnpm test
 Runs the Vitest suite for every workspace. Suites that need a real Postgres or Redis are
 skipped unless their environment variable is set —
 [CONTRIBUTING.md](CONTRIBUTING.md#tests-that-need-postgres-or-redis) lists them and how to
-run them. CI also runs those suites, lint, an indexer typecheck, and a production build of
-the explorer.
+run them. CI runs all of them except the two retention-partition suites, plus lint,
+typechecks of the indexer and the admin console, and a production build of the explorer.
 
 ## Deployment
 
@@ -255,16 +282,17 @@ and Redis. To run your own, with Docker or on Render, follow
 
 ### Data Retention
 
-Indexers prune **transaction bodies** on a rolling window (`RETENTION_DAYS`, default 7),
-running cleanup every 6 hours. Transactions stay queryable — only the refetchable body is
-dropped, and it is refetched on demand. Database size scales with chain throughput and
-the window: BNB Chain writes roughly 12–15 GB per month at full retention, Ethereum 6–8 GB.
-Size the window to your disk; see
+The indexer runs a retention pass every 6 hours. Past `RETENTION_DAYS` (default 7) it
+deletes logs, DEX trades and gas history, and drops each transaction's input data, which
+is refetched from RPC on demand; the transactions themselves stay queryable. Transactions,
+token transfers and blocks are kept forever unless you also set `COMPACT_RETENTION_DAYS`,
+so that is the setting that bounds database size. See
 [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#retention-and-disk).
 
-To manually trigger cleanup:
+There is also a manual prune endpoint. It **deletes whole rows** — transactions and blocks
+included — older than `days`, then runs `VACUUM`. Ask for a dry run first:
 ```bash
-curl -X POST "https://your-explorer.example/api/admin/db-prune?days=7" \
+curl -X POST "https://your-explorer.example/api/admin/db-prune?days=7&dry=true" \
   -H "Authorization: Bearer $ADMIN_SECRET"
 ```
 
@@ -276,15 +304,19 @@ curl -X POST "https://your-explorer.example/api/admin/db-prune?days=7" \
 - **Deep history needs a Moralis key** — without one, address history is limited to
   locally indexed blocks and holder counts fall back to an estimate shown with a caveat.
   This is the only third-party commercial dependency.
-- **Holder counts are eventually consistent** — recomputed every 15 minutes by default
-  (`HOLDER_COUNT_INTERVAL_MIN`) rather than per block, a deliberate trade for indexer
-  throughput. Token pages can be briefly stale.
+- **Live holder data comes from Moralis** — per-block holder tracking is switched off for
+  indexer throughput, so the locally stored holder count is a frozen snapshot and the UI
+  labels it "indexed holders". Live totals and top holders come from Moralis; without a
+  key, the holder list is an estimate from recent transfers, shown with a caveat.
 - **One chain per deployment** — `NEXT_PUBLIC_CHAIN` is inlined into the client bundle at
   build time, so switching chains requires a rebuild, not just a restart.
 - **Two chains supported** — BNB Chain and Ethereum. Adding a third currently requires
   code changes rather than configuration.
-- **Contract verification is Sourcify-only.**
-- **Bot detection disabled** — turned off to enable ISR caching.
+- **Contract verification is Sourcify-only**, and the explorer reads it rather than
+  accepting source.
+- **A fork carries the hosted sites' identity** — analytics IDs, canonical domain, ad
+  placements and the network switcher's target live in `packages/chain-config`. See
+  [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#before-you-run-a-public-fork).
 
 ## Contributing
 

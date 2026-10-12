@@ -17,6 +17,7 @@ body:
         - altscan.io (umbrella site)
         - Public REST API
         - Indexer
+        - Status page (status.altscan.io)
         - Self-hosted / local dev
         - Other / not sure
     validations:

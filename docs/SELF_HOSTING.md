@@ -16,7 +16,13 @@ explorer. First build takes several minutes; after that, startup is seconds.
 
 Every value in `.env` has a working default, so `docker compose up` runs unedited. You
 will want to change at least the RPC endpoint and the Postgres password before running
-this anywhere other than your laptop.
+this anywhere other than your laptop. Set the password before the first `up`: Postgres
+reads it only when it creates the data volume. The stack also publishes Postgres on port
+5432 so you can inspect it with `psql`; remove that port mapping on a shared host.
+
+Compose passes the containers only the variables listed in
+[`docker-compose.yml`](../docker-compose.yml). To set any other variable this guide
+mentions, add it to that service's `environment:` block.
 
 ```bash
 docker compose logs -f indexer     # watch it catch up to the chain head
@@ -51,7 +57,8 @@ changed `CHAIN` but no rebuild gives you a server reading one chain's data while
 browser renders the other chain's currency symbol and theme.
 
 One compose stack runs one chain. To run both, use two clones with different
-`EXPLORER_PORT` and `POSTGRES_PORT` values, or two Render blueprints.
+`EXPLORER_PORT`, `POSTGRES_PORT` and `COMPOSE_PROJECT_NAME` values (the project name keeps
+their containers and data volumes apart), or two Render blueprints.
 
 ## Where indexing starts
 
@@ -85,7 +92,8 @@ With `MORALIS_API_KEY` set ([moralis.io](https://moralis.io), free tier availabl
 are served from the provider and cached, giving full history beyond your retention
 window. Per-feature rate caps keep one feature from exhausting the quota of another —
 see the `MORALIS_*` variables in
-[`apps/explorer/.env.example`](../apps/explorer/.env.example).
+[`apps/explorer/.env.example`](../apps/explorer/.env.example). The Docker stack forwards
+only `MORALIS_API_KEY`; add the caps to the explorer's `environment:` block to change them.
 
 This is the one place Altscan depends on a third-party commercial service. Everything
 else runs from your own node/RPC and your own database.
@@ -93,16 +101,30 @@ else runs from your own node/RPC and your own database.
 ## Retention and disk
 
 ```bash
-RETENTION_DAYS=7    # default
+RETENTION_DAYS=7            # default
+COMPACT_RETENTION_DAYS=     # default: unset, keep forever
+DB_DISK_GB=                 # default: unset, disk checks off
 ```
 
-Transaction bodies older than this are pruned; the transactions themselves remain
-queryable, and bodies are refetched on demand. BNB Chain writes roughly **12–15 GB per
-month** at full retention, Ethereum roughly **6–8 GB**. Check free disk before raising
-this.
+The indexer runs a retention pass 15 minutes after it starts and every 6 hours after that.
 
-The indexer logs table sizes and disk usage on each retention pass. Set `DB_DISK_GB` to
-your actual disk size to get a warning at 70% capacity.
+- **Past `RETENTION_DAYS`** it deletes logs, DEX trades and gas history, and drops each
+  transaction's input data. The transactions stay queryable, and their input is refetched
+  from RPC when a page needs it.
+- **Past `COMPACT_RETENTION_DAYS`** it deletes the transactions, token transfers, internal
+  transactions and blocks themselves. Unset, these are kept forever, so this is the setting
+  that bounds the database. Setting it to `RETENTION_DAYS` or lower is the cheap choice:
+  old transactions are then deleted outright, without first rewriting each one to drop its
+  input, a rewrite that takes hours on a busy chain like BNB.
+
+As a guide, BNB Chain writes roughly **12–15 GB per month** and Ethereum roughly
+**6–8 GB**. Check free disk before you lengthen either window.
+
+The indexer logs table sizes on each pass. With `DB_DISK_GB` set to your disk's size it
+also logs disk use, warns at 70%, raises an alarm at `EMERGENCY_DISK_ALARM_PCT` (default
+85), and at `EMERGENCY_DISK_ACT_PCT` (default 93) tightens retention and deletes older
+data to keep the disk from filling. Without `DB_DISK_GB` none of these checks run. The
+figure is the database's own size, so it reads a few points under what `df` reports.
 
 ## Deploying on Render
 
@@ -114,7 +136,11 @@ cp deploy/render/blueprint.yaml render.yaml
 ```
 
 Commit that to your fork, then in Render: **New → Blueprint → select your fork**. Set
-the RPC URL and `START_BLOCK` when prompted.
+the RPC URL and `START_BLOCK` when prompted. `START_BLOCK` must be a block number here;
+`tip` is resolved only by the Docker entrypoint.
+
+For Ethereum, set `CHAIN` and `NEXT_PUBLIC_CHAIN` to `eth`, and on **both** services
+rename `DATABASE_URL` to `ETH_DATABASE_URL` and `BNB_RPC_URL` to `ETH_RPC_URL`.
 
 The root [`render.yaml`](../render.yaml) is the production two-chain configuration for
 bnbscan.com and ethscan.io — it provisions two databases and paid plans, so don't deploy
@@ -135,9 +161,11 @@ Note the `--build-arg` on the explorer — see [Choosing a chain](#choosing-a-ch
 
 ## Database
 
-There is no migration step. The indexer creates and updates its own schema on boot via
-[`ensure-schema.ts`](../apps/indexer/src/ensure-schema.ts), including the partitioned
-`token_transfers` table. Point it at an empty database and it will do the rest.
+There is no migration step. The indexer creates and updates its own tables and indexes on
+boot via [`ensure-schema.ts`](../apps/indexer/src/ensure-schema.ts). Point it at an empty
+database and it will do the rest. `token_transfers` starts as a plain table; partitioning
+it by block number, which makes retention a cheap partition drop, is an optional one-time
+migration (`apps/indexer/src/migrate-partition-tt.ts`, run with the indexer stopped).
 
 ```bash
 docker compose exec postgres psql -U altscan -d altscan
@@ -146,7 +174,7 @@ docker compose exec postgres psql -U altscan -d altscan
 ## Troubleshooting
 
 **The homepage looks empty on first load, but `/blocks` has data.**
-Expected. The homepage is cached with a 30-second ISR window and ships prerendered
+Expected. The homepage is cached with a 60-second ISR window and ships prerendered
 against an empty database. The first request after that window serves the stale copy and
 triggers regeneration in the background; the next one shows live data. Reload once.
 
@@ -155,10 +183,10 @@ The default RPC endpoints are free public nodes and will throttle a catching-up 
 Failed blocks are retried, so it self-corrects, but throughput suffers. Lower
 `INDEX_CONCURRENCY`, or use a dedicated provider endpoint.
 
-**The indexer says `N blocks behind — skipping to block X`.**
-Normal when it falls more than 1000 blocks behind: it jumps forward to stay near the head
-rather than grinding through the gap. Lower `START_BLOCK_LOOKBACK` or raise
-`INDEX_CONCURRENCY` if you want the gap filled.
+**The indexer says `N blocks behind (>1000) — ABANDONING blocks A..B`.**
+It fell more than `MAX_LAG_BLOCKS` (default 1000) behind the head and skipped that range
+to stay current. The skipped blocks are recorded as a gap in `/api/health` but are not
+filled in later. To avoid it, use a faster RPC endpoint or raise `INDEX_CONCURRENCY`.
 
 **Wrong currency symbol or theme after switching chains.**
 You restarted without rebuilding. Run `docker compose up -d --build` — see
@@ -167,7 +195,7 @@ You restarted without rebuilding. Run `docker compose up -d --build` — see
 ```bash
 docker compose logs -f indexer     # indexing progress and errors
 docker compose logs -f explorer    # request-level errors
-docker compose ps                  # health status of all four services
+docker compose ps                  # state of each service; Postgres, Redis and the explorer report health
 ```
 
 ## Limitations
@@ -178,9 +206,26 @@ Worth knowing before you commit to this:
   provider backfill for older address/token history. It is not a full archive node
   explorer.
 - **One chain per stack**, for the build-time reason above.
-- **Contract verification** is via Sourcify only.
+- **Contract verification** is via Sourcify only. The explorer shows whether a contract
+  is verified there; source is submitted at [sourcify.dev](https://sourcify.dev).
 - **Two chains supported** today (BNB, Ethereum). Adding a third currently requires code
   changes, not configuration.
+
+## Before you run a public fork
+
+A fork serves the hosted sites' identity until you change it. These live in each chain's
+entry in [`packages/chain-config/src/index.ts`](../packages/chain-config/src/index.ts):
+
+- **`gaTrackingId`** — the Google Analytics property every page reports to.
+- **`domain`** — used for canonical URLs, the sitemap, `robots.txt`, structured data, and
+  the API's allowed CORS origin.
+- **`binanceRefCode`** — the referral code on the sponsored Binance placements, which run
+  by default. Each placement can be switched off in the `ads` runtime setting, a row in
+  the `explorer_settings` table that the admin console (`apps/admin`) edits.
+- **`peerUrl`** — where the network switcher sends visitors for the other chain.
+
+The status page (`apps/status`) monitors bnbscan.com and ethscan.io; its targets are set
+in `apps/status/src/server.ts`.
 
 ## Licence
 

@@ -20,6 +20,7 @@
 - [ ] Indexer (`apps/indexer`)
 - [ ] Public REST API
 - [ ] altscan.io site (`apps/altscan-site`)
+- [ ] Admin console (`apps/admin`) or status page (`apps/status`)
 - [ ] Shared packages
 - [ ] Both chains (BNB + ETH)
 

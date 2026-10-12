@@ -4,7 +4,7 @@ Thanks for your interest in **Altscan** — the open-source, multi-chain block e
 
 ## Prerequisites
 
-- **Node.js 22** — what CI, the Docker images, and the hosted explorers run.
+- **Node.js 22** — what CI and the Docker images run.
 - **pnpm 10** — the exact version is pinned in `package.json` (`packageManager`);
   `corepack enable` picks it up.
 - **PostgreSQL 16**. The quickest way to get it is `docker compose up -d postgres` from
@@ -22,7 +22,9 @@ cp apps/explorer/.env.example apps/explorer/.env.local   # fill in RPC + DB URLs
 CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev
 ```
 
-The BNB explorer runs at `http://localhost:3000`. `pnpm dev` starts every app at once
+The BNB explorer runs at `http://localhost:3000`. The indexer creates the database
+schema on its first boot, so run it once against a new database before expecting pages
+to show data. `pnpm dev` starts every app at once
 (explorer, indexer, status page, and both Astro sites).
 
 ## The `CHAIN` model
@@ -56,8 +58,9 @@ Run what CI runs:
 ```bash
 pnpm test                               # Vitest, every workspace
 pnpm lint
-pnpm --filter @altscan/explorer build   # production build of the explorer
+pnpm --filter @altscan/explorer build   # production build; needs DATABASE_URL set (any well-formed URL)
 pnpm --filter @altscan/site test        # only if you touched apps/altscan-site
+pnpm --filter @altscan/admin exec tsc --noEmit -p .   # only if you touched apps/admin
 ```
 
 If you touched the indexer or a package it imports, typecheck it the way CI does. The
@@ -74,7 +77,8 @@ root; `apps/altscan-site` has its own harness and is excluded from the root run.
 
 A bare `pnpm test` **skips** these suites. Each runs only when its variable is set. The
 Postgres suites refuse to run unless the database name contains `test`, because they
-create and drop tables with production names.
+create and drop tables with production names (`retention-sizes` works in a private
+schema instead).
 
 | Suite | Variable |
 |---|---|
@@ -84,6 +88,12 @@ create and drop tables with production names.
 | `apps/indexer/src/retention-boundary-partition.pg.test.ts` | `BOUNDARY_TEST_PG_URL` |
 | `apps/explorer/lib/backfill-serve.pg.test.ts` | `BACKFILL_TEST_PG_URL` (use a separate database from the indexer worker suite) |
 | `apps/explorer/lib/address-query.pg.test.ts` | `ADDRESS_QUERY_TEST_PG_URL` |
+| `apps/explorer/lib/token-transfers-query.pg.test.ts` | `TOKEN_TRANSFERS_TEST_PG_URL` |
+| `apps/explorer/lib/token-suggest.pg.test.ts` | `TOKEN_SUGGEST_TEST_PG_URL` |
+| `apps/explorer/lib/whales.pg.test.ts` | `WHALES_TEST_PG_URL` |
+| `apps/explorer/lib/gas-percentiles.pg.test.ts` | `GAS_TIERS_TEST_PG_URL` |
+| `apps/indexer/src/token-heal.pg.test.ts` | `TOKEN_HEAL_TEST_PG_URL` |
+| `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` (needs a database of its own) |
 | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` |
 | `packages/providers/src/moralis-cu-budget.redis.test.ts` | `MORALIS_TEST_REDIS_URL` (changes server config — use a throwaway Redis only) |
 

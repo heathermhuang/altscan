@@ -6,11 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Lookalike-token labels.** Tokens whose name or symbol imitates a real one (homoglyphs from any Unicode script, a name equal to a known symbol, embedded URLs) carry a badge on `/token`, the token page, and search results, and never headline a page (#196, #206, #215, #221, #229, #233).
+- **Token-metadata healer.** Tokens stored as `Unknown` / `???` after a rate-limited first fetch are retried in the background until they resolve (#190, #199, #203).
+- Indexes for exact-match token search and whale-size transfers (#224).
+
 ### Changed
-- **altscan.io rebuilt around live block tapes.** Two tapes replay the blocks BNBScan and EthScan are indexing (width = block time, fill = gas used). One real block is taken apart, and both explorer panels carry their own mini tape. The page closes with a tape of the codebase itself, measured at build time (width = lines of TypeScript, fill = share that is tests). `/api/chains.json` now serves each explorer's recent blocks behind a 12-second edge cache (#172, #174, #176, #177).
+- **Explorer redesign ("Ledger Tape").** Every route moved onto one design system. A live block tape (width = transactions, fill = gas used) runs through the homepage, `/blocks`, `/txs`, block, transaction, address, token, `/gas`, `/validators`, `/dex` and `/charts`. Transaction pages lead with a decoded one-line summary, and address pages lead with their holdings and draw their transactions as a ledger. Dark mode follows the system setting (#182, #184–#189, #192, #211–#215, #227, #230).
+- **Search accepts the site's own formats** — `#1,234`, comma-grouped numbers, `0X` prefixes, and bare hex. Exact matches always appear, real tokens rank above lookalikes, a single match redirects straight to its page, and the header search suggests as you type (#204, #218, #219, #225).
+- **altscan.io rebuilt around live block tapes.** Two tapes replay the blocks BNBScan and EthScan are indexing (width = block time, fill = gas used). One real block is taken apart, and both explorer panels carry their own mini tape. The page closes with a tape of the codebase itself, measured at build time (width = lines of TypeScript, fill = share that is tests). `/api/chains.json` now serves each explorer's recent blocks behind a 12-second edge cache (#172, #174, #176–#178).
+- Ad space is reserved on the server, so an ad no longer pushes the page down when it loads (#187, #193).
+- altscan.io and the admin console moved from Astro 5 to Astro 7 (#180), and CI now typechecks the admin console (#183).
+
+### Fixed
+- **Contract verification works again.** It used Sourcify's removed v1 API and BNB's chain id on both chains; it now uses Sourcify v2 and the configured chain, and records the compiler version Sourcify reports rather than the one the request claimed (#202, #208).
+- **Pages state only what is true.** `/gas` separates base fee from gas price and derives its tiers from real percentiles; BNB's block time is the measured 0.45 s; `/dex`, `/validators`, `/staking`, About and `/charts` no longer show estimates or placeholders as facts; address and token pages agree on holdings and holder counts (#181, #189, #194, #220, #228, #229).
+- **Consistent number formats** — grouped counts, one compact format, dust shown as `<0.000001`, and one native-price source on every page (#222, #232).
+- **Public API rate limits key on the visitor**, not on the Cloudflare edge that forwarded the request; the counter and its expiry are set atomically, webhook reads and deletes are limited, and `/verify` has its own budget (#195, #200, #201).
+- Token pages render in milliseconds instead of ~7 s, and their holder and transfer lists no longer scan whole tables or shift the page (#150, #207, #209, #210).
+- List-page caches never serve data older than their TTL; ETH `/blocks` could show blocks 27 minutes old (#223).
+- `/whales` finds the period's largest transfers through the whale-size index and ranks them by USD value (#222, #226). BNB `/charts` plots whole hours (#231).
+- Phone layouts: address and token tables stack instead of scrolling sideways (#231).
+- Accessibility: keyboard navigation in the More menu, 3:1 popover borders, and the block tape, gas bar and status dots survive forced-colours mode (#197, #205).
+- ETH can catch up on drpc's free plan: JSON-RPC batch size is capped per chain (#169).
+- The indexer's boot-time schema check retries on more connection-loss shapes instead of crash-looping (#164–#166).
+- AhrefsBot is blocked in `robots.txt` and throttled on heavy paths (#167).
+- **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and the database can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken.
 
 ### Security
 - **Upgraded drizzle-orm to 0.45.2** (drizzle-kit to 0.31.10), clearing the "SQL injection via improperly escaped SQL identifiers" advisory. Nothing here calls `sql.identifier()`, so it was not reachable. Since 0.44, drizzle wraps every database error in one that carries the SQL, not the reason. The deadlock retries, the indexer's boot-time database retry, and every log line and response that reports a database error now read the underlying Postgres error.
+- Cleared the dependency security backlog (#179), plus routine dependency updates (#216, #217).
 
 ## [0.3.0.0] - 2026-09-18
 

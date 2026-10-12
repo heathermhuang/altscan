@@ -36,7 +36,7 @@ In practice that means:
 - You need warranty, indemnity, or a support SLA that AGPL explicitly disclaims.
 
 Commercial licensing removes the source-disclosure obligation and is negotiated per
-deployment. To enquire, email the contact in [SECURITY.md](SECURITY.md).
+deployment. To enquire, email [bnbscan@mdt.io](mailto:bnbscan@mdt.io).
 
 ## How this compares
 

@@ -34,7 +34,7 @@ Please include:
 
 ## Scope
 
-**In scope:** the explorer app (`apps/explorer`), the indexer (`apps/indexer`), the public REST API, and the `altscan-site` umbrella site in this repository.
+**In scope:** everything in this repository — the explorer (`apps/explorer`) with its public REST API and `/api/admin/*` endpoints, the indexer (`apps/indexer`), the admin console (`apps/admin`), the status page (`apps/status`), the altscan.io site (`apps/altscan-site`), and the shared `packages/*`.
 
 **Out of scope:** findings that require physical access or social engineering; volumetric denial-of-service; and vulnerabilities in third-party providers (RPC nodes, Moralis, Cloudflare, Render) — please report those to the respective vendor.
 
