@@ -6,13 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0.0] - 2026-10-12
+
+The explorer redesign ("Ledger Tape") across every route, a long truth-and-correctness pass on what its pages say, and an open-source release that a fork can run as its own: analytics and referral ads are now opt-in, and the docs were checked line by line against the code (#150, #163–#237).
+
 ### Added
 - **Lookalike-token labels.** Tokens whose name or symbol imitates a real one (homoglyphs from any Unicode script, a name equal to a known symbol, embedded URLs) carry a badge on `/token`, the token page, and search results, and never headline a page (#196, #206, #215, #221, #229, #233).
 - **Token-metadata healer.** Tokens stored as `Unknown` / `???` after a rate-limited first fetch are retried in the background until they resolve (#190, #199, #203).
 - Indexes for exact-match token search and whale-size transfers (#224).
 
 ### Changed
-- **Analytics and referral ads are opt-in.** The Google Analytics ID and the Binance referral code were hardcoded per chain, so a fork reported its visitors to the hosted sites' analytics and ran ads carrying their referral code. Both now come from `GA_MEASUREMENT_ID` and `BINANCE_REF_CODE`; unset, no analytics script loads and no referral placement renders or reserves space. The hosted explorers set both on Render.
+- **Analytics and referral ads are opt-in.** The Google Analytics ID and the Binance referral code were hardcoded per chain, so a fork reported its visitors to the hosted sites' analytics and ran ads carrying their referral code. Both now come from `GA_MEASUREMENT_ID` and `BINANCE_REF_CODE`; unset, no analytics script loads and no referral placement renders or reserves space. The hosted explorers set both on Render (#236).
 - **Explorer redesign ("Ledger Tape").** Every route moved onto one design system. A live block tape (width = transactions, fill = gas used) runs through the homepage, `/blocks`, `/txs`, block, transaction, address, token, `/gas`, `/validators`, `/dex` and `/charts`. Transaction pages lead with a decoded one-line summary, and address pages lead with their holdings and draw their transactions as a ledger. Dark mode follows the system setting (#182, #184–#189, #192, #211–#215, #227, #230).
 - **Search accepts the site's own formats** — `#1,234`, comma-grouped numbers, `0X` prefixes, and bare hex. Exact matches always appear, real tokens rank above lookalikes, a single match redirects straight to its page, and the header search suggests as you type (#204, #218, #219, #225).
 - **altscan.io rebuilt around live block tapes.** Two tapes replay the blocks BNBScan and EthScan are indexing (width = block time, fill = gas used). One real block is taken apart, and both explorer panels carry their own mini tape. The page closes with a tape of the codebase itself, measured at build time (width = lines of TypeScript, fill = share that is tests). `/api/chains.json` now serves each explorer's recent blocks behind a 12-second edge cache (#172, #174, #176–#178).
@@ -32,12 +36,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - ETH can catch up on drpc's free plan: JSON-RPC batch size is capped per chain (#169).
 - The indexer's boot-time schema check retries on more connection-loss shapes instead of crash-looping (#164–#166).
 - AhrefsBot is blocked in `robots.txt` and throttled on heavy paths (#167).
-- The homepage search placeholder fits on phones instead of breaking off mid-word, and every `/api/admin/*` route and `/api/health` checks the admin token in constant time.
-- **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and block history can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken.
+- The homepage search placeholder fits on phones instead of breaking off mid-word, and every `/api/admin/*` route and `/api/health` checks the admin token in constant time (#237).
+- **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and block history can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken (#234).
 
 ### Security
 - **Upgraded drizzle-orm to 0.45.2** (drizzle-kit to 0.31.10), clearing the "SQL injection via improperly escaped SQL identifiers" advisory. Nothing here calls `sql.identifier()`, so it was not reachable. Since 0.44, drizzle wraps every database error in one that carries the SQL, not the reason. The deadlock retries, the indexer's boot-time database retry, and every log line and response that reports a database error now read the underlying Postgres error.
-- Cleared the dependency security backlog (#179), plus routine dependency updates (#216, #217).
+- Cleared the dependency security backlog (#179), plus routine dependency updates (#216, #217). `sharp` 0.35.4 (CVE-2026-96889) left the tree with wrangler 4.149 (#235).
 
 ## [0.3.0.0] - 2026-09-18
 
@@ -149,7 +153,8 @@ The platform was unified, rebranded to **Altscan**, and open-sourced. This relea
 - Unified indexer: one chain-configurable worker for BNB Chain and Ethereum
 - Render hosting: web service + 2 indexer workers + PostgreSQL + Redis
 
-[Unreleased]: https://github.com/heathermhuang/altscan/compare/v0.3.0.0...HEAD
+[Unreleased]: https://github.com/heathermhuang/altscan/compare/v0.4.0.0...HEAD
+[0.4.0.0]: https://github.com/heathermhuang/altscan/compare/v0.3.0.0...v0.4.0.0
 [0.3.0.0]: https://github.com/heathermhuang/altscan/compare/v0.2.0.0...v0.3.0.0
 [0.2.0.0]: https://github.com/heathermhuang/altscan/compare/v0.1.1.0...v0.2.0.0
 [0.1.1.0]: https://github.com/heathermhuang/altscan/compare/v0.1.0.0...v0.1.1.0
