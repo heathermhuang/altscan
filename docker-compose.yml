@@ -83,6 +83,9 @@ services:
       args:
         # Build-time: Next inlines NEXT_PUBLIC_CHAIN into the client bundle.
         CHAIN: ${CHAIN:-bnb}
+        # Optional, off when empty. Also passed at run time below.
+        GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
+        BINANCE_REF_CODE: ${BINANCE_REF_CODE:-}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -104,6 +107,9 @@ services:
       # locally indexed data only. See docs/SELF_HOSTING.md.
       MORALIS_API_KEY: ${MORALIS_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      # Analytics and referral ads: off unless set (docs/SELF_HOSTING.md).
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
+      BINANCE_REF_CODE: ${BINANCE_REF_CODE:-}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/ping"]
       interval: 15s

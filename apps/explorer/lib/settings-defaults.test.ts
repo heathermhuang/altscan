@@ -11,6 +11,9 @@ import {
 } from './settings-defaults'
 
 const bnb = getChainConfig('bnb')
+// The hosted explorers set BINANCE_REF_CODE; a fresh fork does not.
+const HOSTED = { BINANCE_REF_CODE: 'BNBSCAN' } as unknown as NodeJS.ProcessEnv
+const FORK = {} as NodeJS.ProcessEnv
 
 describe('settings-defaults', () => {
   it('falls back to the built-in quick links', () => {
@@ -33,13 +36,25 @@ describe('settings-defaults', () => {
   })
 
   it('computes disabled placements and ref code', () => {
-    expect(resolveAds(null)).toEqual({ refCode: null, disabled: [] })
+    expect(resolveAds(null, FORK)).toEqual({ refCode: null, disabled: [] })
     const r = resolveAds({
       binanceRefCode: 'XYZ',
       placements: { footer_strip: { enabled: false }, gas_top: { enabled: true } },
-    })
+    }, FORK)
     expect(r.refCode).toBe('XYZ')
     expect(r.disabled).toEqual(['footer_strip'])
+  })
+
+  it('takes the ref code from BINANCE_REF_CODE, with a saved setting winning', () => {
+    expect(resolveAds(null, HOSTED).refCode).toBe('BNBSCAN')
+    expect(resolveAds(null, { BINANCE_REF_CODE: '  ETHSCAN \n' } as unknown as NodeJS.ProcessEnv).refCode).toBe('ETHSCAN')
+    expect(resolveAds({ binanceRefCode: 'XYZ' }, HOSTED).refCode).toBe('XYZ')
+  })
+
+  it('has no built-in ref code: unset, blank or malformed BINANCE_REF_CODE is none', () => {
+    for (const v of [undefined, '', '   ', 'has spaces', 'x', 'a'.repeat(33), 'semi;colon']) {
+      expect(resolveAds(null, { BINANCE_REF_CODE: v } as unknown as NodeJS.ProcessEnv).refCode, String(v)).toBeNull()
+    }
   })
 
   describe('resolveRpc', () => {
@@ -136,8 +151,17 @@ describe('buildAdConfig', () => {
   }
 
   it('with no override: binance eligible, nothing disabled, no explicit placements', () => {
-    expect(buildAdConfig(null, { binanceRestricted: false, creativesBaseUrl: BASE })).toEqual({
+    expect(buildAdConfig(null, { binanceRestricted: false, creativesBaseUrl: BASE }, HOSTED)).toEqual({
       eligible: true,
+      refCode: 'BNBSCAN',
+      disabled: [],
+      placements: {},
+    })
+  })
+
+  it('on a fork with no ref code, binance is never eligible', () => {
+    expect(buildAdConfig(null, { binanceRestricted: false, creativesBaseUrl: BASE }, FORK)).toEqual({
+      eligible: false,
       refCode: null,
       disabled: [],
       placements: {},
@@ -145,7 +169,7 @@ describe('buildAdConfig', () => {
   })
 
   it('reports geo-restriction through `eligible` for old clients', () => {
-    expect(buildAdConfig(null, { binanceRestricted: true, creativesBaseUrl: BASE }).eligible).toBe(
+    expect(buildAdConfig(null, { binanceRestricted: true, creativesBaseUrl: BASE }, HOSTED).eligible).toBe(
       false,
     )
   })
@@ -228,10 +252,33 @@ describe('buildAdConfig', () => {
         home_after_stats: { mix: [{ provider: 'binance' as const, weight: 1 }] },
       },
     }
-    const out = buildAdConfig(override, { binanceRestricted: true, creativesBaseUrl: BASE })
+    const out = buildAdConfig(override, { binanceRestricted: true, creativesBaseUrl: BASE }, HOSTED)
     expect(out.placements.gas_top!.candidates.map((c) => c.kind)).toEqual(['house'])
     // A binance-only placement is left with nothing — identical to today's behaviour.
     expect(out.placements.home_after_stats!.candidates).toEqual([])
+    // Unrestricted, the same mix keeps both.
+    const open = buildAdConfig(override, { binanceRestricted: false, creativesBaseUrl: BASE }, HOSTED)
+    expect(open.placements.gas_top!.candidates.map((c) => c.kind)).toEqual(['binance', 'house'])
+  })
+
+  it('without a ref code, drops binance slots from explicit mixes but keeps house ones', () => {
+    const out = buildAdConfig(
+      {
+        creatives: [CREATIVE],
+        placements: {
+          gas_top: {
+            mix: [
+              { provider: 'binance' as const, weight: 1 },
+              { provider: 'house' as const, creativeId: 'promo', weight: 1 },
+            ],
+          },
+        },
+      },
+      { binanceRestricted: false, creativesBaseUrl: BASE },
+      FORK,
+    )
+    expect(out.eligible).toBe(false)
+    expect(out.placements.gas_top!.candidates.map((c) => c.kind)).toEqual(['house'])
   })
 
   it('keeps refCode and disabled working exactly as before', () => {

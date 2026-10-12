@@ -226,6 +226,8 @@ indexer's retention and disk settings.
 | `REDIS_URL` | Recommended | Redis connection string; without it, rate limits and caches are per-process |
 | `MORALIS_API_KEY` | No | Moralis API for balance and NFT enrichment |
 | `ADMIN_SECRET` | No | Bearer token for the `/api/admin/*` endpoints; unset, they refuse every request |
+| `GA_MEASUREMENT_ID` | No | Google Analytics measurement ID; unset, no analytics script loads |
+| `BINANCE_REF_CODE` | No | Referral code for the sponsored Binance placements; unset, they never render |
 
 ### Free RPC Endpoints
 
@@ -315,8 +317,9 @@ curl -X POST "https://your-explorer.example/api/admin/db-prune?days=7&dry=true" 
   code changes rather than configuration.
 - **Contract verification is Sourcify-only**, and the explorer reads it rather than
   accepting source.
-- **A fork carries the hosted sites' identity** — analytics IDs, canonical domain, ad
-  placements and the network switcher's target live in `packages/chain-config`. See
+- **The canonical domain and the network switcher's target are per-chain code** in
+  `packages/chain-config`, so a public fork edits them there. Analytics and referral ads
+  are off unless configured. See
   [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#before-you-run-a-public-fork).
 
 ## Contributing

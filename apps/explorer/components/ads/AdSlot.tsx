@@ -33,7 +33,8 @@ type AdConfig = {
 // ad for up to 5 minutes after rollout. Bumping the key retires it immediately.
 const AD_CONFIG_STORAGE_KEY = 'ad_config_v2'
 const AD_CONFIG_TTL_MS = 5 * 60 * 1000
-const FALLBACK: AdConfig = { eligible: true, refCode: null, disabled: [], placements: {} }
+// No config (fetch failed, bad JSON) ⇒ no Binance ad: there is no referral code to link to.
+const FALLBACK: AdConfig = { eligible: false, refCode: null, disabled: [], placements: {} }
 
 /** A placement with no explicit mix is Binance-only — the pre-Phase-B default. */
 const BINANCE_ONLY: Candidate[] = [{ kind: 'binance', weight: 1 }]
@@ -121,7 +122,8 @@ export function AdSlot({
   const [roll] = useState(() => Math.random())
   const impressionTracked = useRef(false)
   const copy = useMemo(() => getBinanceReferralCopy(context, chainConfig), [context])
-  const href = getBinanceReferralUrl(chainConfig.key, config?.refCode ?? null)
+  // Only read when a binance candidate is chosen, which requires a refCode (below).
+  const href = config?.refCode ? getBinanceReferralUrl(config.refCode) : ''
 
   useEffect(() => {
     let alive = true
@@ -135,12 +137,13 @@ export function AdSlot({
 
   // Settings can disable individual placements. Geo-ineligibility no longer
   // hides everything — the server already dropped binance candidates for
-  // restricted countries, so a house ad still runs there.
+  // restricted countries, so a house ad still runs there. A deployment with no
+  // referral code configured gets no binance candidates at all.
   const candidates = config
     ? config.disabled.includes(placement)
       ? []
       : (config.placements[placement]?.candidates ?? BINANCE_ONLY).filter(
-          (c) => c.kind !== 'binance' || config.eligible,
+          (c) => c.kind !== 'binance' || (config.eligible && config.refCode !== null),
         )
     : null
   const chosen = candidates ? pickWeighted(candidates, roll) : null

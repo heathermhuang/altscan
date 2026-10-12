@@ -75,13 +75,30 @@ export function resolveRpc(
   }
 }
 
-export function resolveAds(override: AdsSettings | null): {
+/** Same shape the settings schema accepts for `ads.binanceRefCode`. */
+const REF_CODE = /^[A-Za-z0-9_-]{2,32}$/
+
+/**
+ * The deployment's Binance referral code, from BINANCE_REF_CODE; null when unset
+ * or malformed. There is deliberately no built-in default: a fork that never sets
+ * one shows no referral placements, rather than earning for whoever wrote the code.
+ */
+export function envBinanceRefCode(env: NodeJS.ProcessEnv = process.env): string | null {
+  const code = env.BINANCE_REF_CODE?.trim()
+  return code && REF_CODE.test(code) ? code : null
+}
+
+/** refCode null ⇒ no Binance placements anywhere (house creatives are unaffected). */
+export function resolveAds(
+  override: AdsSettings | null,
+  env: NodeJS.ProcessEnv = process.env,
+): {
   refCode: string | null
   disabled: AdPlacement[]
 } {
   const placements = override?.placements ?? {}
   return {
-    refCode: override?.binanceRefCode ?? null,
+    refCode: override?.binanceRefCode ?? envBinanceRefCode(env),
     disabled: AD_PLACEMENTS.filter((p) => placements[p]?.enabled === false),
   }
 }
@@ -101,7 +118,8 @@ export type HouseCandidate = {
 export type ResolvedCandidate = BinanceCandidate | HouseCandidate
 
 export type AdConfigPayload = {
-  /** Kept for pre-Phase-B clients holding a cached config shape. */
+  /** Whether Binance candidates may run: the visitor is not geo-restricted AND a
+   *  referral code is configured. Kept for pre-Phase-B clients holding a cached config shape. */
   eligible: boolean
   refCode: string | null
   disabled: AdPlacement[]
@@ -192,8 +210,10 @@ export function buildAdConfig(
      *  check (back-compatible when CREATIVES_KEY_PREFIX is unset). */
     creativesKeyPrefix?: string | null
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): AdConfigPayload {
-  const { refCode, disabled } = resolveAds(override)
+  const { refCode, disabled } = resolveAds(override, env)
+  const binanceOn = !opts.binanceRestricted && refCode !== null
   const byId = new Map((override?.creatives ?? []).map((c) => [c.id, c]))
   const placements: AdConfigPayload['placements'] = {}
 
@@ -202,7 +222,7 @@ export function buildAdConfig(
     const candidates: ResolvedCandidate[] = []
     for (const slot of cfg.mix) {
       if (slot.provider === 'binance') {
-        if (!opts.binanceRestricted) candidates.push({ kind: 'binance', weight: slot.weight })
+        if (binanceOn) candidates.push({ kind: 'binance', weight: slot.weight })
         continue
       }
       const creative = slot.creativeId ? byId.get(slot.creativeId) : undefined
@@ -223,5 +243,5 @@ export function buildAdConfig(
     placements[placement as AdPlacement] = { candidates }
   }
 
-  return { eligible: !opts.binanceRestricted, refCode, disabled, placements }
+  return { eligible: binanceOn, refCode, disabled, placements }
 }

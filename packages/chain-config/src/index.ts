@@ -196,8 +196,6 @@ export type ChainConfig = {
   defaultStartBlock: number
   /** Poll interval in ms (matches block time) */
   pollMs: number
-  /** Google Analytics tracking ID */
-  gaTrackingId: string
   /** Peer explorer URL for network switcher */
   peerUrl: string
   /** Peer dev URL for local development */
@@ -228,9 +226,6 @@ export type ChainConfig = {
   /** Fungible-token standard label, e.g. "BEP-20". The bare prefix ("BEP"/"ERC")
    *  is derived from this, so there is no second field to keep in sync. */
   tokenStandard: string
-  /** Default Binance referral code when no override is configured. Was duplicated
-   *  as a key ternary in both lib/binance-referral.ts and the admin settings route. */
-  binanceRefCode: string
   /** DEX names used in page copy and FAQ structured data. */
   dex: {
     /** Best-known AMM, named on its own, e.g. "PancakeSwap". */
@@ -270,7 +265,6 @@ export const BSC: ChainConfig = {
   defaultRpcUrl: 'https://bsc-dataseed1.binance.org/',
   defaultStartBlock: 38000000,
   pollMs: 3_000,
-  gaTrackingId: 'G-BCLL9EVN8Z',
   peerUrl: 'https://ethscan.io',
   peerDevUrl: 'http://localhost:3001',
   externalExplorer: 'BscScan',
@@ -285,7 +279,6 @@ export const BSC: ChainConfig = {
     coincapId: 'binance-coin',
   },
   tokenStandard: 'BEP-20',
-  binanceRefCode: 'BNBSCAN',
   dex: {
     primary: 'PancakeSwap',
     others: 'PancakeSwap, BiSwap, and other BNB Chain AMMs',
@@ -367,7 +360,6 @@ export const ETH: ChainConfig = {
   defaultRpcUrl: 'https://ethereum-rpc.publicnode.com',
   defaultStartBlock: 0,
   pollMs: 12_000,
-  gaTrackingId: 'G-DRSRLLSRMC',
   peerUrl: 'https://bnbscan.com',
   peerDevUrl: 'http://localhost:3000',
   externalExplorer: 'Etherscan',
@@ -382,7 +374,6 @@ export const ETH: ChainConfig = {
     coincapId: 'ethereum',
   },
   tokenStandard: 'ERC-20',
-  binanceRefCode: 'ETHSCAN',
   dex: {
     primary: 'Uniswap',
     others: 'Uniswap V2/V3, SushiSwap, and other Ethereum AMMs',

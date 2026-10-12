@@ -69,6 +69,9 @@ pnpm test    # vitest run (root config, all workspaces)
   named `eth-indexer` has `rootDir: apps/indexer`, **not** `apps/eth-indexer`.
 - Import `@altscan/explorer-core/format`, **not** the barrel, in code that must stay light.
 - New provider cache keys use the `moralis:v2:<chain>:<currency>` prefix.
+- Analytics and Binance referral ads are **opt-in by env** (`GA_MEASUREMENT_ID`,
+  `BINANCE_REF_CODE`; the hosted values are in `render.yaml`). Never give either a built-in
+  default: a fork would report its visitors to, and earn referrals for, the hosted sites.
 - `tt_whale_idx` (one partial index on `token_transfers` covering every tracked whale token) **encodes its
   predicate in its name**: `CREATE INDEX IF NOT EXISTS` keeps an existing index, so adding a token or changing
   an `indexFloor` without a new name (`tt_whale_v2_idx`) silently leaves production on the old predicate.

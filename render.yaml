@@ -29,6 +29,12 @@ services:
                               # Without it, 'use client' components default to bnb (renders
                               # "Value (BNB)" / wrong theme on the ETH build). See guard test
                               # apps/explorer/lib/client-chain-config.test.ts.
+      # The hosted site's identity. A fork leaves both unset: no analytics, no
+      # referral placements (apps/explorer/lib/analytics.ts, settings-defaults.ts).
+      - key: GA_MEASUREMENT_ID
+        value: G-BCLL9EVN8Z
+      - key: BINANCE_REF_CODE
+        value: BNBSCAN
       - key: DATABASE_URL
         fromDatabase:
           name: bnbscan-db
@@ -88,6 +94,10 @@ services:
                               # Without it, 'use client' components default to bnb (renders
                               # "Value (BNB)" / wrong theme on this ETH build). See guard test
                               # apps/explorer/lib/client-chain-config.test.ts.
+      - key: GA_MEASUREMENT_ID
+        value: G-DRSRLLSRMC
+      - key: BINANCE_REF_CODE
+        value: ETHSCAN
       - key: ETH_DATABASE_URL
         fromDatabase:
           name: ethscan-db
