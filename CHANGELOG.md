@@ -31,7 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - ETH can catch up on drpc's free plan: JSON-RPC batch size is capped per chain (#169).
 - The indexer's boot-time schema check retries on more connection-loss shapes instead of crash-looping (#164–#166).
 - AhrefsBot is blocked in `robots.txt` and throttled on heavy paths (#167).
-- **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and the database can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken.
+- **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and block history can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken.
 
 ### Security
 - **Upgraded drizzle-orm to 0.45.2** (drizzle-kit to 0.31.10), clearing the "SQL injection via improperly escaped SQL identifiers" advisory. Nothing here calls `sql.identifier()`, so it was not reachable. Since 0.44, drizzle wraps every database error in one that carries the SQL, not the reason. The deadlock retries, the indexer's boot-time database retry, and every log line and response that reports a database error now read the underlying Postgres error.

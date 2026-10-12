@@ -286,7 +286,8 @@ The indexer runs a retention pass every 6 hours. Past `RETENTION_DAYS` (default 
 deletes logs, DEX trades and gas history, and drops each transaction's input data, which
 is refetched from RPC on demand; the transactions themselves stay queryable. Transactions,
 token transfers and blocks are kept forever unless you also set `COMPACT_RETENTION_DAYS`,
-so that is the setting that bounds database size. See
+so that is the setting that bounds block history. The `addresses` table is never pruned
+and keeps growing with the chain. See
 [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#retention-and-disk).
 
 There is also a manual prune endpoint. It **deletes whole rows** — transactions and blocks

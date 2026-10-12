@@ -113,9 +113,12 @@ The indexer runs a retention pass 15 minutes after it starts and every 6 hours a
   from RPC when a page needs it.
 - **Past `COMPACT_RETENTION_DAYS`** it deletes the transactions, token transfers, internal
   transactions and blocks themselves. Unset, these are kept forever, so this is the setting
-  that bounds the database. Setting it to `RETENTION_DAYS` or lower is the cheap choice:
+  that bounds block history. Setting it to `RETENTION_DAYS` or lower is the cheap choice:
   old transactions are then deleted outright, without first rewriting each one to drop its
   input, a rewrite that takes hours on a busy chain like BNB.
+- **Never pruned:** `addresses`, `tokens`, `token_balances` and `contracts`. `addresses`
+  gains a row for every new address the chain touches, so the database keeps growing
+  slowly even with both windows set. Leave headroom for it.
 
 As a guide, BNB Chain writes roughly **12–15 GB per month** and Ethereum roughly
 **6–8 GB**. Check free disk before you lengthen either window.
