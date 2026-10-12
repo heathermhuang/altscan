@@ -153,7 +153,8 @@ The platform was unified, rebranded to **Altscan**, and open-sourced. This relea
 - Unified indexer: one chain-configurable worker for BNB Chain and Ethereum
 - Render hosting: web service + 2 indexer workers + PostgreSQL + Redis
 
-[Unreleased]: https://github.com/heathermhuang/altscan/compare/v0.3.0.0...HEAD
+[Unreleased]: https://github.com/heathermhuang/altscan/compare/v0.4.0.0...HEAD
+[0.4.0.0]: https://github.com/heathermhuang/altscan/compare/v0.3.0.0...v0.4.0.0
 [0.3.0.0]: https://github.com/heathermhuang/altscan/compare/v0.2.0.0...v0.3.0.0
 [0.2.0.0]: https://github.com/heathermhuang/altscan/compare/v0.1.1.0...v0.2.0.0
 [0.1.1.0]: https://github.com/heathermhuang/altscan/compare/v0.1.0.0...v0.1.1.0
