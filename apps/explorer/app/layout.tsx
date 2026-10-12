@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header'
 import { Footer } from '@/components/layout/Footer'
 import { WebMcpProvider } from '@/components/agent/WebMcpProvider'
 import { chainConfig } from '@/lib/chain'
+import { gaMeasurementId } from '@/lib/analytics'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 // JetBrains Mono, subset to Basic Latin plus the UI's arrows (fonts/OFL.txt): one 8 KB variable
@@ -61,6 +62,7 @@ export const viewport: Viewport = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const gaId = gaMeasurementId()
   return (
     <html
       lang="en"
@@ -81,19 +83,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* First tab stop: hidden until focused, then pinned above the sticky header (z-50). */}
         <a href="#main" className="skip">Skip to content</a>
-        {/* Google Analytics */}
-        <Script
-          src={`https://www.googletagmanager.com/gtag/js?id=${chainConfig.gaTrackingId}`}
-          strategy="afterInteractive"
-        />
-        <Script id="google-analytics" strategy="afterInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', '${chainConfig.gaTrackingId}');
-          `}
-        </Script>
+        {/* Google Analytics, only when the deployment sets GA_MEASUREMENT_ID */}
+        {gaId && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}
+              strategy="afterInteractive"
+            />
+            <Script id="google-analytics" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${gaId}');
+              `}
+            </Script>
+          </>
+        )}
         <Header />
         <main id="main" tabIndex={-1} className="mn">{children}</main>
         <Footer />

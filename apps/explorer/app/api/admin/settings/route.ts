@@ -3,7 +3,7 @@ import { AD_PLACEMENTS, SETTINGS_KEYS } from '@altscan/settings-schema'
 import { db, schema } from '@/lib/db'
 import { isAdminRequest } from '@/lib/admin-auth'
 import { chainConfig } from '@/lib/chain'
-import { DEFAULT_QUICK_LINKS, resolveRpc, rpcHosts } from '@/lib/settings-defaults'
+import { DEFAULT_QUICK_LINKS, envBinanceRefCode, resolveRpc, rpcHosts } from '@/lib/settings-defaults'
 
 /** Host only. The effective fallback RPC can be a keyed URL (Chainstack et al
  *  put the API key in the path), and this payload is readable by every console
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     defaults: {
       links: { quickLinks: DEFAULT_QUICK_LINKS },
       footer: { tagline: chainConfig.tagline, notAffiliatedWith: chainConfig.notAffiliatedWith },
-      ads: { binanceRefCode: chainConfig.binanceRefCode, placements: {} },
+      ads: { binanceRefCode: envBinanceRefCode() ?? undefined, placements: {} },
       rpc: { webRpcHost: rpcFallbackHost(), rpcTimeoutMs: resolveRpc(null, chainConfig, process.env).timeoutMs },
     },
     ...(warning ? { warning } : {}),

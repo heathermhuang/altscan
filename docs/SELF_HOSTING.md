@@ -216,15 +216,23 @@ Worth knowing before you commit to this:
 
 ## Before you run a public fork
 
-A fork serves the hosted sites' identity until you change it. These live in each chain's
-entry in [`packages/chain-config/src/index.ts`](../packages/chain-config/src/index.ts):
+Analytics and referral ads are off unless you turn them on:
 
-- **`gaTrackingId`** — the Google Analytics property every page reports to.
+- **`GA_MEASUREMENT_ID`** (e.g. `G-XXXXXXXXXX`) — loads Google Analytics on every page.
+  Unset, no analytics script loads.
+- **`BINANCE_REF_CODE`** — enables the sponsored Binance placements, linking with your
+  referral code. Unset, they never render and no space is reserved for them. House ads
+  configured in the admin console (`apps/admin`) are unaffected.
+
+Both are read when pages render, and Next renders the static ones during the build, so
+set them where the explorer builds as well as where it runs. On Render, service
+environment variables cover both.
+
+Two more things carry the hosted sites' identity and are set per chain in
+[`packages/chain-config/src/index.ts`](../packages/chain-config/src/index.ts):
+
 - **`domain`** — used for canonical URLs, the sitemap, `robots.txt`, structured data, and
   the API's allowed CORS origin.
-- **`binanceRefCode`** — the referral code on the sponsored Binance placements, which run
-  by default. Each placement can be switched off in the `ads` runtime setting, a row in
-  the `explorer_settings` table that the admin console (`apps/admin`) edits.
 - **`peerUrl`** — where the network switcher sends visitors for the other chain.
 
 The status page (`apps/status`) monitors bnbscan.com and ethscan.io; its targets are set

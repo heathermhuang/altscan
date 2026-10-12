@@ -1,4 +1,4 @@
-import { getChainConfig, type ChainConfig } from '@altscan/chain-config'
+import type { ChainConfig } from '@altscan/chain-config'
 import { AD_PLACEMENTS } from '@altscan/settings-schema'
 
 export type BinanceReferralContext =
@@ -61,9 +61,9 @@ export function isBinanceRestrictedCountry(country: string | null | undefined): 
   return BINANCE_RESTRICTED_COUNTRIES.has(country.trim().toUpperCase())
 }
 
-export function getBinanceReferralUrl(chainKey: string, refCode?: string | null): string {
-  const ref = refCode || getChainConfig(chainKey).binanceRefCode
-  return `https://www.binance.com/register?ref=${encodeURIComponent(ref)}`
+/** Callers pass the deployment's configured code (resolveAds); there is no default. */
+export function getBinanceReferralUrl(refCode: string): string {
+  return `https://www.binance.com/register?ref=${encodeURIComponent(refCode)}`
 }
 
 export function isBinanceIntentQuery(query: string): boolean {
