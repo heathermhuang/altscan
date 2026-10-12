@@ -169,8 +169,7 @@ pnpm install
 # Start Postgres from the Docker stack (localhost:5432; user, password and database all "altscan")
 docker compose up -d postgres
 
-# Set up environment, then point DATABASE_URL at that Postgres:
-#   postgresql://altscan:altscan@localhost:5432/altscan
+# Set up the explorer environment (defaults match the local Docker Postgres)
 cp apps/explorer/.env.example apps/explorer/.env.local
 
 # Start the BNB explorer

@@ -18,7 +18,7 @@ Thanks for your interest in **Altscan** — the open-source, multi-chain block e
 git clone https://github.com/heathermhuang/altscan.git
 cd altscan
 pnpm install
-cp apps/explorer/.env.example apps/explorer/.env.local   # fill in RPC + DB URLs
+cp apps/explorer/.env.example apps/explorer/.env.local   # defaults match the local Docker Postgres
 CHAIN=bnb NEXT_PUBLIC_CHAIN=bnb pnpm --filter @altscan/explorer dev
 ```
 

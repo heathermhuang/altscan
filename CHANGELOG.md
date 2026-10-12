@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
+
 ## [0.4.0.0] - 2026-10-12
 
 The explorer redesign ("Ledger Tape") across every route, a long truth-and-correctness pass on what its pages say, and an open-source release that a fork can run as its own: analytics and referral ads are now opt-in, and the docs were checked line by line against the code (#150, #163–#237).
