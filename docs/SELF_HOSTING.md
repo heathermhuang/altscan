@@ -225,8 +225,9 @@ Analytics and referral ads are off unless you turn them on:
   configured in the admin console (`apps/admin`) are unaffected.
 
 Both are read when pages render, and Next renders the static ones during the build, so
-set them where the explorer builds as well as where it runs. On Render, service
-environment variables cover both.
+they must reach the build as well as the running server. With Docker, set them in `.env`
+and rebuild (`docker compose up -d --build`); the stack passes them to both. On Render,
+service environment variables cover both.
 
 Two more things carry the hosted sites' identity and are set per chain in
 [`packages/chain-config/src/index.ts`](../packages/chain-config/src/index.ts):

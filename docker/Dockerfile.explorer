@@ -23,6 +23,13 @@ ARG CHAIN=bnb
 ENV CHAIN=${CHAIN}
 ENV NEXT_PUBLIC_CHAIN=${CHAIN}
 
+# Optional, and off when empty: analytics and referral ads (docs/SELF_HOSTING.md).
+# Static pages render here, so they must be set at build as well as at run time.
+ARG GA_MEASUREMENT_ID=
+ARG BINANCE_REF_CODE=
+ENV GA_MEASUREMENT_ID=${GA_MEASUREMENT_ID}
+ENV BINANCE_REF_CODE=${BINANCE_REF_CODE}
+
 # Next prerenders the ISR pages during build. getDb() throws when NODE_ENV=production
 # and the chain's DB env var is unset, so both are set to a syntactically valid
 # placeholder. The database does NOT need to be reachable — pages that fail to query
