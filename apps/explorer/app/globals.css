@@ -294,11 +294,13 @@
   .sb-list li[aria-selected="true"] {
     @apply border-l-acc bg-hair2 text-ink;
   }
+  /* Large type only from sm up: on a phone the hero field keeps the header's size, so the
+     placeholder fits beside the button. */
   .sb-lg input {
-    @apply h-12 px-4 text-[15px];
+    @apply h-12 sm:px-4 sm:text-[15px];
   }
   .sb-lg button {
-    @apply h-12 px-6 text-[15px];
+    @apply h-12 sm:px-6 sm:text-[15px];
   }
 }
 

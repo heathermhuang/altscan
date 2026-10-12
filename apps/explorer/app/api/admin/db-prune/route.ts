@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 import { sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // allow up to 5 min for large deletes
 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
 
 /**
  * POST /api/admin/db-prune
@@ -19,8 +19,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
  *   ?vacuum=full     — run VACUUM FULL instead of plain VACUUM (reclaims disk to OS, but locks table)
  */
 export async function POST(request: NextRequest) {
-  const auth = request.headers.get('authorization')
-  if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
+  if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

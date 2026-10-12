@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - ETH can catch up on drpc's free plan: JSON-RPC batch size is capped per chain (#169).
 - The indexer's boot-time schema check retries on more connection-loss shapes instead of crash-looping (#164–#166).
 - AhrefsBot is blocked in `robots.txt` and throttled on heavy paths (#167).
+- The homepage search placeholder fits on phones instead of breaking off mid-word, and every `/api/admin/*` route and `/api/health` checks the admin token in constant time.
 - **Self-hosting:** the Docker stack now passes `DB_DISK_GB` and `COMPACT_RETENTION_DAYS` to the indexer, so the disk alarm and action thresholds it already set can fire, and block history can be bounded from `.env`. The README and self-hosting guide were checked against the code and corrected, and the screenshots retaken.
 
 ### Security

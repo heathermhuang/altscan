@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation'
 import { routeForQuery } from '@/lib/search-route'
 import type { Combo, SuggestProps } from './SearchSuggest'
 
-const PLACEHOLDER = 'Search by address, tx hash, block number, or token name...'
-const PLACEHOLDER_SHORT = 'Address, tx, block or token'
+// One short placeholder for both sizes: the long one was cut mid-word in the phone hero
+// ("Search by address, tx ha"). The aria-label below keeps the full description.
+const PLACEHOLDER = 'Address, tx, block or token'
 
 export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: string }) {
   const [query, setQuery] = useState('')
@@ -42,7 +43,7 @@ export function SearchBar({ size = 'md', label }: { size?: 'lg' | 'md'; label?: 
         value={query}
         onChange={e => setQuery(e.target.value)}
         onFocus={load}
-        placeholder={lg ? PLACEHOLDER : PLACEHOLDER_SHORT}
+        placeholder={PLACEHOLDER}
         aria-label="Search by address, tx hash, block number, or token name"
         aria-keyshortcuts="/"
         {...comboboxProps}
