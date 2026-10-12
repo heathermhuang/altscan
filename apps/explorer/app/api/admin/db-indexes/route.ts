@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { dbErrorMessage } from '@altscan/db'
 import { db } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 import { sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
 
 /**
  * POST /api/admin/db-indexes
@@ -15,8 +15,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
  * Requires Authorization: Bearer <ADMIN_SECRET> header.
  */
 export async function POST(request: NextRequest) {
-  const auth = request.headers.get('authorization')
-  if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
+  if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

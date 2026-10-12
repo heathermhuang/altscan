@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
+import { isAdminRequest } from '@/lib/admin-auth'
 import { desc, sql } from 'drizzle-orm'
 import { getCacheSizes, getTotalCacheEntries } from '@/lib/cache-registry'
 import { getDataProviderHealth } from '@/lib/providers'
@@ -9,12 +10,9 @@ import { GAP_SUMMARY_SQL, summarizeGapRow, completenessStatus } from '@/lib/inde
 
 export const dynamic = 'force-dynamic'
 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || ''
-
 export async function GET(request: NextRequest) {
   // Check if caller is authenticated for detailed diagnostics
-  const auth = request.headers.get('authorization') ?? ''
-  const isAdmin = ADMIN_SECRET && auth === `Bearer ${ADMIN_SECRET}`
+  const isAdmin = isAdminRequest(request)
 
   try {
     let lagSeconds: number | null = null
