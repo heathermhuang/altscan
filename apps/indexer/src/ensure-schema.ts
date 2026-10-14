@@ -638,6 +638,14 @@ export async function ensureSchema(): Promise<void> {
     } catch (err) {
       console.warn('[indexer] Could not retire tokens_holder_count_address_idx:', dbErrorMessage(err))
     }
+    try {
+      for (const stmt of retireOldTxWhaleIndexSql(await plainIndexIsValid('tx_whale_value_idx'))) {
+        await db.execute(sql.raw(stmt))
+        console.log(`[indexer] Retired the first whale index: ${stmt}`)
+      }
+    } catch (err) {
+      console.warn('[indexer] Could not retire tx_ts_value_idx:', dbErrorMessage(err))
+    }
     // Last, so it can never delay the steps above: on BNB this is one CONCURRENTLY
     // build per partition if the production build script has not already run.
     if (ttPartitioned) await ensurePartitionedTtWhaleIndex()
@@ -757,6 +765,17 @@ export const TOKENS_HEAL_PREDICATE =
  */
 export function retireOldTokensHealIndexSql(replacementValid: boolean): string[] {
   return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS tokens_holder_count_address_idx'] : []
+}
+
+/**
+ * /whales' first native index, tx_ts_value_idx ON transactions(timestamp DESC, value DESC).
+ * The partial tx_whale_value_idx superseded it, and /whales always reaches that one
+ * (its floor literal is spliced into every native query): 2 lifetime scans on BNB
+ * against 4.8 GB maintained on every transactions insert (2026-10-14). It goes once
+ * the partial is VALID, so /whales never falls back to a sequential scan.
+ */
+export function retireOldTxWhaleIndexSql(replacementValid: boolean): string[] {
+  return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS tx_ts_value_idx'] : []
 }
 
 export const TT_TOKEN_TS_IDX = 'tt_token_ts_idx'
@@ -939,17 +958,15 @@ export function buildConcurrentIndexList(
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_body_unpruned_idx    ON transactions(block_number) WHERE body_pruned = false',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
     // Whale Tracker native half: `timestamp >= cutoff AND value > threshold
-    // ORDER BY value DESC LIMIT 25`. No existing index carries `value`, so the
+    // ORDER BY value DESC LIMIT 25`. Without an index carrying `value`, the
     // planner seq-scans all of `transactions` — measured 37.5s on ETH and past a
     // 60s statement timeout on BNB, against the page's own 15s budget, which is
-    // what left /whales serving its error state. `timestamp` leads because it is
-    // the selective predicate; being a RANGE scan it does NOT supply the
-    // `value DESC` ordering, so a top-N sort still runs. The win is dropping the
-    // heap scan, not the sort.
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx         ON transactions(timestamp DESC, value DESC)',
-    // …but dropping the heap SCAN is not dropping the heap FETCHES. The index
-    // above still reads every candidate row from the heap to sort it, then
-    // throws all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
+    // what left /whales serving its error state.
+    //
+    // The first fix, tx_ts_value_idx ON transactions(timestamp DESC, value DESC),
+    // dropped the heap SCAN but not the heap FETCHES (now retired at boot, see
+    // retireOldTxWhaleIndexSql). It still read every candidate row from the heap to sort it, then
+    // threw all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
     // 24.8-58.5s at every threshold we can safely set. Raising the threshold
     // does not fix that — under retention-prune I/O the per-row cost swings
     // 3.5-9.4ms, so the total is set by contention, not by the row count.
