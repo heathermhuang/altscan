@@ -591,10 +591,6 @@ export async function ensureSchema(): Promise<void> {
     // 0 scans on BNB after 3.3M inserts (2026-09-15), and a random-key index is
     // exactly the per-insert maintenance BNB cannot spare during retention.
     'DROP INDEX CONCURRENTLY IF EXISTS dex_pair_idx',
-    // Superseded by the partial tx_whale_value_idx, which /whales always reaches
-    // (its floor literal is spliced into every native query). 2 lifetime scans on
-    // BNB against 4.8 GB maintained on every transactions insert (2026-10-14).
-    'DROP INDEX CONCURRENTLY IF EXISTS tx_ts_value_idx',
     // tt_tx_idx is redundant ONLY while the unique (tx_hash, log_index) exists, i.e.
     // on the monolithic table. Post-partition there is no unique → it's the tx-lookup
     // index and must NOT be dropped.
@@ -641,6 +637,14 @@ export async function ensureSchema(): Promise<void> {
       }
     } catch (err) {
       console.warn('[indexer] Could not retire tokens_holder_count_address_idx:', dbErrorMessage(err))
+    }
+    try {
+      for (const stmt of retireOldTxWhaleIndexSql(await plainIndexIsValid('tx_whale_value_idx'))) {
+        await db.execute(sql.raw(stmt))
+        console.log(`[indexer] Retired the first whale index: ${stmt}`)
+      }
+    } catch (err) {
+      console.warn('[indexer] Could not retire tx_ts_value_idx:', dbErrorMessage(err))
     }
     // Last, so it can never delay the steps above: on BNB this is one CONCURRENTLY
     // build per partition if the production build script has not already run.
@@ -761,6 +765,17 @@ export const TOKENS_HEAL_PREDICATE =
  */
 export function retireOldTokensHealIndexSql(replacementValid: boolean): string[] {
   return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS tokens_holder_count_address_idx'] : []
+}
+
+/**
+ * /whales' first native index, tx_ts_value_idx ON transactions(timestamp DESC, value DESC).
+ * The partial tx_whale_value_idx superseded it, and /whales always reaches that one
+ * (its floor literal is spliced into every native query): 2 lifetime scans on BNB
+ * against 4.8 GB maintained on every transactions insert (2026-10-14). It goes once
+ * the partial is VALID, so /whales never falls back to a sequential scan.
+ */
+export function retireOldTxWhaleIndexSql(replacementValid: boolean): string[] {
+  return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS tx_ts_value_idx'] : []
 }
 
 export const TT_TOKEN_TS_IDX = 'tt_token_ts_idx'
@@ -949,8 +964,8 @@ export function buildConcurrentIndexList(
     // what left /whales serving its error state.
     //
     // The first fix, tx_ts_value_idx ON transactions(timestamp DESC, value DESC),
-    // dropped the heap SCAN but not the heap FETCHES (it is now dropped at boot,
-    // see dropIndexes). It still read every candidate row from the heap to sort it, then
+    // dropped the heap SCAN but not the heap FETCHES (now retired at boot, see
+    // retireOldTxWhaleIndexSql). It still read every candidate row from the heap to sort it, then
     // threw all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
     // 24.8-58.5s at every threshold we can safely set. Raising the threshold
     // does not fix that — under retention-prune I/O the per-row cost swings

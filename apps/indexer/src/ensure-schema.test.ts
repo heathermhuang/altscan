@@ -13,6 +13,7 @@ import {
   partitionRangesToCreate,
   retireOldDexKeySql,
   retireOldTokensHealIndexSql,
+  retireOldTxWhaleIndexSql,
   TOKENS_HEAL_IDX,
   TOKENS_HEAL_PREDICATE,
 } from './ensure-schema'
@@ -164,6 +165,19 @@ describe('retireOldTokensHealIndexSql', () => {
 
   it('then drops the full index without blocking writes', () => {
     expect(retireOldTokensHealIndexSql(true)).toEqual(['DROP INDEX CONCURRENTLY IF EXISTS tokens_holder_count_address_idx'])
+  })
+})
+
+describe('retireOldTxWhaleIndexSql', () => {
+  // /whales' native half seq-scans `transactions` without a usable index, so the old
+  // one stays until the partial tx_whale_value_idx is valid (a fork upgrading from
+  // before it existed, or a failed build swept as invalid, keeps the fallback).
+  it('retires nothing until the replacement index is valid', () => {
+    expect(retireOldTxWhaleIndexSql(false)).toEqual([])
+  })
+
+  it('then drops tx_ts_value_idx without blocking writes', () => {
+    expect(retireOldTxWhaleIndexSql(true)).toEqual(['DROP INDEX CONCURRENTLY IF EXISTS tx_ts_value_idx'])
   })
 })
 
