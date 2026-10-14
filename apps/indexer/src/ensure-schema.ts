@@ -591,6 +591,10 @@ export async function ensureSchema(): Promise<void> {
     // 0 scans on BNB after 3.3M inserts (2026-09-15), and a random-key index is
     // exactly the per-insert maintenance BNB cannot spare during retention.
     'DROP INDEX CONCURRENTLY IF EXISTS dex_pair_idx',
+    // Superseded by the partial tx_whale_value_idx, which /whales always reaches
+    // (its floor literal is spliced into every native query). 2 lifetime scans on
+    // BNB against 4.8 GB maintained on every transactions insert (2026-10-14).
+    'DROP INDEX CONCURRENTLY IF EXISTS tx_ts_value_idx',
     // tt_tx_idx is redundant ONLY while the unique (tx_hash, log_index) exists, i.e.
     // on the monolithic table. Post-partition there is no unique → it's the tx-lookup
     // index and must NOT be dropped.
@@ -939,17 +943,15 @@ export function buildConcurrentIndexList(
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_body_unpruned_idx    ON transactions(block_number) WHERE body_pruned = false',
     'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_timestamp_idx        ON transactions(timestamp)',
     // Whale Tracker native half: `timestamp >= cutoff AND value > threshold
-    // ORDER BY value DESC LIMIT 25`. No existing index carries `value`, so the
+    // ORDER BY value DESC LIMIT 25`. Without an index carrying `value`, the
     // planner seq-scans all of `transactions` — measured 37.5s on ETH and past a
     // 60s statement timeout on BNB, against the page's own 15s budget, which is
-    // what left /whales serving its error state. `timestamp` leads because it is
-    // the selective predicate; being a RANGE scan it does NOT supply the
-    // `value DESC` ordering, so a top-N sort still runs. The win is dropping the
-    // heap scan, not the sort.
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tx_ts_value_idx         ON transactions(timestamp DESC, value DESC)',
-    // …but dropping the heap SCAN is not dropping the heap FETCHES. The index
-    // above still reads every candidate row from the heap to sort it, then
-    // throws all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
+    // what left /whales serving its error state.
+    //
+    // The first fix, tx_ts_value_idx ON transactions(timestamp DESC, value DESC),
+    // dropped the heap SCAN but not the heap FETCHES (it is now dropped at boot,
+    // see dropIndexes). It still read every candidate row from the heap to sort it, then
+    // threw all but 25 away: 47,692 rows / 23.8s on ETH at 24h, and on BNB
     // 24.8-58.5s at every threshold we can safely set. Raising the threshold
     // does not fix that — under retention-prune I/O the per-row cost swings
     // 3.5-9.4ms, so the total is set by contention, not by the row count.

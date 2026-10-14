@@ -111,7 +111,6 @@ const FIXTURE = `
   CREATE INDEX ON transactions (block_number);
   CREATE INDEX ON transactions (block_number) WHERE body_pruned = false;
   CREATE INDEX ON transactions (timestamp);
-  CREATE INDEX ON transactions (timestamp DESC, value DESC);
   ANALYZE transactions;
 `
 

@@ -195,14 +195,14 @@ describe('retireOldDexKeySql', () => {
 // ---------------------------------------------------------------------------
 describe('whale tracker indexes', () => {
   // The native half: `WHERE timestamp >= cutoff AND value > threshold
-  // ORDER BY value DESC LIMIT 25`. transactions is never partitioned, so this
-  // one is a plain entry in both modes.
-  it('creates tx_ts_value_idx in both partition modes', () => {
+  // ORDER BY value DESC LIMIT 25` is served by the partial tx_whale_value_idx.
+  // Its first index, tx_ts_value_idx, had 2 lifetime scans on BNB (2026-10-14)
+  // against 4.8 GB of per-insert maintenance, so it must not be rebuilt.
+  it('no longer creates tx_ts_value_idx in either partition mode', () => {
     for (const ttPartitioned of [false, true]) {
       const stmts = buildConcurrentIndexList(ttPartitioned, FLOOR)
         .filter(s => s.includes('tx_ts_value_idx'))
-      expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(1)
-      expect(stmts[0]).toContain('ON transactions(timestamp DESC, value DESC)')
+      expect(stmts, `partitioned=${ttPartitioned}`).toHaveLength(0)
     }
   })
 
