@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import {
-  spreadSeconds, ratePerMin, mergeBlocks, classify, retarget, playheadAt, indexRate, lagLabel, sinceOpened,
-  DELAY_S, STALL_S, MAX_RATE, JUMP_S,
+  spreadSeconds, ratePerMin, mergeBlocks, classify, goesOffline, retarget, playheadAt, indexRate, lagLabel, sinceOpened,
+  DELAY_S, STALL_S, MAX_RATE, JUMP_S, OFFLINE_AFTER,
 } from '../src/lib/tape.ts';
 import type { BlockTuple } from '../src/lib/chains.ts';
 import type { Playhead } from '../src/lib/tape.ts';
@@ -77,6 +77,17 @@ t('classify: stalled only past the threshold', () => {
 });
 t('classify: online without a block is offline', () => {
   assert.equal(classify(true, null, 1000), 'offline');
+});
+
+// goesOffline: one failed poll is a blip, two in a row is an outage
+t('goesOffline: a chain that was online survives one failed poll', () => {
+  assert.equal(OFFLINE_AFTER, 2);
+  assert.equal(goesOffline(true, 1), false);
+  assert.equal(goesOffline(true, 2), true);
+});
+t('goesOffline: with nothing shown yet, or already offline, a failure is offline at once', () => {
+  assert.equal(goesOffline(null, 1), true);
+  assert.equal(goesOffline(false, 1), true);
 });
 
 // playhead: follows the indexing speed, never moves back

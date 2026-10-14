@@ -1,5 +1,5 @@
 import {
-  spreadSeconds, ratePerMin, mergeBlocks, classify, retarget, playheadAt, indexRate, lagLabel,
+  spreadSeconds, ratePerMin, mergeBlocks, classify, goesOffline, retarget, playheadAt, indexRate, lagLabel,
   sinceOpened, POLL_S, type Playhead, type TapeBlock, type ChainStatus,
 } from '../lib/tape';
 import type { BlockTuple, ChainState, LatestBlock } from '../lib/chains';
@@ -21,6 +21,8 @@ interface Chain {
   tuples: BlockTuple[];
   blocks: TapeBlock[];
   online: boolean | null;
+  /** Failed polls in a row. */
+  misses: number;
   latest?: LatestBlock;
   ph: Playhead | null;
   prev: { newestT: number; wall: number } | null;
@@ -49,7 +51,7 @@ const chains: Chain[] = [...document.querySelectorAll<HTMLElement>('[data-chain]
   return {
     id: el.dataset.chain!, el, track, url: track.dataset.url!, domain: track.dataset.domain!,
     cap: el.dataset.chain === 'bnb' ? 400 : 64,
-    tuples: [], blocks: [], online: null, ph: null, prev: null, idx: null,
+    tuples: [], blocks: [], online: null, misses: 0, ph: null, prev: null, idx: null,
     tiles: new Map(), pend, frozenP: null, hl: null,
   };
 });
@@ -244,6 +246,7 @@ function apply(payload: Record<string, ChainState> | null) {
   chains.forEach((c, i) => {
     const s = payload?.[c.id];
     if (s?.online && s.blocks?.length) {
+      c.misses = 0;
       c.online = true;
       c.tuples = mergeBlocks(c.tuples, s.blocks, c.cap);
       c.latest = s.latest;
@@ -255,6 +258,10 @@ function apply(payload: Record<string, ChainState> | null) {
       c.lastSeen = { n: newestN, unix };
       firstSeen[c.id] ??= newestN;
       current[c.id] = newestN;
+    } else if (!goesOffline(c.online, ++c.misses)) {
+      // A single failed poll leaves the chain as it was; the tape stops at the newest block it has.
+      current[c.id] = c.tuples[0][0];
+      return;
     } else {
       c.online = false;
       // Freeze where it stood; the grey tiles keep showing the last blocks seen.

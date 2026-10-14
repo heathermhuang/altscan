@@ -10,6 +10,9 @@ export const POLL_S = 12;
 export const MAX_RATE = 20;
 /** A target further ahead than this is jumped to rather than chased. */
 export const JUMP_S = 60;
+/** Failed polls in a row before a chain that was online reads as offline. One failure is usually a
+ *  blip: a Render instance swap 502s for a few seconds, and the edge caches that answer for a poll. */
+export const OFFLINE_AFTER = 2;
 
 export interface TapeBlock { n: number; t0: number; t1: number; tx: number; g: number }
 export type ChainStatus = 'loading' | 'live' | 'stalled' | 'offline';
@@ -70,6 +73,11 @@ export function classify(online: boolean | null, newestT: number | null, now: nu
   if (online === null) return 'loading';
   if (!online || newestT === null) return 'offline';
   return now - newestT > STALL_S ? 'stalled' : 'live';
+}
+
+/** Whether a failed poll, the `misses`-th in a row, takes the chain offline. */
+export function goesOffline(wasOnline: boolean | null, misses: number): boolean {
+  return wasOnline !== true || misses >= OFFLINE_AFTER;
 }
 
 /** Where the playhead is now; with `horizon` (the newest block received) it never runs past the data. */
