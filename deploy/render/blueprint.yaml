@@ -137,4 +137,7 @@ databases:
   - name: altscan-db
     databaseName: altscan
     user: altscan
+    # Private network only. Omitting the key means 0.0.0.0/0 for Postgres; both
+    # services reach the DB through its internal connectionString.
+    ipAllowList: []
     plan: basic-1gb

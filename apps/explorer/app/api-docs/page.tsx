@@ -306,7 +306,7 @@ const endpoints: Endpoint[] = [
       { name: 'filter', type: 'object', required: false, description: 'Filter object: { address, from, to, blockNumber, blockFrom, blockTo, tokenAddress, dex }' },
       { name: 'orderBy', type: 'string', required: false, description: '"asc" or "desc" (default: "desc")' },
       { name: 'limit', type: 'number', required: false, description: 'Number of results (default: 25, max: 100)' },
-      { name: 'offset', type: 'number', required: false, description: 'Pagination offset (default: 0)' },
+      { name: 'offset', type: 'number', required: false, description: 'Pagination offset (default: 0, max: 10000)' },
     ],
     exampleResponse: JSON.stringify(
       {

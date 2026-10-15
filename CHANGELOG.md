@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
 
+### Security
+- The self-host Docker stack publishes Postgres on `127.0.0.1` only, and both Render blueprints keep their databases on the private network.
+- Every entry of a comma-separated `rpc.webRpcUrl` override must pass the https and public-host rule, not only the first.
+- The admin console proxies only known settings keys to an explorer's admin API.
+- `/api/v1/query` refuses an `offset` above 10,000, and the public `/api/health` no longer includes raw database error text.
+
 ## [0.4.0.0] - 2026-10-12
 
 The explorer redesign ("Ledger Tape") across every route, a long truth-and-correctness pass on what its pages say, and an open-source release that a fork can run as its own: analytics and referral ads are now opt-in, and the docs were checked line by line against the code (#150, #163–#237).

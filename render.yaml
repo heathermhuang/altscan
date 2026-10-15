@@ -252,7 +252,10 @@ databases:
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
-    plan: basic-1gb         # 1 GB RAM — reverted from basic-4gb 2026-06-05: the upgrade did NOT give
+    # Private network only. Omitting the key means 0.0.0.0/0 for Postgres; every
+    # service reaches the DB through its internal connectionString.
+    ipAllowList: []
+    plan: basic-1gb        # 1 GB RAM — reverted from basic-4gb 2026-06-05: the upgrade did NOT give
                             # sustained tip-tracking (only a transient post-restart burst), so it wasn't
                             # worth the recurring cost. The real ceiling is token_transfers insert cost
                             # (index maintenance under concurrent writes), fixable in code, not by DB plan.
@@ -262,4 +265,5 @@ databases:
   - name: ethscan-db
     databaseName: ethscan
     user: ethscan
-    plan: basic-1gb         # 1 GB RAM, 25 GB storage — $20/mo
+    ipAllowList: []         # private network only (see bnbscan-db)
+    plan: basic-1gb        # 1 GB RAM, 25 GB storage — $20/mo

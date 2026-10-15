@@ -11,6 +11,9 @@ import { swallow } from '@/lib/observability'
 import { apiJson } from '@/lib/api-serialize'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
+// Deeper pages walk the index row by row up to the statement timeout, for any
+// anonymous caller; narrow with blockFrom/blockTo instead.
+const MAX_OFFSET = 10_000
 
 function validateAddr(v: unknown): string | null {
   if (!v || typeof v !== 'string' || !ADDR.test(v)) return null
@@ -55,6 +58,12 @@ export async function POST(request: Request) {
   // Validate numeric params
   const safeLimit = Math.min(Math.max(1, Number(limit) || 25), 100)
   const safeOffset = Math.max(0, Number(offset) || 0)
+  if (safeOffset > MAX_OFFSET) {
+    return NextResponse.json(
+      { error: `offset must be at most ${MAX_OFFSET}; narrow the range with filter.blockFrom/blockTo` },
+      { status: 400 },
+    )
+  }
 
   // Validate address filters upfront
   if (filter.address && !ADDR.test(filter.address)) {

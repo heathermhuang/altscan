@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro'
 import { env } from 'cloudflare:workers'
+import { isSettingsKey } from '@altscan/settings-schema'
 import { getDb, getExplorer } from '../../../../../lib/db'
 import { audit } from '../../../../../lib/schema'
 import { canWrite } from '../../../../../lib/rbac'
@@ -14,6 +15,9 @@ export const prerender = false
  *  records a console-side audit row on success. */
 export const PUT: APIRoute = async ({ params, locals, request }) => {
   if (!canWrite(locals.member.role)) return json({ error: 'forbidden: read-only role' }, 403)
+  // The key is spliced into an upstream path that carries the explorer's admin
+  // secret, so only a known namespace may reach it.
+  if (!isSettingsKey(params.key ?? '')) return json({ error: 'unknown setting' }, 404)
 
   const explorer = await getExplorer(env, params.id!, locals.member.tenantId)
   if (!explorer) return json({ error: 'unknown explorer' }, 404)
