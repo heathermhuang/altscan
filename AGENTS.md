@@ -27,7 +27,7 @@ pnpm test    # vitest run (root config, all workspaces)
 ## Testing gotchas
 
 - **PG-gated suites are silently SKIPPED by a bare `pnpm test`.** Each is gated on its own
-  env var, and CI runs eleven of the thirteen by name:
+  env var, and CI runs twelve of the fourteen by name:
   | Suite | Gate | In CI? |
   |---|---|---|
   | `apps/indexer/src/backfill-worker.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes |
@@ -36,6 +36,7 @@ pnpm test    # vitest run (root config, all workspaces)
   | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` | yes |
   | `apps/explorer/lib/address-query.pg.test.ts` | `ADDRESS_QUERY_TEST_PG_URL` | yes |
   | `apps/indexer/src/token-heal.pg.test.ts` | `TOKEN_HEAL_TEST_PG_URL` | yes |
+  | `apps/indexer/src/webhook-notifier.pg.test.ts` | `WEBHOOK_TEST_PG_URL` | yes |
   | `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` | yes (own DB, `whale_idx_test`) |
   | `apps/explorer/lib/token-suggest.pg.test.ts` | `TOKEN_SUGGEST_TEST_PG_URL` | yes |
   | `apps/explorer/lib/whales.pg.test.ts` | `WHALES_TEST_PG_URL` | yes |

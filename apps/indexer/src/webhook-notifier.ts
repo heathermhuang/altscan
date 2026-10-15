@@ -99,18 +99,45 @@ async function deliverWebhook(url: string, secretHash: string, payload: WebhookP
   }
 }
 
+const WEBHOOK_FAIL_LIMIT = 5
+
+/**
+ * notifyWebhooks is fired once per block without being awaited (block-processor),
+ * and a run waits on each delivery in turn, up to 10s apiece. Endpoints that
+ * answer slowly therefore stack one run per block, each holding its block's txs
+ * and a socket — without bound, since registering webhooks needs only a key any
+ * fresh wallet can mint. Past this many runs in flight, a block's notifications
+ * are skipped rather than grow the indexer's memory and socket count.
+ */
+export const MAX_INFLIGHT_NOTIFY_RUNS = 32
+let inflightRuns = 0
+let skippedRuns = 0
+
+type NotifyTx = { hash: string; fromAddress: string; toAddress: string | null; value: string }
+
 /**
  * Fire webhooks for all transactions in a newly indexed block.
  * Matches webhooks against tx fromAddress / toAddress.
- * Deactivates webhooks after 5 consecutive failures.
+ * Deactivates webhooks after WEBHOOK_FAIL_LIMIT consecutive failures.
  */
-export async function notifyWebhooks(
-  txs: { hash: string; fromAddress: string; toAddress: string | null; value: string }[],
-  blockNumber: number,
-  timestamp: Date,
-  blockHash: string,
-) {
+export async function notifyWebhooks(txs: NotifyTx[], blockNumber: number, timestamp: Date, blockHash: string) {
   if (txs.length === 0) return
+  if (inflightRuns >= MAX_INFLIGHT_NOTIFY_RUNS) {
+    skippedRuns++
+    if (skippedRuns === 1 || skippedRuns % 100 === 0) {
+      console.warn(`[webhook-notifier] skipped block ${blockNumber}: ${MAX_INFLIGHT_NOTIFY_RUNS} runs still waiting on deliveries (${skippedRuns} skipped so far)`)
+    }
+    return
+  }
+  inflightRuns++
+  try {
+    await notifyBlock(txs, blockNumber, timestamp, blockHash)
+  } finally {
+    inflightRuns--
+  }
+}
+
+async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date, blockHash: string) {
   const db = getDb()
 
   // Collect all unique addresses in this block
@@ -148,7 +175,7 @@ export async function notifyWebhooks(
 
   // Deliver all webhooks, then batch DB updates (instead of one UPDATE per tx per webhook)
   const succeededIds = new Set<number>()
-  const failedWebhooks = new Map<number, number>() // id → new fail count
+  const failedIds = new Set<number>()
 
   for (const webhook of webhooks) {
     if (!webhook.secret) continue
@@ -230,8 +257,7 @@ export async function notifyWebhooks(
       // Releasing the claim would re-send exactly those ambiguous cases on the
       // next replay, so the release path would itself be a duplicate generator.
       // At-most-once means an ambiguous outcome counts as delivered.
-      const currentFail = (webhook as { failCount?: number }).failCount ?? 0
-      failedWebhooks.set(webhook.id, currentFail + 1)
+      failedIds.add(webhook.id)
     }
   }
 
@@ -244,17 +270,21 @@ export async function notifyWebhooks(
     } catch { /* non-fatal */ }
   }
 
-  // Update failed webhooks individually (need different failCount per webhook)
-  for (const [id, newFail] of failedWebhooks) {
+  // Count failures IN SQL. The select above never loaded fail_count, so a count
+  // computed here was always 0 + 1 and the limit could not be reached; and runs
+  // overlap (one per block), so a read-modify-write would race anyway. `active`
+  // is ANDed, never recomputed, so a row another run deactivated stays off.
+  for (const id of failedIds) {
     try {
-      await db.update(schema.webhooks)
+      const [row] = await db.update(schema.webhooks)
         .set({
-          failCount: newFail,
-          ...(newFail >= 5 ? { active: false } : {}),
+          failCount: sql`${schema.webhooks.failCount} + 1`,
+          active: sql`${schema.webhooks.active} AND ${schema.webhooks.failCount} + 1 < ${WEBHOOK_FAIL_LIMIT}`,
         })
         .where(eq(schema.webhooks.id, id))
-      if (newFail >= 5) {
-        console.warn(`[webhook-notifier] Deactivated webhook ${id} after ${newFail} consecutive failures`)
+        .returning({ failCount: schema.webhooks.failCount, active: schema.webhooks.active })
+      if (row && !row.active && row.failCount === WEBHOOK_FAIL_LIMIT) {
+        console.warn(`[webhook-notifier] Deactivated webhook ${id} after ${row.failCount} consecutive failures`)
       }
     } catch { /* non-fatal */ }
   }

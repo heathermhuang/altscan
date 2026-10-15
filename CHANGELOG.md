@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Fixed
+- A webhook is deactivated after five consecutive failed deliveries, as documented; the count never got past one before. The indexer also caps how many per-block notification runs can wait on slow endpoints at once.
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
 
 ### Security

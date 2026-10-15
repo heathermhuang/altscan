@@ -93,6 +93,7 @@ schema instead).
 | `apps/explorer/lib/whales.pg.test.ts` | `WHALES_TEST_PG_URL` |
 | `apps/explorer/lib/gas-percentiles.pg.test.ts` | `GAS_TIERS_TEST_PG_URL` |
 | `apps/indexer/src/token-heal.pg.test.ts` | `TOKEN_HEAL_TEST_PG_URL` |
+| `apps/indexer/src/webhook-notifier.pg.test.ts` | `WEBHOOK_TEST_PG_URL` |
 | `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` (needs a database of its own) |
 | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` |
 | `packages/providers/src/moralis-cu-budget.redis.test.ts` | `MORALIS_TEST_REDIS_URL` (changes server config — use a throwaway Redis only) |
