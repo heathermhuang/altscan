@@ -134,6 +134,14 @@ jobs:
           TOKEN_HEAL_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/indexer/src/token-heal.pg.test.ts
 
+      # Webhook failure accounting through the shipped notifyWebhooks: five consecutive
+      # failures deactivate, a success resets, and a failure after a concurrent
+      # deactivation does not revive the row. Own schema, so it shares worker_test.
+      - name: PG-gated indexer suite (webhook failure accounting)
+        env:
+          WEBHOOK_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
+        run: npx vitest run apps/indexer/src/webhook-notifier.pg.test.ts
+
       # The round-5 production indexes: tokens' lower() text_pattern_ops pair and the
       # combined token_transfers whale partial index (tt_whale_idx), on BNB's partitioned
       # shape and ETH's plain one. It proves the parent turns valid, a partition made by
