@@ -235,7 +235,12 @@ export function isValidCreativeKey(k: unknown): boolean {
  *  blocked host — the httpsOrRelativeUrl ethos minus the relative branch.
  *  Server-side RPC calls cross the public internet, so http:// (plaintext) is
  *  rejected; ws(s):// is out of scope because ethers' JsonRpcProvider +
- *  FetchRequest is HTTP transport anyway. */
+ *  FetchRequest is HTTP transport anyway.
+ *
+ *  The explorer splits the value on ',' and builds a provider per entry
+ *  (resolveRpc), so EVERY entry must pass on its own. Parsed as one URL,
+ *  `https://a.test/x,http://127.0.0.1:8545/` is host a.test with a comma in the
+ *  path, and its second entry would reach the provider unchecked. */
 const httpsUrl = z
   .string()
   .trim()
@@ -247,14 +252,16 @@ const httpsUrl = z
         const c = v.charCodeAt(i)
         if (c <= 32 || c === 92) return false // controls + space + backslash
       }
-      try {
-        const u = new URL(v)
-        return u.protocol === 'https:' && !isBlockedRpcHost(u.hostname)
-      } catch {
-        return false
-      }
+      return v.split(',').every((entry) => {
+        try {
+          const u = new URL(entry)
+          return u.protocol === 'https:' && !isBlockedRpcHost(u.hostname)
+        } catch {
+          return false
+        }
+      })
     },
-    { message: 'webRpcUrl must be an https:// URL pointing at a public host' },
+    { message: 'every webRpcUrl entry must be an https:// URL pointing at a public host' },
   )
 
 export const rpcSettingsSchema = z

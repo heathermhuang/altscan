@@ -78,6 +78,24 @@ describe('settings-schema', () => {
       expect(parseSetting('rpc', { webRpcUrl: 'https://bsc-dataseed.binance.org' })).not.toBeNull()
     })
 
+    // The explorer splits webRpcUrl on ',' and builds a provider per entry
+    // (resolveRpc), so every entry must pass the rule — not only the first. As
+    // one URL, `https://a.test/x,http://127.0.0.1:8545/` parses with host a.test.
+    it('validates every entry of a comma-separated list', () => {
+      for (const webRpcUrl of [
+        'https://bsc-dataseed.binance.org/x,http://127.0.0.1:8545/',
+        'https://bsc-dataseed.binance.org,https://169.254.169.254/latest/meta-data',
+        'https://bsc-dataseed.binance.org,http://rpc.example.test',
+        'https://bsc-dataseed.binance.org,https://db.internal/rpc',
+        'https://bsc-dataseed.binance.org,,https://rpc.ankr.com/bsc', // empty entry
+      ]) {
+        expect(parseSetting('rpc', { webRpcUrl })).toBeNull()
+      }
+      expect(
+        parseSetting('rpc', { webRpcUrl: 'https://bsc-dataseed.binance.org,https://rpc.ankr.com/bsc' }),
+      ).not.toBeNull()
+    })
+
     it('bounds rpcTimeoutMs to an integer 1000..60000 and rejects unknown keys', () => {
       expect(parseSetting('rpc', { rpcTimeoutMs: 999 })).toBeNull()
       expect(parseSetting('rpc', { rpcTimeoutMs: 60001 })).toBeNull()

@@ -17,8 +17,9 @@ explorer. First build takes several minutes; after that, startup is seconds.
 Every value in `.env` has a working default, so `docker compose up` runs unedited. You
 will want to change at least the RPC endpoint and the Postgres password before running
 this anywhere other than your laptop. Set the password before the first `up`: Postgres
-reads it only when it creates the data volume. The stack also publishes Postgres on port
-5432 so you can inspect it with `psql`; remove that port mapping on a shared host.
+reads it only when it creates the data volume. The stack also publishes Postgres on
+`127.0.0.1:5432` so you can inspect it with `psql` from the same machine; it is not
+reachable from other hosts.
 
 Compose passes the containers only the variables listed in
 [`docker-compose.yml`](../docker-compose.yml). To set any other variable this guide

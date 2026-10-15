@@ -23,8 +23,10 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      # Exposed so you can inspect the database with psql. Remove in production.
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Published on loopback only, so you can inspect the database with psql from
+      # this machine. A bare "5432:5432" binds every interface — Docker's iptables
+      # rules bypass ufw — which puts the default superuser password on the network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-altscan} -d ${POSTGRES_DB:-altscan}"]
       interval: 5s

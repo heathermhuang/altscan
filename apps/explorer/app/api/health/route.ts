@@ -110,11 +110,12 @@ export async function GET(request: NextRequest) {
       // NEVER swallow this into a null that reads as "fine". A typo in the query
       // or a missing table would otherwise disable the completeness signal
       // permanently and invisibly — reproducing the exact blind spot this whole
-      // block exists to close. `unknown` is explicitly not `ok`, and carries the
-      // reason, so `completeness.status != "ok"` is a usable alert rule.
+      // block exists to close. `unknown` is explicitly not `ok`, so
+      // `completeness.status != "ok"` is a usable alert rule. The reason is
+      // admin-only: a raw driver message can name internal hosts.
       completeness = {
         status: 'unknown',
-        reason: dbErrorMessage(err).slice(0, 160),
+        ...(isAdmin ? { reason: dbErrorMessage(err).slice(0, 160) } : {}),
       }
     }
 
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response)
   } catch (err) {
     return NextResponse.json(
-      { status: 'error', message: err instanceof Error ? dbErrorMessage(err) : 'unknown' },
+      { status: 'error', ...(isAdmin ? { message: err instanceof Error ? dbErrorMessage(err) : 'unknown' } : {}) },
       { status: 503 },
     )
   }

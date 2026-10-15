@@ -308,7 +308,7 @@ curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
               </div>
               <div>
                 <dt className="text-xs text-mut">offset</dt>
-                <dd className="mt-1 font-mono text-[15px] text-ink">integer (pagination)</dd>
+                <dd className="mt-1 font-mono text-[15px] text-ink">integer, max 10,000</dd>
               </div>
             </dl>
           </div>
