@@ -11,6 +11,12 @@ const nextConfig = {
   experimental: {
     workerThreads: false,
     cpus: 1,
+    // Keep the ISR/data cache in memory only. On disk, every on-demand page
+    // (each /tx/<hash>, /blocks/<n>) wrote .html+.rsc+.meta that is never
+    // deleted; crawlers request ~13k distinct tx pages an hour, so the
+    // instance's 18 GB temp storage filled and Render evicted it (ETH 4x,
+    // BNB 3x, 2026-10-14..18). Build-time prerenders are still read from disk.
+    isrFlushToDisk: false,
   },
   // Treat EVERY user agent as an "HTML-limited bot": disables Next 15.2+
   // streaming metadata, so generateMetadata resolves BEFORE the response
