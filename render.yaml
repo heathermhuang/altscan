@@ -255,10 +255,12 @@ databases:
     # Private network only. Omitting the key means 0.0.0.0/0 for Postgres; every
     # service reaches the DB through its internal connectionString.
     ipAllowList: []
-    plan: basic-1gb        # 1 GB RAM — reverted from basic-4gb 2026-06-05: the upgrade did NOT give
-                            # sustained tip-tracking (only a transient post-restart burst), so it wasn't
-                            # worth the recurring cost. The real ceiling is token_transfers insert cost
-                            # (index maintenance under concurrent writes), fixable in code, not by DB plan.
+    plan: basic-4gb        # 4 GB RAM (1 GB shared_buffers). On basic-1gb (256 MB) the BNB writer fell to
+                            # 60-260 s per pass for ~9 h on 2026-10-16 and lag reached 10,101 blocks; on
+                            # basic-4gb the same hours stayed at the tip (peak lag 384 over 27 h).
+                            # Every Blueprint sync re-applies this value, so change the plan HERE, never
+                            # only in the dashboard or API: two upgrades made there were reverted by the
+                            # next merge that touched this file (#236, #242).
 
   # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
   # ETH grows ~6-8 GB/month — basic-1gb holds for 3-4 months
