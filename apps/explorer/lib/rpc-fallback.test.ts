@@ -9,7 +9,7 @@ vi.mock('./rpc', () => ({ getWebProvider: vi.fn(async () => provider) }))
 vi.mock('./cache-registry', () => ({ registerCache: vi.fn() }))
 vi.mock('./observability', () => ({ swallow: vi.fn() }))
 
-import { fetchTxFromRpc, fetchBlockFromRpc } from './rpc-fallback'
+import { fetchTxFromRpc, fetchTxFactsFromRpc, fetchBlockFromRpc } from './rpc-fallback'
 import { swallow } from './observability'
 
 const hashOf = (c: string) => '0x' + c.repeat(64)
@@ -82,6 +82,33 @@ describe('fetchTxFromRpc — pending', () => {
     provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: 0 })
     provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
     await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: false, status: false, gasUsed: 21000n })
+  })
+})
+
+// The public API serves these facts to agents, which would read a placeholder as fact; only the
+// page's mapping may fill in.
+describe('fetchTxFactsFromRpc — unknowns stay null', () => {
+  const rawTx = (h: string, blockNumber: number | null) => ({
+    hash: h, blockNumber, from: '0xF', to: null, value: 0n,
+    gasLimit: 21000n, gasPrice: 1n, data: '0x', index: null, nonce: 0, type: 2,
+  })
+
+  it('leaves status, gas used, block, index and time null for a tx not in a block', async () => {
+    const h = hashOf('1')
+    provider.getTransaction.mockResolvedValue(rawTx(h, null))
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({
+      pending: true, status: null, gasUsed: null, blockNumber: null, txIndex: null, timestamp: null,
+    })
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: true, status: true, gasUsed: 0n, blockNumber: 0 })
+  })
+
+  it('leaves the time null when the node does not return the block', async () => {
+    const h = hashOf('2')
+    provider.getTransaction.mockResolvedValue(rawTx(h, 100))
+    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: 1 })
+    provider.getBlock.mockResolvedValue(null)
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ blockNumber: 100, status: true, timestamp: null })
   })
 })
 
