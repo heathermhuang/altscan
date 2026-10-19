@@ -100,7 +100,37 @@ function setNullCache(key: string): void {
   nullCache.set(key, Date.now() + NULL_TTL_MS)
 }
 
-export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
+/**
+ * What the node actually said about a transaction. Unknown fields are null, never filled in: the
+ * public API hands this to agents, which would read a placeholder as fact. The tx page maps it to
+ * RpcTx, whose placeholders the page knows how to caveat.
+ */
+export type RpcTxFacts = {
+  hash: string
+  /** null while the transaction is not in a block */
+  blockNumber: number | null
+  fromAddress: string
+  toAddress: string | null
+  value: bigint
+  gas: bigint
+  gasPrice: bigint | null
+  /** from the receipt; null while `pending` */
+  gasUsed: bigint | null
+  input: string
+  /** from the receipt; null while `pending` */
+  status: boolean | null
+  /** no receipt yet: not in a block, or the node has not served its receipt */
+  pending: boolean
+  methodId: string | null
+  txIndex: number | null
+  nonce: number
+  txType: number
+  /** block time; null while not in a block, or when the node did not return the block */
+  timestamp: Date | null
+}
+
+/** Null means the node answered that it does not know the hash (negative-cached). Throws on failure. */
+export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | null> {
   const cacheKey = `tx:${hash.toLowerCase()}`
   if (isNullCached(cacheKey)) return null
 
@@ -112,28 +142,28 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
     ])
     if (!tx) { setNullCache(cacheKey); return null }
 
-    const blockTs = tx.blockNumber
-      ? await provider.getBlock(tx.blockNumber).then(b => b ? new Date(b.timestamp * 1000) : new Date())
-      : new Date()
+    const timestamp = tx.blockNumber
+      ? await provider.getBlock(tx.blockNumber).then(b => b ? new Date(b.timestamp * 1000) : null)
+      : null
 
     return {
       hash: tx.hash,
-      blockNumber: tx.blockNumber ?? 0,
+      blockNumber: tx.blockNumber ?? null,
       fromAddress: tx.from.toLowerCase(),
       toAddress: tx.to?.toLowerCase() ?? null,
-      value: tx.value.toString(),
+      value: tx.value,
       gas: tx.gasLimit,
-      gasPrice: (tx.gasPrice ?? tx.maxFeePerGas ?? 0n).toString(),
-      gasUsed: receipt?.gasUsed ?? 0n,
+      gasPrice: tx.gasPrice ?? tx.maxFeePerGas ?? null,
+      gasUsed: receipt?.gasUsed ?? null,
       input: tx.data,
-      status: receipt ? receipt.status === 1 : true,
+      // Pre-Byzantium (pre-EIP-658) Ethereum receipts carry no status: unknown, not failed.
+      status: receipt && receipt.status != null ? receipt.status === 1 : null,
       pending: !receipt,
       methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
-      txIndex: tx.index ?? 0,
+      txIndex: tx.index ?? null,
       nonce: tx.nonce,
       txType: tx.type ?? 0,
-      timestamp: blockTs,
-      _fromRpc: true,
+      timestamp,
     }
   } catch (e) {
     // A failed call is NOT an absence. Returning null here made the tx page
@@ -143,6 +173,32 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
     // only that is negative-cached, above). Logged first so it stays greppable.
     swallow('rpc/tx', e)
     throw e
+  }
+}
+
+/** The tx page's shape: the facts with the placeholders the page renders around. */
+export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
+  const f = await fetchTxFactsFromRpc(hash)
+  if (!f) return null
+  return {
+    hash: f.hash,
+    blockNumber: f.blockNumber ?? 0,
+    fromAddress: f.fromAddress,
+    toAddress: f.toAddress,
+    value: f.value.toString(),
+    gas: f.gas,
+    gasPrice: (f.gasPrice ?? 0n).toString(),
+    gasUsed: f.gasUsed ?? 0n,
+    input: f.input,
+    // As before the facts split: pending fills `true` (the page caveats it), a status-less receipt reads as false.
+    status: f.pending ? true : (f.status ?? false),
+    pending: f.pending,
+    methodId: f.methodId,
+    txIndex: f.txIndex ?? 0,
+    nonce: f.nonce,
+    txType: f.txType,
+    timestamp: f.timestamp ?? new Date(),
+    _fromRpc: true,
   }
 }
 

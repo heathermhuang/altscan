@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
+import { lookupTxOnChain } from '@/lib/api-tx-lookup'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,11 +15,13 @@ export async function GET(
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   }
 
-  const { hash } = await params
+  const { hash: rawHash } = await params
 
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(rawHash)) {
     return NextResponse.json({ error: 'Invalid transaction hash' }, { status: 400 })
   }
+  // The indexer stores hashes lowercased; an uppercase request used to miss the index.
+  const hash = rawHash.toLowerCase()
 
   let transactions
   try {
@@ -31,9 +34,24 @@ export async function GET(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 
-  if (transactions.length === 0) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (transactions.length > 0) {
+    return apiJson({ transaction: transactions[0], source: 'index' })
   }
 
-  return apiJson({ transaction: transactions[0] })
+  // The index keeps only recent transactions; older ones come from the chain. Fields the node did
+  // not report are null, and `pending: true` means there is no receipt yet (status, gasUsed unknown).
+  const chain = await lookupTxOnChain(hash)
+  if (chain.kind === 'found') {
+    return apiJson({ transaction: chain.tx, source: 'chain' })
+  }
+  if (chain.kind === 'missing') {
+    return NextResponse.json({
+      error: 'Not found',
+      detail: "Neither this explorer's index nor its node returned this transaction. One broadcast in the last few minutes may not have reached the node yet.",
+    }, { status: 404 })
+  }
+  return NextResponse.json(
+    { error: 'Chain lookup unavailable, retry shortly' },
+    { status: 503, headers: { 'Retry-After': '30' } },
+  )
 }
