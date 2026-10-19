@@ -24,7 +24,8 @@ other chain's explorer: the API returns "not found" rather than an error that na
 - Every response is JSON. Common starting points:
   - `GET /api/v1/stats` — latest block, transaction and token counts, average gas price
   - `GET /api/v1/transactions/{hash}` — one transaction, with its status and gas used
-  - `GET /api/v1/addresses/{address}` — the address's 20 latest transactions and token transfers, and whether it is a contract
+  - `GET /api/v1/addresses/{address}` — the address's 20 latest indexed transactions and token transfers,
+    and `isContract`; when `isContractKnown` is false the contract check failed and `isContract` means nothing
   - `GET /api/v1/tokens/{contract}` — token metadata
 - The full endpoint list, kept in step with the code, is each explorer's own skill:
   `/.well-known/agent-skills/api-usage/SKILL.md`, plus its RFC 9727 catalog at
