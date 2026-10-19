@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { prefersMarkdown, homeResponse, HOME_LINK, HOME_MARKDOWN } from '../src/lib/home.ts';
 import { TRAINING_BLOCKED } from '../../explorer/lib/bot-policy.ts';
 
@@ -94,6 +95,26 @@ await t('ai-catalog.json: well-formed entries, each with exactly one of url/data
     assert.ok(e.displayName && e.type);
     assert.notEqual('url' in e, 'data' in e);
   }
+});
+// Agent Skills Discovery RFC v0.2.0: clients MUST reject a skill whose bytes miss its digest, so the
+// static index has to be regenerated whenever SKILL.md changes.
+await t('agent-skills index: v0.2.0 entry whose digest matches the served SKILL.md', () => {
+  const idx = JSON.parse(pub('.well-known/agent-skills/index.json'));
+  assert.equal(idx.$schema, 'https://schemas.agentskills.io/discovery/0.2.0/schema.json');
+  for (const s of idx.skills) {
+    assert.match(s.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
+    assert.equal(s.type, 'skill-md');
+    const path = new URL(s.url).pathname.slice(1);
+    assert.equal(path, `.well-known/agent-skills/${s.name}/SKILL.md`);
+    const body = readFileSync(new URL(`../public/${path}`, import.meta.url));
+    assert.equal(s.digest, `sha256:${createHash('sha256').update(body).digest('hex')}`, `${s.name}: regenerate the digest`);
+    const fm = body.toString('utf8').match(/^---\nname: (.+)\ndescription: (.+)\n---\n/);
+    assert.ok(fm, `${s.name}: SKILL.md needs name/description frontmatter`);
+    assert.equal(fm[1], s.name);
+    assert.equal(JSON.parse(fm[2]), s.description);
+  }
+  const catalogUrls = JSON.parse(pub('.well-known/ai-catalog.json')).entries.map((e: { url?: string }) => e.url);
+  for (const s of idx.skills) assert.ok(catalogUrls.includes(s.url), `${s.name} missing from ai-catalog.json`);
 });
 await t('_headers: catalogs get their media type and CORS', () => {
   const h = pub('_headers');

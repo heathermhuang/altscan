@@ -7,6 +7,17 @@
   },
   "entries": [
     {
+      "identifier": "urn:air:altscan.io:skill:altscan-api",
+      "displayName": "Altscan explorers API",
+      "type": "application/agent-skills+md",
+      "url": "https://altscan.io/.well-known/agent-skills/altscan-api/SKILL.md",
+      "representativeQueries": [
+        "which explorer API should I use for BNB Chain or Ethereum",
+        "look up a transaction on BNB Chain or Ethereum without an API key",
+        "is the BNB Chain explorer caught up to the latest block"
+      ]
+    },
+    {
       "identifier": "urn:air:altscan.io:catalog:bnbscan",
       "displayName": "BNBScan",
       "type": "application/ai-catalog+json",
