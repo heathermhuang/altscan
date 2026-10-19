@@ -25,7 +25,9 @@ export function resolveAllowOrigin(origin: string | null, allowed: readonly stri
 export function corsHeaders(origin: string | null, allowed: readonly string[]): Record<string, string> {
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    // Authorization: OAuth bearer tokens (lib/oauth.ts) are not CORS-safelisted, so without it the
+    // browser stops a Bearer request at the preflight.
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     'Access-Control-Max-Age': '86400',
     // Always set, even on a miss: the response varies by origin, so a shared
     // cache must not reuse one site's response for the other.

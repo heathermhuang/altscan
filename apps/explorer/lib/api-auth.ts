@@ -1,17 +1,24 @@
 /**
  * API authentication middleware for BNBScan.
  *
- * Two modes:
+ * Three modes:
  *   1. X-API-Key header present → look up hashed key in DB, use key's rate limit + track usage
- *   2. No key → fall back to IP-based rate limit (100 req/min)
+ *   2. Authorization: Bearer (an OAuth token from lib/oauth.ts) → per-address limit (100 req/min)
+ *   3. Neither → fall back to IP-based rate limit (100 req/min)
  *
  * The key lookup adds one DB query per API call. Acceptable for v1 traffic.
  * TODO (v2): add Redis key cache (TTL=60s) to eliminate per-call DB hit.
  */
+import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, sql } from 'drizzle-orm'
+import { verifyBearer, wwwAuthenticate } from '@altscan/oauth'
 import { checkIpRateLimit, checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
+import { oauthConfig } from '@/lib/oauth'
 import crypto from 'crypto'
+
+/** An OAuth token's budget: the same as an API key's, shared by every token for one address. */
+const TOKEN_REQUESTS_PER_MINUTE = 100
 
 export type OwnerAuthResult =
   | { ok: true }
@@ -49,7 +56,20 @@ export async function requireApiKeyOwner(request: Request, owner: string): Promi
 
 export type AuthResult =
   | { ok: true; limited: false }
-  | { ok: false; limited: true; reason: 'rate_limit' | 'invalid_key' }
+  | { ok: false; limited: true; reason: 'rate_limit' | 'invalid_key' | 'invalid_token' }
+
+/** The response for a failed authRequest. A bad bearer token gets RFC 6750's WWW-Authenticate. */
+export function authFailure(auth: Extract<AuthResult, { ok: false }>): NextResponse {
+  if (auth.reason === 'invalid_key') return NextResponse.json({ error: 'Invalid or inactive API key' }, { status: 401 })
+  if (auth.reason === 'invalid_token') {
+    const cfg = oauthConfig()
+    return NextResponse.json(
+      { error: 'Invalid or expired access token' },
+      { status: 401, headers: cfg ? { 'WWW-Authenticate': wwwAuthenticate(cfg, true) } : {} },
+    )
+  }
+  return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+}
 
 /**
  * Authenticate and rate-limit a request.
@@ -101,7 +121,20 @@ export async function authRequest(request: Request): Promise<AuthResult> {
     return { ok: false, limited: true, reason: 'invalid_key' }
   }
 
-  // No API key — IP-based rate limit
+  // An OAuth token, when this explorer issues them. A bad one is refused, not ignored, and still
+  // costs the IP's budget, like a bogus key above.
+  const oauth = oauthConfig()
+  const bearer = oauth ? await verifyBearer(request.headers.get('authorization'), oauth) : null
+  if (bearer === 'invalid') {
+    if (!(await checkIpRateLimit(request.headers))) return { ok: false, limited: true, reason: 'rate_limit' }
+    return { ok: false, limited: true, reason: 'invalid_token' }
+  }
+  if (bearer) {
+    if (!(await checkRateLimit(`sub:${bearer.sub}`, TOKEN_REQUESTS_PER_MINUTE))) return { ok: false, limited: true, reason: 'rate_limit' }
+    return { ok: true, limited: false }
+  }
+
+  // No credential — IP-based rate limit
   if (!(await checkIpRateLimit(request.headers))) {
     console.warn(`[api-auth] IP rate limit exceeded: ${clientIpFromHeaders(request.headers)}`)
     return { ok: false, limited: true, reason: 'rate_limit' }

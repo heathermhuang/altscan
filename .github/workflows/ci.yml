@@ -91,6 +91,11 @@ jobs:
       - name: Typecheck admin
         run: pnpm --filter @altscan/admin exec tsc --noEmit -p .
 
+      # The OAuth server package ships as TS source. altscan.io's deploy never
+      # typechecks it, so this is the only gate on the altscan.io side.
+      - name: Typecheck oauth
+        run: pnpm --filter @altscan/oauth exec tsc --noEmit -p .
+
       - name: Create seam-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
 
@@ -199,6 +204,13 @@ jobs:
         env:
           MORALIS_TEST_REDIS_URL: redis://127.0.0.1:6379
         run: npx vitest run packages/providers/src/moralis-cu-budget.redis.test.ts
+
+      # The explorer's OAuth authorization codes are single-use through a Lua get-and-delete;
+      # only a real Redis can show that (and the TTL) holds. Writes only short-TTL oauth:code:* keys.
+      - name: Redis-gated explorer suite (OAuth codes)
+        env:
+          OAUTH_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: npx vitest run apps/explorer/lib/oauth-codes.redis.test.ts
 
       # `pnpm lint` was dead for the life of the repo: apps/explorer's script was
       # `next lint` with no ESLint config anywhere, so it dropped into an

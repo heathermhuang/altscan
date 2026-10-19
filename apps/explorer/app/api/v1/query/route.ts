@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, desc } from 'drizzle-orm'
-import { authRequest } from '@/lib/api-auth'
+import { authFailure, authRequest } from '@/lib/api-auth'
 import { selectByAddress } from '@/lib/address-query'
 import { swallow } from '@/lib/observability'
 // apiJson (not NextResponse.json) for data rows: blocks/transactions carry
@@ -39,12 +39,7 @@ type QueryBody = {
 
 export async function POST(request: Request) {
   const auth = await authRequest(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      { error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' },
-      { status: auth.reason === 'invalid_key' ? 401 : 429 }
-    )
-  }
+  if (!auth.ok) return authFailure(auth)
 
   let body: QueryBody
   try {

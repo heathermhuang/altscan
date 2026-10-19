@@ -6,6 +6,8 @@ dist/
 !.env.example
 !.env.docker.example
 *.env.local
+# wrangler's local secrets (apps/altscan-site: OAUTH_SECRET for astro dev)
+.dev.vars
 .turbo/
 *.tsbuildinfo
 .gstack/

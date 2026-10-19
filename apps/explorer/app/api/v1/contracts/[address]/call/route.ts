@@ -4,14 +4,14 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { Contract, Interface } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
-import { authRequest } from '@/lib/api-auth'
+import { authFailure, authRequest } from '@/lib/api-auth'
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ address: string }> }
 ) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const { address } = await params
   const addr = address.toLowerCase()

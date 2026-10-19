@@ -77,6 +77,10 @@ pnpm test    # vitest run (root config, all workspaces)
 - Analytics and Binance referral ads are **opt-in by env** (`GA_MEASUREMENT_ID`,
   `BINANCE_REF_CODE`; the hosted values are in `render.yaml`). Never give either a built-in
   default: a fork would report its visitors to, and earn referrals for, the hosted sites.
+- Each site's OAuth server (`packages/oauth`) is **off unless `OAUTH_SECRET` is set** (explorer web env;
+  altscan.io Worker secret): every OAuth path 404s and Bearer is ignored. Use a different secret per
+  site. Authorization codes are single-use through Redis (explorers, no in-memory fallback) or the
+  `OAuthCodes` Durable Object (altscan.io) — never give either a fallback that lets a code be spent twice.
 - `tt_whale_idx` (one partial index on `token_transfers` covering every tracked whale token) **encodes its
   predicate in its name**: `CREATE INDEX IF NOT EXISTS` keeps an existing index, so adding a token or changing
   an `indexFloor` without a new name (`tt_whale_v2_idx`) silently leaves production on the old predicate.

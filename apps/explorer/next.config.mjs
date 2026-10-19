@@ -33,7 +33,7 @@ const nextConfig = {
   // With `unoptimized`, next-server answers that path with a 404 before it
   // validates params or reaches the optimizer (or sharp).
   images: { unoptimized: true },
-  transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/settings-schema'],
+  transpilePackages: ['@altscan/db', '@altscan/types', '@altscan/chain-config', '@altscan/explorer-core', '@altscan/settings-schema', '@altscan/oauth'],
   async headers() {
     return [
       // Security headers for all pages
