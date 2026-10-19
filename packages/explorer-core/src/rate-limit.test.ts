@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { extractClientIp, checkRateLimit, checkIpRateLimit, clientIpFromHeaders } from './rate-limit'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { extractClientIp, checkRateLimit, checkIpRateLimit, clientIpFromHeaders, getRateLimitMapSize } from './rate-limit'
 
 describe('extractClientIp', () => {
   it('returns unknown for null header', () => {
@@ -115,5 +115,37 @@ describe('checkRateLimit', () => {
     for (let i = 0; i < 3; i++) await checkRateLimit(key1, 3) // exhaust key1
     // key2 should still be allowed
     expect(await checkRateLimit(key2, 3)).toBe(true)
+  })
+})
+
+// The in-memory fallback runs when Redis is absent or down. Its size cap used to be checked but
+// never enforced: past it, every request swept the whole map and the new key went in anyway, so a
+// flood of distinct keys (rotating IPv6 clients) grew it without bound on a 2GB web service.
+describe('checkRateLimit in-memory fallback cap', () => {
+  const CAP = 10_000
+  afterEach(() => { vi.useRealTimers() })
+
+  it('stays at or under the cap under a flood of distinct keys', async () => {
+    for (let i = 0; i < CAP * 2; i++) await checkRateLimit(`flood-${i}`, 5)
+    expect(getRateLimitMapSize()).toBeLessThanOrEqual(CAP)
+  })
+
+  it('keeps an active client limited while new keys evict older ones', async () => {
+    for (let i = 0; i < CAP; i++) await checkRateLimit(`fill-${i}`, 5)
+    const key = `active-${Math.random()}`
+    for (let i = 0; i < 3; i++) await checkRateLimit(key, 3) // exhaust
+    for (let i = 0; i < 100; i++) await checkRateLimit(`late-${i}`, 5)
+    expect(await checkRateLimit(key, 3)).toBe(false)
+  })
+
+  it('sweeps expired windows before evicting live ones', async () => {
+    // Forward from the real clock: earlier tests left real-time windows and sweep stamps behind.
+    const t0 = Date.now() + 60_000
+    vi.useFakeTimers()
+    vi.setSystemTime(t0)
+    for (let i = 0; i < CAP; i++) await checkRateLimit(`old-${i}`, 5)
+    vi.setSystemTime(t0 + 5 * 60_000) // every window above has expired
+    await checkRateLimit('fresh', 5)
+    expect(getRateLimitMapSize()).toBe(1)
   })
 })
