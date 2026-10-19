@@ -41,3 +41,10 @@ describe('corsHeaders', () => {
     expect(h['Vary']).toBe('Origin')
   })
 })
+
+describe('corsHeaders: allowed request headers', () => {
+  it('lets a browser send an API key or an OAuth bearer token', () => {
+    const allowed = corsHeaders('https://example.com', ['https://example.com'])['Access-Control-Allow-Headers'].split(', ')
+    expect(allowed).toEqual(expect.arrayContaining(['Content-Type', 'X-API-Key', 'Authorization']))
+  })
+})

@@ -11,6 +11,8 @@ You are an agent. This document tells you which credentials the Altscan sites us
 
 altscan.io runs its own OAuth 2.1 authorization server. Its only identity is an EVM address you prove by signing a message (EIP-191 `personal_sign`). This is anonymous registration: there is no account, email or identity provider, and a freshly generated keypair works. Only sign with a wallet you are authorized to use.
 
+The server is on at altscan.io. A self-hosted copy of this site runs it only when its Worker has the `OAUTH_SECRET` secret; where `/.well-known/oauth-authorization-server` answers 404, skip this section and call `/mcp` without a token.
+
 Discovery: the protected resource metadata at `https://altscan.io/.well-known/oauth-protected-resource` names the authorization server, whose metadata is at `https://altscan.io/.well-known/oauth-authorization-server`. MCP clients that implement MCP authorization do these steps themselves.
 
 ### Step 1: register a client
