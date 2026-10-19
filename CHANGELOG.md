@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - The explorers' agent discovery documents follow their specs. robots.txt's `Content-Signal` sat after the training-crawler group, so it governed only those bots; it is now in the `User-agent: *` group. The agent-skills index used a `$schema` and field names conformant clients reject, and SKILL.md lacked its required frontmatter.
 - The explorer keeps its page cache in memory instead of writing every on-demand page to disk. Crawlers requesting thousands of distinct transaction pages an hour filled the hosted instances' temporary storage until Render evicted them.
+- The explorer's abuse-source IP denylist matches IPv6 ranges too, and blocks eight leased IPv6 proxy pools whose ~4,000 rotating addresses flooded uncached transaction pages and crashed the hosted ETH explorer.
 - A webhook is deactivated after five consecutive failed deliveries, as documented; the count never got past one before. The indexer also caps how many per-block notification runs can wait on slow endpoints at once.
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
 
