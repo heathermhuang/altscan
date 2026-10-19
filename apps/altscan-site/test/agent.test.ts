@@ -2,6 +2,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { prefersMarkdown, homeResponse, HOME_LINK, HOME_MARKDOWN } from '../src/lib/home.ts';
+import { webMcpTools } from '../src/lib/webmcp.ts';
+import { products } from '../src/data/products.ts';
 import { TRAINING_BLOCKED } from '../../explorer/lib/bot-policy.ts';
 
 let passed = 0;
@@ -120,6 +122,59 @@ await t('_headers: catalogs get their media type and CORS', () => {
   const h = pub('_headers');
   assert.match(h, /\/\.well-known\/api-catalog\n {2}Content-Type: application\/linkset\+json\n {2}Access-Control-Allow-Origin: \*/);
   assert.match(h, /\/\.well-known\/ai-catalog\.json\n {2}Content-Type: application\/ai-catalog\+json\n {2}Access-Control-Allow-Origin: \*/);
+});
+
+// auth.md: the scanner's heading rule, and a pointer to every explorer's own auth.md
+await t('auth.md: H1 names auth.md and links each explorer\'s auth.md', () => {
+  const md = pub('auth.md');
+  assert.match(md.split('\n')[0], /^# .*auth\.md$/);
+  for (const p of products) assert.ok(md.includes(`${p.url}/auth.md`), p.domain);
+});
+await t('_headers: auth.md is served as Markdown', () => {
+  assert.match(pub('_headers'), /\/auth\.md\n {2}Content-Type: text\/markdown; charset=utf-8/);
+});
+
+// WebMCP: every tool navigates to the chosen explorer and rejects bad input before navigating
+const goTo = () => {
+  const urls: string[] = [];
+  return { urls, tools: webMcpTools((u) => urls.push(u)) };
+};
+const HASH = `0x${'ab'.repeat(32)}`;
+const ADDR = `0x${'cd'.repeat(20)}`;
+await t('webmcp: each tool opens the matching page on each chain\'s explorer', async () => {
+  const { urls, tools } = goTo();
+  const byName = Object.fromEntries(tools.map((x) => [x.name, x]));
+  for (const p of products) {
+    await byName.open_transaction.execute({ chain: p.id, hash: HASH });
+    await byName.open_address.execute({ chain: p.id, address: ADDR });
+    await byName.open_block.execute({ chain: p.id, number: 123 });
+    await byName.search.execute({ chain: p.id, query: ' USDT & co ' });
+  }
+  assert.deepEqual(urls, products.flatMap((p) => [
+    `${p.url}/tx/${HASH}`, `${p.url}/address/${ADDR}`, `${p.url}/blocks/123`, `${p.url}/search?q=USDT%20%26%20co`,
+  ]));
+});
+await t('webmcp: bad input throws and navigates nowhere', async () => {
+  const { urls, tools } = goTo();
+  const byName = Object.fromEntries(tools.map((x) => [x.name, x]));
+  const bad: Array<[string, unknown]> = [
+    ['open_transaction', { chain: 'sol', hash: HASH }],
+    ['open_transaction', { chain: 'bnb', hash: '0x12' }],
+    ['open_address', { chain: 'eth', address: HASH }],
+    ['open_block', { chain: 'bnb', number: -1 }],
+    ['open_block', { chain: 'bnb', number: 1.5 }],
+    ['search', { chain: 'eth', query: '   ' }],
+    ['search', undefined],
+  ];
+  for (const [name, args] of bad) await assert.rejects(byName[name].execute(args), name);
+  assert.deepEqual(urls, []);
+});
+await t('webmcp: schemas offer exactly the explorers\' chains', () => {
+  for (const tool of goTo().tools) {
+    const s = tool.inputSchema as { required: string[]; properties: { chain: { enum: string[] } } };
+    assert.deepEqual(s.properties.chain.enum, products.map((p) => p.id));
+    assert.ok(s.required.includes('chain'));
+  }
 });
 
 console.log(`\n${passed} passed`);

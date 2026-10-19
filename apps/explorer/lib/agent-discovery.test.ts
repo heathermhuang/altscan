@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { GET as skillsIndex } from '@/app/.well-known/agent-skills/index.json/route'
 import { GET as skillMd } from '@/app/.well-known/agent-skills/api-usage/SKILL.md/route'
 import { GET as aiCatalog } from '@/app/.well-known/ai-catalog.json/route'
+import { GET as authMd } from '@/app/auth.md/route'
+import { GET as serverCard } from '@/app/.well-known/mcp/server-card.json/route'
+import { chainConfig } from '@/lib/chain'
 
 // The Agent Skills Discovery RFC v0.2.0
 // (https://github.com/cloudflare/agent-skills-discovery-rfc): clients SHOULD NOT
@@ -55,5 +59,34 @@ describe('ARD ai-catalog.json', () => {
     }
     expect(catalog.entries[0].type).toBe('application/agent-skills+md')
     expect(catalog.entries[0].url).toBe(skill.url)
+  })
+})
+
+describe('auth.md', () => {
+  it('is Markdown under the H1 scanners look for', async () => {
+    const res = await authMd()
+    expect(res.headers.get('content-type')).toBe('text/markdown; charset=utf-8')
+    const body = await res.text()
+    expect(body.split('\n')[0]).toMatch(/^# .*auth\.md$/)
+  })
+
+  it('names this origin\'s provisioning endpoint and the header the API reads', async () => {
+    const body = await (await authMd()).text()
+    expect(body).toContain(`POST /api/v1/keys HTTP/1.1\nHost: ${chainConfig.domain}`)
+    // lib/api-auth.ts reads X-API-Key only; an agent sending Bearer would be keyless.
+    expect(body).toContain('X-API-Key: bnbs_')
+    // The exact message app/api/v1/keys/route.ts verifies.
+    expect(body).toContain('BNBScan API Key Request\nAddress: 0xyouraddress\nTimestamp: 1760000000000')
+  })
+})
+
+describe('MCP server card', () => {
+  it('is the card altscan.io publishes for the same server', async () => {
+    const res = await serverCard()
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+    const altscan = JSON.parse(
+      readFileSync(new URL('../../altscan-site/public/.well-known/mcp/server-card.json', import.meta.url), 'utf8'),
+    )
+    expect(await res.json()).toEqual(altscan)
   })
 })
