@@ -27,9 +27,10 @@ other chain's explorer: the API returns "not found" rather than an error that na
   - `GET /api/v1/addresses/{address}` — the address's 20 latest indexed transactions and token transfers,
     and `isContract`; when `isContractKnown` is false the contract check failed and `isContract` means nothing
   - `GET /api/v1/tokens/{contract}` — token metadata
-- The full endpoint list, kept in step with the code, is each explorer's own skill:
-  `/.well-known/agent-skills/api-usage/SKILL.md`, plus its RFC 9727 catalog at
-  `/.well-known/api-catalog` and human docs at `/api-docs`.
+- The full endpoint list, kept in step with the code, is each explorer's OpenAPI 3.1 spec at
+  `/openapi.json` (every parameter and response field, e.g. https://bnbscan.com/openapi.json), its own
+  skill at `/.well-known/agent-skills/api-usage/SKILL.md`, its RFC 9727 catalog at
+  `/.well-known/api-catalog`, and human docs at `/api-docs`.
 
 ## Limits to know
 

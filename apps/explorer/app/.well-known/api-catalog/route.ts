@@ -1,19 +1,22 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
 import { API_SURFACE } from '@/lib/api-surface'
+import { OPENAPI_MEDIA_TYPE } from '@/lib/openapi'
 
 // RFC 9727 API Catalog — advertises this site's public REST API so agents can
 // discover it without scraping. One linkset entry per public resource family.
-// No machine-readable OpenAPI spec exists yet, so service-desc is omitted and
-// service-doc points at the human-readable /api-docs page.
+// service-desc is the OpenAPI 3.1 spec (/openapi.json); service-doc is the
+// human-readable /api-docs page.
 export async function GET() {
   const BASE = `https://${chainConfig.domain}`
   const docs = `${BASE}/api-docs`
+  const spec = `${BASE}/openapi.json`
   const status = `${BASE}/api/health`
 
   const linkset = {
     linkset: API_SURFACE.filter(e => e.catalogAnchor).map(e => ({
       anchor: `${BASE}${e.path}`,
+      'service-desc': [{ href: spec, type: OPENAPI_MEDIA_TYPE }],
       'service-doc': [{ href: docs, type: 'text/html' }],
       ...(e.path === '/api/v1/stats'
         ? { status: [{ href: status, type: 'application/json' }] }

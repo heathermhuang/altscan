@@ -31,6 +31,7 @@ description: ${JSON.stringify(skillDescription())}
 - Base URL: https://${c.domain}/api/v1
 - Chain: ${c.name} (chainId ${c.chainId})
 - Human docs: https://${c.domain}/api-docs
+- OpenAPI 3.1 spec (every endpoint, parameter and response field): https://${c.domain}/openapi.json
 - Machine catalog (RFC 9727): https://${c.domain}/.well-known/api-catalog
 
 ## Auth

@@ -6,7 +6,7 @@
       "type": "skill-md",
       "description": "Query BNB Chain or Ethereum data through Altscan's free explorers: pick bnbscan.com or ethscan.io by chain, then call the same keyless REST API on either (blocks, transactions, addresses, tokens, contracts).",
       "url": "https://altscan.io/.well-known/agent-skills/altscan-api/SKILL.md",
-      "digest": "sha256:21b7edeaa338c4ecf13e7a7806e8c32a1c1a39e65ae67024ec351c606c915d4f"
+      "digest": "sha256:ef9219fa12a255bb2c9c5809c1d88f4698a6024ca1643684f8445c6fc000fbb5"
     }
   ]
 }
