@@ -41,13 +41,14 @@ describe('ARD ai-catalog.json', () => {
   it('lists the published skill as a well-formed AI Catalog entry', async () => {
     const res = await aiCatalog()
     expect(res.headers.get('access-control-allow-origin')).toBe('*')
+    expect(res.headers.get('content-type')).toBe('application/ai-catalog+json')
     const catalog = await res.json()
     expect(catalog.specVersion).toBe('1.0')
     expect(catalog.host.displayName).toBeTruthy()
     const [skill] = (await (await skillsIndex()).json()).skills
     expect(catalog.entries).toHaveLength(1)
     for (const entry of catalog.entries) {
-      expect(entry.identifier).toMatch(new RegExp(`^urn:air:${catalog.host.identifier.replace(/\./g, '\\.')}:`))
+      expect(entry.identifier.startsWith(`urn:air:${catalog.host.identifier}:`)).toBe(true)
       expect(entry.displayName).toBeTruthy()
       // Exactly one of url / data (ai-catalog §Catalog Entry).
       expect(('url' in entry) !== ('data' in entry)).toBe(true)

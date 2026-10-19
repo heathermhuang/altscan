@@ -39,7 +39,8 @@ export async function GET() {
 
   return NextResponse.json(catalog, {
     headers: {
-      'Content-Type': 'application/json; charset=utf-8',
+      // The AI Catalog media type; consumers that validate conformance reject plain JSON.
+      'Content-Type': 'application/ai-catalog+json',
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=3600',
     },

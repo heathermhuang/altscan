@@ -98,7 +98,7 @@ await t('ai-catalog.json: well-formed entries, each with exactly one of url/data
 await t('_headers: catalogs get their media type and CORS', () => {
   const h = pub('_headers');
   assert.match(h, /\/\.well-known\/api-catalog\n {2}Content-Type: application\/linkset\+json\n {2}Access-Control-Allow-Origin: \*/);
-  assert.match(h, /\/\.well-known\/ai-catalog\.json\n {2}Access-Control-Allow-Origin: \*/);
+  assert.match(h, /\/\.well-known\/ai-catalog\.json\n {2}Content-Type: application\/ai-catalog\+json\n {2}Access-Control-Allow-Origin: \*/);
 });
 
 console.log(`\n${passed} passed`);
