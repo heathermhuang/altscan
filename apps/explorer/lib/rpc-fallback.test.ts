@@ -103,6 +103,15 @@ describe('fetchTxFactsFromRpc — unknowns stay null', () => {
     await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: true, status: true, gasUsed: 0n, blockNumber: 0 })
   })
 
+  it('keeps a status-less (pre-Byzantium) receipt unknown, not failed, while the page keeps reading false', async () => {
+    const h = hashOf('3')
+    provider.getTransaction.mockResolvedValue(rawTx(h, 100))
+    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: null })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ pending: false, status: null })
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: false, status: false })
+  })
+
   it('leaves the time null when the node does not return the block', async () => {
     const h = hashOf('2')
     provider.getTransaction.mockResolvedValue(rawTx(h, 100))

@@ -156,7 +156,8 @@ export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | nu
       gasPrice: tx.gasPrice ?? tx.maxFeePerGas ?? null,
       gasUsed: receipt?.gasUsed ?? null,
       input: tx.data,
-      status: receipt ? receipt.status === 1 : null,
+      // Pre-Byzantium (pre-EIP-658) Ethereum receipts carry no status: unknown, not failed.
+      status: receipt && receipt.status != null ? receipt.status === 1 : null,
       pending: !receipt,
       methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
       txIndex: tx.index ?? null,
@@ -189,7 +190,8 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
     gasPrice: (f.gasPrice ?? 0n).toString(),
     gasUsed: f.gasUsed ?? 0n,
     input: f.input,
-    status: f.status ?? true,
+    // As before the facts split: pending fills `true` (the page caveats it), a status-less receipt reads as false.
+    status: f.pending ? true : (f.status ?? false),
     pending: f.pending,
     methodId: f.methodId,
     txIndex: f.txIndex ?? 0,

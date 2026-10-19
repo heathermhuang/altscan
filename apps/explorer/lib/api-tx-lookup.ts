@@ -5,7 +5,8 @@
  *
  * - at most MAX_CONCURRENT lookups per process; past that, answer `unavailable` (the route sends
  *   503) instead of queueing, which would hold requests open on a 2GB instance
- * - one in-flight lookup per hash, shared by concurrent callers
+ * - one in-flight lookup per hash, shared by every caller until it settles (even after a
+ *   caller's deadline), each caller with its own deadline
  * - a deadline per lookup; the RPC call cannot be cancelled, so its slot is freed only when it
  *   settles, which keeps the concurrency cap honest under a slow node. Every call does settle:
  *   the provider times each request out (RPC_TIMEOUT_MS, default 8s per endpoint, lib/rpc.ts)
@@ -43,29 +44,30 @@ export function lookupTxOnChain(hash: string): Promise<ChainLookup> {
     if (Date.now() < hit.expires) return Promise.resolve({ kind: 'found', tx: hit.tx })
     hits.delete(key)
   }
-  const shared = inFlight.get(key)
-  if (shared) return shared
-  if (running >= MAX_CONCURRENT) return Promise.resolve({ kind: 'unavailable' })
-
-  running++
-  const work: Promise<ChainLookup> = fetchTxFactsFromRpc(key)
-    .then((tx): ChainLookup => {
-      if (!tx) return { kind: 'missing' }
-      remember(key, tx)
-      return { kind: 'found', tx }
-    }, (): ChainLookup => ({ kind: 'unavailable' }))
-    .finally(() => { running-- })
+  // The node call stays registered until it settles, past any caller's deadline: a retry for a
+  // slow hash shares it instead of starting a duplicate that takes another slot.
+  let work = inFlight.get(key)
+  if (!work) {
+    if (running >= MAX_CONCURRENT) return Promise.resolve({ kind: 'unavailable' })
+    running++
+    work = fetchTxFactsFromRpc(key)
+      .then((tx): ChainLookup => {
+        if (!tx) return { kind: 'missing' }
+        remember(key, tx)
+        return { kind: 'found', tx }
+      }, (): ChainLookup => ({ kind: 'unavailable' }))
+      .finally(() => {
+        running--
+        inFlight.delete(key)
+      })
+    inFlight.set(key, work)
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<ChainLookup>((resolve) => {
     timer = setTimeout(() => resolve({ kind: 'unavailable' }), DEADLINE_MS)
   })
-  const result = Promise.race([work, deadline]).finally(() => {
-    clearTimeout(timer)
-    inFlight.delete(key)
-  })
-  inFlight.set(key, result)
-  return result
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer))
 }
 
 /** Test hook: forget cached hits (the slot counter and in-flight map drain on their own). */

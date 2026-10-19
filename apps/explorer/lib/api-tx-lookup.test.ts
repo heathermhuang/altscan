@@ -83,6 +83,19 @@ describe('lookupTxOnChain', () => {
     expect(await lookupTxOnChain(hashOf(2101))).toEqual({ kind: 'missing' })
   })
 
+  it('lets a retry after the deadline share the still-running node call', async () => {
+    vi.useFakeTimers()
+    let release!: (v: unknown) => void
+    fetchFacts.mockReturnValue(new Promise((r) => { release = r }))
+    const first = lookupTxOnChain(hashOf(3000))
+    await vi.advanceTimersByTimeAsync(8_000)
+    expect(await first).toEqual({ kind: 'unavailable' })
+    const retry = lookupTxOnChain(hashOf(3000))
+    release(facts({ hash: hashOf(3000) }))
+    expect((await retry).kind).toBe('found')
+    expect(fetchFacts).toHaveBeenCalledTimes(1)
+  })
+
   it('caches a settled transaction, but not a pending or freshly mined one', async () => {
     fetchFacts.mockResolvedValue(facts())
     await lookupTxOnChain(hashOf(6))
