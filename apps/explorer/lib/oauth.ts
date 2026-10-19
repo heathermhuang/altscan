@@ -16,10 +16,21 @@ import { db, schema } from './db'
 // Read and delete in one step, so a code is exchanged once even if two requests race.
 const TAKE = "local v = redis.call('GET', KEYS[1]) if v then redis.call('DEL', KEYS[1]) end return v"
 
+/**
+ * The shared client is lazyConnect with no offline queue, so a command sent before it is ready fails
+ * ("Stream isn't writeable"). That includes the window after another caller (the rate limiter, on
+ * the same request) has started the connection: wait for ready, not just for a first connect().
+ */
 async function redis() {
   const r = getRedis()
   if (!r || isRedisUnavailable()) throw new Error('Redis unavailable')
-  if (r.status === 'wait') await r.connect() // lazyConnect, and no offline queue to hold the first command
+  if (r.status === 'wait') await r.connect()
+  else if (r.status !== 'ready') {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Redis not ready (${r.status})`)), 2000)
+      r.once('ready', () => { clearTimeout(timer); resolve() })
+    })
+  }
   return r
 }
 
