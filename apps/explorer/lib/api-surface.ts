@@ -20,7 +20,7 @@ export type ApiEndpoint = {
 export const API_SURFACE: readonly ApiEndpoint[] = [
   { path: '/api/v1/stats', summary: 'network stats (latest block, tx count, token count, avg gas price)', catalogAnchor: true },
   { path: '/api/v1/blocks', summary: 'recent blocks', catalogAnchor: true },
-  { path: '/api/v1/blocks/:number', summary: 'one block with txs', catalogAnchor: false, routeFile: 'api/v1/blocks/[number]/route.ts' },
+  { path: '/api/v1/blocks/:number', summary: 'one block (its transactions are not included)', catalogAnchor: false, routeFile: 'api/v1/blocks/[number]/route.ts' },
   { path: '/api/v1/transactions', summary: 'recent transactions', catalogAnchor: true },
   { path: '/api/v1/transactions/:hash', summary: 'one transaction with its status and gas used (no logs); outside the index it is read from the chain: `source` says which, `pending` means no receipt yet, unknown fields are null, 503 means retry', catalogAnchor: false, routeFile: 'api/v1/transactions/[hash]/route.ts' },
   { path: '/api/v1/addresses/:address', summary: 'the address\'s 20 latest indexed transactions and token transfers, and whether it is a contract (undetermined when isContractKnown is false)', catalogAnchor: false },
