@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
+import { NextRequest } from 'next/server'
 import { handleOAuthRequest } from '@altscan/oauth'
 import { oauthConfig } from '@/lib/oauth'
 import { authFailure, authRequest } from '@/lib/api-auth'
@@ -6,6 +7,8 @@ import { chainConfig } from '@/lib/chain'
 import { GET as asMetadata } from '@/app/.well-known/oauth-authorization-server/route'
 import { GET as prMetadata } from '@/app/.well-known/oauth-protected-resource/route'
 import { POST as token } from '@/app/oauth/token/route'
+import { POST as register } from '@/app/oauth/register/route'
+import { GET as authorize } from '@/app/oauth/authorize/route'
 import { GET as authMd } from '@/app/auth.md/route'
 
 const SECRET = 'q'.repeat(64)
@@ -94,4 +97,26 @@ describe('OAuth on', () => {
     expect(md).toContain('POST /oauth/register HTTP/1.1')
     expect(md).toContain(`https://${chainConfig.domain}/.well-known/oauth-protected-resource`)
   })
+})
+
+// Next hands route handlers a NextRequest whose .url has the first loopback literal rewritten to
+// "localhost". In production (host bnbscan.com) that literal was a native client's redirect_uri,
+// so every http://127.0.0.1 client got "The redirect_uri is not one this app registered."
+describe('loopback redirect URIs through NextRequest', () => {
+  it.each(['http://127.0.0.1:8976/callback', 'http://[::1]:8976/callback', 'http://localhost:8976/callback'])(
+    'opens the sign-in page for %s',
+    async (uri) => {
+      vi.stubEnv('OAUTH_SECRET', SECRET)
+      const reg = await register(new Request(`${ISSUER}/oauth/register`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: [uri] }),
+      }))
+      const { client_id } = await reg.json()
+      const q = new URLSearchParams({
+        response_type: 'code', client_id, redirect_uri: uri, code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', code_challenge_method: 'S256',
+      })
+      const res = await authorize(new NextRequest(`${ISSUER}/oauth/authorize?${q}`))
+      expect(res.status).toBe(200)
+      expect(await res.text()).toContain(`value="${uri}"`)
+    },
+  )
 })
