@@ -85,6 +85,20 @@ export function oauthConfig(): OAuthConfig | null {
 /** Per IP, on the endpoints that mint a client id, a code or a token. */
 const OAUTH_REQUESTS_PER_MINUTE = 20
 
+/**
+ * The URL as the client sent it. NextRequest.url passes through NextURL, which rewrites the first
+ * 127.x.x.x, [::1] or localhost anywhere in the URL to "localhost" — on bnbscan.com that is a
+ * loopback redirect_uri in the query, which then matches nothing the client registered. The
+ * underlying Request keeps the original. Only GETs carry OAuth parameters in the query.
+ */
+const requestUrlAsSent = Object.getOwnPropertyDescriptor(Request.prototype, 'url')!.get!
+
+function asSent(request: Request): Request {
+  if (request.method !== 'GET') return request
+  const sent = requestUrlAsSent.call(request) as string
+  return sent === request.url ? request : new Request(sent, { method: 'GET', headers: request.headers })
+}
+
 /** A route handler that is a 404 while OAuth is off, and rate-limited where it mints something. */
 export function oauthRoute(
   handler: (request: Request, cfg: OAuthConfig) => Response | Promise<Response>,
@@ -99,6 +113,6 @@ export function oauthRoute(
         { status: 429, headers: { 'retry-after': '60', 'access-control-allow-origin': '*' } },
       )
     }
-    return handler(request, cfg)
+    return handler(asSent(request), cfg)
   }
 }
