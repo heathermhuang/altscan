@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- altscan.io is discoverable to AI agents: `/` answers `Accept: text/markdown`, sends Link headers for its machine-readable resources, and publishes an RFC 9727 API catalog and an ARD `ai-catalog.json`, both nesting the explorers' own. Its robots.txt now carries the Content-Signal and training-crawler rules its llms.txt already described. The explorers publish `/.well-known/ai-catalog.json` too.
+
 ### Fixed
+- The explorers' agent discovery documents follow their specs. robots.txt's `Content-Signal` sat after the training-crawler group, so it governed only those bots; it is now in the `User-agent: *` group. The agent-skills index used a `$schema` and field names conformant clients reject, and SKILL.md lacked its required frontmatter.
 - The explorer keeps its page cache in memory instead of writing every on-demand page to disk. Crawlers requesting thousands of distinct transaction pages an hour filled the hosted instances' temporary storage until Render evicted them.
 - A webhook is deactivated after five consecutive failed deliveries, as documented; the count never got past one before. The indexer also caps how many per-block notification runs can wait on slow endpoints at once.
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
