@@ -1,0 +1,32 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Altscan",
+    "identifier": "altscan.io",
+    "documentationUrl": "https://altscan.io/llms.txt"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:altscan.io:catalog:bnbscan",
+      "displayName": "BNBScan",
+      "type": "application/ai-catalog+json",
+      "url": "https://bnbscan.com/.well-known/ai-catalog.json",
+      "representativeQueries": [
+        "look up a BNB Chain transaction by hash",
+        "get the BNB balance of an address",
+        "list the latest BNB Chain blocks"
+      ]
+    },
+    {
+      "identifier": "urn:air:altscan.io:catalog:ethscan",
+      "displayName": "EthScan",
+      "type": "application/ai-catalog+json",
+      "url": "https://ethscan.io/.well-known/ai-catalog.json",
+      "representativeQueries": [
+        "look up an Ethereum transaction by hash",
+        "get the ETH balance of an address",
+        "list the latest Ethereum blocks"
+      ]
+    }
+  ]
+}

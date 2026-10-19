@@ -1,0 +1,15 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://altscan.io/api/chains.json",
+      "service-doc": [{ "href": "https://altscan.io/llms.txt", "type": "text/plain" }]
+    },
+    {
+      "anchor": "https://altscan.io/.well-known/api-catalog",
+      "api-catalog": [
+        { "href": "https://bnbscan.com/.well-known/api-catalog" },
+        { "href": "https://ethscan.io/.well-known/api-catalog" }
+      ]
+    }
+  ]
+}

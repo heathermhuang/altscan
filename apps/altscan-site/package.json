@@ -9,7 +9,7 @@
     "build": "astro build",
     "preview": "wrangler dev",
     "deploy": "astro build && wrangler deploy",
-    "test": "tsx test/chains.test.ts && tsx test/tape.test.ts",
+    "test": "tsx test/chains.test.ts && tsx test/tape.test.ts && tsx test/agent.test.ts",
     "astro": "astro"
   },
   "dependencies": {
