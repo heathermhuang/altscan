@@ -2,7 +2,11 @@
   "name": "altscan-site",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@astrojs/cloudflare/entrypoints/server",
+  // Astro's handler, wrapped so `/` can answer `Accept: text/markdown` (src/worker.ts).
+  "main": "./src/worker.ts",
+  // `/` is prerendered, so without run_worker_first the asset layer would serve it before the worker
+  // runs. Only the homepage pays a worker invocation; every other asset is still served directly.
+  "assets": { "binding": "ASSETS", "run_worker_first": ["/"] },
   "routes": [{ "pattern": "altscan.io", "custom_domain": true }],
   "observability": { "enabled": true }
 }
