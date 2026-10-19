@@ -11,7 +11,7 @@ altscan.io issues no credentials and accepts none.
 
 ## Credentials for the explorers' APIs
 
-The explorers, BNBScan (`bnbscan.com`) and EthScan (`ethscan.io`), issue API keys through anonymous registration: no account, email or identity provider, only a wallet signature (EIP-191 `personal_sign`) that binds the key to an EVM address you control. Their read endpoints are keyless too. A key gives you your own rate-limit budget instead of your IP's, and is required for webhooks.
+The explorers, BNBScan (`bnbscan.com`) and EthScan (`ethscan.io`), issue API keys through anonymous registration: no account, email or identity provider, only a wallet signature (EIP-191 `personal_sign`) that binds the key to an EVM address you control. Their chain-data endpoints are keyless too. A key gives you your own rate-limit budget instead of your IP's, and is required to manage keys and webhooks.
 
 Each explorer keeps its own keys: a key works only on the explorer that issued it, and never at altscan.io. The full flow, with the exact message to sign and the errors, is in each explorer's auth.md:
 

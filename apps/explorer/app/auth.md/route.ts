@@ -18,12 +18,12 @@ You are an agent. This document tells you how to get and use a credential for th
 
 ## Do you need a credential?
 
-Usually not. Every read endpoint under \`/api/v1\` is public and keyless, limited to 100 requests per minute per IP. The OpenAPI description is at https://${host}/openapi.json.
+Usually not. The chain-data endpoints under \`/api/v1\` (blocks, transactions, addresses, tokens, contracts, stats, query) are public and keyless, limited to 100 requests per minute per IP. The OpenAPI description is at https://${host}/openapi.json.
 
 An API key does two things:
 
 - On the endpoints that take one (\`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\`), a request with a valid key counts against that key's own budget of 100 requests per minute instead of your IP's.
-- Webhook management requires it.
+- Webhooks and key listing require it: every \`/api/v1/webhooks\` call and \`GET /api/v1/keys\` answer 401 without one. Only registering an address's first key needs none.
 
 A key works only on ${host}. Each Altscan explorer keeps its own keys.
 
