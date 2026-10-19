@@ -70,9 +70,10 @@ pnpm test    # vitest run (root config, all workspaces)
   named `eth-indexer` has `rootDir: apps/indexer`, **not** `apps/eth-indexer`.
 - Import `@altscan/explorer-core/format`, **not** the barrel, in code that must stay light.
 - New provider cache keys use the `moralis:v2:<chain>:<currency>` prefix.
-- altscan.io's `/mcp` (apps/altscan-site/src/lib/mcp.ts) calls the explorers from Cloudflare's **shared** cross-zone
-  Worker IP, so it sends `ALTSCAN_SERVICE_TOKEN` (Worker secret + Render web env) for its own capped bucket; unset
-  means per-IP limiting, never an exemption. Pause it with the Worker var `MCP_ENABLED` (anything but `true`).
+- altscan.io's `/mcp` (apps/altscan-site/src/lib/mcp.ts) and `/api/chains.json` call the explorers from Cloudflare's
+  **shared** cross-zone Worker IP, so they send `ALTSCAN_SERVICE_TOKEN` (Worker secret + Render web env) for capped
+  buckets of their own (the feed adds `x-altscan-service-client: status-feed` so it can't drain /mcp's); unset means
+  per-IP limiting, never an exemption. Pause /mcp with the Worker var `MCP_ENABLED` (anything but `true`).
 - Analytics and Binance referral ads are **opt-in by env** (`GA_MEASUREMENT_ID`,
   `BINANCE_REF_CODE`; the hosted values are in `render.yaml`). Never give either a built-in
   default: a fork would report its visitors to, and earn referrals for, the hosted sites.

@@ -101,6 +101,7 @@ const captureHeaders = async (serviceToken?: string) => {
 {
   const h = await captureHeaders('s'.repeat(64));
   assert.equal(h.get('x-altscan-service-token'), 's'.repeat(64));
+  assert.equal(h.get('x-altscan-service-client'), 'status-feed');
   assert.equal(h.get('user-agent'), 'altscan-site');
   passed++; console.log('ok - fetchJson: sends x-altscan-service-token when the secret is set');
 }
