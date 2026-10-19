@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, sql } from 'drizzle-orm'
-import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 import { chainConfig } from '@/lib/chain'
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // GET: list webhooks for an owner — requires X-API-Key matching ownerAddress
 export async function GET(request: Request) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 // POST: register a new webhook (requires API key ownership)
 export async function POST(request: Request) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const body = await request.json() as {
     ownerAddress: string

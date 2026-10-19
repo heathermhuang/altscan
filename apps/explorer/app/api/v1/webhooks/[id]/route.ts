@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { and, eq } from 'drizzle-orm'
-import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const { id } = await params
   const webhookId = parseInt(id, 10)

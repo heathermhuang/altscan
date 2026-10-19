@@ -1,13 +1,76 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
+import { oauthConfig } from '@/lib/oauth'
 
-// auth.md (https://workos.com/auth-md): how an agent gets and uses a credential here.
-// There is no OAuth server, so this is the self-contained form: audience, the
-// provisioning endpoint, the method, and how to send the credential. Every fact
-// below is what app/api/v1/keys/route.ts and lib/api-auth.ts actually do; change
-// them together.
+// auth.md (https://workos.com/auth-md): how an agent gets and uses a credential here:
+// audience, the provisioning endpoints, the methods, and how to send the credential.
+// Every fact below is what app/api/v1/keys/route.ts, lib/api-auth.ts and lib/oauth.ts
+// actually do; change them together. The OAuth section exists only while OAuth is on
+// (OAUTH_SECRET), so this reads the runtime env on every request.
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
+
+function oauthSection(host: string): string {
+  return `
+## OAuth 2.1: the same access as a key, as a bearer token
+
+This explorer also runs an OAuth 2.1 authorization server. Its access tokens work wherever an API key does, sent as \`Authorization: Bearer <access_token>\`, and count per address: 100 requests a minute, shared by every token for that address. They do not manage keys or webhooks; those still need \`X-API-Key\`. A token lasts one hour and works only on ${host}.
+
+Discovery: the protected resource metadata at \`https://${host}/.well-known/oauth-protected-resource\` names the authorization server, whose metadata is at \`https://${host}/.well-known/oauth-authorization-server\`.
+
+### With an API key: client_credentials
+
+The key is the client secret, and its \`keyPrefix\` the client_id (HTTP Basic works too):
+
+\`\`\`http
+POST /oauth/token HTTP/1.1
+Host: ${host}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=bnbs_abc1234&client_secret=bnbs_…
+\`\`\`
+
+Response (200):
+
+\`\`\`json
+{"access_token": "…", "token_type": "Bearer", "expires_in": 3600, "scope": "api"}
+\`\`\`
+
+### Without a key: sign in with a wallet (authorization code + PKCE)
+
+Register a public client:
+
+\`\`\`http
+POST /oauth/register HTTP/1.1
+Host: ${host}
+Content-Type: application/json
+
+{"redirect_uris": ["http://127.0.0.1:8976/callback"], "client_name": "my-agent"}
+\`\`\`
+
+Make a PKCE pair (a 43-128 character \`code_verifier\`; \`code_challenge\` = base64url(SHA-256(code_verifier))) and load \`GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&state=…&code_challenge=…&code_challenge_method=S256&scope=api\`. The page is for people with a browser wallet. An agent reads the JSON \`{"before": …, "after": …}\` inside \`<script type="application/json" id="m">\` and the form's hidden fields, signs \`before + address + after\` with \`personal_sign\`, and posts the hidden fields back with \`address\` and \`signature\` filled in:
+
+\`\`\`http
+POST /oauth/authorize HTTP/1.1
+Host: ${host}
+Content-Type: application/x-www-form-urlencoded
+
+response_type=code&client_id=ac1.…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&scope=api&nonce=…&issued_at=…&state=…&address=0x…&signature=0x…
+\`\`\`
+
+The 303 to your redirect URI carries \`code\`, \`state\` and \`iss\`. Sign within 10 minutes of loading the page. Then exchange the code, once, within 60 seconds:
+
+\`\`\`http
+POST /oauth/token HTTP/1.1
+Host: ${host}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code&code=…&client_id=ac1.…&redirect_uri=…&code_verifier=…
+\`\`\`
+
+There are no refresh tokens. A request with an altered or expired token answers 401 with \`WWW-Authenticate: Bearer resource_metadata="…", error="invalid_token"\`. The OAuth endpoints that mint something allow 20 requests a minute per IP.
+`
+}
 
 function authMdBody(): string {
   const c = chainConfig
@@ -88,7 +151,7 @@ List your keys with \`GET /api/v1/keys?owner=0xYourAddress\` and the same header
 | 429 | Rate limit | Back off and retry after a minute |
 
 There is no self-service revocation endpoint. Discard a key you no longer need.
-`
+${oauthConfig() ? oauthSection(host) : ''}`
 }
 
 export async function GET() {

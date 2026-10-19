@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 
@@ -18,7 +18,7 @@ const SIG_MAX_AGE_MS = 5 * 60 * 1000
 // GET: list keys for an address (requires API key ownership)
 export async function GET(request: Request) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 // POST: generate a new API key (requires API key ownership)
 export async function POST(request: Request) {
   const auth = await authRequest(request)
-  if (!auth.ok) return NextResponse.json({ error: auth.reason === 'invalid_key' ? 'Invalid or inactive API key' : 'Rate limit exceeded' }, { status: auth.reason === 'invalid_key' ? 401 : 429 })
+  if (!auth.ok) return authFailure(auth)
 
   const body = await request.json() as { ownerAddress: string; label?: string; signature?: string; timestamp?: number }
   const { ownerAddress, label, signature, timestamp } = body

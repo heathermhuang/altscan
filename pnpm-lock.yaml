@@ -81,6 +81,9 @@ importers:
 
   apps/altscan-site:
     dependencies:
+      '@altscan/oauth':
+        specifier: workspace:*
+        version: link:../../packages/oauth
       '@astrojs/cloudflare':
         specifier: ^14.3.4
         version: 14.3.4(@types/node@24.19.0)(astro@7.3.6(@types/node@24.19.0)(ioredis@5.9.3)(jiti@1.21.7)(tsx@4.23.15)(yaml@2.9.1))(esbuild@0.28.2)(jiti@1.21.7)(tsx@4.23.15)(wrangler@4.149.0(@cloudflare/workers-types@5.20261006.1)(@types/node@24.19.0))(yaml@2.9.1)
@@ -115,6 +118,9 @@ importers:
       '@altscan/explorer-core':
         specifier: workspace:*
         version: link:../../packages/explorer-core
+      '@altscan/oauth':
+        specifier: workspace:*
+        version: link:../../packages/oauth
       '@altscan/providers':
         specifier: workspace:*
         version: link:../../packages/providers

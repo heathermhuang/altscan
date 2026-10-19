@@ -417,7 +417,7 @@ function esc(s: string): string {
 const PAGE_STYLE =
   'body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#fbfbfc;color:#16161d}' +
   'main{max-width:34rem;margin:0 auto;padding:48px 16px}h1{font-size:1.5rem;margin:0 0 16px}' +
-  'code{font:14px ui-monospace,monospace;word-break:break-all}.note{color:#5b5b66;font-size:14px}' +
+  'code{font:14px ui-monospace,monospace;word-break:break-all}.note{color:#5b5b66;font-size:14px}a{color:inherit}' +
   'button{font:inherit;padding:10px 18px;border-radius:8px;border:0;background:#16161d;color:#fff;cursor:pointer}' +
   'button:disabled{opacity:.5}@media(prefers-color-scheme:dark){body{background:#0b0b0f;color:#ececf1}' +
   '.note{color:#a0a0ab}button{background:#ececf1;color:#0b0b0f}}'

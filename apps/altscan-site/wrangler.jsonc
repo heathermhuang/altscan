@@ -11,7 +11,15 @@
   // /mcp kill switch: set to anything but "true" (dashboard or redeploy) to pause the endpoint.
   "vars": { "MCP_ENABLED": "true" },
   // Per-client limit for /mcp, keyed on the visitor IP: 60 calls a minute per Cloudflare location.
-  "ratelimits": [{ "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }],
+  // OAUTH_RATE_LIMITER: per IP, on the OAuth endpoints that mint a client id, a code or a token.
+  "ratelimits": [
+    { "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "OAUTH_RATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }
+  ],
+  // Single-use OAuth authorization codes (src/oauth-codes.ts). SQLite-backed, the kind the Free plan runs.
+  // The server also needs the Worker secret OAUTH_SECRET; without it every OAuth path is a 404.
+  "durable_objects": { "bindings": [{ "name": "OAUTH_CODES", "class_name": "OAuthCodes" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OAuthCodes"] }],
   // One row per /mcp tool call (src/lib/mcp.ts usagePoint), queried by the pilot's usage report.
   "analytics_engine_datasets": [{ "binding": "MCP_USAGE", "dataset": "altscan_mcp_calls" }],
   "observability": { "enabled": true }

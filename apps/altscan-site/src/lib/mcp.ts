@@ -42,7 +42,7 @@ const MAX_SYMBOL = 32;
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'POST, OPTIONS',
-  'access-control-allow-headers': 'content-type, accept, mcp-protocol-version, mcp-session-id',
+  'access-control-allow-headers': 'authorization, content-type, accept, mcp-protocol-version, mcp-session-id',
 };
 
 const chainArg = {
