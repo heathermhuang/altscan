@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { checkIpRateLimit, isAltscanService, SERVICE_TOKEN_HEADER } from './api-rate-limit'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { checkIpRateLimit, isAltscanService, SERVICE_CLIENT_HEADER, SERVICE_TOKEN_HEADER } from './api-rate-limit'
 
 // altscan.io's MCP Worker reaches the explorers from Cloudflare's shared cross-zone Worker address,
 // so it identifies itself with a token instead. The token must never become an exemption.
@@ -37,6 +37,32 @@ describe('checkIpRateLimit for the altscan service', () => {
     let allowed = 0
     for (let i = 0; i < 700; i++) if (await checkIpRateLimit(svc)) allowed++
     expect(allowed).toBeLessThanOrEqual(600)
+  })
+
+  // altscan.io's public status feed also sends the token. Its traffic follows page views, so it
+  // must not be able to drain the bucket /mcp depends on.
+  it('gives the status feed a bucket of its own, so it cannot starve /mcp', async () => {
+    process.env.ALTSCAN_SERVICE_TOKEN = TOKEN
+    const mcp = headers({ [SERVICE_TOKEN_HEADER]: TOKEN })
+    const feed = headers({ [SERVICE_TOKEN_HEADER]: TOKEN, [SERVICE_CLIENT_HEADER]: 'status-feed' })
+    // Earlier tests used the /mcp bucket; start past their window so both buckets are fresh.
+    vi.useFakeTimers({ now: Date.now() + 120_000 })
+    try {
+      for (let i = 0; i < 700; i++) await checkIpRateLimit(feed)
+      expect(await checkIpRateLimit(feed)).toBe(false)
+      expect(await checkIpRateLimit(mcp)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores the client header without a valid token', async () => {
+    process.env.ALTSCAN_SERVICE_TOKEN = TOKEN
+    const ip = `198.51.100.${Math.floor(Math.random() * 200)}`
+    const spoof = new Headers({ 'x-forwarded-for': ip, [SERVICE_TOKEN_HEADER]: 'nope', [SERVICE_CLIENT_HEADER]: 'status-feed' })
+    let allowed = 0
+    for (let i = 0; i < 150; i++) if (await checkIpRateLimit(spoof)) allowed++
+    expect(allowed).toBe(100)
   })
 
   it('limits a request with a wrong token by IP, like any other', async () => {

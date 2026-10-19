@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { gasPct, parseBlocks, buildChainsPayload } from '../src/lib/chains.ts';
+import { gasPct, parseBlocks, buildChainsPayload, fetchJson } from '../src/lib/chains.ts';
 
 let passed = 0;
 function t(name: string, fn: () => void) { fn(); passed++; console.log('ok -', name); }
@@ -86,5 +86,30 @@ t('buildChainsPayload: shapes per-id result and keeps ts', () => {
   assert.equal(bnb.online, true);
   assert.equal(bnb.blocks.length, 1);
 });
+
+// fetchJson: the service token rides along only when the Worker has one
+const captureHeaders = async (serviceToken?: string) => {
+  let sent: Headers | undefined;
+  const fake = (async (_url: string, init?: RequestInit) => {
+    sent = new Headers(init?.headers);
+    return new Response('{"blocks":[]}');
+  }) as typeof fetch;
+  const body = await fetchJson('https://bnbscan.com/api/v1/blocks', { fetchImpl: fake, serviceToken });
+  assert.deepEqual(body, { blocks: [] });
+  return sent!;
+};
+{
+  const h = await captureHeaders('s'.repeat(64));
+  assert.equal(h.get('x-altscan-service-token'), 's'.repeat(64));
+  assert.equal(h.get('x-altscan-service-client'), 'status-feed');
+  assert.equal(h.get('user-agent'), 'altscan-site');
+  passed++; console.log('ok - fetchJson: sends x-altscan-service-token when the secret is set');
+}
+for (const token of [undefined, '']) {
+  const h = await captureHeaders(token);
+  assert.equal(h.has('x-altscan-service-token'), false);
+  assert.deepEqual([...h.keys()], ['user-agent']);
+  passed++; console.log(`ok - fetchJson: no token header when the secret is ${JSON.stringify(token)}`);
+}
 
 console.log(`\n${passed} passed`);

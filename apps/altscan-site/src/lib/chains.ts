@@ -84,16 +84,27 @@ export function buildChainsPayload(
   return out;
 }
 
-/** Fetch JSON with a hard timeout; never throws (null on any failure, including non-2xx). */
+/**
+ * Fetch JSON with a hard timeout; never throws (null on any failure, including non-2xx).
+ *
+ * `serviceToken` is the Worker's ALTSCAN_SERVICE_TOKEN. The Worker calls the explorers from
+ * Cloudflare's shared cross-zone Worker IP; with the token the explorers give the status feed its
+ * own bucket, separate from /mcp's and from the one that IP shares with every other Worker
+ * (apps/explorer/lib/api-rate-limit.ts). Unset, nothing extra is sent.
+ */
 export async function fetchJson(
   url: string,
-  fetchImpl: typeof fetch = fetch,
-  timeoutMs = 2000,
+  { fetchImpl = fetch, timeoutMs = 2000, serviceToken }: { fetchImpl?: typeof fetch; timeoutMs?: number; serviceToken?: string } = {},
 ): Promise<unknown> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const headers: Record<string, string> = { 'user-agent': 'altscan-site' };
+  if (serviceToken) {
+    headers['x-altscan-service-token'] = serviceToken;
+    headers['x-altscan-service-client'] = 'status-feed';
+  }
   try {
-    const res = await fetchImpl(url, { signal: ctrl.signal, headers: { 'user-agent': 'altscan-site' } });
+    const res = await fetchImpl(url, { signal: ctrl.signal, headers });
     if (!res.ok) return null;
     return await res.json();
   } catch {
