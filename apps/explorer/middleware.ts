@@ -130,10 +130,11 @@ function isHeavyPath(pathname: string): boolean {
 }
 
 // Link response headers (RFC 8288) for agent discovery on the homepage.
-// Advertises the API catalog, human API docs, and sitemap so agents can
-// discover capabilities without guessing well-known paths.
+// Advertises the API catalog, OpenAPI spec, human API docs, and sitemap so agents
+// can discover capabilities without guessing well-known paths.
 const HOMEPAGE_LINK_HEADER = [
   '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+  '</openapi.json>; rel="service-desc"; type="application/vnd.oai.openapi+json;version=3.1"',
   '</api-docs>; rel="service-doc"; type="text/html"',
   '</sitemap.xml>; rel="sitemap"; type="application/xml"',
   '</.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"',
