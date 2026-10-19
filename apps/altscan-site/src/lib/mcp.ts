@@ -11,6 +11,29 @@ export const SERVER_INFO = { name: 'altscan', title: 'Altscan explorers', versio
 export type Upstream = (url: string) => Promise<Response>;
 export type McpLog = (line: Record<string, string | number | boolean>) => void;
 
+/**
+ * One Analytics Engine row per tool call (dataset altscan_mcp_calls), so the pilot's success bar
+ * (#254: distinct clients with ok calls across days, within 30-60 days) can be measured: the log
+ * line names no client, and Workers Logs keep only 3-7 days. Positions are the SQL columns:
+ * blob1 tool, blob2 chain, blob3 outcome, blob4 client; double1 ms, double2 upstream status.
+ */
+export type UsagePoint = { indexes: string[]; blobs: string[]; doubles: number[] };
+
+/** The client as a 16-hex SHA-256 prefix of its IP: pseudonymous, not anonymous (Cloudflare's zone
+ *  analytics already hold the raw IP); enough to count distinct clients without storing the address. */
+export async function clientHash(ip: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ip)));
+  return [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function usagePoint(line: Record<string, string | number | boolean>, client: string): UsagePoint {
+  return {
+    indexes: [client],
+    blobs: [String(line.tool ?? ''), String(line.chain ?? ''), String(line.outcome ?? ''), client],
+    doubles: [Number(line.ms ?? 0), Number(line.upstream ?? 0)],
+  };
+}
+
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_INPUT_CHARS = 4_096; // calldata can be hundreds of KB; agents get the head and the length
 const MAX_NAME = 100;

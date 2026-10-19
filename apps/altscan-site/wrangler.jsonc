@@ -12,5 +12,7 @@
   "vars": { "MCP_ENABLED": "true" },
   // Per-client limit for /mcp, keyed on the visitor IP: 60 calls a minute per Cloudflare location.
   "ratelimits": [{ "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }],
+  // One row per /mcp tool call (src/lib/mcp.ts usagePoint), queried by the pilot's usage report.
+  "analytics_engine_datasets": [{ "binding": "MCP_USAGE", "dataset": "altscan_mcp_calls" }],
   "observability": { "enabled": true }
 }

@@ -3,7 +3,7 @@
 // `/mcp`, which no asset matches.
 import { handle } from '@astrojs/cloudflare/handler';
 import { homeResponse } from './lib/home';
-import { handleMcp } from './lib/mcp';
+import { clientHash, handleMcp, usagePoint, type UsagePoint } from './lib/mcp';
 
 type Handle = typeof handle;
 type Env = {
@@ -14,6 +14,8 @@ type Env = {
   MCP_RATE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** Secret shared with the explorers, which give it its own rate-limit bucket. */
   ALTSCAN_SERVICE_TOKEN?: string;
+  /** One row per tool call, for the pilot's usage report (wrangler.jsonc analytics_engine_datasets). */
+  MCP_USAGE?: { writeDataPoint(point: UsagePoint): void };
 };
 
 const MCP_UPSTREAM_DEADLINE_MS = 10_000;
@@ -37,7 +39,13 @@ async function mcp(request: Request, env: Env): Promise<Response> {
   if (env.ALTSCAN_SERVICE_TOKEN) headers['x-altscan-service-token'] = env.ALTSCAN_SERVICE_TOKEN;
   const upstream = (url: string) => fetch(url, { headers, signal: AbortSignal.timeout(MCP_UPSTREAM_DEADLINE_MS) });
   // One line per tool call: tool, chain, outcome, upstream status, latency. No hashes or addresses.
-  return handleMcp(request, upstream, (line) => console.log(JSON.stringify({ mcp: line })));
+  // The usage row adds the client, hashed, so distinct clients can be counted over the whole pilot.
+  const hashed = env.MCP_USAGE ? await clientHash(client) : '';
+  return handleMcp(request, upstream, (line) => {
+    console.log(JSON.stringify({ mcp: line }));
+    // This runs in handleMcp's `finally`: a throw here would turn the tool's answer into a 500.
+    try { env.MCP_USAGE?.writeDataPoint(usagePoint(line, hashed)); } catch { /* usage row lost, call unaffected */ }
+  });
 }
 
 export default {
