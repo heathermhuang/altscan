@@ -49,6 +49,46 @@ const BLOCKED_IPV4_CIDRS = [
   '47.79.0.0/16',
 ].map(parseCidr)
 
+// Parse an IPv6 address to a 128-bit integer, or null if it isn't one. Forms
+// with an embedded IPv4 tail (::ffff:1.2.3.4) return null and are never blocked.
+function ipv6ToBigInt(ip: string): bigint | null {
+  const halves = ip.split('::')
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(':') : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  const fill = 8 - head.length - tail.length
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null
+  let n = 0n
+  for (const g of [...head, ...Array<string>(fill).fill('0'), ...tail]) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null
+    n = (n << 16n) | BigInt(parseInt(g, 16))
+  }
+  return n
+}
+
+function parseCidr6(cidr: string): { network: bigint; mask: bigint } {
+  const [ip, bitsStr] = cidr.split('/')
+  const bits = BigInt(parseInt(bitsStr ?? '128', 10))
+  const mask = ((1n << bits) - 1n) << (128n - bits)
+  const network = (ipv6ToBigInt(ip ?? '') ?? 0n) & mask
+  return { network, mask }
+}
+
+const BLOCKED_IPV6_CIDRS = [
+  // Rotating IPv6 proxy pools (leased /29s) — ~4,000 IPs at ~1 request each
+  // flooded uncached /tx/ pages and crashed ethscan-web, Oct 2026 incident.
+  // Announced by AS214483 (RapidSeedbox leases):
+  '2a10:4a00::/29',
+  '2a10:7b00::/29',
+  '2a12:f540::/29',
+  '2a13:f40::/29',
+  // Announced by AS62610 (Pilo IP, Nuba IP, MB Eisina, Xantho leases):
+  '2a01:f2c0::/29',
+  '2a11:c40::/29',
+  '2a12:da80::/29',
+  '2a13:dcc0::/29',
+].map(parseCidr6)
+
 function getClientIp(request: NextRequest): string | null {
   // Cloudflare sits in front of Render for bnbscan.com/ethscan.io. Prefer
   // cf-connecting-ip when present; fall back to x-real-ip / first XFF hop.
@@ -66,6 +106,14 @@ function getClientIp(request: NextRequest): string | null {
 
 function isBlockedIp(ip: string | null): boolean {
   if (!ip) return false
+  if (ip.includes(':')) {
+    const n6 = ipv6ToBigInt(ip)
+    if (n6 === null) return false
+    for (const { network, mask } of BLOCKED_IPV6_CIDRS) {
+      if ((n6 & mask) === network) return true
+    }
+    return false
+  }
   const n = ipToInt(ip)
   if (n === 0) return false
   for (const { network, mask } of BLOCKED_IPV4_CIDRS) {
