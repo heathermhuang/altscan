@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "altscan-api",
+      "type": "skill-md",
+      "description": "Query BNB Chain or Ethereum data through Altscan's free explorers: pick bnbscan.com or ethscan.io by chain, then call the same keyless REST API on either (blocks, transactions, addresses, tokens, contracts).",
+      "url": "https://altscan.io/.well-known/agent-skills/altscan-api/SKILL.md",
+      "digest": "sha256:6b5824cbe16250caf3f5bfe25207b257a5ac53d09643fc2b7289d673cbfa66d9"
+    }
+  ]
+}

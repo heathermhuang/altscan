@@ -8,9 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - altscan.io is discoverable to AI agents: `/` answers `Accept: text/markdown`, sends Link headers for its machine-readable resources, and publishes an RFC 9727 API catalog and an ARD `ai-catalog.json`, both nesting the explorers' own. Its robots.txt now carries the Content-Signal and training-crawler rules its llms.txt already described. The explorers publish `/.well-known/ai-catalog.json` too.
+- altscan.io publishes an Agent Skill (`/.well-known/agent-skills/altscan-api/SKILL.md`, indexed and listed in its AI catalog) telling agents which explorer serves which chain and how to call the shared API.
 
 ### Fixed
 - The explorers' agent discovery documents follow their specs. robots.txt's `Content-Signal` sat after the training-crawler group, so it governed only those bots; it is now in the `User-agent: *` group. The agent-skills index used a `$schema` and field names conformant clients reject, and SKILL.md lacked its required frontmatter.
+- The API docs, the explorers' agent skill and the Markdown `/api-docs` described `/api/v1/addresses/:address` as a balance/nonce summary. It returns the address's 20 latest transactions and token transfers, and whether it is a contract.
 - The explorer keeps its page cache in memory instead of writing every on-demand page to disk. Crawlers requesting thousands of distinct transaction pages an hour filled the hosted instances' temporary storage until Render evicted them.
 - The explorer's abuse-source IP denylist matches IPv6 ranges too, and blocks eight leased IPv6 proxy pools whose ~4,000 rotating addresses flooded uncached transaction pages and crashed the hosted ETH explorer.
 - A webhook is deactivated after five consecutive failed deliveries, as documented; the count never got past one before. The indexer also caps how many per-block notification runs can wait on slow endpoints at once.

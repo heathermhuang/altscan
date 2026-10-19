@@ -116,7 +116,7 @@ function apiDocsMarkdown(): string {
     `- \`GET /api/v1/stats\` — network stats`,
     `- \`GET /api/v1/blocks\` — recent blocks + by number`,
     `- \`GET /api/v1/transactions\` — recent txs + by hash`,
-    `- \`GET /api/v1/addresses/:address\` — address summary`,
+    `- \`GET /api/v1/addresses/:address\` — latest transactions and token transfers`,
     `- \`GET /api/v1/tokens\` — token list + by contract`,
     `- \`GET /api/v1/contracts\` — verified-contract metadata`,
     '',
