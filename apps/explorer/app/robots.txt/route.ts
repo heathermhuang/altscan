@@ -17,6 +17,14 @@ export async function GET() {
   lines.push('')
 
   lines.push('User-agent: *')
+  // Content Signals (https://contentsignals.org/) — declare AI content-usage policy.
+  // Like any robots.txt rule it belongs to the group it sits in, so it must stay
+  // inside this catch-all group: after the training-bot group it applied only
+  // to those (already disallowed) bots and left everyone else with no signal.
+  // ai-train=no   → do not use content to train models
+  // search=yes    → allow indexing for search features
+  // ai-input=yes  → allow retrieval-augmented answers (agents quoting public chain data)
+  lines.push('Content-Signal: ai-train=no, search=yes, ai-input=yes')
   lines.push('Allow: /')
   lines.push('Disallow: /address/')
   // Noindex pages of a block's transactions: crawling them multiplies block renders for nothing.
@@ -31,14 +39,6 @@ export async function GET() {
   lines.push('# AI training / bulk-scrape crawlers — blocked site-wide:')
   for (const bot of TRAINING_BLOCKED) lines.push(`User-agent: ${bot}`)
   lines.push('Disallow: /')
-  lines.push('')
-
-  // Content Signals (https://contentsignals.org/) — declare AI content-usage policy.
-  // ai-train=no   → do not use content to train models
-  // search=yes    → allow indexing for search features
-  // ai-input=yes  → allow retrieval-augmented answers (agents quoting public chain data)
-  lines.push('# Content Signals (https://contentsignals.org/)')
-  lines.push('Content-Signal: ai-train=no, search=yes, ai-input=yes')
   lines.push('')
 
   lines.push(`Sitemap: ${BASE}/sitemap.xml`)

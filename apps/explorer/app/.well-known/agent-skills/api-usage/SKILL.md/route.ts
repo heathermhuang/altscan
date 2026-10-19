@@ -9,9 +9,21 @@ export const revalidate = 3600
 
 const endpointLines = API_SURFACE.map(e => `- \`GET ${e.path}\` — ${e.summary}`).join('\n')
 
+/** Shared with the discovery index, which SHOULD repeat the frontmatter description. */
+export function skillDescription(): string {
+  return `How to use the ${chainConfig.brandDomain} public REST API to query ${chainConfig.name} chain data (blocks, transactions, addresses, tokens, contracts).`
+}
+
+// The Agent Skills Discovery RFC requires YAML frontmatter with `name` and
+// `description`. JSON.stringify yields a valid YAML double-quoted scalar.
 export function skillBody(): string {
   const c = chainConfig
-  return `# ${c.brandDomain} — REST API usage
+  return `---
+name: api-usage
+description: ${JSON.stringify(skillDescription())}
+---
+
+# ${c.brandDomain} — REST API usage
 
 ## Identity
 
