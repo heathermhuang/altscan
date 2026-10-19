@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { env } from 'cloudflare:workers';
 import { products, type Product } from '../../data/products';
 import { buildChainsPayload, fetchJson } from '../../lib/chains';
 
@@ -16,8 +17,11 @@ const PAGE = 50;
 async function fetchBlocks(p: Product): Promise<unknown> {
   const pages = Math.ceil(p.tapeBlocks / PAGE);
   const limit = pages > 1 ? PAGE : p.tapeBlocks;
+  // Worker secret, shared with the explorers' rate limiter (see fetchJson).
+  const serviceToken = (env as { ALTSCAN_SERVICE_TOKEN?: string }).ALTSCAN_SERVICE_TOKEN;
   const bodies = await Promise.all(
-    Array.from({ length: pages }, (_, i) => fetchJson(`${p.url}/api/v1/blocks?limit=${limit}&page=${i + 1}`)),
+    Array.from({ length: pages }, (_, i) =>
+      fetchJson(`${p.url}/api/v1/blocks?limit=${limit}&page=${i + 1}`, { serviceToken })),
   );
   const first = bodies[0] as { blocks?: unknown } | null;
   if (!Array.isArray(first?.blocks)) return null;
