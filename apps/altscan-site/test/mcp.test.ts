@@ -1,5 +1,6 @@
 import assert from 'node:assert';
-import { handleMcp, PROTOCOL_VERSIONS, type Upstream } from '../src/lib/mcp.ts';
+import { createHash } from 'node:crypto';
+import { clientHash, handleMcp, PROTOCOL_VERSIONS, usagePoint, type Upstream } from '../src/lib/mcp.ts';
 
 let passed = 0;
 async function t(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log('ok -', name); }
@@ -131,6 +132,32 @@ await t('the per-call log line names the tool and outcome, never the hash or add
   assert.equal(lines[0].tool, 'get_token');
   assert.equal(lines[0].outcome, 'ok');
   assert.ok(!JSON.stringify(lines[0]).includes(ADDR.slice(2, 12)));
+});
+
+// Usage rows (Analytics Engine): the #254 bar needs distinct clients over 30-60 days, which
+// neither the log line (no client) nor Workers Logs (3-7 day retention) can answer.
+await t('clientHash is a 16-hex SHA-256 prefix of the IP, never the IP itself', async () => {
+  const h = await clientHash('203.0.113.7');
+  assert.equal(h, createHash('sha256').update('203.0.113.7').digest('hex').slice(0, 16));
+  assert.equal(await clientHash('203.0.113.7'), h);
+  assert.notEqual(await clientHash('203.0.113.8'), h);
+  assert.ok(!h.includes('203'));
+});
+await t('usagePoint maps one tool call to fixed blob and double positions', async () => {
+  const lines: Record<string, string | number | boolean>[] = [];
+  await rpc(call('get_token', { chain: 'bnb', address: ADDR }), upstreamOf(200, { token: { address: ADDR } }).fn, (l) => lines.push(l as never));
+  const p = usagePoint(lines[0], 'c0ffee0123456789');
+  assert.deepEqual(p.indexes, ['c0ffee0123456789']);
+  assert.deepEqual(p.blobs, ['get_token', 'bnb', 'ok', 'c0ffee0123456789']); // blob1..blob4
+  assert.equal(p.doubles[1], 200); // double2 = upstream status
+  assert.ok(Number.isFinite(p.doubles[0]) && p.doubles[0] >= 0); // double1 = ms
+  assert.ok(!JSON.stringify(p).includes(ADDR.slice(2, 12)));
+});
+await t('usagePoint keeps its shape when the call never reached a tool', async () => {
+  const lines: Record<string, string | number | boolean>[] = [];
+  await rpc(call('no_such_tool', {}), failing, (l) => lines.push(l as never));
+  assert.deepEqual(usagePoint(lines[0], 'x').blobs, ['', '', 'invalid', 'x']);
+  assert.equal(usagePoint(lines[0], 'x').doubles.length, 2);
 });
 
 console.log(`\n${passed} passed`);
