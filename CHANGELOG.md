@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **MCP pilot at `https://altscan.io/mcp`**: a keyless, read-only, stateless MCP server with two tools, `get_transaction` and `get_token`, for both chains. It is rate-limited per client, has a kill switch (`MCP_ENABLED`), bounds what it returns, and logs no hashes or addresses. A server card at `/.well-known/mcp/server-card.json` is listed in altscan.io's AI catalog.
+- `/api/v1/tokens/:contract` returns `lookalike`: the well-known token a contract's name or symbol imitates, with that token's real contract, or null. It is evidence, not a safety verdict.
 - altscan.io is discoverable to AI agents: `/` answers `Accept: text/markdown`, sends Link headers for its machine-readable resources, and publishes an RFC 9727 API catalog and an ARD `ai-catalog.json`, both nesting the explorers' own. Its robots.txt now carries the Content-Signal and training-crawler rules its llms.txt already described. The explorers publish `/.well-known/ai-catalog.json` too.
 - altscan.io publishes an Agent Skill (`/.well-known/agent-skills/altscan-api/SKILL.md`, indexed and listed in its AI catalog) telling agents which explorer serves which chain and how to call the shared API.
 

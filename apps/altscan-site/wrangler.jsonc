@@ -8,5 +8,9 @@
   // runs. Only the homepage pays a worker invocation; every other asset is still served directly.
   "assets": { "binding": "ASSETS", "run_worker_first": ["/"] },
   "routes": [{ "pattern": "altscan.io", "custom_domain": true }],
+  // /mcp kill switch: set to anything but "true" (dashboard or redeploy) to pause the endpoint.
+  "vars": { "MCP_ENABLED": "true" },
+  // Per-client limit for /mcp, keyed on the visitor IP: 60 calls a minute per Cloudflare location.
+  "ratelimits": [{ "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }],
   "observability": { "enabled": true }
 }

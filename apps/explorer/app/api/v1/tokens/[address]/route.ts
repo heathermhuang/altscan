@@ -3,6 +3,8 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
+import { chainConfig } from '@/lib/chain'
+import { lookalikeOf } from '@/lib/lookalike'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,5 +43,7 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  return apiJson({ token: tokens[0] })
+  // Evidence, not a verdict: a name or symbol that reads as a well-known token on another contract.
+  // null means no match against that short list, never "safe".
+  return apiJson({ token: tokens[0], lookalike: lookalikeOf(tokens[0], chainConfig.key) })
 }

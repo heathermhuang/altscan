@@ -7,6 +7,17 @@
   },
   "entries": [
     {
+      "identifier": "urn:air:altscan.io:mcp:explorers",
+      "displayName": "Altscan explorers MCP server",
+      "type": "application/mcp-server-card+json",
+      "url": "https://altscan.io/.well-known/mcp/server-card.json",
+      "representativeQueries": [
+        "what happened in this BNB Chain transaction",
+        "look up an old Ethereum transaction by hash",
+        "is this token contract imitating USDT"
+      ]
+    },
+    {
       "identifier": "urn:air:altscan.io:skill:altscan-api",
       "displayName": "Altscan explorers API",
       "type": "application/agent-skills+md",
