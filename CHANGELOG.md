@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - altscan.io publishes an Agent Skill (`/.well-known/agent-skills/altscan-api/SKILL.md`, indexed and listed in its AI catalog) telling agents which explorer serves which chain and how to call the shared API.
 
 ### Fixed
+- The API rate limiter's in-memory fallback, used while Redis is unavailable, now enforces its 10,000-entry cap. It swept expired entries past the cap but kept inserting, so a flood of distinct client addresses grew it without bound and made every request scan the whole map.
 - The explorers' agent discovery documents follow their specs. robots.txt's `Content-Signal` sat after the training-crawler group, so it governed only those bots; it is now in the `User-agent: *` group. The agent-skills index used a `$schema` and field names conformant clients reject, and SKILL.md lacked its required frontmatter.
 - The API docs, the explorers' agent skill and the Markdown `/api-docs` described `/api/v1/addresses/:address` as a balance/nonce summary. It returns the address's 20 latest indexed transactions and token transfers, and a contract check that reports `isContractKnown: false` when it could not be determined.
 - The explorer keeps its page cache in memory instead of writing every on-demand page to disk. Crawlers requesting thousands of distinct transaction pages an hour filled the hosted instances' temporary storage until Render evicted them.

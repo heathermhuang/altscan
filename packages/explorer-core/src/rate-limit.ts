@@ -67,17 +67,35 @@ function startCleanupTimer() {
   if (cleanupTimer.unref) cleanupTimer.unref()
 }
 
-function checkRateLimitMemory(key: string, maxRequests: number): boolean {
-  startCleanupTimer()
-  const now = Date.now()
-  if (rateLimitMap.size > MAX_MAP_SIZE) {
+// The cap is hard: a flood of distinct keys (rotating IPv6 clients) while Redis is down must not
+// grow the map without bound. Expired windows go first, swept at most once a second so a full map
+// does not cost an O(n) scan per request; then the oldest windows are evicted (a Map iterates in
+// insertion order, and a reset re-inserts at the end). Eviction hands that client a fresh window
+// early — briefly lenient — where refusing new keys would lock out every new visitor.
+const FULL_SWEEP_MIN_INTERVAL_MS = 1_000
+let lastFullSweep = 0
+
+function makeRoom(now: number) {
+  if (now - lastFullSweep >= FULL_SWEEP_MIN_INTERVAL_MS) {
+    lastFullSweep = now
     for (const [k, val] of rateLimitMap) {
       if (now > val.resetAt) rateLimitMap.delete(k)
     }
   }
+  while (rateLimitMap.size >= MAX_MAP_SIZE) {
+    const oldest = rateLimitMap.keys().next().value
+    if (oldest === undefined) break
+    rateLimitMap.delete(oldest)
+  }
+}
+
+function checkRateLimitMemory(key: string, maxRequests: number): boolean {
+  startCleanupTimer()
+  const now = Date.now()
   const entry = rateLimitMap.get(key)
   if (!entry || now > entry.resetAt) {
     rateLimitMap.delete(key)
+    if (rateLimitMap.size >= MAX_MAP_SIZE) makeRoom(now)
     rateLimitMap.set(key, { count: 1, resetAt: now + WINDOW_MS })
     return true
   }
