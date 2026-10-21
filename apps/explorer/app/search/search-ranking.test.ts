@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PgDialect } from 'drizzle-orm/pg-core'
+import { SEARCH_POPULAR_ROWS } from '@/lib/token-suggest'
 
 let rows: Record<string, unknown>[] = []
 const limits: number[] = []
@@ -15,7 +16,7 @@ const orderings: unknown[] = []
 vi.mock('@/lib/db', async () => {
   const { schema } = await import('@altscan/db')
   const query: Record<string, unknown> = {}
-  for (const m of ['from', 'where']) query[m] = () => query
+  for (const m of ['from', 'where', 'as']) query[m] = () => query
   query.orderBy = (o: unknown) => { orderings.push(o); return query }
   query.limit = (n: number) => { limits.push(n); return query }
   query.then = (resolve: (r: unknown) => unknown) => resolve(rows)
@@ -99,11 +100,12 @@ describe('/search token ranking', () => {
     expect(await searchHtml('usdt')).toContain('Found 4 tokens')
   })
 
-  // The 50 by-holders candidates, and (search-exact.test.ts) up to 10 rows whose symbol or name equals the query.
+  // The most-held tokens it reads (searchCandidatesQuery's bound), the 50 by-holders candidates among them, and
+  // (search-exact.test.ts) up to 10 rows whose symbol or name equals the query.
   it('asks the database for 50 candidates, ordered, instead of five unordered rows', async () => {
     await searchHtml('usdt')
-    expect(limits).toEqual([50, 10])
-    expect(orderings).toHaveLength(1)
+    expect(limits).toEqual([SEARCH_POPULAR_ROWS, 50, 10])
+    expect(orderings).toHaveLength(2)
   })
 
   // Plain DESC matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops

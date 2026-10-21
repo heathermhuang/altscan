@@ -1,14 +1,13 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { db, schema } from '@/lib/db'
-import { or, ilike, desc } from 'drizzle-orm'
+import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_EXACT_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
 import { normaliseSearchQuery } from '@/lib/search-route'
-import { exactMatchQuery } from '@/lib/token-suggest'
+import { exactMatchQuery, searchCandidatesQuery } from '@/lib/token-suggest'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
@@ -43,18 +42,14 @@ export default async function SearchPage({
 
   // Token name/symbol search — if nothing else matched, search tokens table
   if (query && query.length >= 2) {
-    // Escape SQL LIKE wildcards in user input
-    const safeQuery = query.replace(/[%_\\]/g, '\\$&')
     // redirect() works by THROWING, so it must be called outside the try — the catch below would
     // swallow it and a single-token match would fall through to "No results found".
     let singleMatch: string | null = null
     try {
-      // The SQL only finds rows that CONTAIN the query, biggest first; rankTokenMatches decides which
-      // 10 a visitor sees: every real token before every lookalike, then by match tier (exact symbol/name
-      // before prefix before contains), then holders.
-      // Plain DESC, never NULLS LAST: holder_count is NOT NULL, so the order is the same, and plain DESC
-      // matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops at the
-      // limit. NULLS LAST cannot use that index and forced a seq scan + sort on every search (~3.6 s on BNB).
+      // The SQL only finds rows that CONTAIN the query, biggest first, among the most-held tokens
+      // (searchCandidatesQuery says why it stops there); rankTokenMatches decides which 10 a visitor sees:
+      // every real token before every lookalike, then by match tier (exact symbol/name before prefix before
+      // contains), then holders.
       // That top-50 can leave out a low-holder token whose ticker IS the query, so the rows whose lower(symbol)
       // or lower(name) EQUALS it (tokens_lower_symbol_idx / tokens_lower_name_idx) are unioned in by address.
       const exactQ = query.toLowerCase()
@@ -68,15 +63,7 @@ export default async function SearchPage({
         }
       }
       const [byHolders, exact] = await Promise.all([
-        db.select().from(schema.tokens)
-          .where(
-            or(
-              ilike(schema.tokens.name, `%${safeQuery}%`),
-              ilike(schema.tokens.symbol, `%${safeQuery}%`),
-            )
-          )
-          .orderBy(desc(schema.tokens.holderCount))
-          .limit(SEARCH_CANDIDATE_LIMIT),
+        searchCandidatesQuery(db, query, SEARCH_CANDIDATE_LIMIT),
         exactRows(),
       ])
       const seen = new Set<string>()

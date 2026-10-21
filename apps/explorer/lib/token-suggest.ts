@@ -21,7 +21,7 @@
  * index order, or, when the planner expects only a few matches, fetches and sorts them all, which is bounded by
  * the one histogram bucket (~1% of the table) its estimate came from. Neither ever walks the table.
  */
-import { or, sql } from 'drizzle-orm'
+import { desc, ilike, or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 import type { ChainKey } from '@altscan/chain-config'
 import { lookalikeOf } from '@/lib/lookalike'
@@ -123,6 +123,32 @@ export function exactMatchQuery(db: Db, q: string, limit: number) {
   const t = schema.tokens
   return db.select().from(t)
     .where(or(sql`lower(${t.symbol}) = ${q}`, sql`lower(${t.name}) = ${q}`))
+    .limit(limit)
+}
+
+/** /search reads this many of the most-held tokens and keeps those containing the query. */
+export const SEARCH_POPULAR_ROWS = 20_000
+
+/**
+ * /search's by-holders candidates: the most-held tokens whose name or symbol CONTAINS `query` (case-insensitive,
+ * the visitor's % _ and \ matched literally), plain DESC, at most `limit`.
+ *
+ * NOT `WHERE name ILIKE '%q%' OR symbol ILIKE '%q%' ORDER BY holder_count DESC LIMIT n` over the whole table. No
+ * index serves a contains match, so Postgres walks tokens_holder_count_idx from the top and filters every row
+ * until n match: for a query with fewer than n matches that is every token (1.9M on BNB), and it hit the 15 s
+ * statement timeout 12 times on 2026-10-21, ten of them within 15 s. A subquery with its own LIMIT cannot be
+ * flattened, so this reads the SEARCH_POPULAR_ROWS most-held tokens and stops. A rarer token is found by its exact
+ * symbol or name (exactMatchQuery, which /search unions in) and by its prefix in the header typeahead.
+ */
+export function searchCandidatesQuery(db: Db, query: string, limit: number) {
+  const contains = `%${query.replace(/[%_\\]/g, '\\$&')}%`
+  const popular = db.select().from(schema.tokens)
+    .orderBy(desc(schema.tokens.holderCount))
+    .limit(SEARCH_POPULAR_ROWS)
+    .as('popular')
+  return db.select().from(popular)
+    .where(or(ilike(popular.name, contains), ilike(popular.symbol, contains)))
+    .orderBy(desc(popular.holderCount))
     .limit(limit)
 }
 
