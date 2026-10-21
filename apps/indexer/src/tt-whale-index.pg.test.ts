@@ -391,6 +391,63 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
         expect((await attached(w.name)).size, 'but every partition has its valid child').toBe((await partitionNames()).length)
       }
     }, 120_000)
+
+    // CREATE TABLE … PARTITION OF wants ACCESS EXCLUSIVE on token_transfers, and while it waits every later reader
+    // queues behind it. On BNB at 16:12Z on 2026-10-21 it waited out the 15 s statement timeout three times and 17
+    // tx-page reads timed out in its queue. It now gives up at the lock timeout and leaves the partition to its next
+    // run, which partitions made PARTITION_AHEAD widths early can afford.
+    it('gives up on a forward partition it cannot lock within the timeout, so readers queue behind it only that long', async () => {
+      const holder = createMaintenanceConnection(PG_URL as string)   // a long reader on token_transfers
+      const reader = createMaintenanceConnection(PG_URL as string)   // a read that arrives while the CREATE waits
+      const waitFor = async (what: string, fn: () => Promise<boolean>, ms = 15_000) => {
+        const t0 = Date.now()
+        while (!(await fn())) {
+          if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`)
+          await new Promise(r => setTimeout(r, 50))
+        }
+      }
+      const locked = (mode: string, granted: boolean) => async () => (await rows(
+        `SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+         WHERE c.relname = 'token_transfers' AND l.mode = '${mode}' AND l.granted = ${granted}`,
+      )).length > 0
+      // Leave exactly one forward partition to make: drop the far one an earlier test added, and the newest.
+      await conn.unsafe('DROP TABLE IF EXISTS token_transfers_p_9000000')
+      const forward = (await partitionNames()).filter(p => /^token_transfers_p_\d+$/.test(p))
+      const last = forward.sort((a, b) => Number(a.slice(18)) - Number(b.slice(18))).at(-1)!
+      await conn.unsafe(`DROP TABLE ${last}`)
+
+      let release!: () => void
+      const held = new Promise<void>(r => { release = r })
+      const holding = holder.begin(async tx => {
+        await tx.unsafe('LOCK TABLE token_transfers IN ACCESS SHARE MODE')
+        await held
+      })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await waitFor('the holder to hold its lock', locked('AccessShareLock', true))
+        const t0 = Date.now()
+        const creating = ensureForwardPartitions()
+        await waitFor('the CREATE to wait for ACCESS EXCLUSIVE', locked('AccessExclusiveLock', false))
+        const r0 = Date.now()
+        await reader.unsafe('SELECT count(*) FROM token_transfers WHERE block_number < 0')
+        const readerWaited = Date.now() - r0
+        await creating
+        const took = Date.now() - t0
+        expect(readerWaited, 'a reader queued behind it waits at most the lock timeout').toBeLessThan(3_000)
+        expect(took, 'bounded by the 2s lock timeout').toBeGreaterThanOrEqual(1_500)
+        expect(took).toBeLessThan(8_000)
+        expect(await partitionNames()).not.toContain(last)
+        expect(warn.mock.calls.some(c => String(c[0]).includes(last))).toBe(true)
+      } finally {
+        warn.mockRestore()
+        release()
+        await holding
+        await reader.end({ timeout: 5 })
+        await holder.end({ timeout: 5 })
+      }
+      await ensureForwardPartitions()   // the next run makes it
+      expect(await partitionNames()).toContain(last)
+    }, 60_000)
   })
 
   // ── ETH: a plain, non-partitioned token_transfers ──
