@@ -52,15 +52,24 @@ export function isLocalHistoryIncomplete(
  * via isLocalHistoryIncomplete() and fall back to prior behavior.
  */
 export async function getRetentionFloor(): Promise<Date | null> {
+  return (await getRetentionCutoff())?.timestamp ?? null
+}
+
+/**
+ * The first block at or above the published cutoff, and its timestamp: the
+ * floor getRetentionFloor() reports, with the block number that pins it. Null
+ * on the same terms.
+ */
+export async function getRetentionCutoff(): Promise<{ block: number; timestamp: Date } | null> {
   try {
     const result = await db.execute(sql`
-      SELECT timestamp AS floor FROM blocks
+      SELECT number, timestamp AS floor FROM blocks
       WHERE number >= (SELECT compact_cutoff_block FROM indexer_cursor WHERE id = 1)
       ORDER BY number
       LIMIT 1
     `)
-    const raw = (Array.from(result)[0] as Record<string, unknown> | undefined)?.floor
-    return raw ? new Date(raw as string | number | Date) : null
+    const row = Array.from(result)[0] as Record<string, unknown> | undefined
+    return row?.floor ? { block: Number(row.number), timestamp: new Date(row.floor as string | number | Date) } : null
   } catch (e) {
     swallow('retention/floor', e)
     return null

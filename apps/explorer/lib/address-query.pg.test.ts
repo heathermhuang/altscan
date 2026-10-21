@@ -137,6 +137,12 @@ const FIXTURE = `
   CREATE INDEX ON transactions (block_number) WHERE body_pruned = false;
   CREATE INDEX ON transactions (timestamp);
   ANALYZE transactions;
+
+  -- No cutoff published until a test sets one.
+  CREATE TEMP TABLE blocks (number BIGINT PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL);
+  INSERT INTO blocks SELECT b, ${TS} FROM generate_series(0, 9999) b;
+  CREATE TEMP TABLE indexer_cursor (id INTEGER PRIMARY KEY, compact_cutoff_block BIGINT);
+  INSERT INTO indexer_cursor VALUES (1, NULL);
 `
 
 type PlanNode = {
@@ -303,8 +309,8 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
       route.sent.length = 0
       const res = await POST(new Request('http://x/api/v1/query', { method: 'POST', body: JSON.stringify(body) }))
       expect(res.status).toBe(200)
-      expect(route.sent).toHaveLength(1)
-      return { rows: (await res.json()).data as Record<string, unknown>[], sent: route.sent[0] }
+      // transactions looks up the retention cutoff first; the page is the last query.
+      return { rows: (await res.json()).data as Record<string, unknown>[], sent: route.sent[route.sent.length - 1] }
     }
 
     it.each([
@@ -347,6 +353,42 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
         }
         expect(compared).toBe(36)
       })
+    })
+
+    // Mid-prune on BNB: retention has published a cutoff and DELETEd the rows below it,
+    // and VACUUM has not yet removed their index entries. An uncommitted DELETE leaves
+    // the same entries, and no scan can mark them dead, so every walk that starts below
+    // the cutoff visits the heap for each one.
+    it.each([
+      [{ orderBy: 'asc' }, 10],
+      [{ orderBy: 'asc', filter: { from: Z } }, 2],
+      [{ orderBy: 'asc', filter: { address: Z } }, 3],
+      [{ orderBy: 'desc', filter: { to: Z } }, 1],
+    ])('transactions %j starts at the retention cutoff, not in the rows deleted below it', async (body, count) => {
+      const cutoff = 8000
+      // The suite's one connection, so the route runs inside this transaction too.
+      await conn.unsafe('BEGIN')
+      try {
+        await conn.unsafe(`UPDATE indexer_cursor SET compact_cutoff_block = ${cutoff} WHERE id = 1`)
+        await conn.unsafe(`DELETE FROM transactions WHERE block_number < ${cutoff}`)
+        const { POST } = await import('@/app/api/v1/query/route')
+        route.sent.length = 0
+        const res = await POST(new Request('http://x/api/v1/query', {
+          method: 'POST', body: JSON.stringify({ entity: 'transactions', limit: 10, ...body }),
+        }))
+        expect(res.status).toBe(200)
+        const rows = (await res.json()).data as { blockNumber: number }[]
+        expect(rows).toHaveLength(count)
+        expect(rows.every(r => Number(r.blockNumber) >= cutoff)).toBe(true)
+        // The cutoff lookup, then the page.
+        expect(route.sent).toHaveLength(2)
+        const { query, params } = route.sent[1]
+        const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`, params as never[])
+        const pages = explained.Plan['Local Hit Blocks'] + explained.Plan['Local Read Blocks']
+        expect(pages).toBeLessThan(50)
+      } finally {
+        await conn.unsafe('ROLLBACK')
+      }
     })
   })
 })

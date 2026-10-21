@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, asc, desc } from 'drizzle-orm'
 import { authFailure, authRequest } from '@/lib/api-auth'
 import { selectByAddress } from '@/lib/address-query'
+import { getRetentionCutoff } from '@/lib/retention'
 import { swallow } from '@/lib/observability'
 // apiJson (not NextResponse.json) for data rows: blocks/transactions carry
 // Drizzle bigint columns (gas_used, gas, gas_limit) that JSON.stringify throws
@@ -84,6 +85,16 @@ export async function POST(request: Request) {
         if (filter.blockNumber) conditions.push(eq(schema.transactions.blockNumber, filter.blockNumber))
         if (filter.blockFrom) conditions.push(gte(schema.transactions.blockNumber, filter.blockFrom))
         if (filter.blockTo) conditions.push(lte(schema.transactions.blockNumber, filter.blockTo))
+        // Retention DELETEs transactions below the cutoff it publishes, so until its
+        // VACUUM finishes (~40 min every 6h on BNB) the oldest end of every index is
+        // dead entries, and an asc walk reads them all before its first row: 4.9 s
+        // for 0x8894…d4e3 from mid-prune, 83 ms bounded. Start every walk at the
+        // cutoff instead: timestamp for the (address, timestamp) indexes, block_number
+        // for tx_block_idx. Rows below it are the ones being deleted.
+        const cutoff = await getRetentionCutoff()
+        if (cutoff) {
+          conditions.push(gte(schema.transactions.blockNumber, cutoff.block), gte(schema.transactions.timestamp, cutoff.timestamp))
+        }
 
         if (filter.address) {
           const rows = await selectByAddress(db, schema.transactions, filter.address.toLowerCase(), conditions,
