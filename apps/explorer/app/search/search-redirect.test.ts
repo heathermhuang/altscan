@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 let result: Record<string, unknown>[] | Error = []
 vi.mock('@/lib/db', () => {
   const query: Record<string, unknown> = {}
-  for (const m of ['from', 'where', 'orderBy', 'limit']) query[m] = () => query
+  for (const m of ['from', 'where', 'orderBy', 'limit', 'as']) query[m] = () => query
   query.then = (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) =>
     result instanceof Error ? reject(result) : resolve(result)
   return { db: { select: () => query }, schema: { tokens: {} } }

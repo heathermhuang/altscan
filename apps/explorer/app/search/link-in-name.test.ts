@@ -14,7 +14,7 @@ vi.mock('@/lib/db', async () => {
     token(addr(3), 'BTCX', '@btc_airdrop', 700),
   ]
   const q: Record<string, unknown> = {}
-  for (const m of ['from', 'where', 'orderBy', 'limit']) q[m] = () => q
+  for (const m of ['from', 'where', 'orderBy', 'limit', 'as']) q[m] = () => q
   q.then = (resolve: (r: unknown) => unknown) => resolve(rows)
   return { db: { select: () => q }, schema }
 })

@@ -3,7 +3,9 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema, unwrapDbError } from '@altscan/db'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { sql, type SQL } from 'drizzle-orm'
-import { exactMatchQuery, suggestQuery, suggestRows, SUGGEST_TIMEOUT_MS, withStatementTimeout } from './token-suggest'
+import {
+  exactMatchQuery, searchCandidatesQuery, SEARCH_POPULAR_ROWS, suggestQuery, suggestRows, SUGGEST_TIMEOUT_MS, withStatementTimeout,
+} from './token-suggest'
 import { withTimeout } from './with-timeout'
 
 /**
@@ -210,6 +212,38 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
       expect((await exactMatchQuery(db, 'zq', 10)).map((r) => r.symbol)).toEqual(['ZQ'])
       expect((await exactMatchQuery(db, 'rare name coin', 10)).map((r) => r.symbol)).toEqual(['RNC'])
       expect(await exactMatchQuery(db, 'z', 10)).toEqual([])
+    })
+  })
+
+  // /search's contains match. Over the whole table it walked tokens_holder_count_idx filtering every row until 50
+  // matched, so a query with fewer than 50 matches read every token (100,065 here; 1.9M on BNB, past the 15 s
+  // statement timeout).
+  describe('searchCandidatesQuery', () => {
+    it.each(['qqqqqq', 'rare name'])('reads at most SEARCH_POPULAR_ROWS tokens, never the table, for %s, which few rows contain', async (q) => {
+      const plan = await planOf(searchCandidatesQuery(db, q, 50))
+      expect(plan.seqScan).toBe(false)
+      expect(plan.indexes).toContain('tokens_holder_count_idx')
+      expect(plan.rowsRead).toBeLessThanOrEqual(SEARCH_POPULAR_ROWS)
+    })
+
+    it('returns the most-held tokens whose name or symbol contains the query, case-insensitively', async () => {
+      const rows = await searchCandidatesQuery(db, 'ETHER', 50)
+      expect(rows).toHaveLength(50)
+      expect(rows[0]).toMatchObject({ name: 'Tether USD', holderCount: 9000000 - 1 })
+      expect(rows.map((r) => r.holderCount)).toEqual([...rows.map((r) => r.holderCount)].sort((a, b) => b - a))
+      expect((await searchCandidatesQuery(db, 'sdt', 50)).every((r) => r.symbol === 'USDT')).toBe(true)
+    })
+
+    it('matches the visitor\'s % and _ literally, not as wildcards', async () => {
+      expect(await searchCandidatesQuery(db, '%', 50)).toEqual([])
+      expect(await searchCandidatesQuery(db, '_', 50)).toEqual([])
+    })
+
+    // The trade: a token beyond the most-held rows is not a contains candidate, and /search finds it by its exact
+    // symbol or name instead (and the typeahead by its prefix).
+    it('leaves a low-holder token to exactMatchQuery', async () => {
+      expect(await searchCandidatesQuery(db, 'rare name', 50)).toEqual([])
+      expect((await exactMatchQuery(db, 'rare name coin', 10)).map((r) => r.symbol)).toEqual(['RNC'])
     })
   })
 })

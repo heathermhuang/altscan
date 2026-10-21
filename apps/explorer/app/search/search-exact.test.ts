@@ -25,6 +25,7 @@ vi.mock('@/lib/db', async () => {
         let where: unknown
         let limit = 0
         q.from = () => q
+        q.as = () => q
         q.where = (w: unknown) => { where = w; return q }
         q.orderBy = () => { byHolders = true; return q }
         q.limit = (n: number) => { limit = n; return q }
