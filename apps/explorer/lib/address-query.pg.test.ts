@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq, gte, lte, type SQL } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
-import { selectByAddress } from './address-query'
+import { selectByAddress, selectInTimeOrder } from './address-query'
 
 /**
  * POST /api/v1/query's `filter.address` against a REAL Postgres.
@@ -40,6 +40,14 @@ const noise = (salt: number) =>
   `CASE WHEN ${h(salt, 10)} < 3 THEN '0x' || md5('hot' || ${h(salt + 1, 1000)}) || '00000000'
         ELSE '0x' || md5('a' || ${h(salt + 2, 50000)}) || '00000000' END`
 const other = `'0x' || md5('peer' || b) || '00000000'`
+
+// The query route's retention bound (getRetentionCutoff): block 5001 and its second,
+// 01:02:30, which block 5000 shares, so only the block bound keeps 5000 out.
+const CUTOFF_BLOCK = 5001
+const CUTOFF = [
+  gte(schema.transactions.blockNumber, CUTOFF_BLOCK),
+  gte(schema.transactions.timestamp, new Date('2026-09-12T01:02:30Z')),
+]
 
 const FIXTURE = `
   CREATE TEMP TABLE token_transfers (
@@ -201,6 +209,7 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
           conditions: [gte(schema.transactions.blockNumber, 2000), lte(schema.transactions.blockNumber, 8000)],
           keep: (r: OracleRow) => Number(r.block_number) >= 2000 && Number(r.block_number) <= 8000,
         },
+        { label: 'retention cutoff', conditions: CUTOFF, keep: (r: OracleRow) => Number(r.block_number) >= CUTOFF_BLOCK },
       ],
     },
   ]
@@ -283,6 +292,120 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
           }
         }
       }
+    })
+  })
+
+  // filter.from / filter.to without filter.address. Ordered by block_number, the
+  // planner walked the block index and filtered every row: a filter.to of an
+  // ordinary BNB address timed out at 15s in one or both orders.
+  describe('transactions by one side (filter.from / filter.to)', () => {
+    const side = { from: schema.transactions.fromAddress, to: schema.transactions.toAddress }
+
+    it.each([
+      ['asc', 'from', X],
+      ['asc', 'to', X],
+      ['desc', 'from', Z],
+      ['desc', 'to', Z],
+    ] as const)('reads O(limit) rows, not the table, in %s order for %s = %s', async (order, s, address) => {
+      const q = selectInTimeOrder(db, schema.transactions, [eq(side[s], address)], { order, limit: 10, offset: 0 })
+      const { sql: text, params } = q.toSQL()
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
+      expect(await q).toHaveLength(10)
+      const read = rowsRead(explained.Plan)
+      expect(read).toBeGreaterThanOrEqual(10)
+      expect(read).toBeLessThan(100)
+    })
+
+    it.each([Y, S])('returns exactly the matching rows in block order for %s, for every side, order, limit, offset and the cutoff', async (address) => {
+      const all = (await conn.unsafe(
+        `SELECT hash AS key, block_number, from_address, to_address FROM transactions WHERE from_address = $1 OR to_address = $1`, [address],
+      )) as unknown as { key: string; block_number: string; from_address: string; to_address: string | null }[]
+      type Row = (typeof all)[number]
+      const cases = [
+        { label: 'from', conditions: [eq(side.from, address)], keep: (r: Row) => r.from_address === address },
+        { label: 'to', conditions: [eq(side.to, address)], keep: (r: Row) => r.to_address === address },
+        {
+          label: 'from and to',
+          conditions: [eq(side.from, address), eq(side.to, address)],
+          keep: (r: Row) => r.from_address === address && r.to_address === address,
+        },
+        {
+          label: 'to, from the retention cutoff',
+          conditions: [eq(side.to, address), ...CUTOFF],
+          keep: (r: Row) => r.to_address === address && Number(r.block_number) >= CUTOFF_BLOCK,
+        },
+      ]
+      let compared = 0
+      for (const { label, conditions, keep } of cases) {
+        const matching = all.filter(keep)
+        expect(matching.length, label).toBeGreaterThan(0)
+        for (const order of ['asc', 'desc']) {
+          const sorted = [...matching].sort((a, b) =>
+            order === 'asc' ? Number(a.block_number) - Number(b.block_number) : Number(b.block_number) - Number(a.block_number))
+          for (const limit of [1, 7, 100]) {
+            for (const offset of [0, 5, 40]) {
+              const rows = await selectInTimeOrder(db, schema.transactions, conditions, { order, limit, offset })
+              expect(rows.map(r => String((r as Record<string, unknown>).hash)), `${label} ${order} limit=${limit} offset=${offset}`)
+                .toEqual(sorted.slice(offset, offset + limit).map(r => r.key))
+              compared++
+            }
+          }
+        }
+      }
+      expect(compared).toBe(cases.length * 18)
+    })
+  })
+
+  // The same for token_transfers, plus filter.tokenAddress: a quiet BNB token timed
+  // out at 15s in both orders. T2 is Y's alone, one transfer every ~64 blocks.
+  describe('token_transfers by one column (filter.from / filter.to / filter.tokenAddress)', () => {
+    const col = {
+      from: schema.tokenTransfers.fromAddress, to: schema.tokenTransfers.toAddress, token: schema.tokenTransfers.tokenAddress,
+    }
+
+    it.each([
+      ['asc', 'from', X],
+      ['asc', 'to', X],
+      ['desc', 'from', Z],
+      ['asc', 'token', T2],
+      ['desc', 'token', T2],
+    ] as const)('reads O(limit) rows, not the table, in %s order for %s = %s', async (order, c, value) => {
+      const q = selectInTimeOrder(db, schema.tokenTransfers, [eq(col[c], value)], { order, limit: 10, offset: 0 })
+      const { sql: text, params } = q.toSQL()
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
+      expect(await q).toHaveLength(10)
+      const read = rowsRead(explained.Plan)
+      expect(read).toBeGreaterThanOrEqual(10)
+      expect(read).toBeLessThan(100)
+    })
+
+    it('returns exactly the matching rows in block order, for every column, order, limit and offset', async () => {
+      const cases = [
+        { label: 'from', conditions: [eq(col.from, Y)], where: 'from_address = $1', value: Y },
+        { label: 'to', conditions: [eq(col.to, Y)], where: 'to_address = $1', value: Y },
+        { label: 'tokenAddress', conditions: [eq(col.token, T2)], where: 'token_address = $1', value: T2 },
+      ]
+      let compared = 0
+      for (const { label, conditions, where, value } of cases) {
+        const matching = (await conn.unsafe(
+          `SELECT tx_hash || ':' || log_index AS key, block_number FROM token_transfers WHERE ${where}`, [value],
+        )) as unknown as { key: string; block_number: string }[]
+        // One row per block, so block order is total.
+        expect(new Set(matching.map(r => r.block_number)).size, label).toBe(matching.length)
+        for (const order of ['asc', 'desc']) {
+          const sorted = [...matching].sort((a, b) =>
+            order === 'asc' ? Number(a.block_number) - Number(b.block_number) : Number(b.block_number) - Number(a.block_number))
+          for (const limit of [1, 7, 100]) {
+            for (const offset of [0, 5, 40]) {
+              const rows = await selectInTimeOrder(db, schema.tokenTransfers, conditions, { order, limit, offset })
+              expect(rows.map(r => `${(r as Record<string, unknown>).txHash}:${(r as Record<string, unknown>).logIndex}`),
+                `${label} ${order} limit=${limit} offset=${offset}`).toEqual(sorted.slice(offset, offset + limit).map(r => r.key))
+              compared++
+            }
+          }
+        }
+      }
+      expect(compared).toBe(cases.length * 18)
     })
   })
 })

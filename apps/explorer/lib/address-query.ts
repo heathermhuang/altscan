@@ -63,3 +63,31 @@ export function selectByAddress(
     .limit(page.limit)
     .offset(page.offset)
 }
+
+/**
+ * Rows of `table` matching `conditions`, which hold POST /api/v1/query's
+ * `filter.from`, `filter.to` or `filter.tokenAddress` (an equality on
+ * from_address, to_address or token_address).
+ *
+ * Ordered by `(timestamp, block_number)`, not `block_number`, for the reason
+ * selectByAddress is: with `ORDER BY block_number` the planner walks the
+ * block_number index and filters every row until n match, which for an address
+ * or token whose rows sit at the far end of that walk is most of the table. On
+ * BNB a `filter.to` of an ordinary address, and a `filter.tokenAddress` of a
+ * quiet token, timed out at 15s in one or both orders. Each of those columns
+ * leads a `(column, timestamp DESC)` index, so in this order the walk stops after
+ * `offset + limit` of its own rows. It is still block order.
+ */
+export function selectInTimeOrder(
+  db: Db,
+  table: typeof schema.transactions | typeof schema.tokenTransfers,
+  conditions: SQL[],
+  page: { order: string; limit: number; offset: number },
+) {
+  const dir = page.order === 'asc' ? asc : desc
+  return db.select().from(table)
+    .where(and(...conditions))
+    .orderBy(dir(table.timestamp), dir(table.blockNumber))
+    .limit(page.limit)
+    .offset(page.offset)
+}

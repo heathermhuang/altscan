@@ -52,15 +52,25 @@ export function isLocalHistoryIncomplete(
  * via isLocalHistoryIncomplete() and fall back to prior behavior.
  */
 export async function getRetentionFloor(): Promise<Date | null> {
+  return (await getRetentionCutoff())?.floor ?? null
+}
+
+/**
+ * The retention floor as a block too: the first block at or above the published
+ * cutoff, and its time. A read bounded below by both never walks into the rows a
+ * prune is deleting, whichever index serves it, and the two agree on which rows
+ * that is: blocks below the cutoff can share the floor's second.
+ */
+export async function getRetentionCutoff(): Promise<{ block: number; floor: Date } | null> {
   try {
     const result = await db.execute(sql`
-      SELECT timestamp AS floor FROM blocks
+      SELECT number AS block, timestamp AS floor FROM blocks
       WHERE number >= (SELECT compact_cutoff_block FROM indexer_cursor WHERE id = 1)
       ORDER BY number
       LIMIT 1
     `)
-    const raw = (Array.from(result)[0] as Record<string, unknown> | undefined)?.floor
-    return raw ? new Date(raw as string | number | Date) : null
+    const row = Array.from(result)[0] as Record<string, unknown> | undefined
+    return row?.floor ? { block: Number(row.block), floor: new Date(row.floor as string | number | Date) } : null
   } catch (e) {
     swallow('retention/floor', e)
     return null
