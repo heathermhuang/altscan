@@ -245,7 +245,7 @@ export const OPERATIONS: Record<string, Operation> = {
             'null: cannot tell (a lookup failed, or the index has no record of the address sending or receiving a transaction). ' +
             'Judged from its transactions, so token transfers it received before its first transaction can be missing even when true.',
         },
-        indexedFrom: { ...orNull(ref('DateTime')), description: 'Time of the oldest block the index still holds; the lists cover nothing older. null when unknown.' },
+        indexedFrom: { ...orNull(ref('DateTime')), description: 'When the index\'s retained history starts: retention deletes everything older. null when unknown.' },
         nativeBalance: { ...orNull(ref('Uint')), description: 'Native coin balance (BNB or ETH) in wei, read live from the chain. null when the read failed, never for an empty wallet.' },
         trackedTokenBalances: {
           oneOf: [{ type: 'array', items: ref('TrackedTokenBalance') }, { type: 'null' }],

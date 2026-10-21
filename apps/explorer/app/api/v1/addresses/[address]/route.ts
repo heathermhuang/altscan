@@ -21,7 +21,7 @@ const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
  * Whether retention has cut this address's lists short. The index keeps only a
  * few days, so empty lists alone cannot tell "no activity" from "nothing
  * recent". addresses.first_seen is never pruned, so a first_seen older than the
- * oldest retained block means the index has dropped this address's earliest
+ * retention floor means the index has dropped this address's earliest
  * transactions: the check the address page makes (lib/retention.ts). null when either
  * side is unknown, including an address the index has no row for: whatever
  * history it has, the index cannot vouch for it.
