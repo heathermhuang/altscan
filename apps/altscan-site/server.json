@@ -1,0 +1,10 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.altscan/explorers",
+  "title": "Altscan explorers",
+  "description": "Keyless, read-only BNB Chain and Ethereum data: transactions by hash, tokens with a lookalike check",
+  "version": "0.1.0",
+  "websiteUrl": "https://altscan.io",
+  "repository": { "url": "https://github.com/heathermhuang/altscan", "source": "github" },
+  "remotes": [{ "type": "streamable-http", "url": "https://altscan.io/mcp" }]
+}
