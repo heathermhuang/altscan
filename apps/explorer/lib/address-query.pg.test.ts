@@ -1,8 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq, gte, lte, type SQL } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { selectByAddress, selectInTimeOrder } from './address-query'
+
+// The mid-prune cases run the route itself on this suite's connection, and log the SQL it sends.
+const route = vi.hoisted(() => ({ db: undefined as unknown, sent: [] as { query: string; params: unknown[] }[] }))
+vi.mock('@/lib/api-auth', () => ({ authRequest: async () => ({ ok: true, limited: false }) }))
+vi.mock('@/lib/db', async () => ({ schema: (await import('@altscan/db')).schema, db: route.db }))
 
 /**
  * POST /api/v1/query's `filter.address` against a REAL Postgres.
@@ -29,6 +34,7 @@ const Z = '0x' + '22'.repeat(20)   // busy in the OLDEST partition, 3 rows in th
 const Y = '0x' + '33'.repeat(20)   // spread out: same-second blocks, a self-transfer, two tokens
 const W = '0x' + '44'.repeat(20)   // transactions only: 4 per block, sides alternating by tx_index
 const S = '0x' + '55'.repeat(20)   // a bot: sends to itself every other block, 4 rows in from others
+const D = '0x' + '66'.repeat(20)   // transactions, mid-prune only: scattered, 3 blocks above the cutoff
 const T1 = '0x' + 'e1'.repeat(20)
 const T2 = '0x' + 'e2'.repeat(20)
 
@@ -140,6 +146,12 @@ const FIXTURE = `
   CREATE INDEX ON transactions (block_number) WHERE body_pruned = false;
   CREATE INDEX ON transactions (timestamp);
   ANALYZE transactions;
+
+  -- What getRetentionCutoff() reads. No cutoff is published until a test sets one.
+  CREATE TEMP TABLE blocks (number BIGINT PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL);
+  INSERT INTO blocks SELECT b, ${TS} FROM generate_series(0, 9999) b;
+  CREATE TEMP TABLE indexer_cursor (id INTEGER PRIMARY KEY, compact_cutoff_block BIGINT);
+  INSERT INTO indexer_cursor VALUES (1, NULL);
 `
 
 type PlanNode = {
@@ -170,6 +182,7 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
     }
     conn = createMaintenanceConnection(PG_URL as string)
     db = drizzle(conn, { schema })
+    route.db = drizzle(conn, { schema, logger: { logQuery: (query, params) => { route.sent.push({ query, params }) } } })
     await conn.unsafe(FIXTURE)
   }, 120_000)
 
@@ -406,6 +419,56 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
         }
       }
       expect(compared).toBe(cases.length * 18)
+    })
+  })
+
+  // POST /api/v1/query mid-prune on BNB: retention has published a cutoff and DELETEd
+  // the rows below it, and VACUUM has not yet removed their index entries. An
+  // uncommitted DELETE leaves the same entries, and no scan can mark them dead, so a
+  // walk that starts below the cutoff visits the heap for each one. D's rows are
+  // scattered through the heap, one in ten, as a busy address's are in prod. Each
+  // half of the route's bound matters: the block bound starts the block_number index
+  // at the cutoff, the timestamp bound starts the (address, timestamp) indexes there.
+  // On BNB at 21:38Z on 10-21, `from` asc for 0x8894…d4e3 took 4,920 ms unbounded, 83 ms bounded.
+  describe('mid-prune', () => {
+    const cutoff = 8000
+    const post = async (body: unknown) => {
+      const { POST } = await import('@/app/api/v1/query/route')
+      route.sent.length = 0
+      const res = await POST(new Request('http://x/api/v1/query', { method: 'POST', body: JSON.stringify(body) }))
+      expect(res.status).toBe(200)
+      // transactions looks up the retention cutoff first; the page is the last query.
+      return { rows: (await res.json()).data as Record<string, unknown>[], sent: route.sent[route.sent.length - 1] }
+    }
+
+    // The suite's one connection, so the route runs inside this transaction too.
+    beforeAll(async () => {
+      await conn.unsafe('BEGIN')
+      await conn.unsafe(`
+        INSERT INTO transactions (hash, block_number, from_address, to_address, tx_index, timestamp)
+        SELECT '0x' || md5('d' || b || ':' || i) || md5('e' || b || ':' || i), b,
+               CASE WHEN i = 0 THEN '${D}' ELSE ${other} END, CASE WHEN i = 1 THEN '${D}' ELSE ${other} END, 200 + i, ${TS}
+        FROM generate_series(0, ${cutoff + 2}) b, generate_series(0, 9) i;
+        UPDATE indexer_cursor SET compact_cutoff_block = ${cutoff} WHERE id = 1;
+        DELETE FROM transactions WHERE block_number < ${cutoff};
+      `)
+    }, 120_000)
+
+    afterAll(async () => {
+      await conn?.unsafe('ROLLBACK')
+    })
+
+    it.each([
+      [{ orderBy: 'asc' }, 10],
+      [{ orderBy: 'asc', filter: { from: D } }, 3],
+      [{ orderBy: 'asc', filter: { address: D } }, 6],
+      [{ orderBy: 'desc', filter: { to: D } }, 3],
+    ])('transactions %j starts at the retention cutoff, not in the rows deleted below it', async (body, count) => {
+      const { rows, sent } = await post({ entity: 'transactions', limit: 10, ...body })
+      expect(rows).toHaveLength(count)
+      expect(rows.every(r => Number(r.blockNumber) >= cutoff)).toBe(true)
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sent.query}`, sent.params as never[])
+      expect(explained.Plan['Local Hit Blocks'] + explained.Plan['Local Read Blocks']).toBeLessThan(50)
     })
   })
 })
