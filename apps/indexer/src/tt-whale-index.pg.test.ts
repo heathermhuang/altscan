@@ -438,6 +438,15 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
         expect(took).toBeLessThan(8_000)
         expect(await partitionNames()).not.toContain(last)
         expect(warn.mock.calls.some(c => String(c[0]).includes(last))).toBe(true)
+
+        // The partitioning migration has no partition ahead to fall back on: it waits for the lock instead.
+        const waiting = ensureForwardPartitions({ lockTimeout: null })
+        await waitFor('the migration path to wait for ACCESS EXCLUSIVE', locked('AccessExclusiveLock', false))
+        await new Promise(r => setTimeout(r, 2_500))   // past the lock timeout: still waiting, not given up
+        expect(await partitionNames()).not.toContain(last)
+        release()
+        await waiting
+        expect(await partitionNames(), 'made once the reader lets go').toContain(last)
       } finally {
         warn.mockRestore()
         release()
@@ -445,8 +454,6 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
         await reader.end({ timeout: 5 })
         await holder.end({ timeout: 5 })
       }
-      await ensureForwardPartitions()   // the next run makes it
-      expect(await partitionNames()).toContain(last)
     }, 60_000)
   })
 
