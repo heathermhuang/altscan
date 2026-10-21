@@ -124,6 +124,21 @@ await t('_headers: catalogs get their media type and CORS', () => {
   assert.match(h, /\/\.well-known\/ai-catalog\.json\n {2}Content-Type: application\/ai-catalog\+json\n {2}Access-Control-Allow-Origin: \*/);
 });
 
+// Official MCP registry: server.json is what gets published, mcp-registry-auth proves altscan.io for io.altscan/*
+await t('server.json: the registry entry is the MCP server card, with a description the registry accepts', () => {
+  const card = JSON.parse(pub('.well-known/mcp/server-card.json'));
+  const entry = JSON.parse(readFileSync(new URL('../server.json', import.meta.url), 'utf8'));
+  for (const k of ['name', 'title', 'version', 'websiteUrl', 'repository', 'remotes']) assert.deepEqual(entry[k], card[k], k);
+  assert.match(entry.name, /^io\.altscan\//);
+  assert.ok(entry.description.length <= 100, 'the registry schema caps description at 100 characters');
+});
+await t('mcp-registry-auth: one Ed25519 proof record, served as text/plain', () => {
+  const m = pub('.well-known/mcp-registry-auth').trim().match(/^v=MCPv1; k=ed25519; p=([A-Za-z0-9+/]+=*)$/);
+  assert.ok(m);
+  assert.equal(Buffer.from(m[1], 'base64').length, 32);
+  assert.match(pub('_headers'), /\/\.well-known\/mcp-registry-auth\n {2}Content-Type: text\/plain; charset=utf-8/);
+});
+
 // auth.md: the scanner's heading rule, and a pointer to every explorer's own auth.md
 await t('auth.md: H1 names auth.md and links each explorer\'s auth.md', () => {
   const md = pub('auth.md');
