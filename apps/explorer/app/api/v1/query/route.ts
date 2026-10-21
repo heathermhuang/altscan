@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, gte, lte, desc } from 'drizzle-orm'
 import { authFailure, authRequest } from '@/lib/api-auth'
-import { selectByAddress } from '@/lib/address-query'
+import { selectByAddress, selectInTimeOrder } from '@/lib/address-query'
+import { getRetentionCutoff } from '@/lib/retention'
 import { swallow } from '@/lib/observability'
 // apiJson (not NextResponse.json) for data rows: blocks/transactions carry
 // Drizzle bigint columns (gas_used, gas, gas_limit) that JSON.stringify throws
@@ -83,9 +84,23 @@ export async function POST(request: Request) {
         if (filter.blockNumber) conditions.push(eq(schema.transactions.blockNumber, filter.blockNumber))
         if (filter.blockFrom) conditions.push(gte(schema.transactions.blockNumber, filter.blockFrom))
         if (filter.blockTo) conditions.push(lte(schema.transactions.blockNumber, filter.blockTo))
+        // Start at the retention floor. A prune deletes millions of rows from the old
+        // end of transactions, and until VACUUM finishes (~40 min every 6h on BNB) an
+        // oldest-first walk steps over each of them and times out. The cutoff is
+        // published before the delete starts, and the rows below it are outside the
+        // index anyway (what the address API reports as indexedFrom).
+        const cutoff = await getRetentionCutoff()
+        if (cutoff) {
+          conditions.push(gte(schema.transactions.blockNumber, cutoff.block), gte(schema.transactions.timestamp, cutoff.floor))
+        }
 
         if (filter.address) {
           const rows = await selectByAddress(db, schema.transactions, filter.address.toLowerCase(), conditions,
+            { order: orderBy, limit: safeLimit, offset: safeOffset })
+          return apiJson({ entity, count: rows.length, data: rows })
+        }
+        if (filter.from || filter.to) {
+          const rows = await selectInTimeOrder(db, schema.transactions, conditions,
             { order: orderBy, limit: safeLimit, offset: safeOffset })
           return apiJson({ entity, count: rows.length, data: rows })
         }
@@ -125,6 +140,11 @@ export async function POST(request: Request) {
 
         if (filter.address) {
           const rows = await selectByAddress(db, schema.tokenTransfers, filter.address.toLowerCase(), conditions,
+            { order: orderBy, limit: safeLimit, offset: safeOffset })
+          return apiJson({ entity, count: rows.length, data: rows })
+        }
+        if (filter.from || filter.to || filter.tokenAddress) {
+          const rows = await selectInTimeOrder(db, schema.tokenTransfers, conditions,
             { order: orderBy, limit: safeLimit, offset: safeOffset })
           return apiJson({ entity, count: rows.length, data: rows })
         }
