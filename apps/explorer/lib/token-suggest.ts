@@ -115,8 +115,8 @@ export async function suggestRows(db: Db, prefix: string, timeoutMs: number = SU
 export const SEARCH_EXACT_SCAN = 1_000
 
 /**
- * The `limit` most-held rows whose lower(symbol) or lower(name) equals `q` (already lowercased), whatever their
- * holder count.
+ * The `limit` rows whose lower(symbol) or lower(name) equals `q` (already lowercased), whatever their holder count:
+ * exact-symbol matches first, then exact-name ones, each most-held first.
  *
  * NOT a plain `ORDER BY holder_count DESC LIMIT n`: for a common value ('???', 'Unknown') the planner would walk
  * tokens_holder_count_idx across every better-held token to reach the junk (measured: 2.0 s for 10 rows on 1.9M
@@ -131,7 +131,10 @@ export function exactMatchQuery(db: Db, q: string, limit: number) {
     .where(or(sql`lower(${t.symbol}) = ${q}`, sql`lower(${t.name}) = ${q}`))
     .limit(SEARCH_EXACT_SCAN)
     .as('exact')
-  return db.select().from(exact).orderBy(desc(exact.holderCount)).limit(limit)
+  // Exact symbol before exact name, then holders: rankTokenMatches' own tiers, so the cut keeps the ticker.
+  return db.select().from(exact)
+    .orderBy(sql`lower(${exact.symbol}) = ${q} DESC`, desc(exact.holderCount))
+    .limit(limit)
 }
 
 /** /search reads this many of the most-held tokens and keeps those containing the query. */
