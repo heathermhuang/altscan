@@ -1,5 +1,6 @@
 import { db } from './db'
 import { sql } from 'drizzle-orm'
+import { swallow } from './observability'
 
 /**
  * Detects whether the local index is missing transaction/transfer history for an
@@ -22,7 +23,7 @@ import { sql } from 'drizzle-orm'
  * so we degrade to the prior empty-only fallback and never over-call Moralis on a
  * transient DB error.
  *
- * Pure function: the floor is fetched separately (and cached) via getRetentionFloor().
+ * Pure function: the floor is fetched separately via getRetentionFloor().
  */
 export function isLocalHistoryIncomplete(
   firstSeen: Date | null | undefined,
@@ -32,35 +33,36 @@ export function isLocalHistoryIncomplete(
   return firstSeen.getTime() < retentionFloor.getTime()
 }
 
-// The retention floor advances slowly (cleanup runs every 6h), so cache it rather
-// than running a MIN() on every address-page request. Module-level cache is
-// per-instance and that's fine — each instance refreshes independently.
-let floorCache: { value: Date | null; at: number } | null = null
-const FLOOR_TTL_MS = 10 * 60 * 1000 // 10 minutes
-
 /**
- * The retention floor = MIN(blocks.timestamp) = the timestamp of the oldest block
- * still in the local index.
+ * The retention floor: the time of the first block at or above
+ * indexer_cursor.compact_cutoff_block, the boundary retention publishes and then
+ * deletes below (apps/indexer/src/retention-cleanup.ts). /api/health reports the
+ * same cutoff.
  *
- * Derived from live data rather than a hardcoded RETENTION_DAYS because retention
- * is chain-specific and drifts during incidents (it has been tightened under disk
- * pressure). Backed by blocks_timestamp_idx, so MIN() is a fast leftmost-index
- * lookup. Cached for FLOOR_TTL_MS.
+ * NOT MIN(blocks.timestamp). Retention publishes the cutoff BEFORE it deletes and
+ * deletes `blocks` last, so for a whole prune (25-70 min on BNB) the oldest block
+ * row is older than the transactions that survive, and a block row the prune
+ * skips pins it there. A floor inferred from the rows being measured is circular:
+ * it reported "complete" for addresses whose earliest rows were already gone.
+ * Not cached for the same reason: a cached floor is the old cutoff while the new
+ * one is being deleted below. It is two primary-key lookups.
  *
- * Returns null if the blocks table is empty or the query fails — callers treat
- * null as "unknown" via isLocalHistoryIncomplete() and fall back to prior behavior.
+ * Returns null when no cutoff has been published (retention never ran, or
+ * compact pruning is off) or the query fails. Callers treat null as "unknown"
+ * via isLocalHistoryIncomplete() and fall back to prior behavior.
  */
-export async function getRetentionFloor(now: number = Date.now()): Promise<Date | null> {
-  if (floorCache && now - floorCache.at < FLOOR_TTL_MS) return floorCache.value
+export async function getRetentionFloor(): Promise<Date | null> {
   try {
-    const result = await db.execute(sql`SELECT MIN(timestamp) AS floor FROM blocks`)
-    const row = Array.from(result)[0] as Record<string, unknown> | undefined
-    const raw = row?.floor
-    const value = raw ? new Date(raw as string | number | Date) : null
-    floorCache = { value, at: now }
-    return value
-  } catch {
-    // Reuse the last-known floor on a transient error; null if we never succeeded.
-    return floorCache?.value ?? null
+    const result = await db.execute(sql`
+      SELECT timestamp AS floor FROM blocks
+      WHERE number >= (SELECT compact_cutoff_block FROM indexer_cursor WHERE id = 1)
+      ORDER BY number
+      LIMIT 1
+    `)
+    const raw = (Array.from(result)[0] as Record<string, unknown> | undefined)?.floor
+    return raw ? new Date(raw as string | number | Date) : null
+  } catch (e) {
+    swallow('retention/floor', e)
+    return null
   }
 }

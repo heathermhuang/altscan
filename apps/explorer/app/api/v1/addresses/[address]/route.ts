@@ -2,16 +2,67 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { selectByAddress } from '@/lib/address-query'
-import { swallow } from '@/lib/observability'
+import { swallow, swallowed } from '@/lib/observability'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { getWebProvider } from '@/lib/rpc'
 import { classifyCode, resolveContractStatusFromClass, type CodeClass } from '@/lib/contract-status'
 import { codeClassCache } from '@/lib/code-cache'
+import { chainConfig } from '@/lib/chain'
+import { getRetentionFloor, isLocalHistoryIncomplete } from '@/lib/retention'
+import { trackedTokens } from '@/lib/holdings'
+import { readTrackedBalances } from '@/lib/tracked-balances'
 
 export const dynamic = 'force-dynamic'
 
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * Whether retention has cut this address's lists short. The index keeps only a
+ * few days, so empty lists alone cannot tell "no activity" from "nothing
+ * recent". addresses.first_seen is never pruned, so a first_seen older than the
+ * retention floor means the index has dropped this address's earliest
+ * transactions: the check the address page makes (lib/retention.ts). null when either
+ * side is unknown, including an address the index has no row for: whatever
+ * history it has, the index cannot vouch for it.
+ */
+async function readCoverage(address: string) {
+  const [firstSeen, indexedFrom] = await Promise.all([
+    db
+      .select({ firstSeen: schema.addresses.firstSeen })
+      .from(schema.addresses)
+      .where(eq(schema.addresses.address, address))
+      .limit(1)
+      .then((r) => r[0]?.firstSeen ?? null)
+      .catch(swallowed('api/v1/addresses/coverage', null)),
+    getRetentionFloor(),
+  ])
+  const historyComplete = firstSeen && indexedFrom ? !isLocalHistoryIncomplete(firstSeen, indexedFrom) : null
+  return { historyComplete, indexedFrom }
+}
+
+/**
+ * Live balances from the chain: the native coin, and the tracked tokens (the
+ * chain's stablecoins and wrapped native) that lib/tracked-balances.ts reads for
+ * the address page. null = could not read, never "holds nothing".
+ */
+async function readBalances(address: string) {
+  const tokens = trackedTokens(chainConfig.whales)
+  try {
+    const provider = await getWebProvider()
+    const [nativeBalance, tracked] = await Promise.all([
+      provider.getBalance(address).catch(swallowed('api/v1/addresses/balance', null)),
+      readTrackedBalances(provider, address, tokens),
+    ])
+    const trackedTokenBalances = tracked
+      ? tokens.map((t) => ({ tokenAddress: t.address, symbol: t.symbol, decimals: t.decimals, balance: tracked[t.address] }))
+      : null
+    return { nativeBalance, trackedTokenBalances }
+  } catch (e) {
+    swallow('api/v1/addresses/balance', e)
+    return { nativeBalance: null, trackedTokenBalances: null }
+  }
+}
 
 export async function GET(
   request: Request,
@@ -33,6 +84,11 @@ export async function GET(
   // silently returned empty transactions, empty transfers, AND a missed contracts
   // row — the address page has always done this at its own entry point.
   const address = rawAddress.toLowerCase()
+
+  // Additive fields, read alongside the index queries. Neither can reject: a
+  // failure degrades to null, never turns a working request into a 500.
+  const coverage = readCoverage(address)
+  const balances = readBalances(address)
 
   let transactions, tokenTransfers, contracts
   try {
@@ -79,5 +135,6 @@ export async function GET(
   // isContract stays a boolean for v1 compatibility, but during an RPC outage a
   // bare `false` is indistinguishable from a real EOA. isContractKnown is
   // additive, so existing clients are unaffected and careful ones can tell.
-  return apiJson({ transactions, tokenTransfers, isContract, isContractKnown })
+  // The fields after it follow the same rule: additive, and null when unknown.
+  return apiJson({ transactions, tokenTransfers, isContract, isContractKnown, ...(await coverage), ...(await balances) })
 }

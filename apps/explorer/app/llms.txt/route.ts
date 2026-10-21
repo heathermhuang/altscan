@@ -18,7 +18,9 @@ export async function GET() {
 
 Recent chain state is kept on a rolling multi-day window; older transactions and
 blocks are served live from ${chainConfig.name} RPC on request. Token pages and
-list/analytics pages are durable.
+list/analytics pages are durable. The address API (\`/api/v1/addresses/{address}\`)
+lists only indexed activity: when it returns \`historyComplete: false\`, the address
+has older activity outside the index, so empty lists do not mean no activity.
 
 ## Machine-friendly access
 

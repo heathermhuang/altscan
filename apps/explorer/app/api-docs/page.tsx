@@ -132,8 +132,11 @@ const endpoints: Endpoint[] = [
     method: 'GET',
     path: '/api/v1/addresses/:address',
     description:
-      'Returns an address\u2019s most recent transactions and token transfers, plus whether it is a contract. ' +
-      'isContractKnown is false only when contract status could not be determined at all \u2014 the code lookup failed AND the address is not in the verification registry. Treat isContract as unknown, not false, in that case.',
+      'Returns an address\u2019s most recent transactions and token transfers, whether it is a contract, how much of its history the index holds, and its live balances. ' +
+      'isContractKnown is false only when contract status could not be determined at all \u2014 the code lookup failed AND the address is not in the verification registry. Treat isContract as unknown, not false, in that case. ' +
+      'The index keeps only a few days of history, starting at indexedFrom. historyComplete false means the address has older activity the index no longer holds: empty lists then mean nothing recent, not no activity. ' +
+      'true means retention has not cut its lists short (judged from its transactions); null means it cannot be told. ' +
+      'nativeBalance (wei) and trackedTokenBalances (the chain\u2019s major stablecoins and wrapped native token only, raw units) are read live from the chain; null means the read failed, not an empty wallet.',
     params: [
       { name: 'address', type: 'string', required: true, description: 'The Ethereum/BNB address (0x-prefixed, 42 chars). Case-insensitive.' },
     ],
@@ -155,6 +158,12 @@ const endpoints: Endpoint[] = [
         tokenTransfers: [],
         isContract: false,
         isContractKnown: true,
+        historyComplete: false,
+        indexedFrom: '2024-01-01T00:00:00.000Z',
+        nativeBalance: '1250000000000000000',
+        trackedTokenBalances: [
+          { tokenAddress: '0xfff...', symbol: 'USDT', decimals: 18, balance: '0' },
+        ],
       },
       null,
       2

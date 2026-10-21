@@ -25,7 +25,9 @@ other chain's explorer: the API returns "not found" rather than an error that na
   - `GET /api/v1/stats` — latest block, transaction and token counts, average gas price
   - `GET /api/v1/transactions/{hash}` — one transaction, with its status and gas used (no logs)
   - `GET /api/v1/addresses/{address}` — the address's 20 latest indexed transactions and token transfers,
-    and `isContract`; when `isContractKnown` is false the contract check failed and `isContract` means nothing
+    and `isContract`; when `isContractKnown` is false the contract check failed and `isContract` means nothing.
+    It also returns live `nativeBalance` (wei) and `trackedTokenBalances` (major stablecoins and the wrapped
+    native token only); null means the read failed, not an empty wallet
   - `GET /api/v1/tokens/{contract}` — token metadata
 - The read endpoints, kept in step with the code, are described in each explorer's OpenAPI 3.1 spec at
   `/openapi.json` (every parameter and response field, e.g. https://bnbscan.com/openapi.json), its own
@@ -34,7 +36,9 @@ other chain's explorer: the API returns "not found" rather than an error that na
 
 ## Limits to know
 
-- Indexed history is recent: an address's transaction list covers only the last few days.
+- Indexed history is recent: an address's transaction list covers only the last few days (from its
+  `indexedFrom`). `historyComplete: false` means the address has older activity outside the index, so
+  empty lists do not mean no activity; `null` means it cannot be told.
 - A transaction older than that is read from the chain instead. The response's `source` is `"index"`
   or `"chain"`; `pending: true` means no receipt yet, and fields the node did not report are null.
   A 404 means neither the index nor the node knows the hash; a 503 means the chain lookup is busy or
