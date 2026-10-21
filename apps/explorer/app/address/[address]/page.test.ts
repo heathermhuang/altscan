@@ -27,6 +27,8 @@ vi.mock('@/lib/db', async () => {
   }
   return { schema, db: { select: () => builder(), execute: async () => h.exec } }
 })
+// A UNION ALL the builder stub cannot express; address-query.pg.test.ts runs it against a real Postgres.
+vi.mock('@/lib/address-query', () => ({ selectByAddress: async (_db: unknown, table: unknown) => h.tables.get(table) ?? [] }))
 vi.mock('next/headers', () => ({ headers: async () => new Headers({ 'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130 Safari/537.36' }) }))
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound') } }))
 vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => ({ getBalance: async () => 0n, getTransactionCount: async () => 0, getCode: async () => '0x' }) }))

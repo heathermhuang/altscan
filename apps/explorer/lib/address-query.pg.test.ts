@@ -27,6 +27,7 @@ const PG_URL = process.env[ENV]
 const X = '0x' + '11'.repeat(20)   // busy in the NEWEST partition, 3 rows in the oldest
 const Z = '0x' + '22'.repeat(20)   // busy in the OLDEST partition, 3 rows in the newest
 const Y = '0x' + '33'.repeat(20)   // spread out: same-second blocks, a self-transfer, two tokens
+const W = '0x' + '44'.repeat(20)   // transactions only: 4 per block, sides alternating by tx_index
 const T1 = '0x' + 'e1'.repeat(20)
 const T2 = '0x' + 'e2'.repeat(20)
 
@@ -105,6 +106,14 @@ const FIXTURE = `
          CASE WHEN b = 6273 THEN NULL WHEN b % 2 = 1 THEN '${Y}' ELSE ${other} END, 98, ${TS}
   FROM (SELECT generate_series(0, 9999, 128) AS b UNION ALL SELECT generate_series(0, 9999, 128) + 1) s;
   UPDATE transactions SET from_address = '${Y}' WHERE block_number = 6273 AND tx_index = 98;
+
+  -- Several of W's rows per block, so a page boundary falls inside a block. Inserted
+  -- in descending tx_index, so heap order is not the order a page must come out in.
+  INSERT INTO transactions (hash, block_number, from_address, to_address, tx_index, timestamp)
+  SELECT '0x' || md5('w' || b || ':' || i) || md5('x' || b || ':' || i), b,
+         CASE WHEN i % 2 = 0 THEN '${W}' ELSE ${other} END,
+         CASE WHEN i % 2 = 1 THEN '${W}' ELSE ${other} END, 50 + i, ${TS}
+  FROM generate_series(4000, 4029) b, generate_series(3, 0, -1) i;
 
   CREATE INDEX ON transactions (from_address, timestamp DESC);
   CREATE INDEX ON transactions (to_address, timestamp DESC);
@@ -222,6 +231,44 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
         }
       }
       expect(compared).toBe(filters.length * 18)
+    })
+  })
+
+  // The address page's transactions tab: a busy address has several rows per block,
+  // and offset pages cut through them, so the order must be total.
+  describe('transactions with tieBreak tx_index', () => {
+    const tieBreak = schema.transactions.txIndex
+
+    it.each([
+      ['asc', X],
+      ['desc', Z],
+    ])('still reads O(limit) rows, not the table, in %s order', async (order, address) => {
+      const q = selectByAddress(db, schema.transactions, address, [], { order, limit: 10, offset: 0, tieBreak })
+      const { sql: text, params } = q.toSQL()
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
+      expect(await q).toHaveLength(10)
+      const read = rowsRead(explained.Plan)
+      expect(read).toBeGreaterThanOrEqual(10)
+      expect(read).toBeLessThan(100)
+    })
+
+    it('pages through several rows per block in exactly the OR query order', async () => {
+      const all = (await conn.unsafe(
+        `SELECT hash AS key, block_number, tx_index FROM transactions WHERE from_address = $1 OR to_address = $1`, [W],
+      )) as unknown as { key: string; block_number: string; tx_index: number }[]
+      expect(all).toHaveLength(120)
+      for (const order of ['asc', 'desc']) {
+        const sign = order === 'asc' ? 1 : -1
+        const sorted = [...all].sort((a, b) =>
+          sign * (Number(a.block_number) - Number(b.block_number) || a.tx_index - b.tx_index))
+        for (const limit of [1, 7, 25]) {
+          for (const offset of [0, 5, 26, 100]) {
+            const rows = await selectByAddress(db, schema.transactions, W, [], { order, limit, offset, tieBreak })
+            expect(rows.map(r => String((r as Record<string, unknown>).hash)), `${order} limit=${limit} offset=${offset}`)
+              .toEqual(sorted.slice(offset, offset + limit).map(r => r.key))
+          }
+        }
+      }
     })
   })
 })
