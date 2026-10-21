@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ne, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, ne, type AnyColumn, type SQL } from 'drizzle-orm'
 import { unionAll } from 'drizzle-orm/pg-core'
 import type { Db, schema } from '@altscan/db'
 
@@ -24,19 +24,25 @@ import type { Db, schema } from '@altscan/db'
  * index is ordered by timestamp, and a block's timestamp never runs backwards,
  * so this is still block order, with consecutive blocks that share a second
  * ordered by block. The arms and the outer ORDER BY must stay identical, or
- * cutting each arm at `offset + limit` stops being exact.
+ * cutting each arm at `offset + limit` stops being exact. `tieBreak` appends a
+ * last key to both, for a caller that pages through several rows of one block
+ * (the address page orders a block's transactions by tx_index).
  */
 export function selectByAddress(
   db: Db,
   table: typeof schema.transactions | typeof schema.tokenTransfers,
   address: string,
   conditions: SQL[],
-  page: { order: string; limit: number; offset: number },
+  page: { order: string; limit: number; offset: number; tieBreak?: AnyColumn },
 ) {
   const dir = page.order === 'asc' ? asc : desc
+  // Built fresh per use: drizzle rewrites a set operation's ORDER BY in place.
+  const sortKey = () => [
+    dir(table.timestamp), dir(table.blockNumber), ...(page.tieBreak ? [dir(page.tieBreak)] : []),
+  ]
   const arm = (side: SQL | undefined) => db.select().from(table)
     .where(and(side, ...conditions))
-    .orderBy(dir(table.timestamp), dir(table.blockNumber))
+    .orderBy(...sortKey())
     .limit(page.offset + page.limit)
   return unionAll(
     arm(eq(table.fromAddress, address)),
@@ -47,7 +53,7 @@ export function selectByAddress(
     // result type still comes from the left arm.
     arm(and(eq(table.toAddress, address), ne(table.fromAddress, address))) as never,
   )
-    .orderBy(dir(table.timestamp), dir(table.blockNumber))
+    .orderBy(...sortKey())
     .limit(page.limit)
     .offset(page.offset)
 }

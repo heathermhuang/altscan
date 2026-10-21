@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq, desc, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
+import { selectByAddress } from '@/lib/address-query'
+import { swallow } from '@/lib/observability'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { getWebProvider } from '@/lib/rpc'
@@ -34,36 +36,19 @@ export async function GET(
 
   let transactions, tokenTransfers, contracts
   try {
+    // selectByAddress, not `from = a OR to = a`: the OR form hit the 15s statement
+    // timeout on the busiest addresses (a Binance hot wallet, 0x…dEaD).
     ;[transactions, tokenTransfers, contracts] = await Promise.all([
-      db
-        .select()
-        .from(schema.transactions)
-        .where(
-          or(
-            eq(schema.transactions.fromAddress, address),
-            eq(schema.transactions.toAddress, address),
-          ),
-        )
-        .orderBy(desc(schema.transactions.timestamp))
-        .limit(20),
-      db
-        .select()
-        .from(schema.tokenTransfers)
-        .where(
-          or(
-            eq(schema.tokenTransfers.fromAddress, address),
-            eq(schema.tokenTransfers.toAddress, address),
-          ),
-        )
-        .orderBy(desc(schema.tokenTransfers.timestamp))
-        .limit(20),
+      selectByAddress(db, schema.transactions, address, [], { order: 'desc', limit: 20, offset: 0 }),
+      selectByAddress(db, schema.tokenTransfers, address, [], { order: 'desc', limit: 20, offset: 0 }),
       db
         .select()
         .from(schema.contracts)
         .where(eq(schema.contracts.address, address))
         .limit(1),
     ])
-  } catch {
+  } catch (e) {
+    swallow('api/v1/addresses', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 

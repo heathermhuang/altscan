@@ -1,6 +1,6 @@
 import { cache } from 'react'
 import { db, schema } from '@/lib/db'
-import { eq, or, desc, sql, inArray } from 'drizzle-orm'
+import { eq, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, safeBigInt, groupDigits } from '@/lib/format'
@@ -34,6 +34,7 @@ import { AddressLedger } from '@/components/tape/AddressLedger'
 import { toLedgerRows } from '@/lib/ledger'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
+import { selectByAddress } from '@/lib/address-query'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
 
@@ -431,18 +432,11 @@ async function TxnsTab({
   let txs: typeof schema.transactions.$inferSelect[] = []
 
   try {
-    txs = await db
-      .select()
-      .from(schema.transactions)
-      .where(
-        or(
-          eq(schema.transactions.fromAddress, addr),
-          eq(schema.transactions.toAddress, addr),
-        ),
-      )
-      .orderBy(desc(schema.transactions.timestamp), desc(schema.transactions.blockNumber), desc(schema.transactions.txIndex))
-      .limit(PAGE_SIZE)
-      .offset(offset)
+    // Not `from = addr OR to = addr`: that form hits the statement timeout on busy addresses.
+    // The cast narrows the helper's both-tables row type to the table passed in.
+    txs = await selectByAddress(db, schema.transactions, addr, [], {
+      order: 'desc', limit: PAGE_SIZE, offset, tieBreak: schema.transactions.txIndex,
+    }) as typeof txs
   } catch (e) {
     swallow('addr/txns', e)
     // DB error
@@ -545,18 +539,8 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
   try {
     // Fetch one extra row to detect "has next page" — avoids COUNT(*) on token_transfers
     // which is a full table scan with OR across two columns on millions of rows.
-    const rows = await db
-      .select()
-      .from(schema.tokenTransfers)
-      .where(
-        or(
-          eq(schema.tokenTransfers.fromAddress, addr),
-          eq(schema.tokenTransfers.toAddress, addr),
-        ),
-      )
-      .orderBy(desc(schema.tokenTransfers.blockNumber))
-      .limit(PAGE_SIZE + 1)
-      .offset(offset)
+    // (timestamp, block_number) order, which is block order: a block's timestamp never runs backwards.
+    const rows = await selectByAddress(db, schema.tokenTransfers, addr, [], { order: 'desc', limit: PAGE_SIZE + 1, offset }) as typeof transfers
     transfers = rows.slice(0, PAGE_SIZE)
     // Estimate total for pagination: if we got more than PAGE_SIZE, there are more pages
     total = rows.length > PAGE_SIZE ? offset + PAGE_SIZE + 1 : offset + rows.length
