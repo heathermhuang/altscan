@@ -21,17 +21,18 @@ vi.mock('@/lib/db', async () => {
     db: {
       select: () => {
         const q: Record<string, unknown> = {}
-        let byHolders = false
         let where: unknown
         let limit = 0
-        q.from = () => q
-        q.as = () => q
+        let source: { where: unknown } | undefined   // the subquery this one reads from, if any
+        q.from = (src: { __sub?: { where: unknown } }) => { source = src?.__sub; return q }
+        q.as = () => ({ __sub: { where } })
         q.where = (w: unknown) => { where = w; return q }
-        q.orderBy = () => { byHolders = true; return q }
+        q.orderBy = () => q
         q.limit = (n: number) => { limit = n; return q }
         q.then = (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => {
-          if (byHolders) return resolve(holderRows)
-          exact.push({ where, limit })
+          // exactMatchQuery filters inside its subquery; searchCandidatesQuery filters outside its own.
+          if (source?.where === undefined) return resolve(holderRows)
+          exact.push({ where: source.where, limit })
           return exactRows instanceof Error ? reject(exactRows) : resolve(exactRows)
         }
         return q

@@ -111,18 +111,29 @@ export async function suggestRows(db: Db, prefix: string, timeoutMs: number = SU
   }))
 }
 
+/** Exact matches exactMatchQuery reads before keeping the most-held: every copy of a real ticker, junk bounded. */
+export const SEARCH_EXACT_SCAN = 1_000
+
 /**
- * Rows whose lower(symbol) or lower(name) equals `q` (already lowercased), whatever their holder count.
+ * The `limit` rows whose lower(symbol) or lower(name) equals `q` (already lowercased), whatever their holder count:
+ * exact-symbol matches first, then exact-name ones, each most-held first.
  *
- * Deliberately NO ORDER BY: for a common value ('???', 'Unknown') the planner would walk
- * tokens_holder_count_idx across every better-held token to reach the junk (measured: 2.0 s for 10 rows on
- * 1.9M tokens, against 0.04 ms unordered). The ten rows are therefore not the best-held ten, and don't need
- * to be: /search unions them with its by-holders candidates, which are.
+ * NOT a plain `ORDER BY holder_count DESC LIMIT n`: for a common value ('???', 'Unknown') the planner would walk
+ * tokens_holder_count_idx across every better-held token to reach the junk (measured: 2.0 s for 10 rows on 1.9M
+ * tokens, against 0.04 ms unordered). The subquery's own LIMIT keeps it on the expression indexes, so it reads at
+ * most SEARCH_EXACT_SCAN matches and sorts those. It does need the order: /search's by-holders candidates stop at
+ * the SEARCH_POPULAR_ROWS most-held tokens, so for a ticker shared by more than `limit` rarer tokens these rows
+ * are the only candidates, and an arbitrary ten could leave out the most-held.
  */
 export function exactMatchQuery(db: Db, q: string, limit: number) {
   const t = schema.tokens
-  return db.select().from(t)
+  const exact = db.select().from(t)
     .where(or(sql`lower(${t.symbol}) = ${q}`, sql`lower(${t.name}) = ${q}`))
+    .limit(SEARCH_EXACT_SCAN)
+    .as('exact')
+  // Exact symbol before exact name, then holders: rankTokenMatches' own tiers, so the cut keeps the ticker.
+  return db.select().from(exact)
+    .orderBy(sql`lower(${exact.symbol}) = ${q} DESC`, desc(exact.holderCount))
     .limit(limit)
 }
 
