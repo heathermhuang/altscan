@@ -17,8 +17,13 @@ import type { Db, schema } from '@altscan/db'
  * Instead, one arm per side, each an early-stopping walk of its
  * `(address, timestamp DESC)` index, and the page is cut from their union. An
  * arm needs `offset + limit` rows at most: the page cannot hold more than that
- * from either side. The `to` arm skips rows the `from` arm already has (a
- * self-transfer), so the union holds each of the OR's rows exactly once.
+ * from either side. The `to` arm drops rows the `from` arm already has (a
+ * self-transfer), so the union holds each of the OR's rows exactly once. It
+ * drops them after its LIMIT, not in its WHERE: a bot that mostly sends to
+ * itself (0x9999…0515 on BNB) left that walk filtering its whole history, past
+ * the statement timeout. Dropping them after the cut loses nothing, because a
+ * self-transfer that belongs on the page is within the `from` arm's first
+ * `offset + limit` rows too.
  *
  * `(timestamp, block_number)` is the sort key, not `block_number` alone: the
  * index is ordered by timestamp, and a block's timestamp never runs backwards,
@@ -40,10 +45,11 @@ export function selectByAddress(
   const sortKey = () => [
     dir(table.timestamp), dir(table.blockNumber), ...(page.tieBreak ? [dir(page.tieBreak)] : []),
   ]
-  const arm = (side: SQL | undefined) => db.select().from(table)
+  const arm = (side: SQL) => db.select().from(table)
     .where(and(side, ...conditions))
     .orderBy(...sortKey())
     .limit(page.offset + page.limit)
+  const toSide = arm(eq(table.toAddress, address)).as('to_side')
   return unionAll(
     arm(eq(table.fromAddress, address)),
     // Both arms read the same `table`, so their shapes match by construction.
@@ -51,7 +57,7 @@ export function selectByAddress(
     // `table` typed as a union it compares every pairing, including a
     // transactions arm against a token_transfers arm, which cannot occur. The
     // result type still comes from the left arm.
-    arm(and(eq(table.toAddress, address), ne(table.fromAddress, address))) as never,
+    db.select().from(toSide).where(ne(toSide.fromAddress, address)) as never,
   )
     .orderBy(...sortKey())
     .limit(page.limit)

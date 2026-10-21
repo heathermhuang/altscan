@@ -28,6 +28,7 @@ const X = '0x' + '11'.repeat(20)   // busy in the NEWEST partition, 3 rows in th
 const Z = '0x' + '22'.repeat(20)   // busy in the OLDEST partition, 3 rows in the newest
 const Y = '0x' + '33'.repeat(20)   // spread out: same-second blocks, a self-transfer, two tokens
 const W = '0x' + '44'.repeat(20)   // transactions only: 4 per block, sides alternating by tx_index
+const S = '0x' + '55'.repeat(20)   // a bot: sends to itself every other block, 4 rows in from others
 const T1 = '0x' + 'e1'.repeat(20)
 const T2 = '0x' + 'e2'.repeat(20)
 
@@ -69,6 +70,11 @@ const FIXTURE = `
          CASE WHEN b % 2 = 0 OR b = 5121 THEN '${Y}' ELSE ${other} END,
          CASE WHEN b % 2 = 1 THEN '${Y}' ELSE ${other} END, b, ${TS}
   FROM (SELECT generate_series(0, 9999, 128) AS b UNION ALL SELECT generate_series(0, 9999, 128) + 1) s;
+
+  INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, block_number, timestamp)
+  SELECT '0x' || md5('s' || b) || md5('z' || b), 97, '${T1}',
+         CASE WHEN b % 2 = 0 THEN '${S}' ELSE ${other} END, '${S}', b, ${TS}
+  FROM (SELECT generate_series(0, 9999, 2) AS b UNION ALL SELECT unnest(ARRAY[3, 5001, 9993, 9997])) s;
 
   CREATE INDEX ON token_transfers (token_address);
   CREATE INDEX ON token_transfers (from_address, timestamp DESC);
@@ -114,6 +120,11 @@ const FIXTURE = `
          CASE WHEN i % 2 = 0 THEN '${W}' ELSE ${other} END,
          CASE WHEN i % 2 = 1 THEN '${W}' ELSE ${other} END, 50 + i, ${TS}
   FROM generate_series(4000, 4029) b, generate_series(3, 0, -1) i;
+
+  -- S's to_address rows are nearly all self-sends, so no walk of that index finds 10 rows from others.
+  INSERT INTO transactions (hash, block_number, from_address, to_address, tx_index, timestamp)
+  SELECT '0x' || md5('s' || b) || md5('z' || b), b, CASE WHEN b % 2 = 0 THEN '${S}' ELSE ${other} END, '${S}', 97, ${TS}
+  FROM (SELECT generate_series(0, 9999, 2) AS b UNION ALL SELECT unnest(ARRAY[3, 5001, 9993, 9997])) s;
 
   CREATE INDEX ON transactions (from_address, timestamp DESC);
   CREATE INDEX ON transactions (to_address, timestamp DESC);
@@ -196,11 +207,14 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
   type OracleRow = { key: string; block_number: string; token_address: string | null; from_address: string }
 
   describe.each(tables)('$name', ({ table, oracle, key, filters }) => {
-    // What prod hit: an address's first page read from the far end of the table.
+    // What prod hit: an address's first page read from the far end of the table, and
+    // a bot whose to_address rows are all its own self-sends (0x9999…0515 on BNB).
     it.each([
       ['asc', X],
       ['desc', Z],
-    ])('reads O(limit) rows, not the table, in %s order', async (order, address) => {
+      ['asc', S],
+      ['desc', S],
+    ])('reads O(limit) rows, not the table, in %s order for %s', async (order, address) => {
       const q = selectByAddress(db, table, address, [], { order, limit: 10, offset: 0 })
       const { sql: text, params } = q.toSQL()
       const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params as never[])
@@ -211,8 +225,8 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
       expect(read).toBeLessThan(100)
     })
 
-    it('returns exactly what the OR query returns, for every order, limit, offset and extra filter', async () => {
-      const all = (await conn.unsafe(oracle, [Y])) as unknown as OracleRow[]
+    it.each([Y, S])('returns exactly what the OR query returns for %s, for every order, limit, offset and extra filter', async (address) => {
+      const all = (await conn.unsafe(oracle, [address])) as unknown as OracleRow[]
       // One row per block per address in the fixture, so block order is total.
       expect(new Set(all.map(r => r.block_number)).size).toBe(all.length)
       let compared = 0
@@ -222,7 +236,7 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
             order === 'asc' ? Number(a.block_number) - Number(b.block_number) : Number(b.block_number) - Number(a.block_number))
           for (const limit of [1, 7, 100]) {
             for (const offset of [0, 5, 40]) {
-              const rows = await selectByAddress(db, table, Y, conditions, { order, limit, offset })
+              const rows = await selectByAddress(db, table, address, conditions, { order, limit, offset })
               const expected = sorted.slice(offset, offset + limit).map(r => r.key)
               expect(rows.map(r => key(r as Record<string, unknown>)), `${label} ${order} limit=${limit} offset=${offset}`).toEqual(expected)
               compared++
