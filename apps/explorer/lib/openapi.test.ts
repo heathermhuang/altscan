@@ -93,6 +93,11 @@ const token: typeof schema.tokens.$inferSelect = {
   totalSupply: '9184991859680809663064697687', holderCount: 835871, logoUrl: null,
 }
 const lookalike: Lookalike = { symbol: 'USDT', canonical: A }
+const trackedBalance = { tokenAddress: A, symbol: 'USDT', decimals: 18, balance: '605000000000000000000000000' }
+const addressBody = {
+  transactions: [indexedTx], tokenTransfers: [transfer], isContract: true, isContractKnown: true,
+  historyComplete: false, indexedFrom: T, nativeBalance: 31337n, trackedTokenBalances: [trackedBalance],
+}
 // The route selects these columns explicitly (no bytecode or source).
 const contract: Pick<typeof schema.contracts.$inferSelect, 'address' | 'abi' | 'compilerVersion' | 'verifiedAt' | 'verifySource' | 'license'> = {
   address: A, abi: [], compilerVersion: '0.4.18+commit.9cf6e910', verifiedAt: T, verifySource: 'sourcify', license: null,
@@ -120,7 +125,9 @@ describe('documented 200 bodies match what the routes return', () => {
     ['/api/v1/transactions/:hash', { transaction: indexedTx, source: 'index' }],
     ['/api/v1/transactions/:hash', { transaction: chainTx, source: 'chain' }],
     ['/api/v1/transactions/:hash', { transaction: pendingTx, source: 'chain' }],
-    ['/api/v1/addresses/:address', { transactions: [indexedTx], tokenTransfers: [transfer], isContract: true, isContractKnown: true }],
+    ['/api/v1/addresses/:address', addressBody],
+    ['/api/v1/addresses/:address', { ...addressBody, historyComplete: true, nativeBalance: 0n, trackedTokenBalances: [{ ...trackedBalance, balance: '0' }] }],
+    ['/api/v1/addresses/:address', { ...addressBody, historyComplete: null, indexedFrom: null, nativeBalance: null, trackedTokenBalances: null }],
     ['/api/v1/tokens', { tokens: [token], total: 1 }],
     ['/api/v1/tokens/:contract', { token, lookalike }],
     ['/api/v1/tokens/:contract', { token, lookalike: null }],
@@ -137,11 +144,14 @@ describe('documented 200 bodies match what the routes return', () => {
     expect(validate200('/api/v1/transactions/:hash', { transaction: chainTx, source: 'index' })).not.toEqual([])
     const { lookalike: _drop, ...noLookalike } = { token, lookalike }
     expect(validate200('/api/v1/tokens/:contract', noLookalike)).not.toEqual([])
+    const { historyComplete: _dropToo, ...noCoverage } = addressBody
+    expect(validate200('/api/v1/addresses/:address', noCoverage)).not.toEqual([])
   })
 
   it.each<[string, object]>([
     ['Block', block], ['IndexedTransaction', indexedTx], ['ChainTransaction', chainTx],
     ['TokenTransfer', transfer], ['Token', token], ['Lookalike', lookalike], ['Contract', contract], ['Stats', stats],
+    ['TrackedTokenBalance', trackedBalance],
   ])('%s documents exactly the fields the route returns', (name, row) => {
     const documented = (spec.components.schemas[name] as { properties: object }).properties
     expect(Object.keys(documented).sort()).toEqual(Object.keys(row).sort())
