@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, asc, desc } from 'drizzle-orm'
 import { authFailure, authRequest } from '@/lib/api-auth'
 import { selectByAddress } from '@/lib/address-query'
 import { swallow } from '@/lib/observability'
@@ -49,6 +49,7 @@ export async function POST(request: Request) {
   }
 
   const { entity, filter = {}, orderBy = 'desc', limit = 25, offset = 0 } = body
+  const dir = orderBy === 'asc' ? asc : desc
 
   // Validate numeric params
   const safeLimit = Math.min(Math.max(1, Number(limit) || 25), 100)
@@ -89,8 +90,15 @@ export async function POST(request: Request) {
             { order: orderBy, limit: safeLimit, offset: safeOffset })
           return apiJson({ entity, count: rows.length, data: rows })
         }
+        // filter.from / filter.to sort as selectByAddress does, so the walk is the
+        // address's own (address, timestamp) index and stops at the page. By
+        // block_number alone the planner either walked tx_block_idx filtering every
+        // row or read and sorted every row the address had: on BNB, filter.to
+        // 0x1a39…27af in asc order ran past 10 minutes.
         const q = db.select().from(schema.transactions)
-          .orderBy(orderBy === 'asc' ? schema.transactions.blockNumber : desc(schema.transactions.blockNumber))
+          .orderBy(...(filter.from || filter.to
+            ? [dir(schema.transactions.timestamp), dir(schema.transactions.blockNumber)]
+            : [dir(schema.transactions.blockNumber)]))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return apiJson({ entity, count: rows.length, data: rows })
@@ -128,8 +136,11 @@ export async function POST(request: Request) {
             { order: orderBy, limit: safeLimit, offset: safeOffset })
           return apiJson({ entity, count: rows.length, data: rows })
         }
+        // As for transactions: filter.to 0x1a39…27af 500ed in both orders on BNB.
         const q = db.select().from(schema.tokenTransfers)
-          .orderBy(orderBy === 'asc' ? schema.tokenTransfers.blockNumber : desc(schema.tokenTransfers.blockNumber))
+          .orderBy(...(filter.from || filter.to
+            ? [dir(schema.tokenTransfers.timestamp), dir(schema.tokenTransfers.blockNumber)]
+            : [dir(schema.tokenTransfers.blockNumber)]))
           .limit(safeLimit).offset(safeOffset)
         const rows = conditions.length > 0 ? await q.where(and(...conditions)) : await q
         return apiJson({ entity, count: rows.length, data: rows })

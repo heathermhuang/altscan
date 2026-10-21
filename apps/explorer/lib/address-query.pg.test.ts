@@ -1,8 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq, gte, lte, type SQL } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { selectByAddress } from './address-query'
+
+// The route itself runs on this suite's connection, and logs the SQL it sends.
+const route = vi.hoisted(() => ({ db: undefined as unknown, sent: [] as { query: string; params: unknown[] }[] }))
+vi.mock('@/lib/api-auth', () => ({ authRequest: async () => ({ ok: true, limited: false }) }))
+vi.mock('@/lib/db', async () => ({ schema: (await import('@altscan/db')).schema, db: route.db }))
 
 /**
  * POST /api/v1/query's `filter.address` against a REAL Postgres.
@@ -162,6 +167,7 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
     }
     conn = createMaintenanceConnection(PG_URL as string)
     db = drizzle(conn, { schema })
+    route.db = drizzle(conn, { schema, logger: { logQuery: (query, params) => { route.sent.push({ query, params }) } } })
     await conn.unsafe(FIXTURE)
   }, 120_000)
 
@@ -283,6 +289,64 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
           }
         }
       }
+    })
+  })
+
+  // filter.from or filter.to alone: no OR, and the same trap. ORDER BY block_number
+  // with one address equality leaves the planner two plans, and each is O(table) for
+  // some address: walk the block_number index filtering every row, or read every row
+  // the address has and sort them. On BNB, filter.to for 0x1a39…27af in asc order
+  // ran past 10 minutes, outside any retention prune.
+  describe('POST /api/v1/query filter.from / filter.to', () => {
+    const post = async (body: unknown) => {
+      const { POST } = await import('@/app/api/v1/query/route')
+      route.sent.length = 0
+      const res = await POST(new Request('http://x/api/v1/query', { method: 'POST', body: JSON.stringify(body) }))
+      expect(res.status).toBe(200)
+      expect(route.sent).toHaveLength(1)
+      return { rows: (await res.json()).data as Record<string, unknown>[], sent: route.sent[0] }
+    }
+
+    it.each([
+      ['transactions', 'asc', 'to', X],
+      ['transactions', 'desc', 'from', Z],
+      ['token_transfers', 'asc', 'to', X],
+      ['token_transfers', 'desc', 'from', Z],
+    ])('%s reads O(limit) rows, not the table, in %s order for filter.%s %s', async (entity, orderBy, side, address) => {
+      const { rows, sent } = await post({ entity, orderBy, limit: 10, filter: { [side]: address } })
+      expect(rows).toHaveLength(10)
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${sent.query}`, sent.params as never[])
+      const read = rowsRead(explained.Plan)
+      expect(read).toBeGreaterThanOrEqual(10)
+      expect(read).toBeLessThan(100)
+    })
+
+    const keySql = { transactions: 'hash', token_transfers: `tx_hash || ':' || log_index` }
+
+    describe.each(tables)('$name', ({ name, key }) => {
+      it.each([Y, S])('returns the rows in block order for %s, for each side, order, limit and offset', async (address) => {
+        let compared = 0
+        for (const side of ['from', 'to']) {
+          const all = (await conn.unsafe(
+            `SELECT ${keySql[name as keyof typeof keySql]} AS key, block_number FROM ${name} WHERE ${side}_address = $1`, [address],
+          )) as unknown as { key: string; block_number: string }[]
+          // One row per block per address in the fixture, so block order is total.
+          expect(new Set(all.map(r => r.block_number)).size).toBe(all.length)
+          for (const orderBy of ['asc', 'desc']) {
+            const sign = orderBy === 'asc' ? 1 : -1
+            const sorted = [...all].sort((a, b) => sign * (Number(a.block_number) - Number(b.block_number)))
+            for (const limit of [1, 7, 100]) {
+              for (const offset of [0, 5, 40]) {
+                const { rows } = await post({ entity: name, orderBy, limit, offset, filter: { [side]: address } })
+                expect(rows.map(key), `${side} ${orderBy} limit=${limit} offset=${offset}`)
+                  .toEqual(sorted.slice(offset, offset + limit).map(r => r.key))
+                compared++
+              }
+            }
+          }
+        }
+        expect(compared).toBe(36)
+      })
     })
   })
 })
