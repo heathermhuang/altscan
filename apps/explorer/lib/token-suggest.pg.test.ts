@@ -47,6 +47,9 @@ const FIXTURE = `
     ('${'0x' + '0'.repeat(37) + 'abe'}', '100% Pure', '100%', 7),
     ('${'0x' + '0'.repeat(37) + 'abf'}', 'Under_score', 'A_B', 6),
     ('${'0x' + '0'.repeat(37) + 'ac0'}', 'Azb Not Underscore', 'AZB', 9);
+  -- 15 low-holder copies of one ticker, inserted least-held first, all beyond /search's most-held cutoff.
+  INSERT INTO tokens (address, name, symbol, holder_count)
+  SELECT '0x' || md5('dupe' || i) || '00000000', 'Dupe Copy ' || i, 'DUPE', i FROM generate_series(1, 15) i;
 
   CREATE INDEX tokens_holder_count_idx ON tokens (holder_count DESC);
   CREATE INDEX tokens_lower_symbol_idx ON tokens (lower(symbol) text_pattern_ops);
@@ -212,6 +215,12 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
       expect((await exactMatchQuery(db, 'zq', 10)).map((r) => r.symbol)).toEqual(['ZQ'])
       expect((await exactMatchQuery(db, 'rare name coin', 10)).map((r) => r.symbol)).toEqual(['RNC'])
       expect(await exactMatchQuery(db, 'z', 10)).toEqual([])
+    })
+
+    // Beyond the most-held cutoff these rows are /search's only candidates, so which ten matters.
+    it('returns the most-held of more exact matches than its limit', async () => {
+      expect(await searchCandidatesQuery(db, 'dupe', 50)).toEqual([])
+      expect((await exactMatchQuery(db, 'dupe', 10)).map((r) => r.holderCount)).toEqual([15, 14, 13, 12, 11, 10, 9, 8, 7, 6])
     })
   })
 

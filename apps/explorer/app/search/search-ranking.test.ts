@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { SEARCH_POPULAR_ROWS } from '@/lib/token-suggest'
+import { SEARCH_EXACT_SCAN, SEARCH_POPULAR_ROWS } from '@/lib/token-suggest'
 
 let rows: Record<string, unknown>[] = []
 const limits: number[] = []
@@ -101,11 +101,11 @@ describe('/search token ranking', () => {
   })
 
   // The most-held tokens it reads (searchCandidatesQuery's bound), the 50 by-holders candidates among them, and
-  // (search-exact.test.ts) up to 10 rows whose symbol or name equals the query.
+  // (search-exact.test.ts) the exact matches it reads and the 10 most-held of them.
   it('asks the database for 50 candidates, ordered, instead of five unordered rows', async () => {
     await searchHtml('usdt')
-    expect(limits).toEqual([SEARCH_POPULAR_ROWS, 50, 10])
-    expect(orderings).toHaveLength(2)
+    expect(limits).toEqual([SEARCH_POPULAR_ROWS, 50, SEARCH_EXACT_SCAN, 10])
+    expect(orderings).toHaveLength(3)
   })
 
   // Plain DESC matches tokens_holder_count_idx (holder_count DESC), so Postgres walks the index and stops
