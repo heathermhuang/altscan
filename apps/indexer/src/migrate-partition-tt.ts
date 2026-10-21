@@ -92,7 +92,7 @@ async function main() {
   // ── Already partitioned? Just top up forward partitions and exit. ──
   if (await isPartitioned('token_transfers')) {
     console.log(`${TAG} token_transfers is ALREADY partitioned — nothing to convert.`)
-    await ensureForwardPartitions()
+    await ensureForwardPartitions({ lockTimeout: null })   // an operator's run: wait for the lock, don't skip
     const parts = await listTokenTransferPartitions()
     console.log(`${TAG} ${parts.length} partition(s):`, parts.map(p => `${p.name}[${p.lo},${p.hi})`).join(' '))
     return
@@ -163,14 +163,20 @@ async function main() {
   }
 
   // ── Phase 3: provision forward partitions + verify (pooled connection is fine) ──
-  await ensureForwardPartitions()
+  // Wait for the lock: legacy ends just past MAX(block_number), so there is no partition ahead to fall back on.
+  await ensureForwardPartitions({ lockTimeout: null })
   const partitioned = await isPartitioned('token_transfers')
   const parts = await listTokenTransferPartitions()
-  const cnt = await getDb().execute(sql`SELECT COUNT(*)::bigint AS c FROM token_transfers`)
-  const total = Number((Array.from(cnt)[0] as Record<string, unknown>).c)
+  const cnt = await getDb().execute(sql`SELECT COUNT(*)::bigint AS c, COALESCE(MAX(block_number), 0)::bigint AS m FROM token_transfers`)
+  const row = Array.from(cnt)[0] as Record<string, unknown>
+  const total = Number(row.c)
+  const next = Number(row.m) + 1
   console.log(`${TAG} VERIFY: partitioned=${partitioned}, partitions=${parts.length}, rows readable=${total}`)
   console.log(`${TAG} partitions:`, parts.map(p => `${p.name}[${p.lo},${p.hi})`).join(' '))
   if (!partitioned) throw new Error(`${TAG} post-migration check failed — token_transfers is not partitioned!`)
+  if (!parts.some(p => p.lo <= next && next < p.hi)) {
+    throw new Error(`${TAG} post-migration check failed — no partition covers block ${next}, so the indexer's next insert would fail. Re-run to provision it.`)
+  }
   console.log(`${TAG} ✓ Done. Resume the indexer — it writes into the new small partitions.`)
 }
 

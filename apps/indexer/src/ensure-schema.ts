@@ -1295,14 +1295,22 @@ export async function ensurePartitionedTtWhaleIndex(
   }
 }
 
+/** How long ensureForwardPartitions waits for token_transfers' lock before leaving the partition to its next run. */
+export const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
+
 /**
  * Ensure token_transfers has empty partitions covering well past where data
  * currently ends, so the writer never hits a missing range. Extends contiguously
  * from the highest existing partition upper-bound in PARTITION_BLOCKS-wide chunks
  * until PARTITION_AHEAD widths beyond MAX(block_number). No-op unless partitioned.
  * Safe to call at boot and on the retention interval.
+ *
+ * `lockTimeout: null` waits for the lock instead of giving up: the partitioning
+ * migration's call, which has no partition ahead to fall back on.
  */
-export async function ensureForwardPartitions(): Promise<void> {
+export async function ensureForwardPartitions(
+  { lockTimeout = FORWARD_PARTITION_LOCK_TIMEOUT }: { lockTimeout?: string | null } = {},
+): Promise<void> {
   const db = getDb()
   if (!(await isPartitioned('token_transfers'))) return
   const { blocks: width, ahead } = indexerConfig.partitions   // ~1 day BSC
@@ -1322,9 +1330,17 @@ export async function ensureForwardPartitions(): Promise<void> {
     const hi = upper + width
     const name = `token_transfers_p_${lo}`
     try {
-      await db.execute(sql.raw(
-        `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF token_transfers FOR VALUES FROM (${lo}) TO (${hi})`,
-      ))
+      // CREATE TABLE … PARTITION OF takes ACCESS EXCLUSIVE on token_transfers, and while it waits for that lock
+      // every later reader and writer queues behind it: on BNB at 16:12Z on 2026-10-21 it waited out the 15 s
+      // statement timeout three times, and 17 tx-page reads timed out in its queue. Partitions are made
+      // PARTITION_AHEAD widths early, so giving up after a moment loses nothing: the next run (boot, or
+      // retention every 6 h) makes it.
+      await db.transaction(async (tx) => {
+        if (lockTimeout) await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${lockTimeout}'`))
+        await tx.execute(sql.raw(
+          `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF token_transfers FOR VALUES FROM (${lo}) TO (${hi})`,
+        ))
+      })
       created++
     } catch (err) {
       console.warn(`[indexer] forward partition ${name} warning:`, dbErrorMessage(err))
