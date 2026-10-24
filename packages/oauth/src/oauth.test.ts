@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet } from 'ethers'
 import { createHash, randomBytes } from 'node:crypto'
+import { redirectUriAllowed } from './checks'
 import {
   authorizationServerMetadata,
   handleOAuthRequest,
@@ -153,6 +154,47 @@ describe('registration', () => {
 
   it('accepts loopback http and private-use schemes', async () => {
     expect((await register(['http://127.0.0.1:33418/cb', 'http://localhost/cb', 'cursor://anysphere/oauth'])).status).toBe(201)
+  })
+
+  it('refuses schemes that launch an OS protocol handler or another program', async () => {
+    for (const uri of [
+      'ms-msdt:/id PCWDiagnostic /skip force /param "IT_RebrowseForFile=?"',
+      'ms-excel:ofe|u|https://client.example/x.xlsx',
+      'MS-Word:ofe|u|https://client.example/x.docx',
+      'search-ms:query=x&crumb=location:\\\\client.example\\share',
+      'search:query=x',
+      'smb://client.example/share',
+      'ssh://client.example',
+      'telnet://client.example',
+      'mailto:a@client.example',
+      'tel:+15551234567',
+      'sms:+15551234567',
+      'intent://scan/#Intent;scheme=zxing;end',
+      'view-source:https://client.example/',
+      'chrome://settings',
+      'chrome-extension://abcdefgh/cb',
+      'chrome-untrusted://x/',
+      'moz-extension://abcdefgh/cb',
+      'moz-icon://x',
+    ]) {
+      expect(redirectUriAllowed(uri), uri).toBe(false)
+    }
+    expect((await register(['ms-msdt:/id PCWDiagnostic'])).status).toBe(400)
+    expect((await register([REDIRECT, 'search-ms:query=x'])).status).toBe(400)
+  })
+
+  it('still accepts https, loopback http and native-app private-use schemes', () => {
+    for (const uri of [
+      REDIRECT,
+      'http://127.0.0.1:33418/cb',
+      'http://localhost/cb',
+      'http://[::1]:8080/cb',
+      'cursor://anysphere.cursor-mcp/oauth/callback',
+      'vscode://vscode.github-authentication/did-authenticate',
+      'com.example.app:/oauth2redirect',
+    ]) {
+      expect(redirectUriAllowed(uri), uri).toBe(true)
+    }
   })
 
   it('refuses confidential clients', async () => {

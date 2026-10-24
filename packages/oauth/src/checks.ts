@@ -13,10 +13,17 @@ export async function pkceMatches(verifier: string, challenge: string): Promise<
 
 // ── Redirect URIs ─────────────────────────────────────────────────────────────
 // https anywhere; plain http only to loopback (RFC 8252 §7.3); private-use schemes for native apps
-// (RFC 8252 §7.1, e.g. cursor:), minus the schemes a browser would execute or read locally.
+// (RFC 8252 §7.1, e.g. cursor:), minus the schemes a browser would execute or read locally, and the
+// ones the OS hands to another program (ms-msdt:, search-ms:, smb:, mailto:...): an authorize error
+// 303s to the registered URI before any signature, so a self-registered client would otherwise be a
+// one-click launcher for them.
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
-const BLOCKED_SCHEMES = new Set(['javascript:', 'data:', 'file:', 'vbscript:', 'blob:', 'about:', 'ftp:', 'ws:', 'wss:'])
+const BLOCKED_SCHEMES = new Set([
+  'javascript:', 'data:', 'file:', 'vbscript:', 'blob:', 'about:', 'ftp:', 'ws:', 'wss:',
+  'search-ms:', 'search:', 'smb:', 'ssh:', 'telnet:', 'mailto:', 'tel:', 'sms:', 'intent:', 'view-source:',
+])
+const BLOCKED_SCHEME_PREFIXES = ['ms-', 'chrome', 'moz-']
 export const MAX_REDIRECT_URIS = 4
 const MAX_REDIRECT_URI_LENGTH = 512
 
@@ -31,7 +38,7 @@ export function redirectUriAllowed(uri: string): boolean {
   if (u.username || u.password) return false
   if (u.protocol === 'https:') return true
   if (u.protocol === 'http:') return LOOPBACK.has(u.hostname)
-  if (BLOCKED_SCHEMES.has(u.protocol)) return false
+  if (BLOCKED_SCHEMES.has(u.protocol) || BLOCKED_SCHEME_PREFIXES.some((p) => u.protocol.startsWith(p))) return false
   return /^[a-z][a-z0-9+.-]*:$/.test(u.protocol)
 }
 
