@@ -77,6 +77,25 @@ function parseApproveCalldata(input: string | null | undefined): { spender: stri
   return { spender: `0x${input.slice(34, 74)}`.toLowerCase(), amount: BigInt(`0x${input.slice(74, 138)}`) }
 }
 
+const APPROVAL_TOPIC = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+
+/**
+ * The standard an approve(address,uint256) was made under, from the Approval event the token emitted.
+ * ERC-20 and ERC-721 share the selector, but ERC-721's second argument is a token id, not an amount:
+ * its Approval(owner, approved, tokenId) indexes all three arguments, ERC-20's Approval(owner,
+ * spender, value) only two. Null without that event (a failed tx, logs that could not be read).
+ */
+export function approvalStandard(
+  logs: readonly { address: string; topic0?: string | null; topic3?: string | null }[],
+  token: string | null | undefined,
+): 'fungible' | 'nft' | null {
+  if (!token) return null
+  const t = token.toLowerCase()
+  const log = logs.find(l => l.address.toLowerCase() === t && l.topic0?.toLowerCase() === APPROVAL_TOPIC)
+  if (!log) return null
+  return log.topic3 ? 'nft' : 'fungible'
+}
+
 export function decodeTx(tx: {
   hash: string
   fromAddress: string
@@ -89,6 +108,8 @@ export function decodeTx(tx: {
   input?: string | null
   /** The symbol of the contract at toAddress, already through safeTransferSymbol (an approve goes to its token). */
   toTokenSymbol?: string | null
+  /** For an approve: the standard its Approval event proves (approvalStandard). Amount semantics need 'fungible'. */
+  approvalStandard?: 'fungible' | 'nft' | null
 }, transfers: TxTransferInfo[], nativeCurrency = 'BNB'): DecodedTx {
   // Contract deployment
   if (!tx.toAddress) {
@@ -129,6 +150,9 @@ export function decodeTx(tx: {
     if (!approval) return { summary: 'Approved a token allowance', type: 'approval' }
     const spender = getAddressLabel(approval.spender) ?? `${approval.spender.slice(0, 12)}…`
     const token = tx.toTokenSymbol || 'tokens'
+    // Zero as a revocation and 2^255+ as unlimited are ERC-20 readings; under ERC-721 the same word is a
+    // token id. Without proof of ERC-20 the headline names the spender and the token, and no amount.
+    if (tx.approvalStandard !== 'fungible') return { summary: `Approved ${spender} on ${tx.toTokenSymbol || 'a token'}`, type: 'approval' }
     if (approval.amount === 0n) return { summary: `Revoked ${spender}'s approval to spend ${token}`, type: 'approval' }
     const unlimited = approval.amount >= 2n ** 255n ? 'unlimited ' : ''
     return { summary: `Approved ${spender} to spend ${unlimited}${token}`, type: 'approval' }

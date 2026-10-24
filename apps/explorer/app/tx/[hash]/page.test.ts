@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   blockRow: null as { baseFee: string | null } | null,
   internalRows: [] as unknown[],
   tokenRows: [] as unknown[],
+  logRows: [] as unknown[],
   fetchedMeta: new Map<string, { symbol: string | null; decimals: number | null }>(),
   nativeUsd: null as number | null,
   tablesRead: [] as unknown[],
@@ -22,6 +23,7 @@ vi.mock('@/lib/db', async () => {
     if (table === schema.blocks) return state.blockRow ? [state.blockRow] : []
     if (table === schema.internalTransactions) return state.internalRows
     if (table === schema.tokens) return state.tokenRows
+    if (table === schema.logs) return state.logRows
     return []
   }
   // A drizzle query builder is a thenable with .catch; this one is the same shape.
@@ -92,7 +94,7 @@ const indexedTx = () => ({
 })
 
 beforeEach(() => {
-  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.tokenRows = []; state.fetchedMeta = new Map(); state.nativeUsd = null; state.tablesRead = []
+  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.tokenRows = []; state.logRows = []; state.fetchedMeta = new Map(); state.nativeUsd = null; state.tablesRead = []
   state.fetchTxFromRpc.mockReset(); state.fetchBlockFromRpc.mockReset()
   state.fetchBlockFromRpc.mockResolvedValue(null)
   vi.stubGlobal('fetch', async () => ({ ok: false }))   // native price: every source "down", the page renders without USD
@@ -369,15 +371,29 @@ describe('/tx/[hash] headline', () => {
   const approveTx = (over: Record<string, unknown> = {}) => ({
     ...indexedTx(), toAddress: TOKEN, methodId: '0x095ea7b3', input: approve(2n ** 256n - 1n), ...over,
   })
+  // The ERC-20 Approval(owner, spender, value) the token emitted: what proves the amount is an amount.
+  const erc20Approval = {
+    address: TOKEN, topic0: '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925',
+    topic1: '0x' + word('22'.repeat(20)), topic2: '0x' + word(SPENDER), topic3: null, data: '0x' + 'f'.repeat(64),
+  }
 
   it('names the spender from the calldata and the token by its symbol, not the token as the spender', async () => {
     state.dbTx = approveTx()
+    state.logRows = [erc20Approval]
     state.tokenRows = [{ address: TOKEN, symbol: 'ACME', decimals: 18 }]
     expect(headline(await render())).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend unlimited ACME`)
   })
 
+  it('reads no amount into an approve whose logs prove no ERC-20 Approval (ERC-721 shares the selector)', async () => {
+    state.dbTx = approveTx({ input: approve(0n) })
+    state.logRows = [{ ...erc20Approval, topic3: '0x' + word('0') }]
+    state.tokenRows = [{ address: TOKEN, symbol: 'PUNK', decimals: 0 }]
+    expect(headline(await render())).toBe(`Approved ${SPENDER.slice(0, 12)}… on PUNK`)
+  })
+
   it('names the token only generically when its symbol is the indexer placeholder', async () => {
     state.dbTx = approveTx()
+    state.logRows = [erc20Approval]
     state.tokenRows = [{ address: TOKEN, symbol: '???', decimals: 18 }]
     expect(headline(await render())).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend unlimited tokens`)
   })

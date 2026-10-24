@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
+import { approvalStandard, attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
 
 const base = {
   hash: '0xabc',
@@ -275,8 +275,9 @@ describe('decodeTx approvals', () => {
   const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
   const approveInput = (spender: string, amount: bigint) =>
     '0x095ea7b3' + word(spender) + word(amount.toString(16))
-  const approve = (input: string | null | undefined, over: { toTokenSymbol?: string } = {}) =>
-    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input, ...over }, [], 'BNB')
+  // Amount readings need the Approval event's proof of ERC-20; the cases below have it unless they say otherwise.
+  const approve = (input: string | null | undefined, over: { toTokenSymbol?: string; approvalStandard?: 'fungible' | 'nft' | null } = {}) =>
+    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input, approvalStandard: 'fungible', ...over }, [], 'BNB')
 
   it('names the spender from the calldata, not the token contract the tx was sent to', () => {
     const out = approve(approveInput(SPENDER, 1000n))
@@ -328,5 +329,45 @@ describe('decodeTx approvals', () => {
   it('reads a long (truncated-at-500-chars) approve the same as a short one', () => {
     const long = approveInput(SPENDER, 1000n) + 'ab'.repeat(200)
     expect(approve(long).summary).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend tokens`)
+  })
+})
+
+// ERC-721 shares approve(address,uint256), but its second argument is a token id: approve(spender, 0)
+// grants token #0, it revokes nothing. Only the Approval event tells the two apart.
+describe('decodeTx approvals of an unproven standard', () => {
+  const TOKEN = '0x55d398326f99059ff775485246999027b3197955'
+  const SPENDER = '0x1111111111111111111111111111111111111111'
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const input = (amount: bigint) => '0x095ea7b3' + word(SPENDER) + word(amount.toString(16))
+  const approve = (amount: bigint, approvalStandard: 'nft' | null) =>
+    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input: input(amount), toTokenSymbol: 'PUNK', approvalStandard }, [], 'BNB').summary
+
+  it.each(['nft', null] as const)('does not read a zero second argument as a revocation (standard %s)', (std) => {
+    expect(approve(0n, std)).toBe(`Approved ${SPENDER.slice(0, 12)}… on PUNK`)
+  })
+
+  it.each(['nft', null] as const)('does not read a huge second argument as unlimited (standard %s)', (std) => {
+    expect(approve(2n ** 256n - 1n, std)).not.toContain('unlimited')
+  })
+})
+
+describe('approvalStandard', () => {
+  const TOKEN = '0x' + '55'.repeat(20)
+  const APPROVAL = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+  const t = (n: number) => '0x' + String(n).repeat(64)
+
+  it('is fungible for an ERC-20 Approval (two indexed arguments) at the token', () => {
+    expect(approvalStandard([{ address: TOKEN, topic0: APPROVAL, topic3: null }], TOKEN)).toBe('fungible')
+  })
+
+  it('is nft for an ERC-721 Approval (the token id indexed too)', () => {
+    expect(approvalStandard([{ address: TOKEN.toUpperCase().replace('0X', '0x'), topic0: APPROVAL, topic3: t(0) }], TOKEN)).toBe('nft')
+  })
+
+  it('is unknown without an Approval event from the token itself', () => {
+    expect(approvalStandard([], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: '0x' + '66'.repeat(20), topic0: APPROVAL, topic3: null }], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: TOKEN, topic0: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', topic3: null }], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: TOKEN, topic0: APPROVAL, topic3: null }], null)).toBeNull()
   })
 })

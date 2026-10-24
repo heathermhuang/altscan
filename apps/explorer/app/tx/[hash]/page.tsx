@@ -12,7 +12,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol } from '@/lib/tx-decoder'
+import { approvalStandard, attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
@@ -432,6 +432,7 @@ export default async function TxDetailPage({
       methodName,
       input: effectiveInput,
       toTokenSymbol: approvedSymbol,
+      approvalStandard: approvalStandard(txLogs, approvedToken),
     },
     transferInfos,
     chainConfig.currency
