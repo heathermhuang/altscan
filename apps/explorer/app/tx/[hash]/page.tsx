@@ -23,7 +23,7 @@ import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
-import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
+import { fetchTokenMetadata, addrsNeedingMetadata, recordFetchedMetadata, type KnownToken } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
@@ -359,7 +359,7 @@ export default async function TxDetailPage({
       + `invalid=[${badTokenAddrs.map(v => v === undefined ? 'undefined' : JSON.stringify(v)).join(', ')}]`,
     ))
   }
-  const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
+  const tokenLookup = new Map<string, KnownToken>()
   if (uniqueTokenAddrs.length > 0) {
     let tokens: { address: string; symbol: string; decimals: number }[] | undefined
     try {
@@ -380,11 +380,7 @@ export default async function TxDetailPage({
   // where the answer is "4,280 USDC"). Cached; failures degrade, never throw.
   const unnamed = addrsNeedingMetadata(uniqueTokenAddrs, tokenLookup)
   if (unnamed.length > 0) {
-    for (const [addr, meta] of await fetchTokenMetadata(unnamed)) {
-      if (meta.symbol != null || meta.decimals != null) {
-        tokenLookup.set(addr, { symbol: meta.symbol ?? '', decimals: meta.decimals ?? 18 })
-      }
-    }
+    recordFetchedMetadata(tokenLookup, await fetchTokenMetadata(unnamed))
   }
 
   const transferInfos = effectiveTransfers.map((t) => {
@@ -395,7 +391,7 @@ export default async function TxDetailPage({
       toAddress: t.toAddress,
       value: t.value ?? '0',
       tokenSymbol: safeTransferSymbol(t.tokenAddress, tok?.symbol, chainConfig.key),
-      tokenDecimals: tok?.decimals,
+      tokenDecimals: tok?.decimals ?? undefined,
     }
   })
 

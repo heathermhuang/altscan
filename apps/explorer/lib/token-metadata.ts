@@ -124,6 +124,19 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
  */
 export const PLACEHOLDER_SYMBOL = '???'
 
+/** What the tx page knows of a token: `decimals` is null when nothing answered it (never a guessed 18). */
+export type KnownToken = { symbol: string; decimals: number | null }
+
+/**
+ * Record freshly fetched metadata in `known`. A decimals the contract did not answer stays null: the
+ * old `?? 18` made the amount look known, and a 6-decimal token printed a trillion times too small.
+ */
+export function recordFetchedMetadata(known: Map<string, KnownToken>, fetched: ReadonlyMap<string, TokenMeta>): void {
+  for (const [addr, meta] of fetched) {
+    if (meta.symbol != null || meta.decimals != null) known.set(addr, { symbol: meta.symbol ?? '', decimals: meta.decimals })
+  }
+}
+
 /**
  * Addresses that still need an on-chain metadata lookup.
  *
