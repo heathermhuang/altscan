@@ -133,8 +133,9 @@ export const adsSettingsSchema = z
     creatives: z.array(houseCreativeSchema).max(12).optional(),
     // deliberately partial: only overridden placements appear; absent = enabled,
     // and an absent `mix` = Binance-only, i.e. the pre-Phase-B behaviour.
+    // partialRecord: since zod 4 a z.record over an enum requires every key.
     placements: z
-      .record(
+      .partialRecord(
         z.enum(AD_PLACEMENTS),
         z
           .object({

@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Webhook registration refuses event lists without `tx`, the only event delivered, and says which requested types it ignored. Deliveries carry `chainId`.
 
 ### Security
+- Dependencies patched for the advisories published on 2026-10-24: Next.js 15.5.28 (remote code execution in image optimization, which the explorers do not enable, and a Server Actions denial of service), zod 4 for the settings schema (memory exhaustion on oversized collections), and undici, fast-uri and vitest.
 - altscan.io's `/mcp` caps each IP at 120 calls a minute across every OAuth address it uses, beside the 60-a-minute limit per address. An address costs only a wallet signature, so one IP could open hundreds of per-address buckets and drain the single bucket the explorers give all of altscan.io.
 - `POST /api/v1/keys` checks for existing keys, enforces the 10-key cap and inserts under one per-address lock. Parallel requests used to read the same state, so an address with no keys could get several on its wallet signature alone, and the cap could be overrun.
 - The admin console's house-creative upload enforces its 200-image quota atomically. Concurrent uploads all listed the same bucket count, so they could overshoot it; a new image's audit row is now written first, as a conditional insert that is its quota reservation, and released if storing the image fails.
