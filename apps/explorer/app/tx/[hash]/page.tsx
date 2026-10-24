@@ -19,7 +19,7 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, CALLDATA_TRANSFER_LABEL, TX_OUTCOME_LABEL } from '@/lib/tx-view'
+import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, atCurrentPrice, CALLDATA_TRANSFER_LABEL, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
@@ -309,8 +309,9 @@ export default async function TxDetailPage({
   // USD values
   const bnbValue = Number(safeBigInt(tx.value)) / 1e18
   const feeVal = Number(fee) / 1e18
-  const valueUsd = nativePrice ? formatUsd(bnbValue, nativePrice) : null
-  const feeUsd = nativePrice ? formatUsd(feeVal, nativePrice) : null
+  // Today's price, whatever the tx's age: the figures say so (atCurrentPrice).
+  const valueUsd = nativePrice ? atCurrentPrice(formatUsd(bnbValue, nativePrice)) : null
+  const feeUsd = nativePrice ? atCurrentPrice(formatUsd(feeVal, nativePrice)) : null
 
   // Confirmations
   const confirmations = chainTip && placed ? chainTip - tx.blockNumber : null

@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   dbTx: null as Record<string, unknown> | null,
   blockRow: null as { baseFee: string | null } | null,
   internalRows: [] as unknown[],
+  nativeUsd: null as number | null,
   tablesRead: [] as unknown[],
   fetchTxFromRpc: vi.fn(),
   fetchBlockFromRpc: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('@/lib/tx-internal', async (orig) => {
   const m = await orig<typeof import('@/lib/tx-internal')>()
   return { ...m, selectTxInternals: vi.fn((...args: Parameters<typeof m.selectTxInternals>) => m.selectTxInternals(...args)) }
 })
+vi.mock('@/lib/native-price', () => ({ fetchNativeUsd: async () => state.nativeUsd }))
 vi.mock('@/lib/block-strip', () => ({ getBlockStrip: vi.fn(async () => null) }))
 vi.mock('@/lib/observability', async (orig) => ({
   ...(await orig<typeof import('@/lib/observability')>()),
@@ -83,7 +85,7 @@ const indexedTx = () => ({
 })
 
 beforeEach(() => {
-  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.tablesRead = []
+  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.nativeUsd = null; state.tablesRead = []
   state.fetchTxFromRpc.mockReset(); state.fetchBlockFromRpc.mockReset()
   state.fetchBlockFromRpc.mockResolvedValue(null)
   vi.stubGlobal('fetch', async () => ({ ok: false }))   // native price: every source "down", the page renders without USD
@@ -281,5 +283,26 @@ describe('/tx/[hash] transfer(address,uint256) calldata fallback', () => {
   it('shows none for an indexed tx whose logs are local and hold no Transfer', async () => {
     state.dbTx = { ...indexedTx(), toAddress: TOKEN, methodId: '0xa9059cbb', input: transferCalldata }
     expect(anyTransferRow(await render())).toBeNull()
+  })
+})
+
+// ---- USD figures --------------------------------------------------------------------------------------
+
+describe('/tx/[hash] USD figures', () => {
+  const sub = (tree: ReactNode, label: string) => findAll(tree, p => p.label === label)[0]?.sub
+
+  it('says the Value and Fee figures are at the current price, not the price when the tx ran', async () => {
+    state.nativeUsd = 600
+    state.dbTx = { ...indexedTx(), value: '2000000000000000000.000000000000000000', gas: 21_000n, gasUsed: 21_000n, gasPrice: '5000000000' }
+    const tree = await render()
+    expect(sub(tree, 'Value')).toBe('$1,200.00 at current price')
+    expect(sub(tree, 'Fee')).toBe('$0.06 at current price')
+  })
+
+  it('prints no USD figure at all without a price', async () => {
+    state.dbTx = indexedTx()
+    const tree = await render()
+    expect(sub(tree, 'Value')).toBeUndefined()
+    expect(sub(tree, 'Fee')).toBeUndefined()
   })
 })

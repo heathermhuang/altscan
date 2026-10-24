@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mayShowCalldataTransfer, resolveTxViewKind, txOutcome } from './tx-view'
+import { atCurrentPrice, mayShowCalldataTransfer, resolveTxViewKind, txOutcome } from './tx-view'
 
 describe('resolveTxViewKind', () => {
   it('local when row present and body not pruned', () => {
@@ -63,5 +63,14 @@ describe('mayShowCalldataTransfer', () => {
   it('only for transfer(address,uint256)', () => {
     expect(mayShowCalldataTransfer({ ...ok, methodId: '0x23b872dd' })).toBe(false)
     expect(mayShowCalldataTransfer({ ...ok, methodId: null })).toBe(false)
+  })
+})
+
+// The page only has TODAY's native price, so a USD figure beside a transaction from last month is not what
+// it was worth then. The figure is kept (it is useful) but must say which price it is.
+describe('atCurrentPrice', () => {
+  it('words a USD figure as at the current price, not the price at the time of the tx', () => {
+    expect(atCurrentPrice('$12.34')).toBe('$12.34 at current price')
+    expect(atCurrentPrice('< $0.01')).toBe('< $0.01 at current price')
   })
 })

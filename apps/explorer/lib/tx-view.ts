@@ -48,3 +48,11 @@ export function mayShowCalldataTransfer(opts: {
 }): boolean {
   return opts.methodId === '0xa9059cbb' && opts.outcome === 'success' && opts.logsUnavailable && opts.knownTransfers === 0
 }
+
+/**
+ * A USD figure for a transaction's value or fee. The page prices it at today's native price (there is no
+ * price history), which is not what it was worth when the transaction ran: say so.
+ */
+export function atCurrentPrice(usd: string): string {
+  return `${usd} at current price`
+}
