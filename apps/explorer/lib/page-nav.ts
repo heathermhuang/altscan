@@ -23,11 +23,14 @@ export function pageNav(opts: { page: number; total: number; perPage: number; ro
   const totalPages = capped ? lastServed : Math.ceil(total / perPage)
   const estimated = Math.max(0, Math.min(perPage, total - (page - 1) * perPage))
   const beyondEstimate = rowsOnPage !== undefined && rowsOnPage >= perPage && rowsOnPage > estimated && page < lastServed
-  if (totalPages <= 1 && !beyondEstimate) return null
+  // A page past the estimate's last one (reached through a next link the rule above offered) disproves the
+  // estimate as much as a full page does: it never gets the "of N" back, and it always keeps the way back.
+  const pastEstimate = page > totalPages
+  if (page <= 1 && totalPages <= 1 && !beyondEstimate) return null
   return {
     hasPrev: page > 1,
-    hasNext: beyondEstimate || page < totalPages,
-    label: beyondEstimate
+    hasNext: beyondEstimate || (!pastEstimate && page < totalPages),
+    label: beyondEstimate || pastEstimate
       ? `Page ${formatNumber(page)}`
       : `Page ${formatNumber(page)} of ${formatNumber(totalPages)}${capped ? '+' : ''}`,
   }

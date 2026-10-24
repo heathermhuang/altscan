@@ -56,7 +56,15 @@ describe('pageNav', () => {
     })
 
     it('never offers a page past the deepest the list serves', () => {
-      expect(pageNav({ page: 400, total: 0, perPage: 25, rowsOnPage: 25 })).toBeNull()
+      expect(pageNav({ page: 400, total: 0, perPage: 25, rowsOnPage: 25 })).toEqual({ label: 'Page 400', hasPrev: true, hasNext: false })
+    })
+
+    // Following the next link off an estimate of 0 (30 rows) lands on a partial page 2: it must keep the way
+    // back, and a stale estimate of 2 pages must not come back as "Page 4 of 2" on page 4.
+    it('the partial page a next link led to keeps its previous link and claims no total', () => {
+      expect(pageNav({ page: 2, total: 0, perPage: 25, rowsOnPage: 5 })).toEqual({ label: 'Page 2', hasPrev: true, hasNext: false })
+      expect(pageNav({ page: 4, total: 50, perPage: 25, rowsOnPage: 10 })).toEqual({ label: 'Page 4', hasPrev: true, hasNext: false })
+      expect(pageNav({ page: 4, total: 50, perPage: 25, rowsOnPage: 0 })).toEqual({ label: 'Page 4', hasPrev: true, hasNext: false })
     })
 
     it('a caller that does not pass rowsOnPage keeps the estimate as the whole story', () => {
