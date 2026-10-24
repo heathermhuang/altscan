@@ -197,6 +197,18 @@ jobs:
           GAS_TIERS_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/worker_test
         run: npx vitest run apps/explorer/lib/gas-percentiles.pg.test.ts
 
+      # API key minting: the existing-key check, the 10-key cap and the insert run under one per-owner
+      # advisory lock. 15 parallel requests on a 15-connection pool must mint exactly one first key on a
+      # signature alone, and never take an address past the cap. It creates and drops api_keys, and its
+      # requests use separate pooled connections, so it gets a database of its own.
+      - name: Create key-mint-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE key_mint_test'
+
+      - name: PG-gated explorer suite (API key minting under concurrency)
+        env:
+          API_KEY_MINT_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/key_mint_test
+        run: npx vitest run apps/explorer/lib/api-key-mint.pg.test.ts
+
       # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
       # on the server to reproduce a full noeviction instance, so it needs the
       # throwaway service and must never be pointed at a shared Redis.
