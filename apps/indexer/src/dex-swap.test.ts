@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeV2Swap, SWAP_V2_TOPIC } from './dex-swap'
+import { decodeV2Swap, resolveV2Pair, SWAP_V2_TOPIC, V2_FACTORIES, type V2PairReader } from './dex-swap'
 
 // Real Swap logs, read from each chain's RPC on 2026-09-14 together with the
 // pair's token0()/token1(). The expected amounts were decoded independently of
@@ -52,5 +52,69 @@ describe('decodeV2Swap', () => {
 
   it('rejects data too short to hold all four amounts', () => {
     expect(decodeV2Swap({ ...BSC_SWAP, data: BSC_SWAP.data.slice(0, 2 + 3 * 64) }, BSC_TOKENS)).toBeNull()
+  })
+})
+
+describe('resolveV2Pair', () => {
+  const PANCAKE = V2_FACTORIES.bnb[0].address
+  const PAIR = '0xc2e278b686049ffb0cc42225b1a48b5904f66d44'
+  // A fake reader: what each pair contract says about itself, and each factory's registry.
+  const reader = (claims: Record<string, { token0: string; token1: string; factory: string } | null>, registry: Record<string, string> = {}): V2PairReader & { getPairCalls: number } => {
+    const r = {
+      getPairCalls: 0,
+      async pairInfo(pair: string) { return claims[pair] ?? null },
+      async getPair(factory: string, a: string, b: string) {
+        r.getPairCalls++
+        return registry[`${factory.toLowerCase()}:${a}:${b}`] ?? '0x0000000000000000000000000000000000000000'
+      },
+    }
+    return r
+  }
+  const claim = { token0: BSC_TOKENS[0], token1: BSC_TOKENS[1], factory: PANCAKE }
+  const registered = { [`${PANCAKE}:${BSC_TOKENS[0]}:${BSC_TOKENS[1]}`]: PAIR }
+
+  it("records a listed factory's pair under that factory's label", async () => {
+    const r = reader({ [PAIR]: { ...claim, factory: PANCAKE.toUpperCase().replace('0X', '0x') } }, registered)
+    expect(await resolveV2Pair(PAIR.toUpperCase().replace('0X', '0x'), V2_FACTORIES.bnb, r)).toEqual({ tokens: BSC_TOKENS, dex: 'PancakeSwap V2' })
+  })
+
+  it('refuses a contract that claims a listed factory the factory does not register', async () => {
+    // Anyone can deploy a contract whose factory() returns PancakeSwap's: the registry is the proof.
+    const FAKE = '0x' + 'f'.repeat(40)
+    const r = reader({ [FAKE]: claim }, registered)
+    expect(await resolveV2Pair(FAKE, V2_FACTORIES.bnb, r)).toBeNull()
+    expect(r.getPairCalls).toBe(1)
+  })
+
+  it('refuses a pair of an unlisted factory without asking it anything', async () => {
+    const r = reader({ [PAIR]: { ...claim, factory: '0x' + '1'.repeat(40) } }, registered)
+    expect(await resolveV2Pair(PAIR, V2_FACTORIES.bnb, r)).toBeNull()
+    expect(r.getPairCalls).toBe(0)
+  })
+
+  it("refuses another chain's factory", async () => {
+    const r = reader({ [PAIR]: { ...claim, factory: V2_FACTORIES.eth[0].address } }, { [`${V2_FACTORIES.eth[0].address}:${BSC_TOKENS[0]}:${BSC_TOKENS[1]}`]: PAIR })
+    expect(await resolveV2Pair(PAIR, V2_FACTORIES.bnb, r)).toBeNull()
+  })
+
+  it('refuses a contract that is not a pair at all', async () => {
+    expect(await resolveV2Pair(PAIR, V2_FACTORIES.bnb, reader({ [PAIR]: null }))).toBeNull()
+  })
+
+  it('labels each Ethereum factory by its own name', async () => {
+    const UNI_PAIR = '0x93f768b3daa607370280cb0f69375adca14e5fd5'
+    const SUSHI_PAIR = '0x397ff1542f962076d0bfe58ea045ffa2d347aca0'
+    const [uni, sushi] = V2_FACTORIES.eth
+    const r = reader(
+      { [UNI_PAIR]: { token0: ETH_TOKENS[0], token1: ETH_TOKENS[1], factory: uni.address }, [SUSHI_PAIR]: { token0: ETH_TOKENS[0], token1: ETH_TOKENS[1], factory: sushi.address } },
+      { [`${uni.address}:${ETH_TOKENS[0]}:${ETH_TOKENS[1]}`]: UNI_PAIR, [`${sushi.address}:${ETH_TOKENS[0]}:${ETH_TOKENS[1]}`]: SUSHI_PAIR },
+    )
+    expect((await resolveV2Pair(UNI_PAIR, V2_FACTORIES.eth, r))?.dex).toBe('Uniswap V2')
+    expect((await resolveV2Pair(SUSHI_PAIR, V2_FACTORIES.eth, r))?.dex).toBe('SushiSwap')
+  })
+
+  it('a failed read throws (not remembered as a verdict)', async () => {
+    const r: V2PairReader = { pairInfo: async () => { throw new Error('timeout') }, getPair: async () => PAIR }
+    await expect(resolveV2Pair(PAIR, V2_FACTORIES.bnb, r)).rejects.toThrow('timeout')
   })
 })
