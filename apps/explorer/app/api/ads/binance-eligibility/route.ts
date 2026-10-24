@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { extractClientIp, isCloudflareIp } from '@altscan/explorer-core'
 import { isBinanceRestrictedCountry } from '@/lib/binance-referral'
 import { chainConfig } from '@/lib/chain'
 import { getSetting } from '@/lib/settings'
@@ -6,14 +7,17 @@ import { buildAdConfig } from '@/lib/settings-defaults'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * The visitor's country, from cf-ipcountry and nothing else. Cloudflare sets that header itself,
+ * but only a request whose connecting peer (the last X-Forwarded-For hop) is a Cloudflare edge
+ * can be trusted to carry Cloudflare's value: from any other peer the header, like the
+ * x-vercel-ip-country / x-country-code family this once also read, is whatever the client sent.
+ * No trusted country is the same as no country (not restricted), as it always was.
+ */
 function getCountry(request: NextRequest): string | null {
-  return (
-    request.headers.get('cf-ipcountry') ||
-    request.headers.get('x-vercel-ip-country') ||
-    request.headers.get('cloudfront-viewer-country') ||
-    request.headers.get('x-country-code') ||
-    request.headers.get('x-appengine-country')
-  )
+  const peer = extractClientIp(request.headers.get('x-forwarded-for'))
+  if (!isCloudflareIp(peer)) return null
+  return request.headers.get('cf-ipcountry')
 }
 
 /** Public bucket that serves house-creative images. Overridable per deployment;
@@ -57,13 +61,7 @@ export async function GET(request: NextRequest) {
       // reasonably fast, so cap client caching at 5 min (matches the
       // component's sessionStorage TTL).
       'Cache-Control': 'private, max-age=300',
-      Vary: [
-        'CF-IPCountry',
-        'X-Vercel-IP-Country',
-        'CloudFront-Viewer-Country',
-        'X-Country-Code',
-        'X-AppEngine-Country',
-      ].join(', '),
+      Vary: 'CF-IPCountry',
     },
   })
 }
