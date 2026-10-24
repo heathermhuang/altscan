@@ -19,7 +19,7 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
+import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, CALLDATA_TRANSFER_LABEL, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
@@ -372,7 +372,7 @@ export default async function TxDetailPage({
     recordFetchedMetadata(tokenLookup, await fetchTokenMetadata(unnamed))
   }
 
-  const transferInfos = effectiveTransfers.map((t) => {
+  const transferInfos: TransferInfo[] = effectiveTransfers.map((t) => {
     const tok = tokenLookup.get(t.tokenAddress)
     return {
       tokenAddress: t.tokenAddress,
@@ -384,8 +384,8 @@ export default async function TxDetailPage({
     }
   })
 
-  // Fallback: decode transfer from input data
-  if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {
+  // Fallback: decode transfer from input data, only where the logs could not be read (see mayShowCalldataTransfer).
+  if (tx.toAddress && mayShowCalldataTransfer({ methodId: tx.methodId, outcome, logsUnavailable: bodyUnavailable, knownTransfers: transferInfos.length })) {
     const parsed = decodeTransferInput(effectiveInput ?? null)
     if (parsed) {
       let tokenSymbol: string | undefined
@@ -402,6 +402,7 @@ export default async function TxDetailPage({
         value: parsed.amount.toString(),
         tokenSymbol,
         tokenDecimals,
+        unverified: true,
       })
     }
   }
@@ -837,6 +838,8 @@ type TransferInfo = {
   value: string
   tokenSymbol?: string
   tokenDecimals?: number
+  /** Decoded from calldata, not read from logs. */
+  unverified?: boolean
 }
 
 // One row of the token-transfer list; the summary preview and the full list render the same markup.
@@ -861,6 +864,7 @@ function TransferRow({ t }: { t: TransferInfo }) {
           {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
         </Link>
       </span>
+      {t.unverified && <span className="text-xs text-mut">({CALLDATA_TRANSFER_LABEL})</span>}
     </div>
   )
 }

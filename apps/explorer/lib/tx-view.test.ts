@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTxViewKind, txOutcome } from './tx-view'
+import { mayShowCalldataTransfer, resolveTxViewKind, txOutcome } from './tx-view'
 
 describe('resolveTxViewKind', () => {
   it('local when row present and body not pruned', () => {
@@ -33,5 +33,35 @@ describe('txOutcome', () => {
   it('a tx with no receipt is pending, whatever its defaulted status says', () => {
     expect(txOutcome({ status: true, pending: true })).toBe('pending')
     expect(txOutcome({ status: false, pending: true })).toBe('pending')
+  })
+})
+
+// A token-transfer row decoded from transfer(address,uint256) calldata is a claim about what happened, but
+// calldata is only what was asked. A reverted call moved nothing, a pending one has not run, and a
+// receipt that was READ and held no Transfer log says no ERC-20 moved (the call may not even be a
+// token's). Only a succeeded tx whose logs could not be read leaves the calldata as the best evidence.
+describe('mayShowCalldataTransfer', () => {
+  const ok = { methodId: '0xa9059cbb', outcome: 'success' as const, logsUnavailable: true, knownTransfers: 0 }
+
+  it('allows a succeeded transfer() whose logs could not be read and which has no transfers', () => {
+    expect(mayShowCalldataTransfer(ok)).toBe(true)
+  })
+
+  it('never for a failed or a pending tx', () => {
+    expect(mayShowCalldataTransfer({ ...ok, outcome: 'failed' })).toBe(false)
+    expect(mayShowCalldataTransfer({ ...ok, outcome: 'pending' })).toBe(false)
+  })
+
+  it('never when the logs were read (an empty receipt is an answer, not an unknown)', () => {
+    expect(mayShowCalldataTransfer({ ...ok, logsUnavailable: false })).toBe(false)
+  })
+
+  it('never when real transfers are already known', () => {
+    expect(mayShowCalldataTransfer({ ...ok, knownTransfers: 1 })).toBe(false)
+  })
+
+  it('only for transfer(address,uint256)', () => {
+    expect(mayShowCalldataTransfer({ ...ok, methodId: '0x23b872dd' })).toBe(false)
+    expect(mayShowCalldataTransfer({ ...ok, methodId: null })).toBe(false)
   })
 })

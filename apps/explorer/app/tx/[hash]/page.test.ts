@@ -53,6 +53,8 @@ import { schema } from '@/lib/db'
 import { Badge } from '@/components/ui/Badge'
 import { getBlockStrip } from '@/lib/block-strip'
 import { selectTxInternals } from '@/lib/tx-internal'
+import { getTxBody } from '@/lib/body-cache'
+import { CALLDATA_TRANSFER_LABEL } from '@/lib/tx-view'
 import TxDetailPage from './page'
 
 const HASH = '0x' + 'ab'.repeat(32)
@@ -226,5 +228,58 @@ describe('/tx/[hash] internal transactions', () => {
   it('draws nothing for a tx with none', async () => {
     state.dbTx = indexedTx()
     expect(textOf(await render())).not.toContain('Internal Transactions')
+  })
+})
+
+// ---- a token transfer decoded from calldata ----------------------------------------------------------
+
+describe('/tx/[hash] transfer(address,uint256) calldata fallback', () => {
+  const TOKEN = '0x' + '55'.repeat(20)
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const transferCalldata = '0xa9059cbb' + word('0x' + '33'.repeat(20)) + word('1000')
+  // The node served the tx (so its input) but its receipt/logs could not be refetched: getTxBody -> null.
+  const viaRpc = (over: Record<string, unknown> = {}) => state.fetchTxFromRpc.mockResolvedValue(
+    rpcTx({ blockNumber: 500, pending: false, status: true, toAddress: TOKEN, methodId: '0xa9059cbb', input: transferCalldata, ...over }))
+  const findEl = (node: ReactNode, pred: (props: Record<string, unknown>) => boolean): { type: unknown; props: Record<string, unknown> } | null => {
+    if (!node || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const n of node) { const f = findEl(n, pred); if (f) return f } return null }
+    const el = node as { type?: unknown; props?: Record<string, unknown> }
+    if (el.props && pred(el.props)) return el as { type: unknown; props: Record<string, unknown> }
+    return findEl(el.props?.children as ReactNode, pred)
+  }
+  const calldataRow = (tree: ReactNode) => findEl(tree, p => (p.t as { unverified?: boolean } | undefined)?.unverified === true)
+  const anyTransferRow = (tree: ReactNode) => findEl(tree, p => typeof p.t === 'object' && p.t !== null)
+
+  beforeEach(() => { vi.mocked(getTxBody).mockReset().mockResolvedValue(null) })
+
+  it('shows the row for a succeeded tx whose logs could not be read, and labels it unverified', async () => {
+    viaRpc()
+    const row = calldataRow(await render())
+    expect(row).not.toBeNull()
+    expect(row!.props.t).toMatchObject({ tokenAddress: TOKEN, toAddress: '0x' + '33'.repeat(20), value: '4096' })
+    // The row component writes the label itself: render it.
+    const Row = row!.type as (props: Record<string, unknown>) => ReactNode
+    expect(textOf(Row(row!.props))).toContain(CALLDATA_TRANSFER_LABEL)
+  })
+
+  it('shows none for a failed tx: it moved nothing', async () => {
+    viaRpc({ status: false })
+    expect(anyTransferRow(await render())).toBeNull()
+  })
+
+  it('shows none for a pending tx: it has not run', async () => {
+    viaRpc({ pending: true, blockNumber: 0 })
+    expect(anyTransferRow(await render())).toBeNull()
+  })
+
+  it('shows none when the logs were read and held no Transfer (an empty receipt is an answer)', async () => {
+    viaRpc()
+    vi.mocked(getTxBody).mockResolvedValue({ input: transferCalldata, logs: [] })
+    expect(anyTransferRow(await render())).toBeNull()
+  })
+
+  it('shows none for an indexed tx whose logs are local and hold no Transfer', async () => {
+    state.dbTx = { ...indexedTx(), toAddress: TOKEN, methodId: '0xa9059cbb', input: transferCalldata }
+    expect(anyTransferRow(await render())).toBeNull()
   })
 })

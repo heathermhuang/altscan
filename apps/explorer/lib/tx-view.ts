@@ -29,3 +29,22 @@ export function txOutcome(tx: { status: boolean; pending?: boolean }): TxOutcome
 }
 
 export const TX_OUTCOME_LABEL: Record<TxOutcome, string> = { success: 'Success', failed: 'Failed', pending: 'Pending' }
+
+/** What the page writes beside a token-transfer row it decoded from calldata rather than read from logs. */
+export const CALLDATA_TRANSFER_LABEL = 'from calldata, unverified'
+
+/**
+ * May the page synthesize a token-transfer row from transfer(address,uint256) calldata? Only for a tx
+ * that succeeded whose logs are UNKNOWN (the body fetch failed), with no real transfers to show. A
+ * failed or pending tx moved nothing, and logs that were read and held no Transfer say the call was
+ * not a token transfer: a row from its calldata would show a movement that did not happen.
+ */
+export function mayShowCalldataTransfer(opts: {
+  methodId: string | null
+  outcome: TxOutcome
+  /** The receipt logs could not be obtained (unknown), as opposed to obtained and empty. */
+  logsUnavailable: boolean
+  knownTransfers: number
+}): boolean {
+  return opts.methodId === '0xa9059cbb' && opts.outcome === 'success' && opts.logsUnavailable && opts.knownTransfers === 0
+}
