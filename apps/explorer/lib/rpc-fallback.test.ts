@@ -79,7 +79,7 @@ describe('fetchTxFromRpc — pending', () => {
   it('does not flag a mined tx, and keeps its real status', async () => {
     const h = hashOf('f')
     provider.getTransaction.mockResolvedValue(rawTx(h, 100))
-    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: 0 })
+    provider.getTransactionReceipt.mockResolvedValue({ hash: h, gasUsed: 21000n, status: 0 })
     provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
     await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: false, status: false, gasUsed: 21000n })
   })
@@ -106,7 +106,7 @@ describe('fetchTxFactsFromRpc — unknowns stay null', () => {
   it('keeps a status-less (pre-Byzantium) receipt unknown, not failed, while the page keeps reading false', async () => {
     const h = hashOf('3')
     provider.getTransaction.mockResolvedValue(rawTx(h, 100))
-    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: null })
+    provider.getTransactionReceipt.mockResolvedValue({ hash: h, gasUsed: 21000n, status: null })
     provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
     await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ pending: false, status: null })
     await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ pending: false, status: false })
@@ -115,9 +115,105 @@ describe('fetchTxFactsFromRpc — unknowns stay null', () => {
   it('leaves the time null when the node does not return the block', async () => {
     const h = hashOf('2')
     provider.getTransaction.mockResolvedValue(rawTx(h, 100))
-    provider.getTransactionReceipt.mockResolvedValue({ gasUsed: 21000n, status: 1 })
+    provider.getTransactionReceipt.mockResolvedValue({ hash: h, gasUsed: 21000n, status: 1 })
     provider.getBlock.mockResolvedValue(null)
     await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ blockNumber: 100, status: true, timestamp: null })
+  })
+})
+
+// A node, or a proxy in front of one, can answer for a different hash or block than the one asked.
+// The page would then print another transaction's sender, value and fee under this URL.
+describe('fetchTxFactsFromRpc — the answer must be for the hash asked', () => {
+  const rawTx = (h: string) => ({
+    hash: h, blockNumber: 100, from: '0xF', to: null, value: 0n,
+    gasLimit: 21000n, gasPrice: 1n, data: '0x', index: 0, nonce: 0, type: 2,
+  })
+
+  it('treats a transaction with another hash as not found, and does not negative-cache it', async () => {
+    const asked = hashOf('4'), other = hashOf('5')
+    provider.getTransaction.mockResolvedValue(rawTx(other))
+    provider.getTransactionReceipt.mockResolvedValue({ hash: other, gasUsed: 21000n, status: 1 })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFactsFromRpc(asked)).resolves.toBeNull()
+    await expect(fetchTxFromRpc(asked)).resolves.toBeNull()
+    expect(vi.mocked(swallow).mock.calls.some(([tag]) => tag === 'rpc/tx-hash-mismatch')).toBe(true)
+
+    // The node was wrong, not the tx absent: a later correct answer is served, not hidden for the null TTL.
+    provider.getTransaction.mockResolvedValue(rawTx(asked))
+    provider.getTransactionReceipt.mockResolvedValue({ hash: asked, gasUsed: 21000n, status: 1 })
+    await expect(fetchTxFactsFromRpc(asked)).resolves.toMatchObject({ hash: asked })
+  })
+
+  it('treats a receipt for another hash as not found', async () => {
+    const asked = hashOf('6')
+    provider.getTransaction.mockResolvedValue(rawTx(asked))
+    provider.getTransactionReceipt.mockResolvedValue({ hash: hashOf('7'), gasUsed: 21000n, status: 1 })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFactsFromRpc(asked)).resolves.toBeNull()
+  })
+
+  it('compares hashes ignoring letter case', async () => {
+    const lower = '0x' + 'ab'.repeat(32)
+    provider.getTransaction.mockResolvedValue(rawTx(lower))
+    provider.getTransactionReceipt.mockResolvedValue({ hash: lower, gasUsed: 21000n, status: 1 })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFactsFromRpc('0x' + 'AB'.repeat(32))).resolves.toMatchObject({ hash: lower })
+  })
+
+  it('still serves a pending tx (no receipt to compare)', async () => {
+    const h = hashOf('8')
+    provider.getTransaction.mockResolvedValue({ ...rawTx(h), blockNumber: null })
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ hash: h, pending: true })
+  })
+})
+
+// A type-2 transaction's own gasPrice/maxFeePerGas is a ceiling; what it PAID is the receipt's
+// effective gas price. The fee and gas-price rows used the ceiling.
+describe('fetchTxFactsFromRpc — the price paid comes from the receipt', () => {
+  const rawTx = (h: string) => ({
+    hash: h, blockNumber: 100, from: '0xF', to: null, value: 0n,
+    gasLimit: 21000n, gasPrice: 100n, maxFeePerGas: 200n, data: '0x', index: 0, nonce: 0, type: 2,
+  })
+
+  it("prefers the receipt's effective gas price over the transaction's", async () => {
+    const h = hashOf('9')
+    provider.getTransaction.mockResolvedValue(rawTx(h))
+    provider.getTransactionReceipt.mockResolvedValue({ hash: h, gasUsed: 21000n, status: 1, gasPrice: 50n })
+    provider.getBlock.mockResolvedValue({ timestamp: 1_000_000 })
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ gasPrice: 50n })
+    await expect(fetchTxFromRpc(h)).resolves.toMatchObject({ gasPrice: '50' })
+  })
+
+  it("falls back to the transaction's price while there is no receipt", async () => {
+    const h = hashOf('0')
+    provider.getTransaction.mockResolvedValue({ ...rawTx(h), blockNumber: null })
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ gasPrice: 100n })
+  })
+
+  it('and to the max fee when the transaction carries no gas price', async () => {
+    const h = hashOf('1')
+    provider.getTransaction.mockResolvedValue({ ...rawTx(h), gasPrice: null, blockNumber: null })
+    provider.getTransactionReceipt.mockResolvedValue(null)
+    await expect(fetchTxFactsFromRpc(h)).resolves.toMatchObject({ gasPrice: 200n })
+  })
+})
+
+describe('fetchBlockFromRpc — the answer must be for the block asked', () => {
+  const rawBlock = (number: number) => ({
+    number, hash: '0xb', parentHash: '0xa', timestamp: 1_000_000, miner: '0xM', gasUsed: 1n, gasLimit: 2n,
+    baseFeePerGas: null, transactions: [], prefetchedTransactions: [],
+  })
+
+  it('treats another block as not found', async () => {
+    provider.getBlock.mockResolvedValue(rawBlock(124))
+    await expect(fetchBlockFromRpc(123)).resolves.toBeNull()
+  })
+
+  it('serves the block it was asked for', async () => {
+    provider.getBlock.mockResolvedValue(rawBlock(125))
+    await expect(fetchBlockFromRpc(125)).resolves.toMatchObject({ number: 125 })
   })
 })
 
