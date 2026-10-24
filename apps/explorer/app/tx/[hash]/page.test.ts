@@ -38,7 +38,7 @@ vi.mock('@/lib/db', async () => {
 vi.mock('@/lib/rpc-fallback', () => ({ fetchTxFromRpc: state.fetchTxFromRpc, fetchBlockFromRpc: state.fetchBlockFromRpc }))
 // Chain tip comes from the node, so the page never falls back to a MAX(blocks.number) read of its own.
 vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => ({ getBlockNumber: async () => 1_000_000 }) }))
-vi.mock('@/lib/body-cache', () => ({ getTxBody: vi.fn(async () => null) }))
+vi.mock('@/lib/body-cache', () => ({ getTxBody: vi.fn(async () => null), fetchTxInputFromRpc: vi.fn(async () => null) }))
 vi.mock('@/lib/tx-internal', async (orig) => {
   const m = await orig<typeof import('@/lib/tx-internal')>()
   return { ...m, selectTxInternals: vi.fn((...args: Parameters<typeof m.selectTxInternals>) => m.selectTxInternals(...args)) }
@@ -55,8 +55,8 @@ import { schema } from '@/lib/db'
 import { Badge } from '@/components/ui/Badge'
 import { getBlockStrip } from '@/lib/block-strip'
 import { selectTxInternals } from '@/lib/tx-internal'
-import { getTxBody } from '@/lib/body-cache'
-import { CALLDATA_TRANSFER_LABEL } from '@/lib/tx-view'
+import { fetchTxInputFromRpc, getTxBody } from '@/lib/body-cache'
+import { CALLDATA_TRANSFER_LABEL, TRUNCATED_INPUT_NOTE } from '@/lib/tx-view'
 import TxDetailPage from './page'
 
 const HASH = '0x' + 'ab'.repeat(32)
@@ -304,5 +304,49 @@ describe('/tx/[hash] USD figures', () => {
     const tree = await render()
     expect(sub(tree, 'Value')).toBeUndefined()
     expect(sub(tree, 'Fee')).toBeUndefined()
+  })
+})
+
+// ---- an input the indexer cut ---------------------------------------------------------------------------
+
+describe('/tx/[hash] input the index stores cut at 500 characters', () => {
+  const stored = '0x' + 'ab'.repeat(249)              // what the indexer keeps of a longer input
+  const full = stored + 'cd'.repeat(300)
+  const hexShown = (tree: ReactNode) => findAll(tree, p => typeof p.className === 'string' && p.className.includes('whitespace-pre-wrap') && typeof p.children === 'string').map(p => p.children)[0]
+
+  beforeEach(() => { vi.mocked(fetchTxInputFromRpc).mockReset().mockResolvedValue(null) })
+
+  it('shows the full input from the node in place of the stored prefix, with no cut-off note', async () => {
+    state.dbTx = { ...indexedTx(), input: stored, methodId: '0xabababab' }
+    vi.mocked(fetchTxInputFromRpc).mockResolvedValue(full)
+    const tree = await render()
+    expect(fetchTxInputFromRpc).toHaveBeenCalledWith(HASH)
+    expect(hexShown(tree)).toBe(full)
+    expect(textOf(tree)).not.toContain(TRUNCATED_INPUT_NOTE)
+  })
+
+  it('shows the stored prefix and says it is cut when the node cannot be asked', async () => {
+    state.dbTx = { ...indexedTx(), input: stored, methodId: '0xabababab' }
+    const tree = await render()
+    expect(hexShown(tree)).toBe(stored)
+    expect(textOf(tree)).toContain(TRUNCATED_INPUT_NOTE)
+  })
+
+  it('does not ask the node, or add a note, for an input stored whole', async () => {
+    state.dbTx = { ...indexedTx(), input: '0xa9059cbb' + '00'.repeat(64), methodId: '0xa9059cbb' }
+    const tree = await render()
+    expect(fetchTxInputFromRpc).not.toHaveBeenCalled()
+    expect(textOf(tree)).not.toContain(TRUNCATED_INPUT_NOTE)
+  })
+
+  it('leaves the pruned and node-served views to the body refetch they already do', async () => {
+    state.dbTx = { ...indexedTx(), input: '0x', bodyPruned: true }
+    await render()
+    state.dbTx = null
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, input: full, methodId: '0xabababab' }))
+    const tree = await render()
+    expect(fetchTxInputFromRpc).not.toHaveBeenCalled()
+    expect(hexShown(tree)).toBe(full)
+    expect(textOf(tree)).not.toContain(TRUNCATED_INPUT_NOTE)
   })
 })

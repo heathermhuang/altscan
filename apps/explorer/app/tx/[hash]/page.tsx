@@ -19,8 +19,8 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, atCurrentPrice, CALLDATA_TRANSFER_LABEL, TX_OUTCOME_LABEL } from '@/lib/tx-view'
-import { getTxBody, type CachedLog } from '@/lib/body-cache'
+import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, atCurrentPrice, needsInputRefetch, resolveStoredInput, CALLDATA_TRANSFER_LABEL, TRUNCATED_INPUT_NOTE, TX_OUTCOME_LABEL } from '@/lib/tx-view'
+import { getTxBody, fetchTxInputFromRpc, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
 import { selectTxInternals, capTxInternals, TX_INTERNALS_SHOWN } from '@/lib/tx-internal'
@@ -96,7 +96,7 @@ const getTx = cache(async (hash: string) => {
   // token balances rendered with no transfers and no logs at all.
   // null on RPC failure → the page degrades to compact + a note.
   const body = kind === 'pruned' || kind === 'rpc' ? await getTxBody(hash) : null
-  return { dbTx, rpcTx, body }
+  return { dbTx, rpcTx, body, kind }
 })
 
 // Missing entities return noindex metadata instead of throwing notFound():
@@ -219,7 +219,7 @@ export default async function TxDetailPage({
   const { hash } = await params
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
 
-  const { dbTx, rpcTx, body } = await getTx(hash)
+  const { dbTx, rpcTx, body, kind } = await getTx(hash)
   const tx = dbTx ?? rpcTx
   if (!tx) notFound()
 
@@ -234,7 +234,7 @@ export default async function TxDetailPage({
 
   // token_transfers is compact-immortal → still local even for a pruned tx.
   // logs are a prunable body → local when present, else from the refetched body.
-  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip] = await Promise.all([
+  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip, fullInput] = await Promise.all([
     (fromRpc || bodyPruned)
       ? Promise.resolve([])
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
@@ -253,13 +253,19 @@ export default async function TxDetailPage({
     fetchChainTip(),
     // An RPC-path tx has no local block, so no strip.
     fromRpc ? Promise.resolve(null) : getBlockStrip(tx.blockNumber),
+    // The indexer stores only the first 500 characters of an input and leaves body_pruned false: ask the
+    // node for the rest of a long one (null on failure; the input then shows as cut, below).
+    needsInputRefetch(kind, dbTx?.input) ? fetchTxInputFromRpc(hash) : Promise.resolve(null),
   ])
 
   // Both bodyless views read the refetched body; a local tx reads the DB.
   const usesBody = bodyPruned || fromRpc
   // Effective input: the refetched body wins (DB input is '0x' when pruned, and
-  // absent entirely on the RPC path).
-  const effectiveInput = usesBody && body ? body.input : tx.input
+  // absent entirely on the RPC path). An indexed tx's stored input may be cut at 500 characters:
+  // the node's full copy replaces it, or `inputTruncated` says what is shown is only a prefix.
+  const { input: effectiveInput, truncated: inputTruncated } = usesBody
+    ? { input: body ? body.input : tx.input, truncated: false }
+    : resolveStoredInput(tx.input, fullInput)
   // Effective logs: refetched body logs when bodyless, else local DB logs. Both
   // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
   const bodyLogs: CachedLog[] = usesBody && body ? body.logs : []
@@ -670,6 +676,7 @@ export default async function TxDetailPage({
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-hair bg-canvas p-3 font-mono text-xs text-ink2">
                   {effectiveInput}
                 </pre>
+                {inputTruncated && <p className="mt-1.5 text-xs text-warn">{TRUNCATED_INPUT_NOTE}</p>}
               </div>
               {decodedUtf8 && (
                 <div>

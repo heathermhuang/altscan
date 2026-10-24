@@ -122,9 +122,11 @@ describe('documented 200 bodies match what the routes return', () => {
     ['/api/v1/blocks/:number', { block }],
     ['/api/v1/blocks/:number', { block: { ...block, baseFeePerGas: null } }],
     ['/api/v1/transactions', { transactions: [indexedTx], total: 1, page: 1, limit: 20 }],
-    ['/api/v1/transactions/:hash', { transaction: indexedTx, source: 'index' }],
-    ['/api/v1/transactions/:hash', { transaction: chainTx, source: 'chain' }],
-    ['/api/v1/transactions/:hash', { transaction: pendingTx, source: 'chain' }],
+    // The route adds inputTruncated to the row (the list and address routes return the bare row).
+    ['/api/v1/transactions/:hash', { transaction: { ...indexedTx, inputTruncated: false }, source: 'index' }],
+    ['/api/v1/transactions/:hash', { transaction: { ...indexedTx, inputTruncated: true }, source: 'index' }],
+    ['/api/v1/transactions/:hash', { transaction: { ...chainTx, inputTruncated: false }, source: 'chain' }],
+    ['/api/v1/transactions/:hash', { transaction: { ...pendingTx, inputTruncated: false }, source: 'chain' }],
     ['/api/v1/addresses/:address', addressBody],
     ['/api/v1/addresses/:address', { ...addressBody, historyComplete: true, nativeBalance: 0n, trackedTokenBalances: [{ ...trackedBalance, balance: '0' }] }],
     ['/api/v1/addresses/:address', { ...addressBody, historyComplete: null, indexedFrom: null, nativeBalance: null, trackedTokenBalances: null }],
@@ -142,6 +144,8 @@ describe('documented 200 bodies match what the routes return', () => {
     const raw = ajv.compile({ ...responses('/api/v1/blocks/:number')[200].content['application/json'].schema, components: spec.components })
     expect(raw({ block })).toBe(false)
     expect(validate200('/api/v1/transactions/:hash', { transaction: chainTx, source: 'index' })).not.toEqual([])
+    expect(validate200('/api/v1/transactions/:hash', { transaction: indexedTx, source: 'index' })).not.toEqual([])   // no inputTruncated
+    expect(validate200('/api/v1/transactions/:hash', { transaction: { ...chainTx, inputTruncated: true }, source: 'chain' })).not.toEqual([])
     const { lookalike: _drop, ...noLookalike } = { token, lookalike }
     expect(validate200('/api/v1/tokens/:contract', noLookalike)).not.toEqual([])
     const { historyComplete: _dropToo, ...noCoverage } = addressBody

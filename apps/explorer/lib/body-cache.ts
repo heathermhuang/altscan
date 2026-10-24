@@ -88,6 +88,26 @@ export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
   }
 }
 
+/**
+ * The full input of ONE transaction from the node, for an indexed tx whose stored input is cut at
+ * 500 characters. Null on any failure, or when the node answers for a different hash.
+ *
+ * Deliberately NOT cached through getTxBody: that writes input + logs to the shared noeviction Redis
+ * (see BODY_CACHE_TTL_MS above), and an indexed tx with a long input is common, so caching these
+ * would multiply the arrival rate that cache was sized against. The tx page is ISR (one render per
+ * path per minute), which already bounds this to one getTransaction per tx per minute.
+ */
+export async function fetchTxInputFromRpc(hash: string): Promise<string | null> {
+  try {
+    const provider = await getWebProvider()
+    const tx = await provider.getTransaction(hash)
+    if (!tx || tx.hash.toLowerCase() !== hash.toLowerCase()) return null
+    return tx.data
+  } catch {
+    return null
+  }
+}
+
 /** Cache-first body fetch. Returns null if RPC is unreachable (caller degrades). */
 export async function getTxBody(hash: string): Promise<TxBody | null> {
   const key = bodyCacheKey(hash)

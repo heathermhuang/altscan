@@ -102,8 +102,25 @@ const SCHEMAS: Record<string, Schema> = {
     }),
     description: 'A transaction read from the node because it is outside the index. Fields the node did not report are null.',
   },
-  IndexedTransactionResponse: object({ transaction: ref('IndexedTransaction'), source: { const: 'index' } }),
-  ChainTransactionResponse: object({ transaction: ref('ChainTransaction'), source: { const: 'chain' } }),
+  // inputTruncated is added by this route only; the list and address routes return the bare row.
+  IndexedTransactionResponse: object({
+    transaction: {
+      allOf: [
+        ref('IndexedTransaction'),
+        object({ inputTruncated: { type: 'boolean', description: 'true when `input` may be cut: the index keeps the first 500 characters (0x + 249 bytes) of a longer calldata, so an `input` of that length may not be the whole of it. Read the full calldata from the node.' } }),
+      ],
+    },
+    source: { const: 'index' },
+  }),
+  ChainTransactionResponse: object({
+    transaction: {
+      allOf: [
+        ref('ChainTransaction'),
+        object({ inputTruncated: { type: 'boolean', const: false, description: "Always false here: `input` is the node's full calldata. Present so a client can read the flag from either source." } }),
+      ],
+    },
+    source: { const: 'chain' },
+  }),
 
   TokenTransfer: object({
     txHash: ref('Hash'),
