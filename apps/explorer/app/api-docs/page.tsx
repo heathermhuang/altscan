@@ -317,8 +317,8 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/keys/:id',
     description:
       'Revoke an API key. Requires an active key of the same owner in X-API-Key (a key can revoke itself). ' +
-      'The key stops authenticating at once; it stays in GET /api/v1/keys with active: false, and no longer counts toward the 10-key limit per address. ' +
-      'Answers 404 when the owner has no key with that id, 401 or 403 when X-API-Key is missing, invalid, or belongs to another address. Revoking an already revoked key answers 200 again.',
+      'The key is deleted: it stops authenticating at once, leaves GET /api/v1/keys, and frees its place under the 10-key limit per address. ' +
+      'Answers 404 when the owner has no key with that id (including one already revoked), 401 or 403 when X-API-Key is missing, invalid, or belongs to another address.',
     params: [
       { name: 'id', type: 'number', required: true, description: 'The key\u2019s id, from POST /api/v1/keys or GET /api/v1/keys (path parameter)' },
       { name: 'owner', type: 'string', required: true, description: 'Owner address of the key (0x-prefixed), as a query parameter' },

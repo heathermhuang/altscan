@@ -5,9 +5,10 @@ import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 
 const MAX_SERIAL = 2_147_483_647 // api_keys.id is a 4-byte serial; a larger id would be a database error
 
-// DELETE: revoke an API key (requires an active key of the same owner). The row is kept, with
-// active=false: a revoked key stops authenticating (authRequest and requireApiKeyOwner only read
-// active keys) and stays listed by GET /api/v1/keys as inactive.
+// DELETE: revoke an API key (requires an active key of the same owner). The row is deleted, not
+// set inactive: mintApiKey counts every row an owner holds, so a deleted key frees its slot under
+// the cap, while a key the operator deactivated (active=false) keeps counting and keeps its owner
+// from minting a replacement with a signature alone.
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -31,8 +32,7 @@ export async function DELETE(
   const ownerAuth = await requireApiKeyOwner(request, owner)
   if (!ownerAuth.ok) return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status })
 
-  const revoked = await db.update(schema.apiKeys)
-    .set({ active: false })
+  const revoked = await db.delete(schema.apiKeys)
     .where(and(
       eq(schema.apiKeys.id, keyId),
       eq(schema.apiKeys.ownerAddress, owner),

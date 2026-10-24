@@ -1,6 +1,6 @@
 /**
- * DELETE /api/v1/keys/:id: revoking an API key. Nothing used to write api_keys.active = false, so a
- * leaked key could not be retired. The update must be scoped to the owner the requesting key was
+ * DELETE /api/v1/keys/:id: revoking an API key. There was no way to retire a leaked key. The
+ * delete must be scoped to the owner the requesting key was
  * proven to belong to, and a key of another owner must not be reachable by id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,7 +14,6 @@ const h = vi.hoisted(() => ({
   authOk: true,
   ownerAuth: { ok: true } as { ok: true } | { ok: false; status: number; error: string },
   ownerChecks: [] as string[],
-  sets: [] as unknown[],
   wheres: [] as unknown[],
   returned: [{ id: 7 }] as { id: number }[],
 }))
@@ -29,11 +28,8 @@ vi.mock('@/lib/db', async () => {
   return {
     schema,
     db: {
-      update: () => ({
-        set: (values: unknown) => {
-          h.sets.push(values)
-          return { where: (cond: unknown) => { h.wheres.push(cond); return { returning: async () => h.returned } } }
-        },
+      delete: () => ({
+        where: (cond: unknown) => { h.wheres.push(cond); return { returning: async () => h.returned } },
       }),
     },
   }
@@ -51,18 +47,16 @@ beforeEach(() => {
   h.authOk = true
   h.ownerAuth = { ok: true }
   h.ownerChecks = []
-  h.sets = []
   h.wheres = []
   h.returned = [{ id: 7 }]
 })
 
 describe('DELETE /api/v1/keys/:id', () => {
-  it('deactivates the key, scoped to its id AND the owner the requesting key belongs to', async () => {
+  it('deletes the key, scoped to its id AND the owner the requesting key belongs to', async () => {
     const res = await del('7', `?owner=${OWNER.toUpperCase().replace('0X', '0x')}`)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ revoked: 7 })
-    expect(h.sets).toEqual([{ active: false }])
-    // The owner is checked, and updated on, in lowercase: api_keys.owner_address is stored lowercase.
+    // The owner is checked, and deleted on, in lowercase: api_keys.owner_address is stored lowercase.
     expect(h.ownerChecks).toEqual([OWNER])
     expect(h.wheres).toHaveLength(1)
     const { sql, params } = sqlOf(h.wheres[0])
@@ -78,7 +72,7 @@ describe('DELETE /api/v1/keys/:id', () => {
     expect(sqlOf(h.wheres[0]).params).toEqual([7, OWNER])
   })
 
-  it('answers 403 and updates nothing when the requesting key belongs to a different owner than the one named', async () => {
+  it('answers 403 and deletes nothing when the requesting key belongs to a different owner than the one named', async () => {
     h.ownerAuth = { ok: false, status: 403, error: 'API key does not belong to this owner address' }
     const res = await del('7', `?owner=${OTHER}`)
     expect(res.status).toBe(403)
@@ -86,7 +80,7 @@ describe('DELETE /api/v1/keys/:id', () => {
     expect(h.wheres).toEqual([])
   })
 
-  it('answers 401 and updates nothing without a valid key', async () => {
+  it('answers 401 and deletes nothing without a valid key', async () => {
     h.ownerAuth = { ok: false, status: 401, error: 'X-API-Key header required for this operation' }
     const res = await del('7')
     expect(res.status).toBe(401)

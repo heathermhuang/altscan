@@ -149,7 +149,7 @@ Host: ${host}
 X-API-Key: bnbs_…
 \`\`\`
 
-\`1\` is the \`id\` returned when the key was created or listed. Send any active key of that address in \`X-API-Key\`; a key can revoke itself. Response (200): \`{"revoked": 1}\`. The key stops working at once and stays in the listing with \`"active": false\`. A revoked key no longer counts toward the limit of 10, and an address left with no active key can register again with a signature alone.
+\`1\` is the \`id\` returned when the key was created or listed. Send any active key of that address in \`X-API-Key\`; a key can revoke itself. Response (200): \`{"revoked": 1}\`. The key is deleted: it stops working at once, leaves the listing, and frees its place under the limit of 10. Revoking it again answers 404. An address whose every key is revoked can register again with a signature alone.
 
 ## Errors
 
