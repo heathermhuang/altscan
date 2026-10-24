@@ -9,6 +9,9 @@
  * response without a usable price ended the search there (never trying CoinCap) and a 0 passed as
  * a price. Here such a response falls through to the next source.
  *
+ * Binance's ticker and CoinCap's asset also name what they priced (`symbol`, `id`); a response that
+ * does not name this chain's own instrument falls through too, rather than passing as its price.
+ *
  * The change is read from the same response as the price and is `null` when that source gave none
  * (or one that is not a number): a missing change is never reported as 0%.
  *
@@ -51,7 +54,7 @@ export async function fetchNativeQuote(revalidateSeconds = 300): Promise<NativeQ
       if (res.ok) {
         const data = await res.json()
         const price = parseFloat(data.lastPrice)
-        if (price > 0) return { price, change24h: percent(data.priceChangePercent) }
+        if (data.symbol === binanceSymbol && price > 0) return { price, change24h: percent(data.priceChangePercent) }
       }
     } catch { /* try next */ }
   }
@@ -86,7 +89,7 @@ export async function fetchNativeQuote(revalidateSeconds = 300): Promise<NativeQ
     if (res.ok) {
       const data = (await res.json())?.data
       const price = parseFloat(data?.priceUsd)
-      if (price > 0) return { price, change24h: percent(data?.changePercent24Hr) }
+      if (data?.id === chainConfig.market.coincapId && price > 0) return { price, change24h: percent(data?.changePercent24Hr) }
     }
   } catch (e) { swallow('native-price/all-failed', e) }
 

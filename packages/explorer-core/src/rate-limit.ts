@@ -134,7 +134,7 @@ for (const range of CLOUDFLARE_RANGES) {
   cloudflare.addSubnet(net, Number(bits), isIP(net) === 6 ? 'ipv6' : 'ipv4')
 }
 
-function isCloudflareIp(ip: string): boolean {
+export function isCloudflareIp(ip: string): boolean {
   const family = isIP(ip)
   return family !== 0 && cloudflare.check(ip, family === 6 ? 'ipv6' : 'ipv4')
 }

@@ -86,7 +86,7 @@ Usually not. The chain-data endpoints under \`/api/v1\` (blocks, transactions, a
 An API key does two things:
 
 - On the endpoints that take one (\`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\`), a request with a valid key counts against that key's own budget of 100 requests per minute instead of your IP's.
-- Webhooks and key listing require it: every \`/api/v1/webhooks\` call and \`GET /api/v1/keys\` answer 401 without one. Only registering an address's first key needs none.
+- Webhooks, key listing and key revocation require it: every \`/api/v1/webhooks\` call, \`GET /api/v1/keys\` and \`DELETE /api/v1/keys/{id}\` answer 401 without one. Only registering an address's first key needs none.
 
 A key works only on ${host}. Each Altscan explorer keeps its own keys.
 
@@ -141,6 +141,16 @@ Content-Type: application/json
 
 List your keys with \`GET /api/v1/keys?owner=0xYourAddress\` and the same header.
 
+## Revoking a key
+
+\`\`\`http
+DELETE /api/v1/keys/1?owner=0xYourAddress HTTP/1.1
+Host: ${host}
+X-API-Key: bnbs_…
+\`\`\`
+
+\`1\` is the \`id\` returned when the key was created or listed. Send any active key of that address in \`X-API-Key\`; a key can revoke itself. Response (200): \`{"revoked": 1}\`. The key is deleted: it stops working at once, leaves the listing, and frees its place under the limit of 10. Revoking it again answers 404. An address whose every key is revoked can register again with a signature alone.
+
 ## Errors
 
 | Status | Meaning | What to do |
@@ -148,9 +158,8 @@ List your keys with \`GET /api/v1/keys?owner=0xYourAddress\` and the same header
 | 400 | Invalid \`ownerAddress\`, missing or expired signature, unparseable signature, or the 10-key limit | Fix the request; re-sign with a fresh timestamp |
 | 401 | \`X-API-Key\` missing where the address already has a key, or the key is invalid or inactive | Send a valid key of that address |
 | 403 | The signature was not made by \`ownerAddress\`, or the key belongs to another address | Sign with the matching wallet |
+| 404 | \`DELETE /api/v1/keys/{id}\`: that owner has no key with that id | Check the id with \`GET /api/v1/keys\` |
 | 429 | Rate limit | Back off and retry after a minute |
-
-There is no self-service revocation endpoint. Discard a key you no longer need.
 ${oauthConfig() ? oauthSection(host) : ''}`
 }
 
