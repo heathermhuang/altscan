@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { apiListPage } from '@/lib/list-depth'
 import { apiJson } from '@/lib/api-serialize'
 
 export const dynamic = 'force-dynamic'
@@ -12,14 +13,10 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url)
-  const page = Math.max(1, Number(searchParams.get('page') ?? 1))
-  const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') ?? 20)))
-
-  if (isNaN(page) || isNaN(limit)) {
-    return NextResponse.json({ error: 'Invalid pagination parameters' }, { status: 400 })
-  }
-
-  const offset = (page - 1) * limit
+  // Newest 10,000 rows at most: a deeper OFFSET would walk the table (lib/list-depth.ts).
+  const paging = apiListPage(searchParams)
+  if ('error' in paging) return NextResponse.json({ error: paging.error }, { status: 400 })
+  const { page, limit, offset } = paging
 
   let blocks, totalResult
   try {

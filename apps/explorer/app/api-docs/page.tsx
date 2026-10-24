@@ -50,7 +50,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/blocks',
     description: 'Returns a paginated list of blocks ordered by block number descending.',
     params: [
-      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1)' },
+      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
       { name: 'limit', type: 'number', description: 'Number of results per page (default: 25, max: 100)' },
     ],
     exampleResponse: JSON.stringify(
@@ -77,7 +77,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/transactions',
     description: 'Returns a paginated list of recent transactions, ordered by block number and transaction index, descending.',
     params: [
-      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1)' },
+      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
       { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
     ],
     exampleResponse: JSON.stringify(
@@ -106,7 +106,7 @@ const endpoints: Endpoint[] = [
     path: '/api/v1/tokens',
     description: 'Returns a paginated list of BEP20/BEP721/BEP1155 tokens tracked by the indexer.',
     params: [
-      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1)' },
+      { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
       { name: 'limit', type: 'number', description: 'Number of results per page (default: 25, max: 100)' },
     ],
     exampleResponse: JSON.stringify(

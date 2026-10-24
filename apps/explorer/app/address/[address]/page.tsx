@@ -35,6 +35,7 @@ import { toLedgerRows } from '@/lib/ledger'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { selectByAddress } from '@/lib/address-query'
+import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
 
@@ -133,7 +134,8 @@ export default async function AddressPage({
   const { address } = await params
   const { tab, page: pageStr, cursor } = await searchParams
   const addr = address.toLowerCase()
-  const page = Math.max(1, parseInt(pageStr ?? '1', 10) || 1)
+  // The tabs stop at the newest MAX_LIST_ROWS rows, so a deeper ?page= gets its last page.
+  const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
   const offset = (page - 1) * PAGE_SIZE
 
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) notFound()
@@ -521,7 +523,7 @@ async function TxnsTab({
       </div>
       <Pagination
         page={page}
-        total={total}
+        total={Math.min(total, MAX_LIST_ROWS)}
         perPage={PAGE_SIZE}
         baseUrl={`/address/${addr}?tab=txns`}
       />
@@ -613,7 +615,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
       </div>
       <Pagination
         page={page}
-        total={total}
+        total={Math.min(total, MAX_LIST_ROWS)}
         perPage={PAGE_SIZE}
         baseUrl={`/address/${addr}?tab=transfers`}
       />
