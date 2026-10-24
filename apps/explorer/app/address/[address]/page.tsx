@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, safeBigInt, groupDigits } from '@/lib/format'
+import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -38,6 +38,7 @@ import { selectByAddress } from '@/lib/address-query'
 import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
+import { FLOW_SAMPLE_CAP, flowLabel, flowValue, parseFlowRow, type FlowSample } from '@/lib/address-analytics'
 
 export const revalidate = 300
 
@@ -632,31 +633,31 @@ async function AnalyticsTab({
   addr: string
   addressInfo: typeof schema.addresses.$inferSelect | null
 }) {
-  let totalSentNative = '0'
-  let totalReceivedNative = '0'
+  // null = the read failed, which renders "—": a DB error must not print as a confident zero.
+  let sent: FlowSample | null = null
+  let received: FlowSample | null = null
   const firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
   const lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
 
   try {
-    // Use a capped sample (last 1000 txs) instead of full-table SUM scans.
+    // Use a capped sample (last 1000 successful txs) instead of full-table SUM scans.
     // Full SUM on 36M+ row transactions table was the #1 cause of OOM crashes.
+    // Failed txs moved no value, so `status` keeps their `value` out of the sums; the labels
+    // (lib/address-analytics.ts) say these are samples of the index, not lifetime totals.
+    const cap = sql.raw(String(FLOW_SAMPLE_CAP))
     const [sentResult, receivedResult] = await Promise.all([
       db.execute(sql`
-        SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM (SELECT value FROM transactions WHERE from_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
+        SELECT COALESCE(SUM(value::numeric), 0) as total, COUNT(*) as n
+        FROM (SELECT value FROM transactions WHERE from_address = ${addr} AND status = true ORDER BY timestamp DESC LIMIT ${cap}) sub
       `),
       db.execute(sql`
-        SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM (SELECT value FROM transactions WHERE to_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
+        SELECT COALESCE(SUM(value::numeric), 0) as total, COUNT(*) as n
+        FROM (SELECT value FROM transactions WHERE to_address = ${addr} AND status = true ORDER BY timestamp DESC LIMIT ${cap}) sub
       `),
     ])
 
-    totalSentNative = String(
-      (Array.from(sentResult)[0] as Record<string, unknown>)?.total ?? '0',
-    )
-    totalReceivedNative = String(
-      (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
-    )
+    sent = parseFlowRow(Array.from(sentResult)[0])
+    received = parseFlowRow(Array.from(receivedResult)[0])
 
     // first_seen/last_seen are pre-computed by the indexer in the addresses table.
     // All 1.9M+ addresses have these fields populated, so no fallback needed.
@@ -666,23 +667,12 @@ async function AnalyticsTab({
     // DB error
   }
 
-  const formatWei = (raw: string) => {
-    try {
-      return formatNativeToken(safeBigInt(raw))
-    } catch {
-      return '0.0000'
-    }
-  }
-
   return (
     <div className="bg-card rounded-xl border border-hair p-6">
       <h2 className="mb-4 font-semibold tracking-[-0.02em] text-ink">Address Analytics</h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        <AnalyticItem label="Total Sent" value={`${formatWei(totalSentNative)} ${chainConfig.currency}`} />
-        <AnalyticItem
-          label="Total Received"
-          value={`${formatWei(totalReceivedNative)} ${chainConfig.currency}`}
-        />
+        <AnalyticItem label={flowLabel('Sent', sent)} value={flowValue(sent, chainConfig.currency)} />
+        <AnalyticItem label={flowLabel('Received', received)} value={flowValue(received, chainConfig.currency)} />
         <AnalyticItem
           label="First indexed"
           value={firstSeen ? formatUtc(firstSeen) : 'Unknown'}
