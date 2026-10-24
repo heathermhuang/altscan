@@ -69,6 +69,15 @@ describe.skipIf(!PG_URL)('/gas tier query: against a real Postgres', () => {
     expect(await queryGasTiers(db)).toEqual({ slow: String(1 * GWEI), standard: String(2 * GWEI), fast: String(3 * GWEI), baseFee: String(30 * GWEI) })
   })
 
+  // The regime is read from the newest block that HAS a base fee. Reading it from the newest block alone, a NULL on that
+  // one row flipped the chain into the price regime: tips printed as prices, with no base fee beside them.
+  it('ETH-like: a NULL base fee on the NEWEST block keeps the tip regime, and the base fee comes from the newest block that has one', async () => {
+    await load(1, 30, n => (n === 30 ? null : n * GWEI), n => (n === 30
+      ? Array.from({ length: 4 }, () => 500 * GWEI)
+      : [1, 2, 3, 4].map(tip => n * GWEI + tip * GWEI)))
+    expect(await queryGasTiers(db)).toEqual({ slow: String(1 * GWEI), standard: String(2 * GWEI), fast: String(3 * GWEI), baseFee: String(29 * GWEI) })
+  })
+
   it('BNB-like: NULL-base blocks stay in the sample (the base fee is not used there)', async () => {
     await load(100, 119, n => (n % 2 === 0 ? null : 0), () => [50_000_000, 60_000_000, 70_000_000, 80_000_000])
     expect(await queryGasTiers(db)).toEqual({ slow: '50000000', standard: '60000000', fast: '70000000', baseFee: null })
