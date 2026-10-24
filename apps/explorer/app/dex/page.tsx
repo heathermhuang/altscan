@@ -3,6 +3,7 @@ import { schema } from '@/lib/db'
 import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
+import { dexEmptyState } from '@/lib/dex-empty'
 import { parsePageParam } from '@/lib/list-pages'
 import { MAX_LIST_ROWS } from '@/lib/list-depth'
 import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
@@ -47,6 +48,7 @@ export default async function DexPage({
   let nativeUsd: number | null = null
   const tokenDecimalsMap = new Map<string, number>()
   const tokenSymbolMap = new Map<string, string>()
+  let loadFailed = false
 
   try {
     const data = await fetchDexPage(page)
@@ -59,8 +61,10 @@ export default async function DexPage({
       tokenSymbolMap.set(t.address, t.symbol)
     }
   } catch (err) {
+    loadFailed = true
     console.error('[dex] page query failed:', dbErrorMessage(err))
   }
+  const empty = dexEmptyState(loadFailed, chainConfig.dex.primary)
 
   // The indexer stores '???' for a symbol it could not read: that is an unknown token, not a ticker.
   // A token with no metadata row at all keeps its bare amount. A symbol that reads as a URL or handle is an advert
@@ -214,7 +218,7 @@ export default async function DexPage({
               )
             })}
             {trades.length === 0 && (
-              <tr><td colSpan={7} className="py-16 text-center font-sans"><p className="text-ink2 text-lg mb-1">No DEX trades found</p><p className="text-mut text-sm">Swaps from {chainConfig.dex.primary} and compatible AMM pairs will appear here as they are indexed.</p></td></tr>
+              <tr><td colSpan={7} className="py-16 text-center font-sans"><p className="text-ink2 text-lg mb-1">{empty.title}</p><p className="text-mut text-sm">{empty.detail}</p></td></tr>
             )}
           </tbody>
         </table>
