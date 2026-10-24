@@ -3,6 +3,7 @@
  * Queries active webhooks from DB and delivers HMAC-signed payloads.
  * Called by block-processor after each block is indexed.
  */
+import { getChainConfig } from '@altscan/chain-config'
 import { getDb, schema, unwrapDbError } from './db'
 import { indexerConfig } from './config-instance'
 import { openSigningKey, parseWebhookSecretKey, sealSigningKey } from './webhook-secret'
@@ -15,6 +16,8 @@ type WebhookPayload = {
   event: 'tx' | 'token_transfer' | 'new_block'
   timestamp: string
   blockNumber?: number
+  /** EIP-155 chain id. Both chains' webhooks sign and post identically, so a consumer registered on both needs this to tell them apart. */
+  chainId?: number
   count?: number
   // A single event object, or (for batched per-block tx delivery) an array.
   data: Record<string, unknown> | Record<string, unknown>[]
@@ -269,6 +272,7 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
       event: 'tx',
       timestamp: timestamp.toISOString(),
       blockNumber,
+      chainId: getChainConfig().chainId,
       count: relevantTxs.length,
       data: relevantTxs.map((tx) => ({
         hash: tx.hash,
