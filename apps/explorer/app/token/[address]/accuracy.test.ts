@@ -13,6 +13,9 @@ const h = vi.hoisted(() => ({
   adContext: '' as string,
   // What the node answers for a token the index has not seen: a value, or 'fail' for a read that throws (a throttled node).
   rpc: { decimals: 6n, totalSupply: 100_000_000_000_000_000n } as { decimals: bigint | 'fail'; totalSupply: bigint | 'fail' },
+  // The indexed token's transfers: rows, 'fail' (the query throws) or 'hang' (it never answers: the page's own timeout).
+  transfers: [] as Row[] | 'fail' | 'hang',
+  count: 0 as number | 'fail',
 }))
 const tokenRow = (address: string, symbol: string, name: string) => ({
   address, name, symbol, type: 'BEP20', decimals: 18,
@@ -27,8 +30,15 @@ vi.mock('@/lib/db', () => {
 })
 vi.mock('@/lib/token-transfers-query', () => ({
   TOKEN_TRANSFERS_MAX_ROWS: 10_000,
-  selectTokenTransfers: async () => [] as Row[],
-  countTokenTransfers: async () => [{ value: 0 }],
+  selectTokenTransfers: async () => {
+    if (h.transfers === 'hang') return new Promise<Row[]>(() => {})
+    if (h.transfers === 'fail') throw new Error('canceling statement due to statement timeout')
+    return h.transfers
+  },
+  countTokenTransfers: async () => {
+    if (h.count === 'fail') throw new Error('canceling statement due to statement timeout')
+    return [{ value: h.count }]
+  },
 }))
 vi.mock('@/lib/market-data', () => ({ getTokenMarketData: async () => null }))
 vi.mock('@/lib/holders', () => ({ getTokenHolders: async () => ({ holders: [], holderCount: null, source: 'local' }), EMPTY_HOLDERS: { holders: [] } }))
@@ -60,6 +70,8 @@ beforeEach(() => {
   h.indexed = true
   h.adContext = ''
   h.rpc = { decimals: 6n, totalSupply: 100_000_000_000_000_000n }
+  h.transfers = []
+  h.count = 0
 })
 
 // The stablecoin CTA used to match "usdt", "dai", ... anywhere in a token's symbol or name, so anyone could earn it by
@@ -119,5 +131,59 @@ describe('token page: a live token whose reads failed', () => {
     h.rpc = { decimals: 'fail', totalSupply: 'fail' }
     const html = await live()
     expect([fact(html, 'Decimals'), fact(html, 'Total Supply')]).toEqual(['—', '—'])
+  })
+})
+
+// The transfers query is time-boxed and its failure is swallowed so the rest of the page still renders. That fallback was an
+// empty list, so a failed or timed-out query printed "No transfers yet." for a token that has millions.
+describe('token page: the transfers table when the query did not answer', () => {
+  const UNAVAILABLE = 'Transfers are temporarily unavailable. Try again shortly.'
+  const tbody = (html: string) => html.match(/<tbody>(.*?)<\/tbody>/)?.[1] ?? ''
+  const transfer = { txHash: '0x' + 'b'.repeat(64), logIndex: 1, blockNumber: 100, fromAddress: OTHER, toAddress: OTHER, tokenAddress: OTHER, value: '1500000000000000000' }
+  beforeEach(() => { h.row = tokenRow(OTHER, 'CAKE', 'PancakeSwap Token') })
+
+  it('says "No transfers yet." only when the query succeeded and found nothing', async () => {
+    const body = tbody(await render(OTHER))
+    expect(body).toContain('No transfers yet.')
+    expect(body).not.toContain('temporarily unavailable')
+  })
+
+  it('says it is unavailable when the query failed', async () => {
+    h.transfers = 'fail'
+    h.count = 'fail'
+    const body = tbody(await render(OTHER))
+    expect(body).toContain(UNAVAILABLE)
+    expect(body).not.toContain('No transfers yet.')
+  })
+
+  it('says it is unavailable when the query timed out', async () => {
+    vi.useFakeTimers()
+    try {
+      h.transfers = 'hang'
+      const html = render(OTHER)
+      await vi.advanceTimersByTimeAsync(6_500)
+      const body = tbody(await html)
+      expect(body).toContain(UNAVAILABLE)
+      expect(body).not.toContain('No transfers yet.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says it is unavailable when the count found transfers but the page came back empty', async () => {
+    h.transfers = []
+    h.count = 7
+    const body = tbody(await render(OTHER))
+    expect(body).toContain(UNAVAILABLE)
+    expect(body).not.toContain('No transfers yet.')
+  })
+
+  it('lists the rows, with no message, when the query answered', async () => {
+    h.transfers = [transfer]
+    h.count = 1
+    const body = tbody(await render(OTHER))
+    expect(body).toContain('/tx/' + transfer.txHash)
+    expect(body).not.toContain('No transfers yet.')
+    expect(body).not.toContain('temporarily unavailable')
   })
 })

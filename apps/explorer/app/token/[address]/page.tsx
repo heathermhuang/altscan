@@ -5,6 +5,7 @@ import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
 import { readDecimals, supplyText } from '@/lib/token-units'
+import { transfersEmptyState, TRANSFERS_EMPTY_TEXT } from '@/lib/transfers-empty-state'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -207,7 +208,9 @@ export default async function TokenDetailPage({
   // For indexed tokens, time-box every heavy query so a slow aggregation on a
   // mega-token (USDT/WBNB had millions of transfers) renders a partial page instead
   // of hanging until the connection drops ("Connection closed").
-  const TRANSFERS_FALLBACK: typeof schema.tokenTransfers.$inferSelect[] = []
+  // A live token has no local transfer data at all: an empty list there is the answer. A query that FAILED or timed
+  // out is null instead, which the table must not read as "no transfers" (lib/transfers-empty-state).
+  const NO_LOCAL_TRANSFERS: typeof schema.tokenTransfers.$inferSelect[] = []
   // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
   // every real token — including live/not-yet-indexed ones. Holders need Moralis or local
   // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
@@ -218,13 +221,13 @@ export default async function TokenDetailPage({
   // unguarded SSR Moralis call; the edge /token/ Managed Challenge + holders bucket cap remain.
   const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
-    ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
+    ? [NO_LOCAL_TRANSFERS, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
         withTimeout(
           selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset })
-            .catch(() => TRANSFERS_FALLBACK),
+            .catch(() => null),
           6000,
-          TRANSFERS_FALLBACK,
+          null,
         ),
         // Counts at most one row past the list. -1 = "unknown" (timed out /
         // errored) so we never render a misleading "0 total".
@@ -247,9 +250,11 @@ export default async function TokenDetailPage({
     : formatNumber(totalTransfers)
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
+  const pageRows = transfers ?? []
+  const transfersState = transfersEmptyState({ rows: transfers, count: totalTransfersRaw, offset })
   const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
     ? totalTransfers
-    : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0))
+    : offset + pageRows.length + (pageRows.length === PAGE_SIZE ? PAGE_SIZE : 0))
 
   // The DB column is NOT NULL, so only a token resolved live can have unknown decimals (a failed decimals() read).
   const decimals = readDecimals(token.decimals)
@@ -450,7 +455,7 @@ export default async function TokenDetailPage({
             </tr>
           </thead>
           <tbody>
-            {transfers.map((t) => {
+            {pageRows.map((t) => {
               // Four places, a dust transfer as "<0.0001" rather than "0".
               const amount = formatTokenAmount(t.value ?? '0', token.decimals, 4)
               return (
@@ -476,10 +481,10 @@ export default async function TokenDetailPage({
                 </tr>
               )
             })}
-            {transfers.length === 0 && (
+            {transfersState !== 'rows' && (
               <tr>
                 <td colSpan={5} className="py-8 text-center font-sans text-mut">
-                  No transfers yet.
+                  {TRANSFERS_EMPTY_TEXT[transfersState]}
                 </td>
               </tr>
             )}
