@@ -4,6 +4,7 @@ import { getDb, getExplorer } from '../../../../lib/db'
 import { audit } from '../../../../lib/schema'
 import { canWrite } from '../../../../lib/rbac'
 import { json } from '../../../../lib/http'
+import { releaseCreativeSlot, reserveCreativeSlot } from '../../../../lib/creative-quota'
 import {
   MAX_CREATIVE_BYTES,
   MAX_CREATIVE_OBJECTS_PER_EXPLORER,
@@ -76,7 +77,11 @@ export const POST: APIRoute = async ({ params, locals, request }) => {
   // key is computed so a re-upload of existing bytes is free: content addressing
   // means it targets a key that already exists and cannot grow the count.
   const prefix = `${locals.member.tenantId}/${explorer.id}/`
+  const payload = JSON.stringify({ key, bytes: bytes.byteLength, contentType }).slice(0, 4000)
   const existing = await env.CREATIVES.head(key)
+  // A new key's audit row doubles as its quota reservation (lib/creative-quota.ts): the
+  // listing below is only a pre-check, and concurrent uploads all list the same count.
+  let reserved: number | null = null
   if (!existing) {
     const listed = await env.CREATIVES.list({
       prefix,
@@ -90,27 +95,48 @@ export const POST: APIRoute = async ({ params, locals, request }) => {
         429,
       )
     }
-  }
-
-  await env.CREATIVES.put(key, bytes, {
-    httpMetadata: {
-      // Sniffed, never the client's claim.
-      contentType,
-      // Content-addressed, so the bytes at this key can never change.
-      cacheControl: 'public, max-age=31536000, immutable',
-    },
-  })
-
-  await getDb(env)
-    .insert(audit)
-    .values({
+    reserved = await reserveCreativeSlot(env.DB, {
       actorEmail: locals.member.email,
       tenantId: explorer.tenantId,
       explorerId: explorer.id,
-      action: 'creative.upload',
-      payload: JSON.stringify({ key, bytes: bytes.byteLength, contentType }).slice(0, 4000),
+      key,
+      payload,
       at: Math.floor(Date.now() / 1000),
     })
+    if (reserved === null) {
+      return json({ error: `storage quota reached (${MAX_CREATIVE_OBJECTS_PER_EXPLORER} images for this explorer)` }, 429)
+    }
+  }
+
+  try {
+    await env.CREATIVES.put(key, bytes, {
+      httpMetadata: {
+        // Sniffed, never the client's claim.
+        contentType,
+        // Content-addressed, so the bytes at this key can never change.
+        cacheControl: 'public, max-age=31536000, immutable',
+      },
+    })
+  } catch (err) {
+    // Nothing was stored, so the reservation must not keep the slot (or claim an upload).
+    if (reserved !== null) await releaseCreativeSlot(env.DB, reserved)
+    throw err
+  }
+
+  // A new key's audit row was written as its reservation; a re-upload of stored bytes
+  // is logged here, as before.
+  if (reserved === null) {
+    await getDb(env)
+      .insert(audit)
+      .values({
+        actorEmail: locals.member.email,
+        tenantId: explorer.tenantId,
+        explorerId: explorer.id,
+        action: 'creative.upload',
+        payload,
+        at: Math.floor(Date.now() / 1000),
+      })
+  }
 
   return json({ key, url: `${PUBLIC_BASE}/${key}`, bytes: bytes.byteLength, contentType })
 }

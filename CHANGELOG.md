@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 - `POST /api/v1/keys` checks for existing keys, enforces the 10-key cap and inserts under one per-address lock. Parallel requests used to read the same state, so an address with no keys could get several on its wallet signature alone, and the cap could be overrun.
+- The admin console's house-creative upload enforces its 200-image quota atomically. Concurrent uploads all listed the same bucket count, so they could overshoot it; a new image's audit row is now written first, as a conditional insert that is its quota reservation, and released if storing the image fails.
 - Webhook signing keys can be encrypted at rest. A webhook's HMAC key is stored in the database, so a read of that table was enough to forge its signatures. With `WEBHOOK_SECRET_KEY` set on the indexer, it encrypts each key (AES-256-GCM, bound to the webhook) within a minute of its creation and clears the plaintext. Signatures do not change. Unset, keys stay in plaintext as before.
 - `POST /api/v1/keys` rejects a signature timestamp that is not an integer or is more than 5 minutes from the server clock in either direction. A non-numeric timestamp made the age check compare against `NaN` and pass, and a future one passed until its date arrived, so either signature never expired.
 - The self-hosting guide says to run the explorer behind a proxy that sets the client-IP headers. Published directly, a client can choose the address the rate limits and denylist see.
