@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import { keyRequestTimestampError } from '@/lib/key-request'
+import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 
@@ -73,39 +74,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
-  // For subsequent keys, also verify the requesting API key belongs to the ownerAddress
-  const existingKeys = await db.select({ id: schema.apiKeys.id })
-    .from(schema.apiKeys)
-    .where(eq(schema.apiKeys.ownerAddress, ownerAddress.toLowerCase()))
-    .limit(1)
-
-  if (existingKeys.length > 0) {
-    const ownerAuth = await requireApiKeyOwner(request, ownerAddress.toLowerCase())
-    if (!ownerAuth.ok) return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status })
-  }
-
-  // Limit keys per address to prevent abuse
-  const keyCount = await db.select({ id: schema.apiKeys.id })
-    .from(schema.apiKeys)
-    .where(eq(schema.apiKeys.ownerAddress, ownerAddress.toLowerCase()))
-  if (keyCount.length >= 10) {
-    return NextResponse.json({ error: 'Maximum 10 API keys per address' }, { status: 400 })
-  }
-
   // Generate key: bnbs_<32 random bytes hex>
   const rawKey = `bnbs_${crypto.randomBytes(32).toString('hex')}`
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex')
   const keyPrefix = rawKey.slice(0, 12)
 
-  const [created] = await db.insert(schema.apiKeys).values({
-    keyHash,
-    keyPrefix,
-    label: label ?? null,
-    ownerAddress: ownerAddress.toLowerCase(),
-    requestsPerMinute: 100,
-    totalRequests: 0,
-    active: true,
-  }).returning({ id: schema.apiKeys.id })
+  // The existing-key check, the per-address cap and the insert run under one per-owner
+  // lock (lib/api-key-mint.ts). For subsequent keys, the requesting API key must also
+  // belong to ownerAddress; that check reads through the pool, so it runs first.
+  const owner = ownerAddress.toLowerCase()
+  const ownerAuth = await requireApiKeyOwner(request, owner)
+  const created = await mintApiKey(db, owner, { keyHash, keyPrefix, label: label ?? null }, ownerAuth)
+  if (!created.ok) return NextResponse.json({ error: created.error }, { status: created.status })
 
   return NextResponse.json({
     id: created.id,

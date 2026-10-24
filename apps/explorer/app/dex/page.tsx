@@ -4,6 +4,7 @@ import {
   fetchDexPage, parseDexTrade, DEX_PAGE_SIZE, TOP_PAIRS_WINDOW, type TopPair,
 } from '@/lib/dex-page'
 import { parsePageParam } from '@/lib/list-pages'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
 import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
@@ -38,7 +39,7 @@ export default async function DexPage({
 }: {
   searchParams: Promise<{ page?: string }>
 }) {
-  const page = parsePageParam((await searchParams).page)
+  const page = parsePageParam((await searchParams).page, DEX_PAGE_SIZE)
 
   let trades: typeof schema.dexTrades.$inferSelect[] = []
   let totalTrades = 0
@@ -221,7 +222,7 @@ export default async function DexPage({
       </div>
       <Pagination
         page={page}
-        total={totalTrades}
+        total={Math.min(totalTrades, MAX_LIST_ROWS)}
         perPage={DEX_PAGE_SIZE}
         baseUrl="/dex"
       />

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { desc, eq, sql } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { apiListPage } from '@/lib/list-depth'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,15 +12,9 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url)
-  const rawPage = Number(searchParams.get('page') ?? 1)
-  const rawLimit = Number(searchParams.get('limit') ?? 20)
-  if (isNaN(rawPage) || isNaN(rawLimit)) {
-    return NextResponse.json({ error: 'Invalid pagination parameters' }, { status: 400 })
-  }
-  const page = Math.max(1, rawPage)
-  const limit = Math.min(50, Math.max(1, rawLimit))
-
-  const offset = (page - 1) * limit
+  const paging = apiListPage(searchParams)
+  if ('error' in paging) return NextResponse.json({ error: paging.error }, { status: 400 })
+  const { limit, offset } = paging
   const type = searchParams.get('type') as 'BEP20' | 'BEP721' | 'BEP1155' | null
 
   const validTypes = ['BEP20', 'BEP721', 'BEP1155']
