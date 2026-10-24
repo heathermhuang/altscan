@@ -11,6 +11,8 @@ const h = vi.hoisted(() => ({
   row: {} as Record<string, unknown>,
   indexed: true,
   adContext: '' as string,
+  // What the node answers for a token the index has not seen: a value, or 'fail' for a read that throws (a throttled node).
+  rpc: { decimals: 6n, totalSupply: 100_000_000_000_000_000n } as { decimals: bigint | 'fail'; totalSupply: bigint | 'fail' },
 }))
 const tokenRow = (address: string, symbol: string, name: string) => ({
   address, name, symbol, type: 'BEP20', decimals: 18,
@@ -32,6 +34,19 @@ vi.mock('@/lib/market-data', () => ({ getTokenMarketData: async () => null }))
 vi.mock('@/lib/holders', () => ({ getTokenHolders: async () => ({ holders: [], holderCount: null, source: 'local' }), EMPTY_HOLDERS: { holders: [] } }))
 vi.mock('@/lib/token-risk', () => ({ analyzeTokenRisk: async () => [] }))
 vi.mock('@/lib/rpc', () => ({ getWebProvider: () => ({}) }))
+vi.mock('ethers', async (orig) => {
+  const real = await orig<typeof import('ethers')>()
+  const read = <T>(v: T | 'fail') => async () => { if (v === 'fail') throw new Error('missing response'); return v }
+  return {
+    ...real,
+    Contract: class {
+      name = async () => 'Tether USD'
+      symbol = async () => 'USDT'
+      decimals = read(h.rpc.decimals)
+      totalSupply = read(h.rpc.totalSupply)
+    },
+  }
+})
 vi.mock('@/components/ads/AdReserve', () => ({ AdReserve: (p: { context: string }) => { h.adContext = p.context; return null } }))
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound') } }))
 
@@ -44,6 +59,7 @@ beforeEach(() => {
   vi.resetModules()
   h.indexed = true
   h.adContext = ''
+  h.rpc = { decimals: 6n, totalSupply: 100_000_000_000_000_000n }
 })
 
 // The stablecoin CTA used to match "usdt", "dai", ... anywhere in a token's symbol or name, so anyone could earn it by
@@ -67,5 +83,41 @@ describe('token page: the stablecoin referral context', () => {
 
   it('is "token_research" for a lookalike USDT', async () => {
     expect(await contextFor(OTHER, 'USDT', 'Tether USD')).toBe('token_research')
+  })
+})
+
+// A token the index has not seen is read live from the node. A decimals() or totalSupply() read that fails is UNKNOWN: it
+// used to become 18 and 0, which printed ETH USDT (6 decimals) as "18" decimals with a supply of "0".
+describe('token page: a live token whose reads failed', () => {
+  const fact = (html: string, label: string) => html.match(new RegExp(`<dt class="k">${label}</dt><dd[^>]*>(.*?)</dd>`))?.[1]
+  const live = async () => {
+    h.indexed = false
+    return render(OTHER)
+  }
+
+  it('reads the decimals and the supply the node answered', async () => {
+    const html = await live()
+    expect(fact(html, 'Decimals')).toBe('6')
+    expect(fact(html, 'Total Supply')).toBe((100_000_000_000n).toLocaleString())
+  })
+
+  it('shows unknown decimals as "—" and the supply as labelled raw units, not 18 and not 0', async () => {
+    h.rpc = { decimals: 'fail', totalSupply: 100_000_000_000_000_000n }
+    const html = await live()
+    expect(fact(html, 'Decimals')).toBe('—')
+    expect(fact(html, 'Total Supply')).toBe('100,000,000,000,000,000 raw units')
+  })
+
+  it('shows an unread supply as "—"', async () => {
+    h.rpc = { decimals: 6n, totalSupply: 'fail' }
+    const html = await live()
+    expect(fact(html, 'Decimals')).toBe('6')
+    expect(fact(html, 'Total Supply')).toBe('—')
+  })
+
+  it('shows both as unknown when both reads failed', async () => {
+    h.rpc = { decimals: 'fail', totalSupply: 'fail' }
+    const html = await live()
+    expect([fact(html, 'Decimals'), fact(html, 'Total Supply')]).toEqual(['—', '—'])
   })
 })

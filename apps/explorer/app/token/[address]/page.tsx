@@ -3,7 +3,8 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
+import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
+import { readDecimals, supplyText } from '@/lib/token-units'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -38,8 +39,10 @@ const ERC20_ABI = [
 type OnDemandToken = {
   name: string
   symbol: string
-  decimals: number
-  totalSupply: string
+  /** null = the decimals() read failed: unknown, never 18 (ETH USDT and USDC are 6). */
+  decimals: number | null
+  /** null = the totalSupply() read failed: unknown, never 0. */
+  totalSupply: string | null
   holderCount: number
   address: string
   type: string
@@ -62,15 +65,15 @@ const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | nu
     const [name, symbol, decimals, totalSupply] = await Promise.all([
       contract.name().catch(() => null),
       contract.symbol().catch(() => null),
-      contract.decimals().catch(() => 18),
-      contract.totalSupply().catch(() => 0n),
+      contract.decimals().catch(() => null),
+      contract.totalSupply().catch(() => null),
     ])
     if (!name && !symbol) return null
     return {
       name: name ?? 'Unknown Token',
       symbol: symbol ?? '???',
-      decimals: Number(decimals),
-      totalSupply: totalSupply.toString(),
+      decimals: readDecimals(decimals),
+      totalSupply: totalSupply === null ? null : totalSupply.toString(),
       holderCount: 0,
       address: addr,
       type: chainConfig.tokenStandard,
@@ -100,7 +103,7 @@ async function healPlaceholderMeta(
     ...token,
     name: token.name === 'Unknown' && rpc.name !== 'Unknown Token' ? rpc.name : token.name,
     symbol: token.symbol === '???' && rpc.symbol !== '???' ? rpc.symbol : token.symbol,
-    totalSupply: token.totalSupply === '0' && rpc.totalSupply !== '0' ? rpc.totalSupply : token.totalSupply,
+    totalSupply: token.totalSupply === '0' && rpc.totalSupply !== null && rpc.totalSupply !== '0' ? rpc.totalSupply : token.totalSupply,
   }
 }
 
@@ -248,16 +251,8 @@ export default async function TokenDetailPage({
     ? totalTransfers
     : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0))
 
-  const displaySupply = (() => {
-    try {
-      const divisor = 10n ** BigInt(token.decimals)
-      const whole = BigInt(token.totalSupply ?? '0') / divisor
-      return whole.toLocaleString()
-    } catch (e) {
-      swallow('token/transfers', e)
-      return (token.totalSupply ?? '0').slice(0, 20)
-    }
-  })()
+  // The DB column is NOT NULL, so only a token resolved live can have unknown decimals (a failed decimals() read).
+  const decimals = readDecimals(token.decimals)
 
   // A token the indexer could not read (and the live re-resolve could not either) keeps its
   // '???' / 'Unknown' placeholders: those are "missing", so the header says "—", not a name.
@@ -342,8 +337,8 @@ export default async function TokenDetailPage({
       )}
 
       <dl className={`ledger mb-6 ${isLive ? '[--cols:2]' : '[--cols:3]'}`}>
-        <Fact label="Decimals">{token.decimals}</Fact>
-        <Fact label="Total Supply">{hasSupply(token.totalSupply) ? displaySupply : '—'}</Fact>
+        <Fact label="Decimals">{decimals ?? '—'}</Fact>
+        <Fact label="Total Supply">{supplyText(token.totalSupply, decimals)}</Fact>
         {!isLive && (
           <HoldersFact address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
         )}
