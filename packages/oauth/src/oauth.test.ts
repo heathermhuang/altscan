@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet } from 'ethers'
 import { createHash, randomBytes } from 'node:crypto'
 import { redirectUriAllowed } from './checks'
-import { mintClientId } from './tokens'
+import { mintAccessToken, mintClientId, readAccessToken, readClientId } from './tokens'
 import {
   authorizationServerMetadata,
   handleOAuthRequest,
@@ -405,6 +405,31 @@ describe('bearer verification', () => {
     expect(await verifyBearer(`Bearer ${t}`, config({ secret: 't'.repeat(40) }))).toBe('invalid')
     expect(await verifyBearer(`Bearer ${t}`, config({ issuer: 'https://other.example' }))).toBe('invalid')
     expect(await verifyBearer(`Bearer ${t}`, config({ scope: 'mcp' }))).toBe('invalid')
+  })
+
+  it('accepts one spelling of a signature: the canonical base64url, not its trailing-bit siblings', async () => {
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    // A 32-byte HMAC is 43 characters whose last one carries 4 bits and 2 padding bits that decoders ignore.
+    const sibling = (signed: string) => signed.slice(0, -1) + ALPHABET[ALPHABET.indexOf(signed.at(-1)!) ^ 1]
+    const nowSeconds = T0 / 1000
+    const expected = { issuer: ISSUER, scope: 'api', nowSeconds }
+
+    const token = await mintAccessToken(cfg.secret, {
+      iss: ISSUER, aud: ISSUER, sub: '0x' + 'ab'.repeat(20), client_id: 'ac1.x', scope: 'api', iat: nowSeconds, exp: nowSeconds + 3600, jti: 'j',
+    })
+    const otherToken = sibling(token)
+    expect(otherToken).not.toBe(token)
+    // Same bytes, so a lenient decoder would call it the same signature.
+    expect(Buffer.from(otherToken.split('.')[2], 'base64url').equals(Buffer.from(token.split('.')[2], 'base64url'))).toBe(true)
+    expect((await readAccessToken(cfg.secret, token, expected))?.client_id).toBe('ac1.x')
+    expect(await readAccessToken(cfg.secret, otherToken, expected)).toBeNull()
+    expect(await verifyBearer(`Bearer ${otherToken}`, cfg)).toBe('invalid')
+
+    const clientId = await mintClientId(cfg.secret, { redirect_uris: [REDIRECT], client_name: null, iat: nowSeconds })
+    const otherClientId = sibling(clientId)
+    expect(otherClientId).not.toBe(clientId)
+    expect(await readClientId(cfg.secret, clientId)).not.toBeNull()
+    expect(await readClientId(cfg.secret, otherClientId)).toBeNull()
   })
 
   it('points a 401 at the protected-resource metadata', () => {
