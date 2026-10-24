@@ -11,7 +11,7 @@ import { getSetting } from './settings'
 // asking the next one.
 vi.mock('./settings', () => ({ getSetting: vi.fn(async () => null) }))
 
-type Mode = 'ok' | 'http408' | 'rpcError' | 'hang'
+type Mode = 'ok' | 'http408' | 'rpcError' | 'hang' | 'redirect'
 type Endpoint = { url: string; requests: string[] }
 
 const servers: http.Server[] = []
@@ -20,9 +20,9 @@ const servers: http.Server[] = []
  * A local JSON-RPC endpoint. Chain-id and block-number probes are always
  * answered, like a node that is up but failing some requests; every other method
  * gets `result`, or misbehaves per `mode`. Records each request's method
- * ('BATCH' for a JSON-RPC array).
+ * ('BATCH' for a JSON-RPC array). 'redirect' answers them with a 302 to `location`.
  */
-async function endpoint(mode: Mode, result = '0x1'): Promise<Endpoint> {
+async function endpoint(mode: Mode, result = '0x1', location = ''): Promise<Endpoint> {
   const requests: string[] = []
   const server = http.createServer((req, res) => {
     let body = ''
@@ -32,6 +32,10 @@ async function endpoint(mode: Mode, result = '0x1'): Promise<Endpoint> {
       requests.push(Array.isArray(msg) ? 'BATCH' : msg.method)
       const probe = !Array.isArray(msg) && ['eth_chainId', 'eth_blockNumber'].includes(msg.method)
       if (!probe && mode === 'hang') return
+      if (!probe && mode === 'redirect') {
+        res.writeHead(302, { location })
+        return res.end()
+      }
       if (!probe && mode === 'http408') {
         res.writeHead(408)
         return res.end('Request Timeout')
@@ -81,6 +85,23 @@ describe('getWebProvider against real endpoints', () => {
   it('fails over when the first endpoint answers HTTP 408', async () => {
     useEndpoints(await endpoint('http408'), await endpoint('ok', '0x2'))
     expect(await (await getWebProvider()).getBalance(ADDRS[0])).toBe(2n)
+  })
+
+  // ethers would otherwise follow the 302 and re-POST to the second server: a
+  // way past the admin console's saved-host policy to any http(s) address.
+  it('refuses to follow a redirect, and fails over past the endpoint that sent it', async () => {
+    const target = await endpoint('ok', '0x9')
+    const redirecting = await endpoint('redirect', '0x1', target.url)
+    useEndpoints(redirecting)
+    await expect((await getWebProvider()).getBalance(ADDRS[0])).rejects.toMatchObject({ code: 'SERVER_ERROR' })
+    expect(redirecting.requests).toEqual(['eth_getBalance'])
+    expect(target.requests).toEqual([])
+
+    ;(globalThis as { __explorer_provider?: unknown }).__explorer_provider = null
+    const fallback = await endpoint('ok', '0x2')
+    useEndpoints(redirecting, fallback)
+    expect(await (await getWebProvider()).getBalance(ADDRS[0])).toBe(2n)
+    expect(target.requests).toEqual([])
   })
 
   it('fails over when the first endpoint hangs past the timeout', async () => {

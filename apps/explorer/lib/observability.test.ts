@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { DrizzleQueryError } from 'drizzle-orm'
+import { makeError } from 'ethers'
 import { swallow, swallowed, resetSwallowThrottle, arrayShape } from './observability'
 
 afterEach(() => {
@@ -25,6 +26,23 @@ describe('swallow', () => {
     const logged = String(spy.mock.calls[0][1])
     expect(logged).toContain('statement timeout')
     expect(logged).not.toContain('select "address"')
+  })
+
+  // ethers 6.17 puts the complete requestUrl, keyed endpoint and all, in the
+  // message of every HTTP failure, and the explorer's web RPC URL is often keyed.
+  it('does not write an RPC endpoint key to the log', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const err = makeError('server response 429', 'SERVER_ERROR', {
+      request: {} as never,
+      response: {} as never,
+      info: { requestUrl: 'https://rpc.example/v2/SECRETKEY', responseBody: '', responseStatus: '429 Too Many Requests' },
+    })
+    swallow('tx/logs', err)
+    swallow('tx/logs2', { info: { requestUrl: 'https://rpc.example/v2/SECRETKEY' } })
+    swallow('tx/logs3', 'GET https://user:SECRETKEY@rpc.example/v2/SECRETKEY failed')
+    expect(spy).toHaveBeenCalledTimes(3)
+    for (const call of spy.mock.calls) expect(JSON.stringify(call)).not.toContain('SECRETKEY')
+    expect(String(spy.mock.calls[0][1])).toContain('server response 429')
   })
 
   it('never throws, whatever it is handed', () => {
