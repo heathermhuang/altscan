@@ -11,9 +11,12 @@
   // /mcp kill switch: set to anything but "true" (dashboard or redeploy) to pause the endpoint.
   "vars": { "MCP_ENABLED": "true" },
   // Per-client limit for /mcp, keyed on the visitor IP: 60 calls a minute per Cloudflare location.
+  // A token caller is keyed on its address instead, and MCP_IP_RATE_LIMITER caps its IP at 120 a
+  // minute across all addresses, since addresses cost only a signature (src/lib/oauth.ts).
   // OAUTH_RATE_LIMITER: per IP, on the OAuth endpoints that mint a client id, a code or a token.
   "ratelimits": [
     { "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "MCP_IP_RATE_LIMITER", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } },
     { "name": "OAUTH_RATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }
   ],
   // Single-use OAuth authorization codes (src/oauth-codes.ts). SQLite-backed, the kind the Free plan runs.
