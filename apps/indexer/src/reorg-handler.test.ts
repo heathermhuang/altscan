@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  detectReorg, detectReorgPinned, resolveReorgDepth, UNWIND_ORDER, type ReorgDeps,
+  detectReorg, detectReorgPinned, resolveReorgDepth, UnresolvedForkError, UNWIND_ORDER, type ReorgDeps,
 } from './reorg-handler'
 import { schema } from '@altscan/db'
 import { getTableColumns, is } from 'drizzle-orm'
@@ -42,12 +42,17 @@ describe('detectReorg', () => {
     const d = deps({ 10: 'b10' }, { 10: { hash: 'b10', parentHash: 'b9' } })
     expect(await detectReorg(d, 10, K)).toEqual({ isReorg: false })
   })
-  it('no agreement within K → bounded fork point at lastIndexed - K', async () => {
+  it('no agreement within K → throws instead of treating the floor as a common ancestor', async () => {
+    // One endpoint's view is not proof: deleting down to an unverified floor is how a
+    // single bad provider response rewrote canonical history. detectReorgPinned decides
+    // whether enough endpoints agree to roll back anyway.
     const stored: Record<number, string> = {}
     const rpc: Record<number, { hash: string; parentHash: string }> = {}
     for (let n = 0; n <= 10; n++) { stored[n] = `x${n}`; rpc[n] = { hash: `b${n}`, parentHash: `b${n - 1}` } }
     rpc[11] = { hash: 'b11', parentHash: 'b10' }
-    expect(await detectReorg(deps(stored, rpc), 10, K)).toEqual({ isReorg: true, forkPoint: 5 })
+    const err = await detectReorg(deps(stored, rpc), 10, K).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UnresolvedForkError)
+    expect((err as UnresolvedForkError).floor).toBe(5)
   })
   it('missing stored rows inside the walk are skipped, not treated as agreement', async () => {
     const d = deps(
@@ -170,5 +175,51 @@ describe('detectReorgPinned', () => {
     })
     await expect(detectReorgPinned([hung, good], 0, deps, 100, 15, 30))
       .resolves.toEqual({ isReorg: false })
+  })
+})
+
+/**
+ * No stored hash agrees with an endpoint's chain anywhere within K. That is either a
+ * reorg deeper than K or an endpoint serving a different chain, and one endpoint
+ * cannot tell them apart. Rolling back to the floor deletes K blocks of history, so
+ * it needs a second endpoint to say the same thing.
+ */
+describe('detectReorgPinned with no agreement within K', () => {
+  const L = 100, K = 15
+  // `wrong` disagrees with every stored hash (a different chain, or a bad response).
+  const wrong = (n: number) => ({ hash: `w-${n}`, parentHash: `w-${n - 1}` })
+  // `canon` matches storage up to 97, then forks: a real reorg of depth 3.
+  const canon = (n: number) => n <= 97
+    ? { hash: `stored-${n}`, parentHash: `stored-${n - 1}` }
+    : { hash: `c-${n}`, parentHash: n === 98 ? 'stored-97' : `c-${n - 1}` }
+
+  type Ep = { name: string; block: (n: number) => { hash: string; parentHash: string } | null }
+  const deps = (p: Ep): ReorgDeps => ({
+    async storedHash(n) { return `stored-${n}` },
+    async rpcBlock(n) {
+      if (p.name === 'down') throw new Error('endpoint down')
+      return p.block(n)
+    },
+  })
+
+  it('one endpoint on the wrong chain fails over to one that finds the real fork point', async () => {
+    const res = await detectReorgPinned<Ep>([{ name: 'wrong', block: wrong }, { name: 'canon', block: canon }], 0, deps, L, K, 1000)
+    expect(res).toEqual({ isReorg: true, forkPoint: 97 })
+  })
+
+  it('two endpoints that independently find no agreement roll back to the floor', async () => {
+    const res = await detectReorgPinned<Ep>([{ name: 'a', block: wrong }, { name: 'b', block: wrong }], 0, deps, L, K, 1000)
+    expect(res).toEqual({ isReorg: true, forkPoint: L - K })
+  })
+
+  it('a lone report with the other endpoint unavailable does NOT roll back', async () => {
+    const err = await detectReorgPinned<Ep>([{ name: 'wrong', block: wrong }, { name: 'down', block: wrong }], 0, deps, L, K, 1000)
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error) // rejected: the poll loop retries; nothing is deleted
+  })
+
+  it('a single configured endpoint is trusted alone, as before (nothing to corroborate with)', async () => {
+    const res = await detectReorgPinned<Ep>([{ name: 'only', block: wrong }], 0, deps, L, K, 1000)
+    expect(res).toEqual({ isReorg: true, forkPoint: L - K })
   })
 })

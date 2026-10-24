@@ -8,8 +8,9 @@
  *    the RPC hash of lastIndexed itself — catches an in-place tail replacement while idle.
  * On mismatch, walk back ≤ K blocks to the last stored-hash == RPC-hash agreement (the
  * fork point). Per spec invariant 4 only the last K blocks are mutable, so the walk and
- * the rollback are hard-bounded at K even if no agreement is found (loud error — that
- * means K is too small for the chain, or the RPC is serving a different canonical chain).
+ * the rollback are hard-bounded at K. No agreement within K means K is too small for the
+ * chain or the endpoint serves a different chain; the rollback then goes to the floor
+ * only when a second endpoint confirms it (detectReorgPinned), and otherwise waits.
  *
  * Rollback deletes every block-scoped index row above the fork point (UNWIND_ORDER,
  * children before parents; guardrail-tested against the schema so a future block-scoped
@@ -90,9 +91,22 @@ export async function detectReorg(deps: ReorgDeps, lastIndexed: number, maxDepth
 }
 
 /**
+ * No stored hash agreed with one endpoint's chain anywhere within K. Thrown rather
+ * than returned as a fork point: the floor was never shown to be a common ancestor.
+ * detectReorgPinned decides whether enough endpoints say so to roll back anyway.
+ */
+export class UnresolvedForkError extends Error {
+  constructor(readonly startFrom: number, readonly floor: number, readonly maxDepth: number) {
+    super(`[reorg-handler] no stored/RPC agreement within K=${maxDepth} of block ${startFrom}`)
+    this.name = 'UnresolvedForkError'
+  }
+}
+
+/**
  * Walk back from `startFrom` to the last block where stored hash === RPC hash.
  * Missing local rows are skipped (can't agree or disagree). Hard-bounded at
- * startFrom - maxDepth per spec invariant 4 (only the last K blocks are mutable).
+ * startFrom - maxDepth per spec invariant 4 (only the last K blocks are mutable);
+ * no agreement inside that bound throws UnresolvedForkError.
  */
 async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: number): Promise<number> {
   const floor = Math.max(0, startFrom - maxDepth)
@@ -103,8 +117,7 @@ async function findForkPoint(deps: ReorgDeps, startFrom: number, maxDepth: numbe
     if (!rpc?.hash) continue
     if (rpc.hash === stored) return n
   }
-  console.error(`[reorg-handler] no stored/RPC agreement within K=${maxDepth} of block ${startFrom} — bounding rollback at ${floor}. If this recurs, K is too small for this chain (or the RPC is on a different canonical chain).`)
-  return floor
+  throw new UnresolvedForkError(startFrom, floor, maxDepth)
 }
 
 /**
@@ -168,6 +181,14 @@ export function makeReorgDepsFrom(rpcBlock: ReorgDeps['rpcBlock']): ReorgDeps {
  * `timeoutMs`, the entire check is abandoned and restarted on the next provider
  * rather than resumed, because a half-walked result is exactly the mixed view we
  * are avoiding.
+ *
+ * An endpoint that finds no agreement within K (UnresolvedForkError) fails over
+ * too. Rolling back to the floor deletes K blocks on the strength of a fork point
+ * nobody observed, and one endpoint cannot tell a reorg deeper than K from serving
+ * a different chain. So the floor is used only when two endpoints independently
+ * report no agreement, or when only one endpoint is configured and there is no one
+ * to corroborate with. Otherwise this rejects, nothing is deleted, and the poll
+ * loop retries the check.
  */
 export async function detectReorgPinned<P>(
   providers: readonly P[],
@@ -179,17 +200,37 @@ export async function detectReorgPinned<P>(
   onFailover?: (provider: P, err: unknown) => void,
   health?: EndpointHealth<P>,
 ): Promise<ReorgCheck> {
-  return readWithFailover(
-    providers,
-    startIdx,
-    provider => detectReorg(depsFor(provider), lastIndexed, maxDepth),
-    timeoutMs,
-    onFailover,
-    // Reorg checks gate every batch, so they must respect the same demotion the
-    // block fetches do — otherwise a sick endpoint keeps taxing the one call
-    // that runs before any block work can start.
-    health,
-  )
+  const unresolved = new Set<P>()
+  let floor = 0
+  try {
+    return await readWithFailover(
+      providers,
+      startIdx,
+      async provider => {
+        try {
+          return await detectReorg(depsFor(provider), lastIndexed, maxDepth)
+        } catch (err) {
+          if (err instanceof UnresolvedForkError) { unresolved.add(provider); floor = err.floor }
+          throw err
+        }
+      },
+      timeoutMs,
+      onFailover,
+      // Reorg checks gate every batch, so they must respect the same demotion the
+      // block fetches do — otherwise a sick endpoint keeps taxing the one call
+      // that runs before any block work can start.
+      health,
+    )
+  } catch (err) {
+    const needed = Math.min(2, providers.length)
+    if (unresolved.size === 0) throw err
+    if (unresolved.size >= needed) {
+      console.error(`[reorg-handler] ${unresolved.size} endpoint(s) found no stored/RPC agreement within K=${maxDepth} of block ${lastIndexed} — rolling back to the floor at ${floor}. If this recurs, K is too small for this chain.`)
+      return { isReorg: true, forkPoint: floor }
+    }
+    console.error(`[reorg-handler] ${unresolved.size} of ${providers.length} endpoint(s) found no stored/RPC agreement within K=${maxDepth} of block ${lastIndexed}, and no second endpoint confirmed it — NOT rolling back; retrying. An endpoint serving a different chain looks exactly like this.`)
+    throw err
+  }
 }
 
 /**
