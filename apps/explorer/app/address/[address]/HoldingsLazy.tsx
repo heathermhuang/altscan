@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { chainConfig } from '@/lib/chain-client'
 import type { ProviderTokenBalance } from '@/lib/providers'
 import type { Lookalike } from '@/lib/lookalike-note'
-import { holdingFromProvider, holdingsNote, mergeHoldings, trackedTokens, type HoldingRow } from '@/lib/holdings'
+import { holdingFromProvider, holdingsCapNote, holdingsNote, mergeHoldings, trackedTokens, type HoldingRow } from '@/lib/holdings'
 import { HoldingsBanner, HoldingsTable } from './HoldingsTable'
 
 type HoldingsResponse = {
@@ -37,6 +37,7 @@ export function HoldingsView({ data, tracked, nativePriced }: { data: HoldingsRe
   const known = tracked !== null
   const tokens = trackedTokens(chainConfig.whales)
   const rows = mergeHoldings(tracked ?? [], providerOk ? data.tokens.map(holdingFromProvider) : [], known ? tokens.map((t) => t.address) : [])
+  const capNote = providerOk ? holdingsCapNote(data.tokens.length) : null
   const throttled = data?.reason === 'rate_limited' || data?.reason === 'upstream_error'
   const unavailable = throttled
     ? 'The data provider is busy right now — token holdings are temporarily unavailable. Check back in a few minutes.'
@@ -51,6 +52,7 @@ export function HoldingsView({ data, tracked, nativePriced }: { data: HoldingsRe
         <>
           <HoldingsTable rows={rows} caption={`${chainConfig.name} token holdings for this address`} nativeSymbol={chainConfig.currency} />
           {!providerOk && <p className="mt-3 text-sm text-mut">Other token holdings are not available right now.</p>}
+          {capNote && <p className="mt-3 text-sm text-mut">{capNote}</p>}
         </>
       )}
     </div>

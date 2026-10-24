@@ -155,6 +155,17 @@ export function mergeHoldings(
   return rows.sort((a, b) => (a.usd === null ? (b.usd === null ? 0 : 1) : b.usd === null ? -1 : b.usd - a.usd))
 }
 
+/**
+ * How many tokens the provider is asked for at once: Moralis `getAddressTokenBalances` sends `limit=20`
+ * (packages/providers/src/moralis.ts) and there is no next page. A response of exactly this many was cut off.
+ */
+export const PROVIDER_HOLDINGS_LIMIT = 20
+
+/** The line under the table when the provider's list stopped at its limit, else null. `providerRows`: how many tokens it returned. */
+export function holdingsCapNote(providerRows: number): string | null {
+  return providerRows >= PROVIDER_HOLDINGS_LIMIT ? `First ${PROVIDER_HOLDINGS_LIMIT} tokens shown.` : null
+}
+
 /** Below this the clause is dust, and the native balance's own USD figure uses the same floor. */
 const DUST_USD = 0.1
 
