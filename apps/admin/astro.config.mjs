@@ -12,6 +12,8 @@ export default defineConfig({
   // No sessions. Without this the adapter defaults to KV-backed sessions and adds a SESSION binding
   // with no id, which wrangler would provision as a new KV namespace on deploy.
   session: false,
+  // CSRF: Astro 403s cross-origin non-GET requests (the PUT/POST endpoints rely on it) — pin it, don't lean on the default.
+  security: { checkOrigin: true },
   adapter: cloudflare({ imageService: 'compile', platformProxy: { enabled: true } }),
   integrations: [react()],
   vite: {
