@@ -21,7 +21,7 @@ type Param = {
 }
 
 type Endpoint = {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'DELETE'
   path: string
   description: string
   params?: Param[]
@@ -311,6 +311,19 @@ const endpoints: Endpoint[] = [
       null,
       2
     ),
+  },
+  {
+    method: 'DELETE',
+    path: '/api/v1/keys/:id',
+    description:
+      'Revoke an API key. Requires an active key of the same owner in X-API-Key (a key can revoke itself). ' +
+      'The key stops authenticating at once; it stays in GET /api/v1/keys with active: false, and no longer counts toward the 10-key limit per address. ' +
+      'Answers 404 when the owner has no key with that id, 401 or 403 when X-API-Key is missing, invalid, or belongs to another address. Revoking an already revoked key answers 200 again.',
+    params: [
+      { name: 'id', type: 'number', required: true, description: 'The key\u2019s id, from POST /api/v1/keys or GET /api/v1/keys (path parameter)' },
+      { name: 'owner', type: 'string', required: true, description: 'Owner address of the key (0x-prefixed), as a query parameter' },
+    ],
+    exampleResponse: JSON.stringify({ revoked: 1 }, null, 2),
   },
   {
     method: 'POST',

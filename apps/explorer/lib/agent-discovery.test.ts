@@ -93,6 +93,13 @@ describe('auth.md', () => {
     // The exact message app/api/v1/keys/route.ts verifies.
     expect(body).toContain('BNBScan API Key Request\nAddress: 0xyouraddress\nTimestamp: 1760000000000')
   })
+
+  // DELETE /api/v1/keys/[id] exists; the document once said there was no revocation endpoint.
+  it('documents key revocation, not its absence', async () => {
+    const body = await (await authMd()).text()
+    expect(body).toContain('DELETE /api/v1/keys/1?owner=0xYourAddress HTTP/1.1')
+    expect(body).not.toMatch(/no self-service revocation/i)
+  })
 })
 
 describe('MCP server card', () => {

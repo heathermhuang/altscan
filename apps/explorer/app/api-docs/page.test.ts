@@ -52,6 +52,12 @@ describe('/api-docs', () => {
     expect(tokens.params?.map((p) => p.name)).toContain('type')
   })
 
+  it('documents DELETE /api/v1/keys/:id with the id and owner it takes', () => {
+    const revoke = doc('DELETE', '/api/v1/keys/:id')
+    expect(revoke.params?.map((p) => p.name)).toEqual(['id', 'owner'])
+    expect(JSON.parse(revoke.exampleResponse)).toEqual({ revoked: 1 })
+  })
+
   it('shows only the event type the webhook notifier delivers in the GET /webhooks example', () => {
     const example = JSON.parse(doc('GET', '/api/v1/webhooks').exampleResponse) as {
       webhooks: { eventTypes: string[] }[]
