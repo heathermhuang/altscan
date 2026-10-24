@@ -17,7 +17,7 @@ const URL_ = process.env.OAUTH_TEST_REDIS_URL
 const d = URL_ ? describe : describe.skip
 
 const grant: CodeGrant = {
-  client_id: 'ac1.x', redirect_uri: 'https://client.example/cb', code_challenge: 'c'.repeat(43), scope: 'api', sub: '0x' + '12'.repeat(20),
+  iss: 'https://bnbscan.com', client_id: 'ac1.x', redirect_uri: 'https://client.example/cb', code_challenge: 'c'.repeat(43), scope: 'api', sub: '0x' + '12'.repeat(20),
 }
 const code = () => randomBytes(16).toString('hex')
 
