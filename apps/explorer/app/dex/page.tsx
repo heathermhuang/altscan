@@ -228,6 +228,7 @@ export default async function DexPage({
         page={page}
         total={Math.min(totalTrades, MAX_LIST_ROWS)}
         perPage={DEX_PAGE_SIZE}
+        rowsOnPage={trades.length}
         baseUrl="/dex"
       />
 

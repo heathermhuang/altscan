@@ -80,7 +80,7 @@ export default async function BlocksPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${tape ? ' pt-6' : ''}`}>
       <BlockTable blocks={blocks} gasBar />
       <div className="mt-4 flex justify-end">
-        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} baseUrl="/blocks" />
+        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} rowsOnPage={blocks.length} baseUrl="/blocks" />
       </div>
     </div>
     </>
