@@ -122,6 +122,9 @@ function rawAddressLiteral(address: string): SQL {
   return sql.raw(`'${address}'`)
 }
 
+// `status = true` keeps a REVERTED transaction out: a failed call carries its `value` in the row, but no value moved,
+// so it is not a whale transfer. `status` is not an index column, so it is a heap filter on the same index walk
+// (whales.pg.test.ts pins both: the plan still uses tx_whale_value_idx, and a failed row is not returned).
 export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string): SQL {
   return sql`
       SELECT hash, from_address as "fromAddress", to_address as "toAddress",
@@ -131,6 +134,7 @@ export function buildNativeWhaleQuery(period: WhalePeriod, minNativeWei: string)
       WHERE timestamp >= ${cutoffFor(period)}
         AND value > ${rawWeiLiteral(chainConfig.whales.nativeIndexFloorWei)}
         AND value > ${minNativeWei}
+        AND status = true
       ORDER BY value DESC
       LIMIT ${sql.raw(String(WHALE_NATIVE_CANDIDATES))}
   `

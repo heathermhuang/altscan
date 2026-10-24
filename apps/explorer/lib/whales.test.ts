@@ -408,6 +408,11 @@ describe('buildNativeWhaleQuery carries the partial-index floor as a literal', (
     expect(params).not.toContain(floor)
   })
 
+  it('excludes reverted transactions: a failed call carries a value but moved none', () => {
+    const { sql: text } = toQuery(buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei))
+    expect(norm(text)).toMatch(/\bAND status = true\b/)
+  })
+
   it('still binds the configured threshold as a parameter', () => {
     const { params } = toQuery(
       buildNativeWhaleQuery('24h', chainConfig.whales.nativeMinWei),

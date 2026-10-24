@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { createMaintenanceConnection } from '@altscan/db'
 import { getChainConfig } from '@altscan/chain-config'
-import { buildTokenWhaleQuery, rankWhalesByUsd, type WhalePeriod, type WhaleTx } from '@/lib/whales'
+import { chainConfig } from '@/lib/chain'
+import { buildNativeWhaleQuery, buildTokenWhaleQuery, rankWhalesByUsd, type WhalePeriod, type WhaleTx } from '@/lib/whales'
 
 /**
  * /whales' token candidates against a REAL Postgres, on BOTH production table shapes: ETH's monolithic
@@ -277,6 +278,123 @@ describe.skipIf(!PG_URL)('whale token candidates — against a real Postgres', (
           await conn.unsafe('SET enable_bitmapscan = off')
           await conn.unsafe('SET enable_indexonlyscan = off')
           expect((await candidates(period)).map(r => r.hash), period).toEqual(viaIndex)
+        } finally {
+          await conn.unsafe('RESET enable_indexscan')
+          await conn.unsafe('RESET enable_bitmapscan')
+          await conn.unsafe('RESET enable_indexonlyscan')
+        }
+      }
+    })
+  })
+
+  // The native half runs against `transactions`, which is monolithic on both chains. A reverted transaction keeps its
+  // `value` in the row but moved none, so it must not rank as a whale transfer; `status` is a heap filter on the
+  // existing `tx_whale_value_idx` walk, which must still be the plan.
+  describe('native whale query: reverted transactions', () => {
+    const native = chainConfig.whales
+    const FAILED_BIG = hash('f')     // 5,000,000 coins, status = false: larger than everything else, so unfiltered it would rank first
+    const OK_BIG = hash('e')         // 3,000,000 coins, status = true: the largest real transfer
+    const FAILED_MID = hash('d')     // a reverted transfer inside the noise range
+    const COIN = '1000000000000000000'
+    const NOISE_TX = 120_000
+
+    beforeAll(async () => {
+      if (!/test/i.test(new URL(PG_URL as string).pathname)) {
+        throw new Error(`${ENV} must name a disposable database (its name must contain "test")`)
+      }
+      await conn.unsafe('DROP TABLE IF EXISTS pg_temp.transactions CASCADE')
+      // Only the columns the query reads. `value` is the schema's numeric(78,18).
+      await conn.unsafe(`
+        CREATE TEMP TABLE transactions (
+          hash varchar(66) PRIMARY KEY, from_address varchar(42) NOT NULL, to_address varchar(42),
+          value numeric(78,18) NOT NULL DEFAULT 0, block_number bigint NOT NULL,
+          status boolean NOT NULL DEFAULT true, timestamp timestamptz NOT NULL
+        );
+        -- Noise over three days ending now. Every 67th row is whale-size (100+ coins: above the index floor and the
+        -- display minimum on both chains), 1 in 29 of those reverted; the rest are 0.001-0.049 coin, under the floor.
+        INSERT INTO transactions (hash, from_address, to_address, value, block_number, status, timestamp)
+        SELECT '0x' || md5(i::text) || md5((i + 1)::text), '0x${'a'.repeat(40)}', '0x${'b'.repeat(40)}',
+               CASE WHEN i % 67 = 0 THEN (100 + (i % 977))::numeric * ${COIN}::numeric
+                    ELSE (1 + (i % 49))::numeric * 1000000000000000::numeric END,
+               i, NOT (i % 67 = 0 AND (i / 67) % 29 = 0), now() - ((${NOISE_TX} - i) * 2.16 || ' seconds')::interval
+        FROM generate_series(1, ${NOISE_TX}) i;
+        INSERT INTO transactions (hash, from_address, to_address, value, block_number, status, timestamp) VALUES
+          ('${FAILED_BIG}', '0x${'c'.repeat(40)}', '0x${'d'.repeat(40)}', 5000000 * ${COIN}::numeric, ${NOISE_TX + 1}, false, now() - interval '5 minutes'),
+          ('${OK_BIG}',     '0x${'c'.repeat(40)}', '0x${'d'.repeat(40)}', 3000000 * ${COIN}::numeric, ${NOISE_TX + 2}, true,  now() - interval '6 minutes'),
+          ('${FAILED_MID}', '0x${'c'.repeat(40)}', '0x${'d'.repeat(40)}', 2000000 * ${COIN}::numeric, ${NOISE_TX + 3}, false, now() - interval '7 minutes');
+        -- The shipped DDL (apps/indexer/src/ensure-schema.ts), on this chain's floor.
+        CREATE INDEX tx_whale_value_idx ON transactions (value DESC, timestamp DESC) WHERE value > ${native.nativeIndexFloorWei};
+        ANALYZE transactions;
+      `)
+    }, 120_000)
+
+    afterAll(async () => {
+      await conn.unsafe('DROP TABLE IF EXISTS pg_temp.transactions CASCADE')
+    })
+
+    const compileNative = (period: WhalePeriod) => {
+      const q = dialect.sqlToQuery(buildNativeWhaleQuery(period, native.nativeMinWei))
+      return { text: q.sql, params: q.params as never[] }
+    }
+    const nativeHashes = async (period: WhalePeriod) => {
+      const { text, params } = compileNative(period)
+      return Array.from(await conn.unsafe(text, params)).map(r => String(r.hash))
+    }
+    // Values, not hashes: the query orders by value alone, so equal values may come out in either order.
+    const nativeValues = async (period: WhalePeriod) => {
+      const { text, params } = compileNative(period)
+      return Array.from(await conn.unsafe(text, params)).map(r => String(r.value))
+    }
+
+    it('leaves a reverted transfer out, even the largest, and ranks the largest successful one first', async () => {
+      const out = await nativeHashes('24h')
+      expect(out).not.toContain(FAILED_BIG)
+      expect(out).not.toContain(FAILED_MID)
+      expect(out[0]).toBe(OK_BIG)
+      // Nothing reverted anywhere in the candidates: ask the table, not the fixture arithmetic.
+      const failed = await rows(`SELECT hash FROM transactions WHERE NOT status`)
+      for (const f of failed) expect(out).not.toContain(String(f.hash))
+      expect(out).toHaveLength(50)
+    })
+
+    // Negative control for the above: the same statement without the filter does return them, so the test can fail.
+    it('the unfiltered statement would have returned the reverted transfers first', async () => {
+      const { text, params } = compileNative('24h')
+      const unfiltered = text.replace(/\s+AND status = true/, '')
+      expect(unfiltered).not.toBe(text)
+      const out = Array.from(await conn.unsafe(unfiltered, params)).map(r => String(r.hash))
+      expect(out.slice(0, 3)).toEqual([FAILED_BIG, OK_BIG, FAILED_MID])
+    })
+
+    it.each([false, true])('is still served by tx_whale_value_idx, with no seq scan of transactions (generic plan: %s)', async (generic) => {
+      const { text, params } = compileNative('24h')
+      let res
+      if (!generic) {
+        res = await conn.unsafe(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, params)
+      } else {
+        try {
+          await conn.unsafe('SET plan_cache_mode = force_generic_plan')
+          await conn.unsafe(`PREPARE native_whale_stmt AS ${text}`)
+          res = await conn.unsafe(`EXPLAIN (FORMAT JSON) EXECUTE native_whale_stmt(${params.map(p => `'${p}'`).join(', ')})`)
+        } finally {
+          await conn.unsafe('DEALLOCATE ALL')
+          await conn.unsafe('RESET plan_cache_mode')
+        }
+      }
+      const nodes = flatten((res[0]['QUERY PLAN'] as Array<{ Plan: PlanNode }>)[0].Plan)
+      const label = shape(nodes)
+      expect(nodes.some(n => n['Index Name'] === 'tx_whale_value_idx'), label).toBe(true)
+      expect(nodes.some(n => /Seq Scan/.test(n['Node Type']) && n['Relation Name'] === 'transactions'), label).toBe(false)
+    })
+
+    it('returns the same values in the same order as a sequential scan, for every window', async () => {
+      for (const period of ['1h', '24h', 'all'] as const) {
+        const viaIndex = await nativeValues(period)
+        try {
+          await conn.unsafe('SET enable_indexscan = off')
+          await conn.unsafe('SET enable_bitmapscan = off')
+          await conn.unsafe('SET enable_indexonlyscan = off')
+          expect(await nativeValues(period), period).toEqual(viaIndex)
         } finally {
           await conn.unsafe('RESET enable_indexscan')
           await conn.unsafe('RESET enable_bitmapscan')
