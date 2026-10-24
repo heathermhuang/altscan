@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider } from '@/lib/providers'
 import { guardInternalAddress } from '@/lib/internal-guard'
+import { chainConfig } from '@/lib/chain'
+import { withLookalikes } from '@/lib/lookalike'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,8 +24,11 @@ export async function GET(
     )
   }
 
+  // The tab (a client component) badges a token that passes for a well-known one but cannot judge that itself
+  // (lib/lookalike stays out of the browser), so every row leaves here with the verdict on it.
+  const tokens = withLookalikes(result.data, chainConfig.key, (t) => ({ address: t.tokenAddress, symbol: t.symbol, name: t.name }))
   return NextResponse.json(
-    { tokens: result.data, limited: false },
+    { tokens, limited: false },
     { headers: { 'cache-control': 'private, no-store' } },
   )
 }

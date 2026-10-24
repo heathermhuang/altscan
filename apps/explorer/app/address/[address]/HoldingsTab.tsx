@@ -6,6 +6,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { swallow } from '@/lib/observability'
 import { holdingFromIndex, holdingsNote, mergeHoldings, priceTracked, trackedTokens, type HoldingRow } from '@/lib/holdings'
 import { readTrackedBalances } from '@/lib/tracked-balances'
+import { lookalikeOf } from '@/lib/lookalike'
 import { HoldingsLazy } from './HoldingsLazy'
 import { HoldingsBanner, HoldingsTable } from './HoldingsTable'
 
@@ -59,6 +60,7 @@ export async function HoldingsTab({ addr, isBot, nativeUsd }: { addr: string; is
         name: tok?.name ?? null,
         symbol: tok?.symbol ?? null,
         decimals: tok?.decimals ?? null,
+        lookalike: lookalikeOf({ address: tokenAddress, symbol: tok?.symbol, name: tok?.name }, chainConfig.key),
       })
     })
   } catch (e) {

@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect } from 'vitest'
 import { BSC } from '@altscan/chain-config'
-import { priceTracked, trackedTokens } from '@/lib/holdings'
+import { holdingsCapNote, PROVIDER_HOLDINGS_LIMIT, priceTracked, trackedTokens } from '@/lib/holdings'
 import { HoldingsLazy, HoldingsView } from './HoldingsLazy'
 
 // The provider (Moralis) lists at most 20 tokens and can leave out USDT/USDC/WBNB. The tab merges the
@@ -42,6 +42,20 @@ describe('HoldingsView', () => {
       const dust = { tokens: [prov('DUST', null, '0x' + '3'.repeat(40), '1', formatted)] }
       expect(cells(view(dust, [])).map((r) => r[2]), String(formatted)).toEqual(['&lt;0.000001']) // renderToStaticMarkup escapes the '<'
     }
+  })
+
+  // The provider is asked for 20 tokens and has no next page, so a list of exactly 20 was cut off.
+  it('says the list stopped at the provider\'s limit when it returned that many', () => {
+    const full = { tokens: Array.from({ length: PROVIDER_HOLDINGS_LIMIT }, (_, i) => prov(`T${i}`, null, '0x' + (i + 1).toString(16).padStart(40, '0'))) }
+    expect(view(full)).toContain('First 20 tokens shown.')
+    expect(view(full, [])).toContain('First 20 tokens shown.')
+  })
+
+  it('says nothing about a cap when the provider returned fewer, or none', () => {
+    const nineteen = { tokens: Array.from({ length: PROVIDER_HOLDINGS_LIMIT - 1 }, (_, i) => prov(`T${i}`, null, '0x' + (i + 1).toString(16).padStart(40, '0'))) }
+    expect(view(nineteen)).not.toContain('tokens shown')
+    expect(view(data)).not.toContain('tokens shown')
+    expect(view({ tokens: [], limited: true, reason: 'rate_limited' })).not.toContain('tokens shown')
   })
 
   it('names the sources', () => {
@@ -110,5 +124,18 @@ describe('HoldingsView: link in name', () => {
     expect(html).toContain('claim-bnb.xyz')
     const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1])
     expect(hrefs.filter((h) => !h.startsWith('/token/'))).toEqual([])
+  })
+})
+
+describe('holdingsCapNote', () => {
+  it('is the provider\'s limit', () => {
+    expect(PROVIDER_HOLDINGS_LIMIT).toBe(20)
+  })
+
+  it('speaks only when the provider returned its limit', () => {
+    expect(holdingsCapNote(20)).toBe('First 20 tokens shown.')
+    expect(holdingsCapNote(21)).toBe('First 20 tokens shown.')
+    expect(holdingsCapNote(19)).toBeNull()
+    expect(holdingsCapNote(0)).toBeNull()
   })
 })

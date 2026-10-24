@@ -3,6 +3,7 @@ import { sanitizeSymbolOr, tokenLabel } from '@/lib/format'
 import { usdText, type HoldingRow } from '@/lib/holdings'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { LookalikeBadge } from '@/components/ui/LookalikeBadge'
 
 // Kicker-style column header, matching components/transactions/TxTable.
 const TH = 'text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut'
@@ -46,11 +47,13 @@ export function HoldingsTable({ rows, caption, nativeSymbol }: { rows: readonly 
           {rows.map((r) => {
             const label = tokenLabel(r.symbol, r.name, r.tokenAddress)
             const link = <Link href={`/token/${r.tokenAddress}`} className="text-acc-ink hover:underline font-medium">{label}</Link>
+            // A token passing for a well-known one (the server's flag, lib/holdings): the Symbol column prints the sanitised symbol, which can read as USDT.
+            const linkLike = anyLinkLike(label, r.symbol)
             return (
               <tr key={r.tokenAddress} className="hover:bg-canvas transition-colors">
                 {/* Flagged rows only (judged on the text this row shows: the label and the symbol column): an unflagged row's cell is the bare link. */}
                 <td className="px-3 sm:px-4 py-2">
-                  {anyLinkLike(label, r.symbol) ? <>{link}<LinkInName className="ml-2" /></> : link}
+                  {linkLike || r.lookalike ? <>{link}{linkLike && <LinkInName className="ml-2" />}{r.lookalike && <LookalikeBadge lookalike={r.lookalike} className="ml-2" />}</> : link}
                 </td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px] text-ink2">{sanitizeSymbolOr(r.symbol, '—')}</td>
                 <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">{r.amount}</td>

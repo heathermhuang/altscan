@@ -35,10 +35,10 @@ describe('Transfers tab (server row)', () => {
     inTable(createElement(TransferRow, { t, addr: ME, info: { symbol, name, decimals: 18 } }))
 
   it('an ordinary token reads as before: its symbol in the cell and after the amount, no badge', () => {
-    const c = cells(row('USDT', 'Tether USD'))
-    expect(text(c[4])).toBe('USDT')
-    expect(text(c[5])).toBe('1.5 USDT')
-    expect(badges(row('USDT'))).toBe(0)
+    const c = cells(row('CAKE', 'PancakeSwap Token'))
+    expect(text(c[4])).toBe('CAKE')
+    expect(text(c[5])).toBe('1.5 CAKE')
+    expect(badges(row('CAKE'))).toBe(0)
   })
 
   it('a URL symbol: the cell keeps the text with the badge, the amount names the token by its short address', () => {
@@ -75,7 +75,7 @@ describe('Transfers tab (server row)', () => {
 
   it('the token link beside a badge is medium weight; an unflagged one is as it was', () => {
     expect(linkClass(row('claim-bnb.xyz'), `/token/${TOKEN}`)).toBe('text-acc-ink hover:underline font-medium')
-    expect(linkClass(row('USDT'), `/token/${TOKEN}`)).toBe('text-acc-ink hover:underline')
+    expect(linkClass(row('CAKE'), `/token/${TOKEN}`)).toBe('text-acc-ink hover:underline')
   })
 })
 
