@@ -116,7 +116,7 @@ Content-Type: application/json
 {"ownerAddress": "0xYourAddress", "label": "my-agent", "signature": "0x…", "timestamp": 1760000000000}
 \`\`\`
 
-Signatures older than 5 minutes are rejected. If the address already has a key, also send one of its keys in \`X-API-Key\`. An address can hold at most 10 keys.
+The timestamp must be an integer within 5 minutes of the server clock, in either direction. If the address already has a key, also send one of its keys in \`X-API-Key\`. An address can hold at most 10 keys.
 
 Response (201):
 
