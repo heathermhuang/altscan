@@ -6,7 +6,6 @@ import { notFound } from 'next/navigation'
 import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
-import { Icon } from '@/components/ui/Icon'
 import { Pagination } from '@/components/ui/Pagination'
 import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
@@ -24,6 +23,7 @@ import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersFact } from './HoldersLazy'
+import { RiskSignals } from './RiskSignals'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
@@ -430,31 +430,7 @@ export default async function TokenDetailPage({
       {adAfterHolders && tokenAd}
 
       {/* Risk Signals */}
-      {signals.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-3 flex items-center gap-2 font-semibold tracking-[-0.02em] text-ink">
-            <Icon name="shield" className="h-4 w-4 text-mut" />Risk Signals
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {signals.map((s, i) => (
-              <div key={i} className={`flex items-start gap-2 rounded-xl border border-hair border-l-[3px] px-3 py-2 text-sm
-                ${s.severity === 'danger' ? 'border-l-warn bg-warn-t' : s.severity === 'warn' ? 'border-l-warn bg-card' : 'border-l-acc bg-card'}`}>
-                <Icon
-                  name={s.ok ? 'check' : s.severity === 'danger' ? 'danger' : 'warn'}
-                  className={`mt-0.5 h-4 w-4 ${s.ok ? 'text-live' : 'text-warn'}`}
-                />
-                <div>
-                  <p className="font-medium text-ink">
-                    <span className="sr-only">{s.ok ? 'Pass: ' : s.severity === 'danger' ? 'Danger: ' : 'Warning: '}</span>
-                    {s.label}
-                  </p>
-                  <p className="text-xs text-ink2">{s.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <RiskSignals signals={signals} />
 
       {/* Token Transfers */}
       <div className="flex items-center justify-between mb-3">
