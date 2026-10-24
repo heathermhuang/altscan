@@ -81,10 +81,10 @@ export async function POST(request: Request) {
 
   // The existing-key check, the per-address cap and the insert run under one per-owner
   // lock (lib/api-key-mint.ts). For subsequent keys, the requesting API key must also
-  // belong to ownerAddress.
+  // belong to ownerAddress; that check reads through the pool, so it runs first.
   const owner = ownerAddress.toLowerCase()
-  const created = await mintApiKey(db, owner, { keyHash, keyPrefix, label: label ?? null },
-    () => requireApiKeyOwner(request, owner))
+  const ownerAuth = await requireApiKeyOwner(request, owner)
+  const created = await mintApiKey(db, owner, { keyHash, keyPrefix, label: label ?? null }, ownerAuth)
   if (!created.ok) return NextResponse.json({ error: created.error }, { status: created.status })
 
   return NextResponse.json({

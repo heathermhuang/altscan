@@ -16,24 +16,25 @@ export type MintResult = { ok: true; id: number } | Refusal
  * extra key bringing its own rate-limit budget. Webhook registration uses the same
  * pattern. The lock releases on commit or rollback.
  *
- * `authorizeExisting` runs only when the owner already holds a key: it is the
- * X-API-Key ownership check.
+ * `existingOwnerAuth` is the X-API-Key ownership check's result, applied only when the
+ * owner already holds a key. The caller computes it BEFORE this runs: a check that read
+ * through the pool from inside the transaction would hold one connection while waiting
+ * for a second, and a burst of mints could take every connection that way and deadlock
+ * the pool. Its answer depends only on the request's key, not on the state the lock
+ * protects.
  */
 export async function mintApiKey(
   db: Db,
   owner: string,
   key: { keyHash: string; keyPrefix: string; label: string | null },
-  authorizeExisting: () => Promise<{ ok: true } | Refusal>,
+  existingOwnerAuth: { ok: true } | Refusal,
 ): Promise<MintResult> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`api_keys:${owner}`}))`)
     const existing = await tx.select({ id: schema.apiKeys.id })
       .from(schema.apiKeys)
       .where(eq(schema.apiKeys.ownerAddress, owner))
-    if (existing.length > 0) {
-      const auth = await authorizeExisting()
-      if (!auth.ok) return auth
-    }
+    if (existing.length > 0 && !existingOwnerAuth.ok) return existingOwnerAuth
     if (existing.length >= MAX_KEYS_PER_ADDRESS) {
       return { ok: false, status: 400, error: `Maximum ${MAX_KEYS_PER_ADDRESS} API keys per address` }
     }

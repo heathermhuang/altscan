@@ -64,7 +64,7 @@ describe.skipIf(!PG_URL)('mintApiKey under concurrency — against a real Postgr
 
   it('parallel signature-only requests for a new address mint exactly one key', async () => {
     // No X-API-Key: allowed only while the address holds no key.
-    const refuseWithoutKey = async () => ({ ok: false as const, status: 403, error: 'needs one of its keys' })
+    const refuseWithoutKey = { ok: false as const, status: 403, error: 'needs one of its keys' }
     const results = await Promise.all(
       Array.from({ length: PARALLEL }, () => mintApiKey(db, OWNER, key(), refuseWithoutKey)))
     expect(results.filter((r) => r.ok)).toHaveLength(1)
@@ -73,11 +73,28 @@ describe.skipIf(!PG_URL)('mintApiKey under concurrency — against a real Postgr
   })
 
   it('parallel authorized requests never take an address past the cap', async () => {
-    const authorized = async () => ({ ok: true as const })
+    const authorized = { ok: true as const }
     const results = await Promise.all(
       Array.from({ length: PARALLEL }, () => mintApiKey(db, OWNER, key(), authorized)))
     expect(results.filter((r) => r.ok)).toHaveLength(MAX_KEYS_PER_ADDRESS)
     expect(results.filter((r) => !r.ok && r.status === 400)).toHaveLength(PARALLEL - MAX_KEYS_PER_ADDRESS)
     expect(await count()).toBe(MAX_KEYS_PER_ADDRESS)
+  })
+
+  it('a burst of mints on a small pool cannot deadlock it', { timeout: 15_000 }, async () => {
+    // Each request authorizes through the pool, as requireApiKeyOwner does, then mints. Run
+    // inside the transaction, that lookup would hold one connection waiting for a second, and
+    // six of them would take a two-connection pool and never finish.
+    process.env.API_KEY_MINT_SMALL_POOL = PG_URL
+    process.env.DB_POOL_SIZE = '2'
+    const small = getDb('API_KEY_MINT_SMALL_POOL')
+    const owners = Array.from({ length: 6 }, (_, i) => '0x' + String(i).repeat(40).slice(0, 40))
+    for (const o of owners) await mintApiKey(small, o, key(), { ok: true })  // each already holds a key
+    const results = await Promise.all(owners.map(async (o) => {
+      await small.execute(sql`SELECT 1 FROM api_keys WHERE owner_address = ${o}`)  // the ownership lookup
+      return mintApiKey(small, o, key(), { ok: true })
+    }))
+    expect(results.every((r) => r.ok)).toBe(true)
+    expect(await count()).toBe(12)
   })
 })
