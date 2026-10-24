@@ -160,9 +160,9 @@ const RATE_LIMITED = error('Rate limit exceeded for this client IP. Back off and
 const INTERNAL = error('Database error.')
 
 const pathParam = (name: string, schema: Schema, description: string): Schema => ({ name, in: 'path', required: true, description, schema })
-const PAGE = { name: 'page', in: 'query', description: '1-based page number.', schema: { type: 'integer', minimum: 1, default: 1 } }
+const PAGE = { name: 'page', in: 'query', description: '1-based page number. Lists reach the newest 10,000 records: a page that starts beyond them answers 400.', schema: { type: 'integer', minimum: 1, default: 1 } }
 const LIMIT = { name: 'limit', in: 'query', description: 'Page size. Values outside 1–50 are clamped.', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }
-const PAGE_BAD = error('page or limit is not a number.')
+const PAGE_BAD = error('page or limit is not a number, or the page starts beyond the newest 10,000 records.')
 const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' }, `${description} Any letter case.`)
 
 type Operation = { operationId: string; parameters?: Schema[]; responses: Record<string, unknown> }

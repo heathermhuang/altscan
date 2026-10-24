@@ -9,6 +9,7 @@ import { chainConfig } from '@/lib/chain'
 import { BlockTape } from '@/components/home/BlockTape'
 import { queryRecentTape } from '@/lib/recent-tape'
 import { createPageCache } from '@/lib/page-cache'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
 import { swallow } from '@/lib/observability'
 
 // Next.js statically analyses route segment config and cannot resolve an
@@ -79,7 +80,7 @@ export default async function BlocksPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${tape ? ' pt-6' : ''}`}>
       <BlockTable blocks={blocks} gasBar />
       <div className="mt-4 flex justify-end">
-        <Pagination page={page} total={total} perPage={PER_PAGE} baseUrl="/blocks" />
+        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} baseUrl="/blocks" />
       </div>
     </div>
     </>

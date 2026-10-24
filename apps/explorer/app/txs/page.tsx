@@ -8,6 +8,7 @@ import type { Metadata } from 'next'
 import { chainConfig } from '@/lib/chain'
 import { getBlockStrip } from '@/lib/block-strip'
 import { createPageCache } from '@/lib/page-cache'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 
 // Next.js statically analyses route segment config and cannot resolve an
@@ -68,7 +69,7 @@ export default async function TransactionsPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <TxTable txs={txs} />
       <div className="mt-4 flex justify-end">
-        <Pagination page={page} total={total} perPage={PER_PAGE} baseUrl="/txs" />
+        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} baseUrl="/txs" />
       </div>
     </div>
     </>

@@ -9,6 +9,7 @@
 import { desc, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
 import { createPageCache } from '@/lib/page-cache'
+import { clampListPage } from '@/lib/list-depth'
 
 export const PER_PAGE = 25
 export const TXS_REVALIDATE_SECONDS = 45
@@ -107,8 +108,8 @@ export function parseBlock(row: CachedBlock): typeof schema.blocks.$inferSelect 
   return { ...row, timestamp: new Date(row.timestamp), gasUsed: BigInt(row.gasUsed), gasLimit: BigInt(row.gasLimit) }
 }
 
-/** Page numbers come straight off the query string. */
-export function parsePageParam(raw: string | undefined): number {
+/** Page numbers come straight off the query string; a deeper page gets the last one served (lib/list-depth.ts). */
+export function parsePageParam(raw: string | undefined, perPage = PER_PAGE): number {
   const n = Number(raw ?? 1)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1
+  return clampListPage(Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1, perPage)
 }

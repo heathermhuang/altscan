@@ -61,6 +61,13 @@ describe('parsePageParam', () => {
     // Number('1e999') is Infinity, and (Infinity - 1) * 25 is NaN as an OFFSET.
     expect(Number.isFinite(parsePageParam('1e999'))).toBe(true)
   })
+
+  it('serves no deeper than the newest 10,000 rows (lib/list-depth.ts)', () => {
+    expect(parsePageParam('400')).toBe(400)
+    expect(parsePageParam('401')).toBe(400)
+    expect(parsePageParam('99999999')).toBe(400)
+    expect(parsePageParam('999', 50)).toBe(200)
+  })
 })
 
 describe('cache-boundary rehydration', () => {
