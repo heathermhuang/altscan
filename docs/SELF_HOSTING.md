@@ -240,6 +240,14 @@ Two more things carry the hosted sites' identity and are set per chain in
 The status page (`apps/status`) monitors bnbscan.com and ethscan.io; its targets are set
 in `apps/status/src/server.ts`.
 
+Put the explorer behind a proxy that sets the client-IP headers itself. The explorer
+takes the visitor's address from `CF-Connecting-IP`, `X-Real-IP` and `X-Forwarded-For`
+for its per-IP rate limits and its abuse denylist. The Docker stack publishes the
+explorer's port directly, so a client can send those headers itself and pick any address.
+Cloudflare in front of the explorer sets them for you. A reverse proxy of your own must
+drop any client-sent `CF-Connecting-IP`, set `X-Real-IP`, and append the client to
+`X-Forwarded-For`. Then let only that proxy reach the explorer's port.
+
 ## Licence
 
 Altscan is open source under [AGPL-3.0](../LICENSE). You may run it, modify it, and

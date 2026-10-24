@@ -93,9 +93,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'eventTypes must contain at least one of: tx, token_transfer, new_block' }, { status: 400 })
   }
 
-  // Generate raw secret, store SHA-256 hash in DB (same pattern as API keys).
-  // The raw secret is returned once and never stored — if the DB is compromised,
-  // the attacker cannot forge webhook signatures.
+  // Generate a raw secret and store its SHA-256. The raw secret is returned once
+  // and never stored, but it is NOT the signing key: delivery uses the stored
+  // SHA-256 as the HMAC key (webhook-notifier.ts), so anyone who can read this
+  // column can forge signatures for this webhook.
   const rawSecret = crypto.randomBytes(32).toString('hex')
   const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 
