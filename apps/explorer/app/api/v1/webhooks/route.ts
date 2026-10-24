@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, sql } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { insertWebhookSql } from '@/lib/webhook-insert'
 import crypto from 'crypto'
 import { chainConfig } from '@/lib/chain'
 
@@ -96,7 +97,9 @@ export async function POST(request: Request) {
   // Generate a raw secret and store its SHA-256. The raw secret is returned once
   // and never stored, but it is NOT the signing key: delivery uses the stored
   // SHA-256 as the HMAC key (webhook-notifier.ts), so anyone who can read this
-  // column can forge signatures for this webhook.
+  // column can forge signatures for this webhook. With WEBHOOK_SECRET_KEY set on
+  // the indexer, it seals the value into secret_enc and clears this column within
+  // a minute (apps/indexer/src/webhook-secret.ts).
   const rawSecret = crypto.randomBytes(32).toString('hex')
   const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 
@@ -131,14 +134,15 @@ export async function POST(request: Request) {
       }
     }
 
-    const [row] = await tx.insert(schema.webhooks).values({
+    // Not tx.insert(schema.webhooks): see insertWebhookSql.
+    const rows = await tx.execute(insertWebhookSql({
       ownerAddress: owner,
       url,
-      watchAddress: watchAddress?.toLowerCase(),
+      watchAddress: watchAddress?.toLowerCase() ?? null,
       eventTypes: sanitizedEvents,
       secret: secretHash,
-    }).returning({ id: schema.webhooks.id })
-    created = row
+    }))
+    created = Array.from(rows as Iterable<{ id: number }>)[0]
   })
   if (capError || !created) {
     return NextResponse.json({ error: capError ?? 'Webhook creation failed' }, { status: 400 })

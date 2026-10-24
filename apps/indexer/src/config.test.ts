@@ -286,3 +286,19 @@ describe('redact', () => {
     expect(redact('production')).toBe('production')
   })
 })
+
+describe('WEBHOOK_SECRET_KEY', () => {
+  const KEY = 'ab'.repeat(32)
+  it('is read, but the boot log shows only that it is set', () => {
+    const { config, resolutions } = read({ WEBHOOK_SECRET_KEY: KEY })
+    expect(config.webhooks.secretKey).toBe(KEY)
+    const log = formatResolvedConfig(resolutions).join('\n')
+    expect(log).toContain('WEBHOOK_SECRET_KEY=(set)')
+    expect(log).not.toContain(KEY)
+  })
+  it('is blank, and absent from the overrides, when unset', () => {
+    const { config, resolutions } = read()
+    expect(config.webhooks.secretKey).toBe('')
+    expect(formatResolvedConfig(resolutions).join('\n')).not.toContain('WEBHOOK_SECRET_KEY')
+  })
+})

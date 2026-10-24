@@ -69,6 +69,9 @@ services:
       START_BLOCK_LOOKBACK: ${START_BLOCK_LOOKBACK:-1000}
       INDEX_CONCURRENCY: ${INDEX_CONCURRENCY:-4}
       DB_POOL_SIZE: ${INDEXER_DB_POOL_SIZE:-8}
+      # Optional, 64 hex characters (`openssl rand -hex 32`): encrypts webhook signing
+      # keys at rest (docs/SELF_HOSTING.md). Losing it makes sealed webhooks undeliverable.
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-}
       RETENTION_DAYS: ${RETENTION_DAYS:-7}
       # Unset keeps transactions, transfers and blocks forever (docs/SELF_HOSTING.md).
       COMPACT_RETENTION_DAYS: ${COMPACT_RETENTION_DAYS:-}

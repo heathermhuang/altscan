@@ -44,6 +44,7 @@ import { startTokenMetadataHealer } from './token-metadata-healer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
 import { ensureSchema, ensureInternalTxPartitions } from './ensure-schema'
+import { sealPlaintextWebhookSecrets, webhookSecretKey } from './webhook-notifier'
 import { getDb, schema, dbErrorMessage, isConnectionError } from './db'
 import { desc, sql } from 'drizzle-orm'
 
@@ -268,6 +269,22 @@ async function main() {
   // Repairs 'Unknown'/'???' token rows the one-shot first-sight fetch left behind.
   // Same RPC pool as block fetches; never throws and never touches block processing.
   startTokenMetadataHealer(providers)
+
+  // Webhook signing keys at rest (webhook-secret.ts). New webhooks arrive in
+  // plaintext from the explorer and are sealed within a minute. The first pass
+  // waits out the deploy overlap: the outgoing binary reads only `secret`, so it
+  // would skip, not fail, the rows this clears, but there is no need to make it.
+  const webhookKey = webhookSecretKey()
+  console.log(`${TAG} webhook signing keys: ${webhookKey ? 'sealed at rest' : 'stored in plaintext (WEBHOOK_SECRET_KEY unset or malformed)'}`)
+  if (webhookKey) {
+    const sealWebhookKeys = () => sealPlaintextWebhookSecrets(webhookKey)
+      .then(n => { if (n > 0) console.log(`${TAG} sealed ${n} plaintext webhook signing key(s)`) })
+      .catch(err => console.error(`${TAG} sealing webhook signing keys failed:`, safeErr(err)))
+    setTimeout(() => {
+      void sealWebhookKeys()
+      setInterval(() => void sealWebhookKeys(), 60_000).unref?.()
+    }, 3 * 60_000).unref?.()
+  }
 
   const MAX_LAG = indexerConfig.indexing.maxLagBlocks
   // Consecutive PROVABLY-CLEAN failover failures before a block is stepped over.

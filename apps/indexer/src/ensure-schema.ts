@@ -279,6 +279,7 @@ export async function ensureSchema(): Promise<void> {
       watch_address     VARCHAR(42),
       event_types       TEXT[] NOT NULL DEFAULT '{tx}',
       secret            VARCHAR(64),
+      secret_enc        TEXT,
       active            BOOLEAN NOT NULL DEFAULT true,
       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       last_triggered_at TIMESTAMPTZ,
@@ -508,6 +509,9 @@ export async function ensureSchema(): Promise<void> {
   // place so the tx page knows to refetch it. Lock-safe: addColumnIfMissing skips
   // the ALTER entirely once the column exists (see the CRITICAL note above).
   await addColumnIfMissing('transactions', 'body_pruned', 'BOOLEAN NOT NULL DEFAULT false')
+  // The sealed webhook signing key, written only by the indexer (webhook-secret.ts).
+  // The explorer never names it, so it does not depend on this having run.
+  await addColumnIfMissing('webhooks', 'secret_enc', 'TEXT')
   // Where gap RECORDING began — the bound on /api/health's `ok`. Left NULL here
   // ON PURPOSE, which reports `unverified` until an operator sets it.
   //

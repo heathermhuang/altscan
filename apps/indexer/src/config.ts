@@ -153,6 +153,18 @@ class EnvReader {
   }
 
   /**
+   * A credential: recorded as "(set)" or blank, never its value. `string`'s
+   * `secret` option is not enough here, because `redact` masks URLs only and
+   * returns any other value as it is.
+   */
+  credential(name: string): string {
+    const raw = this.env[name]
+    const value = raw?.trim() ?? ''
+    this.record(name, value ? '(set)' : '', raw, true)
+    return value
+  }
+
+  /**
    * Whole percent, 1-100, falling back with a warning on anything else.
    *
    * Moved from retention-cleanup.ts UNCHANGED, including the warnings, and now
@@ -393,6 +405,11 @@ export function readIndexerConfig(
     sourcifyApi: r.string('SOURCIFY_API', 'https://sourcify.dev/server'),
   }
 
+  const webhooks = {
+    /** 64 hex chars; seals webhook signing keys at rest (webhook-secret.ts). Unset = plaintext, as before. */
+    secretKey: r.credential('WEBHOOK_SECRET_KEY'),
+  }
+
   const runtime = {
     /** Identifies the healer's lease owner; 'local' outside Render. */
     instanceId: r.string('RENDER_INSTANCE_ID', 'local'),
@@ -401,7 +418,7 @@ export function readIndexerConfig(
 
   const config = {
     indexing, rpc, reorg, gapHeal, transferWriter, holders, tokenHeal,
-    retention, partitions, internalTx, backfill, verifier, runtime,
+    retention, partitions, internalTx, backfill, verifier, webhooks, runtime,
 
     /**
      * Per-block holder-balance tracking.
