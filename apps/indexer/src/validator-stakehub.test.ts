@@ -1,6 +1,6 @@
 import { AbiCoder, Interface } from 'ethers'
 import { describe, expect, it } from 'vitest'
-import { STAKE_HUB_ABI, toCommissionFraction } from './validator-stakehub'
+import { STAKE_HUB_ABI, buildValidatorWrite, toCommissionFraction } from './validator-stakehub'
 
 const coder = AbiCoder.defaultAbiCoder()
 const iface = () => new Interface(STAKE_HUB_ABI)
@@ -53,5 +53,49 @@ describe('commission scaling', () => {
 
   it('maps the full-rate bound to 1.0000 (fits numeric(5,4))', () => {
     expect(toCommissionFraction(10000n)).toBe('1.0000')
+  })
+})
+
+// f026. A failed read is UNKNOWN. The syncer used to store the default '0.1' ("10.0%" on the page) for a failed
+// commission read and replace a good stored moniker with `Validator N` for a failed description read.
+describe('buildValidatorWrite — a failed read is not a value', () => {
+  const NOW = new Date('2026-10-24T00:00:00Z')
+  const base = { address: '0xabc', fallbackMoniker: 'Validator 3', votingPower: 5n, now: NOW }
+
+  it('stores what the chain answered, and updates both columns from it', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: 'Legend', commissionRate: 900n })
+    expect(w.values).toMatchObject({ moniker: 'Legend', commission: '0.0900', votingPower: '5', status: 'active' })
+    expect(w.update).toMatchObject({ moniker: 'Legend', commission: '0.0900' })
+  })
+
+  it('a failed commission read inserts NULL and never touches the stored commission', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: 'Legend', commissionRate: null })
+    expect(w.values.commission).toBeNull()
+    expect(w.update).not.toHaveProperty('commission')
+    expect(w.update).toMatchObject({ moniker: 'Legend' })
+  })
+
+  it('a failed moniker read inserts the fallback but never overwrites a stored moniker', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: null, commissionRate: 900n })
+    expect(w.values.moniker).toBe('Validator 3')
+    expect(w.update).not.toHaveProperty('moniker')
+    expect(w.update).toMatchObject({ commission: '0.0900' })
+  })
+
+  it('an empty on-chain moniker counts as a failed read', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: '', commissionRate: null })
+    expect(w.values.moniker).toBe('Validator 3')
+    expect(w.update).not.toHaveProperty('moniker')
+  })
+
+  it('a real 0% commission is a value, not a failed read', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: null, commissionRate: 0n })
+    expect(w.values.commission).toBe('0.0000')
+    expect(w.update).toMatchObject({ commission: '0.0000' })
+  })
+
+  it('both reads failing (ValidatorSet fallback) still refreshes voting power and updatedAt', () => {
+    const w = buildValidatorWrite({ ...base, chainMoniker: null, commissionRate: null })
+    expect(w.update).toEqual({ votingPower: '5', status: 'active', updatedAt: NOW })
   })
 })

@@ -1,7 +1,7 @@
 import { Contract, formatEther } from 'ethers'
 import { getDb, schema } from './db'
 import { getProvider, safeRpcError } from './provider'
-import { STAKE_HUB_ABI, STAKE_HUB_ADDRESS, toCommissionFraction } from './validator-stakehub'
+import { STAKE_HUB_ABI, STAKE_HUB_ADDRESS, buildValidatorWrite } from './validator-stakehub'
 
 const provider = getProvider()
 
@@ -142,9 +142,10 @@ async function upsertValidators(
     const addr = validators[i].toLowerCase()
     const vp = votingPowers[i] ?? 0n
 
-    // Try to get on-chain moniker via operator address, fall back to known list
-    let moniker = KNOWN_VALIDATORS[addr] ?? `Validator ${i + 1}`
-    let commission = '0.1' // default 10%
+    // On-chain moniker/commission via the operator address. A failed read stays null
+    // (unknown) — buildValidatorWrite decides what that means for the row.
+    let chainMoniker: string | null = null
+    let commissionRate: bigint | null = null
 
     if (stakeHub) {
       const operatorAddr = operatorMap.get(addr)
@@ -152,35 +153,31 @@ async function upsertValidators(
         try {
           const desc = await stakeHub.getValidatorDescription(operatorAddr)
           if (desc.moniker && desc.moniker.length > 0) {
-            moniker = desc.moniker
+            chainMoniker = desc.moniker
             descResolved++
           }
         } catch { /* description not available for this operator */ }
 
         try {
           const comm = await stakeHub.getValidatorCommission(operatorAddr)
-          commission = toCommissionFraction(comm.rate)
+          commissionRate = comm.rate
         } catch { /* commission not available */ }
       }
     }
 
+    const write = buildValidatorWrite({
+      address: addr,
+      fallbackMoniker: KNOWN_VALIDATORS[addr] ?? `Validator ${i + 1}`,
+      chainMoniker,
+      commissionRate,
+      votingPower: vp,
+      now,
+    })
+
     try {
-      await db.insert(schema.validators).values({
-        address: addr,
-        moniker,
-        votingPower: vp.toString(),
-        commission,
-        status: 'active',
-        updatedAt: now,
-      }).onConflictDoUpdate({
+      await db.insert(schema.validators).values(write.values).onConflictDoUpdate({
         target: [schema.validators.address],
-        set: {
-          moniker,
-          votingPower: vp.toString(),
-          commission,
-          status: 'active',
-          updatedAt: now,
-        },
+        set: write.update,
       })
       upserted++
     } catch (err) {

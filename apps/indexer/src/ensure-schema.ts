@@ -252,12 +252,17 @@ export async function ensureSchema(): Promise<void> {
       address      VARCHAR(42) PRIMARY KEY,
       moniker      VARCHAR(255) NOT NULL,
       voting_power NUMERIC(36,0) NOT NULL DEFAULT 0,
-      commission   NUMERIC(5,4) NOT NULL DEFAULT 0,
+      commission   NUMERIC(5,4),
       uptime       NUMERIC(5,4) NOT NULL DEFAULT 0,
       status       validator_status NOT NULL DEFAULT 'active',
       updated_at   TIMESTAMPTZ NOT NULL
     )
   `))
+  // Commission is NULL when StakeHub could not be read (validator-syncer). Tables
+  // created before that were NOT NULL DEFAULT 0, which made "unknown" a real-looking
+  // 0%. Dropping NOT NULL is safe under deploy overlap: the outgoing binary always
+  // writes an explicit commission, and every reader treats the column as optional.
+  await dropNotNullIfSet('validators', 'commission')
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gas_history (
@@ -1060,6 +1065,28 @@ async function addColumnIfMissing(table: string, column: string, type: string): 
   const rows = Array.from(result)
   if (rows.length > 0) return
   await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`))
+}
+
+/**
+ * Make `column` nullable with no default, only if it is still NOT NULL.
+ *
+ * Same trap as addColumnIfMissing: `ALTER TABLE` takes an AccessExclusiveLock even
+ * when it changes nothing, so the no-op path must be decided by a catalog read.
+ * Dropping the default goes with dropping NOT NULL — a default would put a real-
+ * looking value back wherever a writer omits the column.
+ */
+async function dropNotNullIfSet(table: string, column: string): Promise<void> {
+  const db = getDb()
+  const result = await db.execute(sql`
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = ${table}::regclass
+      AND attname  = ${column}
+      AND NOT attisdropped
+      AND attnotnull
+    LIMIT 1
+  `)
+  if (Array.from(result).length === 0) return
+  await db.execute(sql.raw(`ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL, ALTER COLUMN ${column} DROP DEFAULT`))
 }
 
 /**
