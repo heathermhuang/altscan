@@ -23,6 +23,7 @@ import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
 import { getTxBody, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
+import { selectTxInternals, capTxInternals, TX_INTERNALS_SHOWN } from '@/lib/tx-internal'
 import { fetchTokenMetadata, addrsNeedingMetadata, recordFetchedMetadata, type KnownToken } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
@@ -210,19 +211,6 @@ function formatUsd(nativeAmount: number, price: number): string {
   return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/** Execution order. '0.10' sorts after '0.2' numerically, not as a string. */
-function sortByTraceAddress<T extends { traceAddress: string }>(rows: T[]): T[] {
-  const key = (r: T) => r.traceAddress.split('.').map(Number)
-  return [...rows].sort((a, b) => {
-    const ka = key(a), kb = key(b)
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const d = (ka[i] ?? -1) - (kb[i] ?? -1)
-      if (d !== 0) return d
-    }
-    return 0
-  })
-}
-
 export default async function TxDetailPage({
   params,
 }: {
@@ -257,7 +245,7 @@ export default async function TxDetailPage({
     // indexed before the feature (or while the indexer was behind) has none.
     fromRpc
       ? Promise.resolve([])
-      : db.select().from(schema.internalTransactions).where(eq(schema.internalTransactions.txHash, hash)).limit(100).catch(swallowed('tx/internal', [])),
+      : selectTxInternals(db, hash, tx.blockNumber).catch(swallowed('tx/internal', [])),
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
@@ -334,6 +322,7 @@ export default async function TxDetailPage({
   // On the RPC path there are no token_transfers rows, so the transfers are
   // decoded out of the receipt logs we just refetched. `transfers` (DB) wins
   // when present — it is authoritative and already normalised.
+  const { shown: shownInternalTxs, truncated: internalTxsTruncated } = capTxInternals(internalTxs)
   const { shown: shownTransfers, truncated: transfersTruncated } = capTransfers(transfers)
   const effectiveTransfers = shownTransfers.length > 0
     ? shownTransfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
@@ -693,11 +682,11 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {internalTxs.length > 0 && (
+      {shownInternalTxs.length > 0 && (
         <div className="mb-6 rounded-xl border border-hair bg-card p-4">
-          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Internal Transactions ({internalTxs.length})</h2>
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Internal Transactions ({shownInternalTxs.length}{internalTxsTruncated ? '+' : ''})</h2>
           <div className="space-y-2">
-            {sortByTraceAddress(internalTxs).map((it) => (
+            {shownInternalTxs.map((it) => (
               <div key={it.traceAddress} className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge variant="default">{it.callType}</Badge>
                 <span className="text-mut">From</span>
@@ -714,6 +703,19 @@ export default async function TxDetailPage({
           <p className="mt-3 text-xs text-mut">
             Value-moving calls, contract creations and self-destructs decoded from execution traces. Zero-value calls are not listed.
           </p>
+          {internalTxsTruncated && (
+            <p className="mt-2 text-xs text-mut">
+              Showing the first {TX_INTERNALS_SHOWN} internal transactions, in execution order — this transaction has more.{' '}
+              <a
+                href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-acc-ink underline"
+              >
+                View all on {chainConfig.externalExplorer} ↗
+              </a>
+            </p>
+          )}
         </div>
       )}
 

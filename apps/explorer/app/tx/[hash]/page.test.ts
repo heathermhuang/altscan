@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 const state = vi.hoisted(() => ({
   dbTx: null as Record<string, unknown> | null,
   blockRow: null as { baseFee: string | null } | null,
+  internalRows: [] as unknown[],
   tablesRead: [] as unknown[],
   fetchTxFromRpc: vi.fn(),
   fetchBlockFromRpc: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock('@/lib/db', async () => {
   const rowsOf = (table: unknown) => {
     if (table === schema.transactions) return state.dbTx ? [state.dbTx] : []
     if (table === schema.blocks) return state.blockRow ? [state.blockRow] : []
+    if (table === schema.internalTransactions) return state.internalRows
     return []
   }
   // A drizzle query builder is a thenable with .catch; this one is the same shape.
@@ -36,6 +38,10 @@ vi.mock('@/lib/rpc-fallback', () => ({ fetchTxFromRpc: state.fetchTxFromRpc, fet
 // Chain tip comes from the node, so the page never falls back to a MAX(blocks.number) read of its own.
 vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => ({ getBlockNumber: async () => 1_000_000 }) }))
 vi.mock('@/lib/body-cache', () => ({ getTxBody: vi.fn(async () => null) }))
+vi.mock('@/lib/tx-internal', async (orig) => {
+  const m = await orig<typeof import('@/lib/tx-internal')>()
+  return { ...m, selectTxInternals: vi.fn((...args: Parameters<typeof m.selectTxInternals>) => m.selectTxInternals(...args)) }
+})
 vi.mock('@/lib/block-strip', () => ({ getBlockStrip: vi.fn(async () => null) }))
 vi.mock('@/lib/observability', async (orig) => ({
   ...(await orig<typeof import('@/lib/observability')>()),
@@ -46,6 +52,7 @@ vi.mock('@/lib/observability', async (orig) => ({
 import { schema } from '@/lib/db'
 import { Badge } from '@/components/ui/Badge'
 import { getBlockStrip } from '@/lib/block-strip'
+import { selectTxInternals } from '@/lib/tx-internal'
 import TxDetailPage from './page'
 
 const HASH = '0x' + 'ab'.repeat(32)
@@ -74,7 +81,7 @@ const indexedTx = () => ({
 })
 
 beforeEach(() => {
-  state.dbTx = null; state.blockRow = null; state.tablesRead = []
+  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.tablesRead = []
   state.fetchTxFromRpc.mockReset(); state.fetchBlockFromRpc.mockReset()
   state.fetchBlockFromRpc.mockResolvedValue(null)
   vi.stubGlobal('fetch', async () => ({ ok: false }))   // native price: every source "down", the page renders without USD
@@ -177,5 +184,47 @@ describe('/tx/[hash] position in block', () => {
   it('a pending tx has no position', async () => {
     state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 0, pending: true }))
     expect(positionRow(await render())).toBeUndefined()
+  })
+})
+
+// ---- internal transactions ------------------------------------------------------------------------
+
+const internalRow = (i: number) => ({
+  txHash: HASH, traceAddress: `0.${i}`, fromAddress: '0x' + '11'.repeat(20), toAddress: '0x' + '22'.repeat(20),
+  value: '1', callType: 'call', blockNumber: 777, timestamp: new Date('2026-10-10T00:00:00.000Z'),
+})
+const internalRows = (n: number) => Array.from({ length: n }, (_, i) => internalRow(i))
+const internalRowEls = (tree: ReactNode) => findAll(tree, p => typeof p.className === 'string' && p.className.includes('flex flex-wrap items-center gap-2 text-sm'))
+const internalHeading = (tree: ReactNode) => textOf(findAll(tree, p => Array.isArray(p.children) && p.children[0] === 'Internal Transactions (')[0]?.children as ReactNode)
+
+describe('/tx/[hash] internal transactions', () => {
+  it('asks for this tx at its own block, so another height cannot answer', async () => {
+    state.dbTx = indexedTx()
+    vi.mocked(selectTxInternals).mockClear()
+    await render()
+    expect(selectTxInternals).toHaveBeenCalledWith(expect.anything(), HASH, 777)
+  })
+
+  it('lists 100 and says there are more when a 101st row came back', async () => {
+    state.dbTx = indexedTx()
+    state.internalRows = internalRows(101)
+    const tree = await render()
+    expect(internalRowEls(tree)).toHaveLength(100)
+    expect(internalHeading(tree)).toBe('Internal Transactions (100+)')
+    expect(textOf(tree)).toContain('Showing the first 100 internal transactions')
+  })
+
+  it('counts exactly, with no note, at or under 100', async () => {
+    state.dbTx = indexedTx()
+    state.internalRows = internalRows(100)
+    const tree = await render()
+    expect(internalRowEls(tree)).toHaveLength(100)
+    expect(internalHeading(tree)).toBe('Internal Transactions (100)')
+    expect(textOf(tree)).not.toContain('Showing the first')
+  })
+
+  it('draws nothing for a tx with none', async () => {
+    state.dbTx = indexedTx()
+    expect(textOf(await render())).not.toContain('Internal Transactions')
   })
 })
