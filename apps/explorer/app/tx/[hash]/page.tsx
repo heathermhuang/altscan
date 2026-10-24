@@ -24,7 +24,7 @@ import { getTxBody, fetchTxInputFromRpc, type CachedLog } from '@/lib/body-cache
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
 import { selectTxInternals, capTxInternals, TX_INTERNALS_SHOWN } from '@/lib/tx-internal'
-import { fetchTokenMetadata, addrsNeedingMetadata, recordFetchedMetadata, type KnownToken } from '@/lib/token-metadata'
+import { fetchTokenMetadata, addrsNeedingMetadata, recordFetchedMetadata, PLACEHOLDER_SYMBOL, type KnownToken } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
@@ -416,6 +416,11 @@ export default async function TxDetailPage({
 
   const transfersAllShown = transferInfos.length <= TRANSFER_PREVIEW
 
+  // The approved token's symbol: not the indexer's placeholder, which names nothing.
+  const approvedSymbol = approvedToken && tokenLookup.get(approvedToken)?.symbol !== PLACEHOLDER_SYMBOL
+    ? safeTransferSymbol(approvedToken, tokenLookup.get(approvedToken)?.symbol, chainConfig.key)
+    : undefined
+
   const decoded = decodeTx(
     {
       hash: tx.hash,
@@ -426,7 +431,7 @@ export default async function TxDetailPage({
       status: tx.status,
       methodName,
       input: effectiveInput,
-      toTokenSymbol: approvedToken ? safeTransferSymbol(approvedToken, tokenLookup.get(approvedToken)?.symbol, chainConfig.key) : undefined,
+      toTokenSymbol: approvedSymbol,
     },
     transferInfos,
     chainConfig.currency

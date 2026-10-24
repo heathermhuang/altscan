@@ -7,6 +7,8 @@ const state = vi.hoisted(() => ({
   dbTx: null as Record<string, unknown> | null,
   blockRow: null as { baseFee: string | null } | null,
   internalRows: [] as unknown[],
+  tokenRows: [] as unknown[],
+  fetchedMeta: new Map<string, { symbol: string | null; decimals: number | null }>(),
   nativeUsd: null as number | null,
   tablesRead: [] as unknown[],
   fetchTxFromRpc: vi.fn(),
@@ -19,6 +21,7 @@ vi.mock('@/lib/db', async () => {
     if (table === schema.transactions) return state.dbTx ? [state.dbTx] : []
     if (table === schema.blocks) return state.blockRow ? [state.blockRow] : []
     if (table === schema.internalTransactions) return state.internalRows
+    if (table === schema.tokens) return state.tokenRows
     return []
   }
   // A drizzle query builder is a thenable with .catch; this one is the same shape.
@@ -43,6 +46,10 @@ vi.mock('@/lib/tx-internal', async (orig) => {
   const m = await orig<typeof import('@/lib/tx-internal')>()
   return { ...m, selectTxInternals: vi.fn((...args: Parameters<typeof m.selectTxInternals>) => m.selectTxInternals(...args)) }
 })
+vi.mock('@/lib/token-metadata', async (orig) => ({
+  ...(await orig<typeof import('@/lib/token-metadata')>()),
+  fetchTokenMetadata: async () => state.fetchedMeta,
+}))
 vi.mock('@/lib/native-price', () => ({ fetchNativeUsd: async () => state.nativeUsd }))
 vi.mock('@/lib/block-strip', () => ({ getBlockStrip: vi.fn(async () => null) }))
 vi.mock('@/lib/observability', async (orig) => ({
@@ -85,7 +92,7 @@ const indexedTx = () => ({
 })
 
 beforeEach(() => {
-  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.nativeUsd = null; state.tablesRead = []
+  state.dbTx = null; state.blockRow = null; state.internalRows = []; state.tokenRows = []; state.fetchedMeta = new Map(); state.nativeUsd = null; state.tablesRead = []
   state.fetchTxFromRpc.mockReset(); state.fetchBlockFromRpc.mockReset()
   state.fetchBlockFromRpc.mockResolvedValue(null)
   vi.stubGlobal('fetch', async () => ({ ok: false }))   // native price: every source "down", the page renders without USD
@@ -348,5 +355,48 @@ describe('/tx/[hash] input the index stores cut at 500 characters', () => {
     expect(fetchTxInputFromRpc).not.toHaveBeenCalled()
     expect(hexShown(tree)).toBe(full)
     expect(textOf(tree)).not.toContain(TRUNCATED_INPUT_NOTE)
+  })
+})
+
+// ---- the headline of an approve, and of a transfer of a token with unknown decimals ------------------------
+
+describe('/tx/[hash] headline', () => {
+  const TOKEN = '0x' + '55'.repeat(20)
+  const SPENDER = '0x' + '11'.repeat(20)
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const headline = (tree: ReactNode) => textOf(findAll(tree, p => typeof p.className === 'string' && p.className.includes('leading-[1.1]'))[0]?.children as ReactNode)
+  const approve = (amount: bigint) => '0x095ea7b3' + word(SPENDER) + word(amount.toString(16))
+  const approveTx = (over: Record<string, unknown> = {}) => ({
+    ...indexedTx(), toAddress: TOKEN, methodId: '0x095ea7b3', input: approve(2n ** 256n - 1n), ...over,
+  })
+
+  it('names the spender from the calldata and the token by its symbol, not the token as the spender', async () => {
+    state.dbTx = approveTx()
+    state.tokenRows = [{ address: TOKEN, symbol: 'ACME', decimals: 18 }]
+    expect(headline(await render())).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend unlimited ACME`)
+  })
+
+  it('names the token only generically when its symbol is the indexer placeholder', async () => {
+    state.dbTx = approveTx()
+    state.tokenRows = [{ address: TOKEN, symbol: '???', decimals: 18 }]
+    expect(headline(await render())).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend unlimited tokens`)
+  })
+
+  it('does not name the token contract as the spender when the calldata is not available', async () => {
+    state.dbTx = approveTx({ input: '0x', bodyPruned: true })
+    expect(headline(await render())).toBe('Approved a token allowance')
+  })
+
+  it('reads the amount of a transfer of a token whose decimals nothing answered as ?, not as 18-decimal', async () => {
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, status: true, toAddress: TOKEN, methodId: '0xa9059cbb', input: '0xa9059cbb' }))
+    vi.mocked(getTxBody).mockResolvedValue({
+      input: '0xa9059cbb',
+      logs: [{
+        address: TOKEN, topic0: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+        topic1: '0x' + word('0x' + '22'.repeat(20)), topic2: '0x' + word('0x' + '33'.repeat(20)), topic3: null, data: '0x' + word('1000'), logIndex: 0,
+      }],
+    })
+    state.fetchedMeta = new Map([[TOKEN, { symbol: 'ACME', decimals: null }]])
+    expect(headline(await render())).toBe(`Transferred ? ACME to ${'0x' + '3'.repeat(10)}…`)
   })
 })
