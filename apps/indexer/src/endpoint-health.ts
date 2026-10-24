@@ -76,8 +76,15 @@ export const DEFAULT_MAX_COOLDOWN_MS = 900_000
  * Per-kind also gives the RIGHT answer rather than merely a working one: such an
  * endpoint stays in normal rotation for the reads it serves correctly and is
  * demoted only for the fetches it cannot.
+ *
+ * 'reorg' is the same lesson one level down. Reorg checks read OLD headers (the
+ * stored tip and a K-deep walk), tip reads (`getBlockNumber`, kind 'read') read the
+ * newest, and an endpoint can serve the one while failing the other. Sharing a
+ * kind let every successful tip read clear the reorg-failure streak, so such an
+ * endpoint kept its place at the front of the order for the one check that runs
+ * before every batch.
  */
-export type HealthKind = 'read' | 'block'
+export type HealthKind = 'read' | 'block' | 'reorg'
 
 export type EndpointHealth<P> = {
   /** Attempt order for one call: healthy round-robin first, demoted last. */

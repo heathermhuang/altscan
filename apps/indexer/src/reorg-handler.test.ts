@@ -178,6 +178,31 @@ describe('detectReorgPinned', () => {
   })
 })
 
+describe('detectReorgPinned health kind', () => {
+  // f068: reorg checks share nothing with tip reads' health, or a successful
+  // getBlockNumber clears the reorg-failure streak of an endpoint that serves the
+  // tip but not older headers.
+  it("orders, records and clears health under 'reorg' — never 'read'", async () => {
+    const calls: Array<[string, string]> = []
+    const health = {
+      order: (ps: readonly string[], _s: number, kind: string) => { calls.push(['order', kind]); return [...ps] },
+      recordSuccess: (_p: string, kind: string) => { calls.push(['success', kind]) },
+      recordFailure: (_p: string, kind: string) => { calls.push(['failure', kind]) },
+      demoted: () => [],
+    }
+    const deps = (p: string): ReorgDeps => ({
+      async storedHash(n) { return `stored-${n}` },
+      async rpcBlock() {
+        if (p === 'down') throw new Error('endpoint down')
+        return { hash: 'z', parentHash: 'stored-100' }
+      },
+    })
+    await expect(detectReorgPinned(['down', 'good'], 0, deps, 100, 15, 1000, undefined, health))
+      .resolves.toEqual({ isReorg: false })
+    expect(calls).toEqual([['order', 'reorg'], ['failure', 'reorg'], ['success', 'reorg']])
+  })
+})
+
 /**
  * No stored hash agrees with an endpoint's chain anywhere within K. That is either a
  * reorg deeper than K or an endpoint serving a different chain, and one endpoint

@@ -19,7 +19,7 @@
  */
 
 import { unwrapDbError } from './db'
-import type { EndpointHealth } from './endpoint-health'
+import type { EndpointHealth, HealthKind } from './endpoint-health'
 
 /**
  * Marks an error as NOT the endpoint's fault.
@@ -247,6 +247,8 @@ export async function readWithFailover<T, P>(
   timeoutMs: number,
   onFailover?: (provider: P, err: unknown) => void,
   health?: EndpointHealth<P>,
+  /** Which class of request this is, for health tracking. Tip reads are 'read'; reorg checks pass 'reorg'. */
+  kind: HealthKind = 'read',
 ): Promise<T> {
   if (providers.length === 0) {
     throw new Error('[rpc-failover] no RPC providers configured — cannot read')
@@ -255,7 +257,7 @@ export async function readWithFailover<T, P>(
   // These are the tip and reorg reads that gate EVERY batch, so they are the
   // calls that most need to stop starting on a known-bad endpoint.
   const ordered = health
-    ? health.order(providers, start, 'read')
+    ? health.order(providers, start, kind)
     : providers.map((_, i) => providers[(start + i) % providers.length])
 
   let lastErr: unknown
@@ -271,7 +273,7 @@ export async function readWithFailover<T, P>(
           )
         }),
       ])
-      health?.recordSuccess(provider, 'read')
+      health?.recordSuccess(provider, kind)
       return value
     } catch (err) {
       lastErr = err
@@ -282,7 +284,7 @@ export async function readWithFailover<T, P>(
       // and draining the connection pool. Stop immediately instead.
       // (codex P2, round 5.)
       if (!isEndpointFault(err)) throw err
-      health?.recordFailure(provider, 'read')
+      health?.recordFailure(provider, kind)
       onFailover?.(provider, err)
     } finally {
       // Always clear: on the success path this stops a pending timer from

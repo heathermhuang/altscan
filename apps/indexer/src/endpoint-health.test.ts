@@ -210,6 +210,30 @@ describe('createEndpointHealth', () => {
     expect(h.order(ALL, 0, 'block')).toEqual(['B', 'C', 'A'])
   })
 
+  // f068. Tip reads (`getBlockNumber`, kind 'read') and reorg checks (old headers,
+  // kind 'reorg') were one kind, so an endpoint that serves the tip but fails older
+  // headers had its reorg-failure streak wiped by every successful tip read and
+  // was never demoted for the check that gates every batch.
+  it("reorg failures interleaved with tip-read successes still demote for 'reorg'", () => {
+    const h = createEndpointHealth<string>()
+    for (let i = 0; i < DEFAULT_DEMOTE_AFTER; i++) {
+      h.recordFailure(P.a, 'reorg')
+      h.recordSuccess(P.a, 'read')
+    }
+    expect(h.order(ALL, 0, 'reorg')).toEqual(['B', 'C', 'A'])
+    // ...while staying in normal rotation for the reads it does serve.
+    expect(h.order(ALL, 0, 'read')).toEqual(['A', 'B', 'C'])
+    expect(h.order(ALL, 0, 'block')).toEqual(['A', 'B', 'C'])
+  })
+
+  it("a 'reorg' success clears only the reorg streak", () => {
+    const h = createEndpointHealth<string>()
+    for (let i = 0; i < DEFAULT_DEMOTE_AFTER; i++) { h.recordFailure(P.a, 'reorg'); h.recordFailure(P.a, 'block') }
+    h.recordSuccess(P.a, 'reorg')
+    expect(h.order(ALL, 0, 'reorg')).toEqual(['A', 'B', 'C'])
+    expect(h.order(ALL, 0, 'block')).toEqual(['B', 'C', 'A'])
+  })
+
   it('a single success clears the streak immediately', () => {
     const h = createEndpointHealth<string>()
     for (let i = 0; i < DEFAULT_DEMOTE_AFTER; i++) h.recordFailure(P.a, 'block')

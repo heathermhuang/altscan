@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { DrizzleQueryError } from 'drizzle-orm'
 import { processWithFailover, readWithFailover, withTimeout, redactRpcUrl, redactRpcSecrets, formatRedactedError } from './rpc-failover'
+import { createEndpointHealth } from './endpoint-health'
 
 /**
  * Regression cover for the 2026-08-11 BNB indexing collapse.
@@ -268,6 +269,48 @@ describe('readWithFailover', () => {
     await readWithFailover(['bad', 'good'], 0, work, 500, onFailover)
     expect(onFailover).toHaveBeenCalledTimes(1)
     expect(onFailover).toHaveBeenCalledWith('bad', expect.any(Error))
+  })
+
+  // f068: the health `kind` is what keeps a tip read's success from clearing a
+  // reorg check's failure streak for the same endpoint.
+  it("records health under the given kind: 'read' by default, caller-chosen otherwise", async () => {
+    const health = createEndpointHealth<string>()
+    const down = new Error('503')
+    // 'a' serves the tip but fails every reorg header read.
+    const tip = async () => 1
+    const reorg = async (p: string) => { if (p === 'a') throw down; return 2 }
+    for (let i = 0; i < 3; i++) {
+      await readWithFailover(['a', 'b'], 0, tip, 500, undefined, health)
+      await readWithFailover(['a', 'b'], 0, reorg, 500, undefined, health, 'reorg')
+    }
+    expect(health.demoted(['a', 'b'], 'reorg')).toEqual(['a'])
+    expect(health.demoted(['a', 'b'], 'read')).toEqual([])
+  })
+
+  it('orders by the health of the kind it runs under', async () => {
+    const health = createEndpointHealth<string>()
+    for (let i = 0; i < 3; i++) health.recordFailure('a', 'reorg')
+    const tried = (kind?: 'reorg') => {
+      const work = vi.fn().mockResolvedValue('ok')
+      return readWithFailover(['a', 'b'], 0, work, 500, undefined, health, kind).then(() => work.mock.calls[0][0])
+    }
+    await expect(tried('reorg')).resolves.toBe('b')   // 'a' is demoted for reorg checks
+    await expect(tried()).resolves.toBe('a')          // ...but still first for tip reads
+  })
+
+  it('a success clears only the streak of the kind it ran under', async () => {
+    const health = createEndpointHealth<string>()
+    const fail = async () => { throw new Error('503') }
+    const ok = async () => 'ok'
+    const run = (work: (p: string) => Promise<string>, kind?: 'read' | 'reorg') =>
+      readWithFailover(['a'], 0, work, 500, undefined, health, kind).catch(() => 'failed')
+    await run(fail, 'reorg'); await run(fail, 'reorg')
+    await run(fail); await run(fail)
+    await run(ok, 'reorg')                 // clears the reorg streak only
+    await run(fail, 'reorg')               // reorg streak is back to 1: not demoted
+    await run(fail)                        // read streak is 3: demoted
+    expect(health.demoted(['a'], 'reorg')).toEqual([])
+    expect(health.demoted(['a'], 'read')).toEqual(['a'])
   })
 
   it('propagates a falsy result without treating it as failure', async () => {
