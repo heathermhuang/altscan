@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server'
-import { dbErrorMessage } from '@altscan/db'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { Contract, Interface } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
 import { authFailure, authRequest } from '@/lib/api-auth'
+import { swallow } from '@/lib/observability'
+import { redactSecrets } from '@/lib/redact'
+
+// Errors about the call itself (a revert, bad arguments, undecodable return data).
+// Their `shortMessage` is the reason alone. Transport errors (SERVER_ERROR,
+// TIMEOUT, NETWORK_ERROR, ...) are never shown: ethers 6.17 appends
+// `info={"requestUrl": ...}` to their message, and the web RPC URL is often keyed.
+const CALL_ERROR_CODES: readonly string[] = [
+  'CALL_EXCEPTION', 'INVALID_ARGUMENT', 'MISSING_ARGUMENT', 'UNEXPECTED_ARGUMENT',
+  'BAD_DATA', 'NUMERIC_FAULT', 'BUFFER_OVERRUN',
+]
 
 export async function POST(
   request: Request,
@@ -77,8 +87,16 @@ export async function POST(
     ))
     return NextResponse.json({ result: serialized })
   } catch (err) {
-    // Return safe error message without internal details
-    const message = err instanceof Error ? dbErrorMessage(err).split('\n')[0] : 'Call failed'
-    return NextResponse.json({ error: message }, { status: 400 })
+    // Log the cause (redacted by swallow), return only a message that cannot carry the RPC URL
+    swallow('api/contracts/call', err)
+    const { code, shortMessage } = (err ?? {}) as { code?: unknown; shortMessage?: unknown }
+    if (typeof code === 'string' && CALL_ERROR_CODES.includes(code) && typeof shortMessage === 'string') {
+      return NextResponse.json({ error: redactSecrets(shortMessage) }, { status: 400 })
+    }
+    // Any other coded error is the transport or the node: say so, and nothing more.
+    if (typeof code === 'string') {
+      return NextResponse.json({ error: 'Upstream RPC error' }, { status: 502 })
+    }
+    return NextResponse.json({ error: 'Call failed' }, { status: 400 })
   }
 }
