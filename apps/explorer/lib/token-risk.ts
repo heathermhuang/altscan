@@ -53,7 +53,9 @@ export async function analyzeTokenRisk(tokenAddress: string): Promise<RiskSignal
   let abiRead = false
   if (contractData?.abi) {
     try {
-      const abi = contractData.abi as { name?: string; type?: string }[]
+      // Rows written before #163 hold the ABI as a jsonb STRING (double-encoded); decode it rather than read it as none.
+      const raw = typeof contractData.abi === 'string' ? JSON.parse(contractData.abi) : contractData.abi
+      const abi = raw as { name?: string; type?: string }[]
       const fnNames = abi.filter(f => f.type === 'function').map(f => (f.name ?? '').toLowerCase())
       abiRead = fnNames.length > 0
       hasMint = fnNames.some(n => n === 'mint' || n === 'minttokens')

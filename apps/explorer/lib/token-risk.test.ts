@@ -51,12 +51,21 @@ describe('analyzeTokenRisk with no verified ABI', () => {
     ])
   })
 
-  it('treats an ABI that is not a list (a legacy double-encoded jsonb string) or lists no function as no ABI', async () => {
-    for (const abi of ['[{"type":"function","name":"mint"}]', [], [{ type: 'event', name: 'Transfer' }]]) {
+  it('treats an ABI that is not a list, or lists no function, as no ABI', async () => {
+    for (const abi of ['not json', '{"type":"function","name":"mint"}', [], [{ type: 'event', name: 'Transfer' }]]) {
       h.contract = verified(abi)
       const s = await byLabel()
       expect([s['Mint Function'].unknown, s['Blacklist'].unknown, s['Proxy/Upgradeable'].unknown]).toEqual([true, true, true])
     }
+  })
+
+  it('reads a legacy double-encoded ABI (a jsonb string) as the ABI it encodes', async () => {
+    h.contract = verified(JSON.stringify([fn('mint'), fn('transfer')]))
+    const s = await byLabel()
+    expect(s['Mint Function']).toMatchObject({ ok: false, severity: 'warn' })
+    expect(s['Mint Function'].unknown).toBeUndefined()
+    expect(s['Blacklist']).toMatchObject({ ok: true })
+    expect(s['Blacklist'].unknown).toBeUndefined()
   })
 
   it('a timeout is not an answer either', async () => {
