@@ -244,12 +244,12 @@ const endpoints: Endpoint[] = [
   {
     method: 'POST',
     path: '/api/v1/webhooks',
-    description: `Register a new webhook. Returns a one-time secret for verifying incoming webhook signatures (HMAC-SHA256). ${chainConfig.brandName} will POST events to your URL with an X-BNBScan-Signature header.`,
+    description: `Register a new webhook. Returns a one-time secret for verifying incoming webhook signatures (HMAC-SHA256, keyed with sha256(secret) in hex). ${chainConfig.brandName} will POST events to your URL with an X-BNBScan-Signature header. Delivery is best-effort: one POST per block with matching transactions, sent at most once, before the block is final, and not withdrawn if a reorg drops it.`,
     params: [
       { name: 'ownerAddress', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
       { name: 'url', type: 'string', required: true, description: 'Your HTTPS endpoint to receive events' },
       { name: 'watchAddress', type: 'string', required: false, description: 'Address to watch for events' },
-      { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types: ["tx", "token_transfer"] (default: ["tx"])' },
+      { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types (default: ["tx"]). "token_transfer" and "new_block" are accepted but not delivered yet; only "tx" events are sent.' },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -293,6 +293,8 @@ const endpoints: Endpoint[] = [
     description: 'Generate a new API key linked to your address. The full key is shown once — save it immediately. Use the X-API-Key header to authenticate requests.',
     params: [
       { name: 'ownerAddress', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
+      { name: 'signature', type: 'string', required: true, description: 'Wallet signature (personal_sign) of "BNBScan API Key Request\\nAddress: <ownerAddress, lowercase>\\nTimestamp: <timestamp>"' },
+      { name: 'timestamp', type: 'number', required: true, description: 'Unix time in milliseconds, within 5 minutes of the server clock' },
       { name: 'label', type: 'string', required: false, description: 'Human-readable label for this key' },
     ],
     exampleResponse: JSON.stringify(

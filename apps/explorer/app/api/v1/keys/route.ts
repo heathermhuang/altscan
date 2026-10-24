@@ -2,18 +2,16 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { keyRequestTimestampError } from '@/lib/key-request'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 
 export const dynamic = 'force-dynamic'
 
-/** Message the client must sign: deterministic, timestamped, non-replayable. */
+/** Message the client must sign: deterministic and timestamped; reusable only inside the skew window. */
 function expectedMessage(ownerAddress: string, timestamp: number): string {
   return `BNBScan API Key Request\nAddress: ${ownerAddress.toLowerCase()}\nTimestamp: ${timestamp}`
 }
-
-/** Allow signatures up to 5 minutes old to accommodate clock skew. */
-const SIG_MAX_AGE_MS = 5 * 60 * 1000
 
 // GET: list keys for an address (requires API key ownership)
 export async function GET(request: Request) {
@@ -61,8 +59,9 @@ export async function POST(request: Request) {
   if (!signature || !timestamp) {
     return NextResponse.json({ error: 'signature and timestamp required' }, { status: 400 })
   }
-  if (Date.now() - timestamp > SIG_MAX_AGE_MS) {
-    return NextResponse.json({ error: 'Signature expired' }, { status: 400 })
+  const timestampError = keyRequestTimestampError(timestamp)
+  if (timestampError) {
+    return NextResponse.json({ error: timestampError }, { status: 400 })
   }
   const message = expectedMessage(ownerAddress, timestamp)
   try {

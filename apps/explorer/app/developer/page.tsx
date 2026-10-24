@@ -136,6 +136,10 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
               Subscribe to real-time on-chain events. {chainConfig.brandName} will POST to your URL whenever the specified
               events occur for the watched address. Requests are signed with HMAC-SHA256.
             </p>
+            <p className="text-ink2">
+              Delivery is best-effort: one POST per block with matching transactions, sent at most once, before the
+              block is final, and not withdrawn if a reorg later drops it. Only <code>tx</code> events are sent today.
+            </p>
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Register a Webhook</h3>
@@ -146,7 +150,7 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
     "ownerAddress": "0xYourAddress",
     "url": "https://your-app.com/webhook",
     "watchAddress": "0xWatchedAddress",
-    "eventTypes": ["tx", "token_transfer"]
+    "eventTypes": ["tx"]
   }'
 
 # Response:
@@ -159,17 +163,21 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Webhook Payload Format</h3>
-              <CodeBlock label="Webhook Payload Format">{`// POST to your URL:
+              <CodeBlock label="Webhook Payload Format">{`// One POST per block, batching that block's matching transactions:
 {
   "event": "tx",
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "data": {
-    "hash": "0xabc...",
-    "from": "0x111...",
-    "to": "0x222...",
-    "value": "1000000000000000000",
-    "blockNumber": 42000000
-  }
+  "blockNumber": 42000000,
+  "count": 1,
+  "data": [
+    {
+      "hash": "0xabc...",
+      "blockNumber": 42000000,
+      "from": "0x111...",
+      "to": "0x222...",
+      "value": "1000000000000000000"
+    }
+  ]
 }
 
 // Headers included:
@@ -182,15 +190,18 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
               <h3 className="mb-2 text-sm font-semibold text-ink">Verify Signature (Node.js)</h3>
               <CodeBlock label="Verify Signature (Node.js)">{`const crypto = require('crypto')
 
+// body: the raw request body string, exactly as received.
+// The HMAC key is sha256(secret) in lowercase hex, not the secret itself.
 function verifyWebhook(body, signature, secret) {
-  const expected = 'sha256=' +
-    crypto.createHmac('sha256', secret)
+  const key = crypto.createHash('sha256').update(secret).digest('hex')
+  const expected = Buffer.from('sha256=' +
+    crypto.createHmac('sha256', key)
       .update(body)
-      .digest('hex')
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  )
+      .digest('hex'))
+  const received = Buffer.from(signature)
+  // timingSafeEqual throws on unequal lengths
+  return received.length === expected.length &&
+    crypto.timingSafeEqual(received, expected)
 }`}</CodeBlock>
             </div>
 
