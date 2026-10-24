@@ -8,7 +8,10 @@
  * Next.js hot-module reloads and is shared across server-side renders in the
  * same process. Resets on connection error so the next call gets a fresh provider.
  */
-import { AbstractProvider, JsonRpcProvider, FetchRequest, Network, type PerformActionRequest } from 'ethers'
+import {
+  AbstractProvider, JsonRpcProvider, FetchRequest, Network,
+  type FetchGetUrlFunc, type PerformActionRequest,
+} from 'ethers'
 import { chainConfig } from './chain'
 import { getSetting } from './settings'
 import { resolveRpc } from './settings-defaults'
@@ -49,6 +52,23 @@ class FailoverProvider extends AbstractProvider {
   }
 }
 
+/**
+ * ethers follows a 301/302/307/308 to ANY http(s) URL (https only to https), so
+ * an endpoint that answers with a redirect can aim our POST at a host the
+ * saved-host policy (isBlockedRpcHost, packages/settings-schema) never approved,
+ * such as an internal address. Turn every 3xx into a plain 502 before ethers
+ * sees it: the endpoint counts as failed, and FailoverProvider moves to the next.
+ */
+function refuseRedirects(getUrl: FetchGetUrlFunc): FetchGetUrlFunc {
+  return async (req, signal) => {
+    const resp = await getUrl(req, signal)
+    if (resp.statusCode >= 300 && resp.statusCode < 400) {
+      return { statusCode: 502, statusMessage: 'redirect refused', headers: {}, body: null }
+    }
+    return resp
+  }
+}
+
 type ProviderEntry = { key: string; timeoutMs: number; provider: AbstractProvider }
 
 const g = globalThis as typeof globalThis & {
@@ -73,6 +93,7 @@ function buildProvider({ urls, timeoutMs }: { urls: string[]; timeoutMs: number 
   const endpoints = urls.map((url) => {
     const req = new FetchRequest(url)
     req.timeout = timeoutMs
+    req.getUrlFunc = refuseRedirects(req.getUrlFunc)
     // batchMaxCount 1: every call goes out as its own request. ethers' default
     // (100) coalesces concurrent calls into one JSON-RPC batch, and because this
     // provider is a process-wide singleton, calls from concurrent page renders
