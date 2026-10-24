@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { secureHeaders } from 'hono/secure-headers'
 import { html } from './page.js'
+import { classifyHealth } from './classify.js'
 
 // ── Config ──────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3090
@@ -97,23 +98,19 @@ async function checkService(key: string) {
     svc.lastChecked = new Date().toISOString()
     svc.error = null
 
-    if (data.status === 'ok' || data.status === 'degraded') {
-      svc.latestBlock = (data.latestBlock as number) ?? null
-      svc.lagSeconds = (data.lagSeconds as number) ?? null
-
-      // Upstream says 'degraded' (the public health view carries the flag when
-      // the explorer is under critical memory pressure — never the numbers) OR
-      // the chain head is stale (> 2 min).
-      svc.status = (data.status === 'degraded' || (svc.lagSeconds !== null && svc.lagSeconds > 120))
-        ? 'degraded'
-        : 'operational'
-    } else {
-      svc.status = 'degraded'
-    }
+    // Degraded: upstream says so (critical memory pressure, abandoned blocks, an unreadable blocks
+    // table), the payload lacks a head or its lag, or the head is stale (> 2 min) — see classifyHealth.
+    const result = classifyHealth(data)
+    svc.latestBlock = result.latestBlock
+    svc.lagSeconds = result.lagSeconds
+    svc.status = result.status
     pushHistory(key, svc.status === 'operational' ? 'operational' : 'degraded', elapsed, svc.lagSeconds)
   } catch (err) {
     const elapsed = Date.now() - start
     svc.status = 'down'
+    // The last good head/lag would otherwise keep rendering beside a "down" badge.
+    svc.latestBlock = null
+    svc.lagSeconds = null
     svc.responseTimeMs = elapsed
     svc.error = err instanceof Error ? err.message : 'Unknown error'
     svc.lastChecked = new Date().toISOString()
