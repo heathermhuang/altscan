@@ -81,6 +81,25 @@ describe.skipIf(!PG_URL)('mintApiKey under concurrency — against a real Postgr
     expect(await count()).toBe(MAX_KEYS_PER_ADDRESS)
   })
 
+  it('revoked keys count toward neither the cap nor the has-a-key rule', async () => {
+    const refuseWithoutKey = { ok: false as const, status: 403, error: 'needs one of its keys' }
+    for (let i = 0; i < MAX_KEYS_PER_ADDRESS; i++) await mintApiKey(db, OWNER, key(), { ok: true })
+    // At the cap, and holding keys: refused either way.
+    expect((await mintApiKey(db, OWNER, key(), { ok: true })).ok).toBe(false)
+    expect((await mintApiKey(db, OWNER, key(), refuseWithoutKey)).ok).toBe(false)
+
+    // Revoke one: its slot is free again.
+    await db.execute(sql.raw(`UPDATE api_keys SET active = false WHERE id = (SELECT min(id) FROM api_keys)`))
+    expect((await mintApiKey(db, OWNER, key(), { ok: true })).ok).toBe(true)
+
+    // Revoke every key: the owner holds none, so a signature alone mints one again (no requesting
+    // key could pass the ownership check), and then the has-a-key rule applies as usual.
+    await db.execute(sql.raw(`UPDATE api_keys SET active = false`))
+    expect((await mintApiKey(db, OWNER, key(), refuseWithoutKey)).ok).toBe(true)
+    expect((await mintApiKey(db, OWNER, key(), refuseWithoutKey)).ok).toBe(false)
+    expect(await count()).toBe(MAX_KEYS_PER_ADDRESS + 2)
+  })
+
   it('a burst of mints on a small pool cannot deadlock it', { timeout: 15_000 }, async () => {
     // Each request authorizes through the pool, as requireApiKeyOwner does, then mints. Run
     // inside the transaction, that lookup would hold one connection waiting for a second, and
