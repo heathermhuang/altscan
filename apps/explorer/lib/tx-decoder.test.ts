@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
+import { approvalStandard, attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol, type TxTransferInfo } from './tx-decoder'
 
 const base = {
   hash: '0xabc',
@@ -261,5 +261,113 @@ describe('headline of a transfer of a token whose symbol is a URL', () => {
     expect(swap.summary).toMatch(/ for 5 0x123456 on /)
     const many = decodeTx({ ...base, methodId: '0xa9059cbb' }, [transfer(safe), { ...transfer(safe), toAddress: '0x3333333333333333333333333333333333333333' }])
     expect(many.summary).toBe('2 token transfers to 2 recipients')
+  })
+})
+
+// approve(spender, amount) is sent TO the token contract, so tx.toAddress is the token and the
+// grantee is in the calldata. The headline used to name the token contract as the one "approved to
+// spend tokens": it pointed the reader at the wrong address on the very action where the right one
+// matters most.
+describe('decodeTx approvals', () => {
+  const TOKEN = '0x55d398326f99059ff775485246999027b3197955'
+  const SPENDER = '0x1111111111111111111111111111111111111111'
+  const ROUTER = '0x10ed43c718714eb63d5aa57b78b54704e256024e' // labelled "PancakeSwap: Router v2" on BNB
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const approveInput = (spender: string, amount: bigint) =>
+    '0x095ea7b3' + word(spender) + word(amount.toString(16))
+  // Amount readings need the Approval event's proof of ERC-20; the cases below have it unless they say otherwise.
+  const approve = (input: string | null | undefined, over: { toTokenSymbol?: string; approvalStandard?: 'fungible' | 'nft' | null } = {}) =>
+    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input, approvalStandard: 'fungible', ...over }, [], 'BNB')
+
+  it('names the spender from the calldata, not the token contract the tx was sent to', () => {
+    const out = approve(approveInput(SPENDER, 1000n))
+    expect(out.type).toBe('approval')
+    expect(out.summary).toContain(SPENDER.slice(0, 12))
+    expect(out.summary).not.toContain(TOKEN.slice(0, 12))
+    expect(out.summary).not.toContain('USDT (BSC)') // the token contract's own address label
+  })
+
+  it('uses the address label of the spender when it has one', () => {
+    expect(approve(approveInput(ROUTER, 1000n)).summary).toBe('Approved PancakeSwap: Router v2 to spend tokens')
+  })
+
+  it('names the token by its symbol when the page resolved one', () => {
+    expect(approve(approveInput(SPENDER, 1000n), { toTokenSymbol: 'USDT' }).summary)
+      .toBe(`Approved ${SPENDER.slice(0, 12)}… to spend USDT`)
+  })
+
+  it('says unlimited from 2^255 up, and only then', () => {
+    const max = 2n ** 256n - 1n
+    expect(approve(approveInput(SPENDER, max), { toTokenSymbol: 'USDT' }).summary).toContain('to spend unlimited USDT')
+    expect(approve(approveInput(SPENDER, 2n ** 255n)).summary).toContain('to spend unlimited tokens')
+    expect(approve(approveInput(SPENDER, 2n ** 255n - 1n)).summary).not.toContain('unlimited')
+  })
+
+  it('reads an approval of zero as a revocation, not a grant', () => {
+    const out = approve(approveInput(SPENDER, 0n), { toTokenSymbol: 'USDT' })
+    expect(out.type).toBe('approval')
+    expect(out.summary).toBe(`Revoked ${SPENDER.slice(0, 12)}…'s approval to spend USDT`)
+    expect(attemptedSummary(out.summary)).toMatch(/^Tried to revoke /)
+    expect(pendingSummary(out.summary)).toMatch(/^Revoking /)
+  })
+
+  it.each([
+    ['no calldata at all', undefined],
+    ['null calldata', null],
+    ['calldata pruned to 0x', '0x'],
+    ['calldata cut short', '0x095ea7b3' + word(SPENDER)],
+    ['non-hex calldata', '0x095ea7b3' + 'zz'.repeat(64)],
+    ['calldata for another method', '0xa9059cbb' + word(SPENDER) + word('1')],
+  ])('does not name the token contract as the spender when it has %s', (_what, input) => {
+    const out = approve(input)
+    expect(out.type).toBe('approval')
+    expect(out.summary).toBe('Approved a token allowance')
+    expect(out.summary).not.toContain(TOKEN.slice(0, 12))
+    expect(out.summary).not.toContain('USDT (BSC)')
+  })
+
+  it('reads a long (truncated-at-500-chars) approve the same as a short one', () => {
+    const long = approveInput(SPENDER, 1000n) + 'ab'.repeat(200)
+    expect(approve(long).summary).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend tokens`)
+  })
+})
+
+// ERC-721 shares approve(address,uint256), but its second argument is a token id: approve(spender, 0)
+// grants token #0, it revokes nothing. Only the Approval event tells the two apart.
+describe('decodeTx approvals of an unproven standard', () => {
+  const TOKEN = '0x55d398326f99059ff775485246999027b3197955'
+  const SPENDER = '0x1111111111111111111111111111111111111111'
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const input = (amount: bigint) => '0x095ea7b3' + word(SPENDER) + word(amount.toString(16))
+  const approve = (amount: bigint, approvalStandard: 'nft' | null) =>
+    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input: input(amount), toTokenSymbol: 'PUNK', approvalStandard }, [], 'BNB').summary
+
+  it.each(['nft', null] as const)('does not read a zero second argument as a revocation (standard %s)', (std) => {
+    expect(approve(0n, std)).toBe(`Approved ${SPENDER.slice(0, 12)}… on PUNK`)
+  })
+
+  it.each(['nft', null] as const)('does not read a huge second argument as unlimited (standard %s)', (std) => {
+    expect(approve(2n ** 256n - 1n, std)).not.toContain('unlimited')
+  })
+})
+
+describe('approvalStandard', () => {
+  const TOKEN = '0x' + '55'.repeat(20)
+  const APPROVAL = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+  const t = (n: number) => '0x' + String(n).repeat(64)
+
+  it('is fungible for an ERC-20 Approval (two indexed arguments) at the token', () => {
+    expect(approvalStandard([{ address: TOKEN, topic0: APPROVAL, topic3: null }], TOKEN)).toBe('fungible')
+  })
+
+  it('is nft for an ERC-721 Approval (the token id indexed too)', () => {
+    expect(approvalStandard([{ address: TOKEN.toUpperCase().replace('0X', '0x'), topic0: APPROVAL, topic3: t(0) }], TOKEN)).toBe('nft')
+  })
+
+  it('is unknown without an Approval event from the token itself', () => {
+    expect(approvalStandard([], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: '0x' + '66'.repeat(20), topic0: APPROVAL, topic3: null }], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: TOKEN, topic0: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', topic3: null }], TOKEN)).toBeNull()
+    expect(approvalStandard([{ address: TOKEN, topic0: APPROVAL, topic3: null }], null)).toBeNull()
   })
 })

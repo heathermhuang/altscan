@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchTxBodyFromRpc, getTxBody } from './body-cache'
+import { fetchTxBodyFromRpc, fetchTxInputFromRpc, getTxBody } from './body-cache'
 import { getWebProvider } from './rpc'
 import { kvGet, kvSet } from '@altscan/explorer-core'
 import { serializeTxBody } from './body-cache-serde'
@@ -121,5 +121,35 @@ describe('getTxBody TTL bound', () => {
     const ttlMs = vi.mocked(freshCore.kvSet).mock.calls.at(-1)?.[2]
     expect(ttlMs).toBeGreaterThan(0)
     expect(ttlMs).toBeLessThanOrEqual(3 * 60 * 60 * 1000)
+  })
+})
+
+// An indexed tx's stored input is cut at 500 chars; the page asks the node for the rest. That must not
+// ride getTxBody's cache: those writes go to the noeviction Redis the Moralis CU ledger depends on.
+describe('fetchTxInputFromRpc', () => {
+  const FULL = '0x' + 'ab'.repeat(400)
+
+  it("returns the node's input for the hash asked, and writes nothing to the shared cache", async () => {
+    mockProvider({ tx: { hash: HASH, data: FULL } })
+    expect(await fetchTxInputFromRpc(HASH)).toBe(FULL)
+    expect(kvSet).not.toHaveBeenCalled()
+    expect(kvGet).not.toHaveBeenCalled()
+  })
+
+  it('compares the hash ignoring letter case', async () => {
+    mockProvider({ tx: { hash: HASH, data: FULL } })
+    expect(await fetchTxInputFromRpc(HASH.toUpperCase().replace('0X', '0x'))).toBe(FULL)
+  })
+
+  it('is null when the node answers for another transaction', async () => {
+    mockProvider({ tx: { hash: '0x' + 'cd'.repeat(32), data: FULL } })
+    expect(await fetchTxInputFromRpc(HASH)).toBeNull()
+  })
+
+  it('is null when the node does not know the tx, or the call fails', async () => {
+    mockProvider({ tx: null })
+    expect(await fetchTxInputFromRpc(HASH)).toBeNull()
+    mockProvider({ throws: true })
+    expect(await fetchTxInputFromRpc(HASH)).toBeNull()
   })
 })

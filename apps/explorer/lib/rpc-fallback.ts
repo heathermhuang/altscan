@@ -141,6 +141,14 @@ export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | nu
       provider.getTransactionReceipt(hash),
     ])
     if (!tx) { setNullCache(cacheKey); return null }
+    // A node (or a proxy in front of one) can answer for a different transaction than the one asked,
+    // and the page would print that one's sender, value and fee under this hash. Not found, and not
+    // negative-cached: the node was wrong, which says nothing about whether this hash exists.
+    const asked = hash.toLowerCase()
+    if (tx.hash.toLowerCase() !== asked || (receipt && receipt.hash.toLowerCase() !== asked)) {
+      swallow('rpc/tx-hash-mismatch', new Error(`asked ${asked}, node returned tx ${tx.hash} and receipt ${receipt?.hash ?? 'none'}`))
+      return null
+    }
 
     const timestamp = tx.blockNumber
       ? await provider.getBlock(tx.blockNumber).then(b => b ? new Date(b.timestamp * 1000) : null)
@@ -153,7 +161,8 @@ export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | nu
       toAddress: tx.to?.toLowerCase() ?? null,
       value: tx.value,
       gas: tx.gasLimit,
-      gasPrice: tx.gasPrice ?? tx.maxFeePerGas ?? null,
+      // The receipt's effective price is what was paid; the transaction's own is a ceiling for a type-2.
+      gasPrice: receipt?.gasPrice ?? tx.gasPrice ?? tx.maxFeePerGas ?? null,
       gasUsed: receipt?.gasUsed ?? null,
       input: tx.data,
       // Pre-Byzantium (pre-EIP-658) Ethereum receipts carry no status: unknown, not failed.
@@ -211,6 +220,11 @@ export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock |
     // prefetch=true: same RPC round trip, but the transaction bodies come back.
     const block = await provider.getBlock(blockNumber, true)
     if (!block) { setNullCache(cacheKey); return null }
+    // As for a transaction: another block's answer is not this block's, and is not negative-cached.
+    if (block.number !== blockNumber) {
+      swallow('rpc/block-number-mismatch', new Error(`asked block ${blockNumber}, node returned ${block.number}`))
+      return null
+    }
     return {
       number: block.number,
       hash: block.hash ?? '',

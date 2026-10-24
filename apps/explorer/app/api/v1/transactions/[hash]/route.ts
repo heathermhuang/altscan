@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { lookupTxOnChain } from '@/lib/api-tx-lookup'
+import { inputMayBeTruncated } from '@/lib/tx-view'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,14 +36,16 @@ export async function GET(
   }
 
   if (transactions.length > 0) {
-    return apiJson({ transaction: transactions[0], source: 'index' })
+    // The index keeps only the first 500 characters of `input`: say when what it holds may be cut.
+    const row = transactions[0]
+    return apiJson({ transaction: { ...row, inputTruncated: inputMayBeTruncated(row.input) }, source: 'index' })
   }
 
   // The index keeps only recent transactions; older ones come from the chain. Fields the node did
   // not report are null, and `pending: true` means there is no receipt yet (status, gasUsed unknown).
   const chain = await lookupTxOnChain(hash)
   if (chain.kind === 'found') {
-    return apiJson({ transaction: chain.tx, source: 'chain' })
+    return apiJson({ transaction: { ...chain.tx, inputTruncated: false }, source: 'chain' })
   }
   if (chain.kind === 'missing') {
     return NextResponse.json({

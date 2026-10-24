@@ -12,18 +12,19 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import type { BinanceReferralPlacement } from '@/lib/binance-referral'
-import { attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol } from '@/lib/tx-decoder'
+import { approvalStandard, attemptedSummary, decodeTx, pendingSummary, safeTransferSymbol } from '@/lib/tx-decoder'
 import { getAddressLabel } from '@/lib/known-addresses'
 import { toChecksumAddress, shortenAddress } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { fetchTxFromRpc, fetchBlockFromRpc, type RpcTx } from '@/lib/rpc-fallback'
 import { getWebProvider } from '@/lib/rpc'
 import { computeGasBreakdown } from '@/lib/gas-breakdown'
-import { resolveTxViewKind, txOutcome, TX_OUTCOME_LABEL } from '@/lib/tx-view'
-import { getTxBody, type CachedLog } from '@/lib/body-cache'
+import { resolveTxViewKind, txOutcome, mayShowCalldataTransfer, atCurrentPrice, needsInputRefetch, resolveStoredInput, CALLDATA_TRANSFER_LABEL, TRUNCATED_INPUT_NOTE, TX_OUTCOME_LABEL } from '@/lib/tx-view'
+import { getTxBody, fetchTxInputFromRpc, type CachedLog } from '@/lib/body-cache'
 import { decodeEventName, decodeTopicParam } from '@/lib/event-decoder'
 import { decodeTransferLogs, decodeNftTransferLogs, splitTokenAddrs, capTransfers, TX_TRANSFERS_SHOWN } from '@/lib/erc20-transfers'
-import { fetchTokenMetadata, addrsNeedingMetadata } from '@/lib/token-metadata'
+import { selectTxInternals, capTxInternals, TX_INTERNALS_SHOWN } from '@/lib/tx-internal'
+import { fetchTokenMetadata, addrsNeedingMetadata, recordFetchedMetadata, PLACEHOLDER_SYMBOL, type KnownToken } from '@/lib/token-metadata'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { swallow, swallowed, arrayShape } from '@/lib/observability'
 import { getBlockStrip } from '@/lib/block-strip'
@@ -95,7 +96,7 @@ const getTx = cache(async (hash: string) => {
   // token balances rendered with no transfers and no logs at all.
   // null on RPC failure → the page degrades to compact + a note.
   const body = kind === 'pruned' || kind === 'rpc' ? await getTxBody(hash) : null
-  return { dbTx, rpcTx, body }
+  return { dbTx, rpcTx, body, kind }
 })
 
 // Missing entities return noindex metadata instead of throwing notFound():
@@ -210,19 +211,6 @@ function formatUsd(nativeAmount: number, price: number): string {
   return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/** Execution order. '0.10' sorts after '0.2' numerically, not as a string. */
-function sortByTraceAddress<T extends { traceAddress: string }>(rows: T[]): T[] {
-  const key = (r: T) => r.traceAddress.split('.').map(Number)
-  return [...rows].sort((a, b) => {
-    const ka = key(a), kb = key(b)
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const d = (ka[i] ?? -1) - (kb[i] ?? -1)
-      if (d !== 0) return d
-    }
-    return 0
-  })
-}
-
 export default async function TxDetailPage({
   params,
 }: {
@@ -231,7 +219,7 @@ export default async function TxDetailPage({
   const { hash } = await params
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
 
-  const { dbTx, rpcTx, body } = await getTx(hash)
+  const { dbTx, rpcTx, body, kind } = await getTx(hash)
   const tx = dbTx ?? rpcTx
   if (!tx) notFound()
 
@@ -246,7 +234,7 @@ export default async function TxDetailPage({
 
   // token_transfers is compact-immortal → still local even for a pruned tx.
   // logs are a prunable body → local when present, else from the refetched body.
-  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip] = await Promise.all([
+  const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip, fullInput] = await Promise.all([
     (fromRpc || bodyPruned)
       ? Promise.resolve([])
       : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
@@ -257,7 +245,7 @@ export default async function TxDetailPage({
     // indexed before the feature (or while the indexer was behind) has none.
     fromRpc
       ? Promise.resolve([])
-      : db.select().from(schema.internalTransactions).where(eq(schema.internalTransactions.txHash, hash)).limit(100).catch(swallowed('tx/internal', [])),
+      : selectTxInternals(db, hash, tx.blockNumber).catch(swallowed('tx/internal', [])),
     tx.methodId && tx.methodId !== '0x'
       ? resolveMethodName(tx.methodId)
       : Promise.resolve(null),
@@ -265,13 +253,19 @@ export default async function TxDetailPage({
     fetchChainTip(),
     // An RPC-path tx has no local block, so no strip.
     fromRpc ? Promise.resolve(null) : getBlockStrip(tx.blockNumber),
+    // The indexer stores only the first 500 characters of an input and leaves body_pruned false: ask the
+    // node for the rest of a long one (null on failure; the input then shows as cut, below).
+    needsInputRefetch(kind, dbTx?.input) ? fetchTxInputFromRpc(hash) : Promise.resolve(null),
   ])
 
   // Both bodyless views read the refetched body; a local tx reads the DB.
   const usesBody = bodyPruned || fromRpc
   // Effective input: the refetched body wins (DB input is '0x' when pruned, and
-  // absent entirely on the RPC path).
-  const effectiveInput = usesBody && body ? body.input : tx.input
+  // absent entirely on the RPC path). An indexed tx's stored input may be cut at 500 characters:
+  // the node's full copy replaces it, or `inputTruncated` says what is shown is only a prefix.
+  const { input: effectiveInput, truncated: inputTruncated } = usesBody
+    ? { input: body ? body.input : tx.input, truncated: false }
+    : resolveStoredInput(tx.input, fullInput)
   // Effective logs: refetched body logs when bodyless, else local DB logs. Both
   // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
   const bodyLogs: CachedLog[] = usesBody && body ? body.logs : []
@@ -321,8 +315,9 @@ export default async function TxDetailPage({
   // USD values
   const bnbValue = Number(safeBigInt(tx.value)) / 1e18
   const feeVal = Number(fee) / 1e18
-  const valueUsd = nativePrice ? formatUsd(bnbValue, nativePrice) : null
-  const feeUsd = nativePrice ? formatUsd(feeVal, nativePrice) : null
+  // Today's price, whatever the tx's age: the figures say so (atCurrentPrice).
+  const valueUsd = nativePrice ? atCurrentPrice(formatUsd(bnbValue, nativePrice)) : null
+  const feeUsd = nativePrice ? atCurrentPrice(formatUsd(feeVal, nativePrice)) : null
 
   // Confirmations
   const confirmations = chainTip && placed ? chainTip - tx.blockNumber : null
@@ -334,14 +329,17 @@ export default async function TxDetailPage({
   // On the RPC path there are no token_transfers rows, so the transfers are
   // decoded out of the receipt logs we just refetched. `transfers` (DB) wins
   // when present — it is authoritative and already normalised.
+  const { shown: shownInternalTxs, truncated: internalTxsTruncated } = capTxInternals(internalTxs)
   const { shown: shownTransfers, truncated: transfersTruncated } = capTransfers(transfers)
   const effectiveTransfers = shownTransfers.length > 0
     ? shownTransfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
     : decodeTransferLogs(txLogs)
 
   // Batch token lookups into single query (was N+1: one query per transfer)
+  // An approve is sent to its token, which no transfer names: resolve that token alongside the transfers'.
+  const approvedToken = tx.methodId === '0x095ea7b3' && tx.toAddress ? tx.toAddress.toLowerCase() : null
   const { valid: uniqueTokenAddrs, invalid: badTokenAddrs } =
-    splitTokenAddrs([...new Set(effectiveTransfers.map(t => t.tokenAddress))])
+    splitTokenAddrs([...new Set([...effectiveTransfers.map(t => t.tokenAddress), ...(approvedToken ? [approvedToken] : [])])])
   if (badTokenAddrs.length > 0) {
     // The column is notNull and the log decoder only emits strings, so an
     // undefined here has come from a HOLE in the query result: postgres.js
@@ -357,7 +355,7 @@ export default async function TxDetailPage({
       + `invalid=[${badTokenAddrs.map(v => v === undefined ? 'undefined' : JSON.stringify(v)).join(', ')}]`,
     ))
   }
-  const tokenLookup = new Map<string, { symbol: string; decimals: number }>()
+  const tokenLookup = new Map<string, KnownToken>()
   if (uniqueTokenAddrs.length > 0) {
     let tokens: { address: string; symbol: string; decimals: number }[] | undefined
     try {
@@ -378,14 +376,10 @@ export default async function TxDetailPage({
   // where the answer is "4,280 USDC"). Cached; failures degrade, never throw.
   const unnamed = addrsNeedingMetadata(uniqueTokenAddrs, tokenLookup)
   if (unnamed.length > 0) {
-    for (const [addr, meta] of await fetchTokenMetadata(unnamed)) {
-      if (meta.symbol != null || meta.decimals != null) {
-        tokenLookup.set(addr, { symbol: meta.symbol ?? '', decimals: meta.decimals ?? 18 })
-      }
-    }
+    recordFetchedMetadata(tokenLookup, await fetchTokenMetadata(unnamed))
   }
 
-  const transferInfos = effectiveTransfers.map((t) => {
+  const transferInfos: TransferInfo[] = effectiveTransfers.map((t) => {
     const tok = tokenLookup.get(t.tokenAddress)
     return {
       tokenAddress: t.tokenAddress,
@@ -393,12 +387,12 @@ export default async function TxDetailPage({
       toAddress: t.toAddress,
       value: t.value ?? '0',
       tokenSymbol: safeTransferSymbol(t.tokenAddress, tok?.symbol, chainConfig.key),
-      tokenDecimals: tok?.decimals,
+      tokenDecimals: tok?.decimals ?? undefined,
     }
   })
 
-  // Fallback: decode transfer from input data
-  if (transferInfos.length === 0 && tx.methodId === '0xa9059cbb' && tx.toAddress) {
+  // Fallback: decode transfer from input data, only where the logs could not be read (see mayShowCalldataTransfer).
+  if (tx.toAddress && mayShowCalldataTransfer({ methodId: tx.methodId, outcome, logsUnavailable: bodyUnavailable, knownTransfers: transferInfos.length })) {
     const parsed = decodeTransferInput(effectiveInput ?? null)
     if (parsed) {
       let tokenSymbol: string | undefined
@@ -415,11 +409,17 @@ export default async function TxDetailPage({
         value: parsed.amount.toString(),
         tokenSymbol,
         tokenDecimals,
+        unverified: true,
       })
     }
   }
 
   const transfersAllShown = transferInfos.length <= TRANSFER_PREVIEW
+
+  // The approved token's symbol: not the indexer's placeholder, which names nothing.
+  const approvedSymbol = approvedToken && tokenLookup.get(approvedToken)?.symbol !== PLACEHOLDER_SYMBOL
+    ? safeTransferSymbol(approvedToken, tokenLookup.get(approvedToken)?.symbol, chainConfig.key)
+    : undefined
 
   const decoded = decodeTx(
     {
@@ -430,6 +430,9 @@ export default async function TxDetailPage({
       methodId: tx.methodId,
       status: tx.status,
       methodName,
+      input: effectiveInput,
+      toTokenSymbol: approvedSymbol,
+      approvalStandard: approvalStandard(txLogs, approvedToken),
     },
     transferInfos,
     chainConfig.currency
@@ -679,6 +682,7 @@ export default async function TxDetailPage({
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-hair bg-canvas p-3 font-mono text-xs text-ink2">
                   {effectiveInput}
                 </pre>
+                {inputTruncated && <p className="mt-1.5 text-xs text-warn">{TRUNCATED_INPUT_NOTE}</p>}
               </div>
               {decodedUtf8 && (
                 <div>
@@ -693,11 +697,11 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {internalTxs.length > 0 && (
+      {shownInternalTxs.length > 0 && (
         <div className="mb-6 rounded-xl border border-hair bg-card p-4">
-          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Internal Transactions ({internalTxs.length})</h2>
+          <h2 className="mb-3 font-semibold tracking-[-0.02em] text-ink">Internal Transactions ({shownInternalTxs.length}{internalTxsTruncated ? '+' : ''})</h2>
           <div className="space-y-2">
-            {sortByTraceAddress(internalTxs).map((it) => (
+            {shownInternalTxs.map((it) => (
               <div key={it.traceAddress} className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge variant="default">{it.callType}</Badge>
                 <span className="text-mut">From</span>
@@ -714,6 +718,19 @@ export default async function TxDetailPage({
           <p className="mt-3 text-xs text-mut">
             Value-moving calls, contract creations and self-destructs decoded from execution traces. Zero-value calls are not listed.
           </p>
+          {internalTxsTruncated && (
+            <p className="mt-2 text-xs text-mut">
+              Showing the first {TX_INTERNALS_SHOWN} internal transactions, in execution order — this transaction has more.{' '}
+              <a
+                href={`${chainConfig.externalExplorerUrl}/tx/${hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-acc-ink underline"
+              >
+                View all on {chainConfig.externalExplorer} ↗
+              </a>
+            </p>
+          )}
         </div>
       )}
 
@@ -835,6 +852,8 @@ type TransferInfo = {
   value: string
   tokenSymbol?: string
   tokenDecimals?: number
+  /** Decoded from calldata, not read from logs. */
+  unverified?: boolean
 }
 
 // One row of the token-transfer list; the summary preview and the full list render the same markup.
@@ -859,6 +878,7 @@ function TransferRow({ t }: { t: TransferInfo }) {
           {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
         </Link>
       </span>
+      {t.unverified && <span className="text-xs text-mut">({CALLDATA_TRANSFER_LABEL})</span>}
     </div>
   )
 }

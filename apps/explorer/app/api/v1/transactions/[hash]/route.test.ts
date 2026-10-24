@@ -40,6 +40,20 @@ describe('GET /api/v1/transactions/:hash', () => {
     expect(h.lookup).not.toHaveBeenCalled()
   })
 
+  // The indexer stores only the first 500 characters of `input` and leaves bodyPruned false, so a long
+  // input arrived looking whole.
+  it('flags an indexed input at the 500-character cut-off as possibly truncated', async () => {
+    h.rows = [{ hash: HASH, input: '0x' + 'ab'.repeat(249) }]
+    expect((await (await get(HASH)).json()).transaction.inputTruncated).toBe(true)
+  })
+
+  it('does not flag an input the index stores whole', async () => {
+    h.rows = [{ hash: HASH, input: '0x' + 'ab'.repeat(248) + 'a' }]   // 499 characters
+    expect((await (await get(HASH)).json()).transaction.inputTruncated).toBe(false)
+    h.rows = [{ hash: HASH, input: '0x' }]
+    expect((await (await get(HASH)).json()).transaction.inputTruncated).toBe(false)
+  })
+
   it('queries the index with the lowercased hash', async () => {
     h.rows = [{ hash: HASH }]
     await get(HASH.toUpperCase().replace('0X', '0x'))
@@ -55,7 +69,7 @@ describe('GET /api/v1/transactions/:hash', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       source: 'chain',
-      transaction: { hash: HASH, pending: true, status: null, gasUsed: null, blockNumber: null, timestamp: null, value: '5' },
+      transaction: { hash: HASH, pending: true, status: null, gasUsed: null, blockNumber: null, timestamp: null, value: '5', inputTruncated: false },
     })
     expect(h.lookup).toHaveBeenCalledWith(HASH)
   })
