@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
+import crypto from 'crypto'
+import { openSigningKey } from './webhook-secret'
 
 /**
  * Webhook failure accounting against a REAL Postgres, through the shipped notifyWebhooks.
@@ -9,7 +11,8 @@ import { createMaintenanceConnection, schema } from '@altscan/db'
  * five-failure deactivation could not fire. The count is now incremented in SQL; this
  * pins that five consecutive failures deactivate, that a success resets the count, and
  * that a failure landing after a concurrent run deactivated the row does not revive it
- * (runs overlap: notifyWebhooks is fired per block without being awaited).
+ * (runs overlap: notifyWebhooks is fired per block without being awaited). It also pins
+ * that sealing a signing key at rest clears the plaintext without changing a signature.
  *
  * Gated on WEBHOOK_TEST_PG_URL. Everything lives in its own schema on ONE connection.
  * Run locally with:
@@ -24,9 +27,12 @@ const PG_URL = process.env[ENV]
 const SCHEMA = 'webhook_notify_test'
 const ADDR = '0x' + 'a'.repeat(40)
 
+const KEY_HEX = 'ef'.repeat(32)
+const KEY = Buffer.from(KEY_HEX, 'hex')
+
 const h = vi.hoisted(() => ({
   db: null as unknown,
-  onFetch: async (): Promise<Response> => new Response(null, { status: 500 }),
+  onFetch: async (_url?: string, _init?: RequestInit): Promise<Response> => new Response(null, { status: 500 }),
 }))
 vi.mock('./db', async (orig) => ({ ...(await orig<typeof import('./db')>()), getDb: () => h.db }))
 vi.mock('node:dns/promises', () => ({ default: { lookup: async () => [{ address: '93.184.216.34', family: 4 }] } }))
@@ -34,6 +40,7 @@ vi.mock('node:dns/promises', () => ({ default: { lookup: async () => [{ address:
 describe.skipIf(!PG_URL)('webhook failure accounting — against a real Postgres', () => {
   let conn: ReturnType<typeof createMaintenanceConnection>
   let notifyWebhooks: typeof import('./webhook-notifier').notifyWebhooks
+  let sealPlaintextWebhookSecrets: typeof import('./webhook-notifier').sealPlaintextWebhookSecrets
   let block = 0
 
   const notify = () => {
@@ -67,6 +74,7 @@ describe.skipIf(!PG_URL)('webhook failure accounting — against a real Postgres
         watch_address varchar(42),
         event_types text[] NOT NULL DEFAULT '{tx}',
         secret varchar(64),
+        secret_enc text,
         active boolean NOT NULL DEFAULT true,
         created_at timestamptz NOT NULL DEFAULT now(),
         last_triggered_at timestamptz,
@@ -83,12 +91,14 @@ describe.skipIf(!PG_URL)('webhook failure accounting — against a real Postgres
         ON webhook_deliveries (webhook_id, block_hash) WHERE block_hash IS NOT NULL;
     `)
     h.db = drizzle(conn, { schema })
-    vi.stubGlobal('fetch', () => h.onFetch())
-    notifyWebhooks = (await import('./webhook-notifier')).notifyWebhooks
+    vi.stubGlobal('fetch', (url: string, init: RequestInit) => h.onFetch(url, init))
+    vi.stubEnv('WEBHOOK_SECRET_KEY', KEY_HEX) // read when the notifier's config loads, just below
+    ;({ notifyWebhooks, sealPlaintextWebhookSecrets } = await import('./webhook-notifier'))
   })
 
   afterAll(async () => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     if (!conn) return
     await conn.unsafe(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
     await conn.end()
@@ -124,5 +134,27 @@ describe.skipIf(!PG_URL)('webhook failure accounting — against a real Postgres
     }
     await notify()
     expect(await row()).toEqual({ fail_count: 1, active: false })
+  })
+
+  it('seals the plaintext signing key, clears it, and keeps every signature identical', async () => {
+    const sent: Array<{ body: string; signature: string }> = []
+    h.onFetch = async (_url, init) => {
+      sent.push({ body: init!.body as string, signature: (init!.headers as Record<string, string>)['X-BNBScan-Signature'] })
+      return new Response(null, { status: 200 })
+    }
+    await notify() // from the plaintext key
+
+    expect(await sealPlaintextWebhookSecrets(KEY)).toBe(1)
+    expect(await sealPlaintextWebhookSecrets(KEY)).toBe(0) // idempotent
+    const [stored] = await conn.unsafe('SELECT secret, secret_enc FROM webhooks WHERE id = 1')
+    expect(stored.secret).toBeNull()
+    expect(openSigningKey(stored.secret_enc as string, KEY, 1)).toBe('k')
+
+    await notify() // from the sealed key
+    expect(sent).toHaveLength(2)
+    for (const { body, signature } of sent) {
+      expect(signature).toBe('sha256=' + crypto.createHmac('sha256', 'k').update(body).digest('hex'))
+    }
+    expect(await row()).toEqual({ fail_count: 0, active: true })
   })
 })

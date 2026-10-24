@@ -240,6 +240,13 @@ Two more things carry the hosted sites' identity and are set per chain in
 The status page (`apps/status`) monitors bnbscan.com and ethscan.io; its targets are set
 in `apps/status/src/server.ts`.
 
+Set **`WEBHOOK_SECRET_KEY`** on the indexer if your fork offers webhooks. A webhook's
+signing key is stored in the database, so without this anyone who can read that table can
+forge its signatures. Set to 64 hex characters (`openssl rand -hex 32`), the indexer
+encrypts each signing key at rest within a minute of its creation; signatures do not
+change. Keep the value safe: if it is lost, encrypted webhooks stop being delivered until
+their owners register them again.
+
 Put the explorer behind a proxy that sets the client-IP headers itself. The explorer
 takes the visitor's address from `CF-Connecting-IP`, `X-Real-IP` and `X-Forwarded-For`
 for its per-IP rate limits and its abuse denylist. The Docker stack publishes the
