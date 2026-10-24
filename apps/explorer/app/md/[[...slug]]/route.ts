@@ -122,7 +122,7 @@ function apiDocsMarkdown(): string {
     '',
     '## Auth',
     '',
-    'All documented endpoints are public and require no authentication. Admin-only endpoints are out of scope for agent integrations.',
+    `The endpoints above need no credential; keyless requests are rate limited per IP. \`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\` take an API key in \`X-API-Key\`, and webhooks and key management require one: see https://${c.domain}/auth.md. Admin-only endpoints are out of scope for agent integrations.`,
     '',
   ].join('\n')
 }

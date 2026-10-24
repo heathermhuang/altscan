@@ -63,3 +63,13 @@ describe('/md still echoes plain paths', () => {
     expect((await md('blocks', 'latest')).body).toContain('`latest` is not in the')
   })
 })
+
+describe('/md/api-docs', () => {
+  // It once said every documented endpoint needs no authentication; webhooks and key management do.
+  it('names the endpoints that take a key and points to auth.md', async () => {
+    const { body } = await md('api-docs')
+    expect(body).not.toMatch(/require no authentication/)
+    expect(body).toContain('`/api/v1/webhooks`')
+    expect(body).toMatch(/https:\/\/[^ ]+\/auth\.md/)
+  })
+})
