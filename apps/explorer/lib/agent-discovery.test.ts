@@ -39,6 +39,21 @@ describe('agent skills discovery index', () => {
     expect(fm![1]).toBe(skill.name)
     expect(JSON.parse(fm![2])).toBe(skill.description)
   })
+
+  // The Auth section once said every /api/v1/* endpoint needs no authentication and that
+  // OAuth is "intentionally absent". Neither is true: four endpoints take X-API-Key and the
+  // OAuth server exists whenever OAUTH_SECRET is set (a static page can't know which).
+  it('does not claim the API is keyless or that OAuth is absent; points at /auth.md for keys', async () => {
+    const body = await (await skillMd()).text()
+    expect(body).not.toMatch(/require no authentication/i)
+    expect(body).not.toMatch(/intentionally absent/i)
+    expect(body).not.toMatch(/no OAuth authorization server/i)
+    expect(body).toContain('X-API-Key')
+    expect(body).toContain('/auth.md')
+    for (const path of ['/api/v1/query', '/api/v1/keys', '/api/v1/webhooks', '/api/v1/contracts/{address}/call']) {
+      expect(body).toContain(path)
+    }
+  })
 })
 
 describe('ARD ai-catalog.json', () => {
