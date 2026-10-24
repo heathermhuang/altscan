@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 
 export const MAX_KEYS_PER_ADDRESS = 10
@@ -17,7 +17,7 @@ export type MintResult = { ok: true; id: number } | Refusal
  * pattern. The lock releases on commit or rollback.
  *
  * `existingOwnerAuth` is the X-API-Key ownership check's result, applied only when the
- * owner already holds an active key. The caller computes it BEFORE this runs: a check that read
+ * owner already holds a key. The caller computes it BEFORE this runs: a check that read
  * through the pool from inside the transaction would hold one connection while waiting
  * for a second, and a burst of mints could take every connection that way and deadlock
  * the pool. Its answer depends only on the request's key, not on the state the lock
@@ -31,13 +31,9 @@ export async function mintApiKey(
 ): Promise<MintResult> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`api_keys:${owner}`}))`)
-    // Active keys only. A key revoked through DELETE /api/v1/keys/:id stays in the table but no
-    // longer authenticates, so counting it would lock an owner who revoked every key out of ever
-    // minting again (no key of theirs can pass the ownership check) and would never free a slot
-    // under the cap.
     const existing = await tx.select({ id: schema.apiKeys.id })
       .from(schema.apiKeys)
-      .where(and(eq(schema.apiKeys.ownerAddress, owner), eq(schema.apiKeys.active, true)))
+      .where(eq(schema.apiKeys.ownerAddress, owner))
     if (existing.length > 0 && !existingOwnerAuth.ok) return existingOwnerAuth
     if (existing.length >= MAX_KEYS_PER_ADDRESS) {
       return { ok: false, status: 400, error: `Maximum ${MAX_KEYS_PER_ADDRESS} API keys per address` }
