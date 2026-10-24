@@ -7,6 +7,7 @@ import {
   buildPartitionedTtWhaleIndexSql,
   ensureForwardPartitions,
   ensurePartitionedTtWhaleIndex,
+  isPartitioned,
   sweepInvalidIndexes,
   ttWhaleIndex,
 } from './ensure-schema'
@@ -35,9 +36,9 @@ import {
  * The code under test is the production path: ensurePartitionedTtWhaleIndexes /
  * ensureForwardPartitions go through the indexer's own getDb() (DATABASE_URL on bnb), which
  * this suite points at the fixture. Gated on TT_WHALE_INDEX_TEST_PG_URL. The database must
- * be disposable (its name must contain "test") and DEDICATED: the catalog helpers match
- * relations by name across schemas, and the suite creates and drops `token_transfers` and
- * `tokens` in public. Run locally with:
+ * be disposable (its name must contain "test") and DEDICATED: the suite creates and drops
+ * `token_transfers` and `tokens` in public (and a `sweep_other` schema, to prove the catalog
+ * helpers and the sweep stay inside the indexer's own schema). Run locally with:
  *
  *   docker run -d --rm --name pg-ttwhale -e POSTGRES_PASSWORD=x \
  *     -e POSTGRES_DB=ttwhale_test -p 127.0.0.1:5467:5432 postgres:16
@@ -644,6 +645,47 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
       expect(await indexValid('sweep_dead_idx')).toBe(false)
       expect(await sweepInvalidIndexes()).toContain('sweep_dead_idx')
       expect(await indexValid('sweep_dead_idx')).toBeUndefined()
+    })
+
+    // The sweep reads the whole cluster's catalog but used to DROP unqualified, so an invalid `x_idx` in ANOTHER
+    // schema dropped the valid `x_idx` that search_path resolves to. Same family: a bare-relname catalog lookup
+    // answered for a same-named relation in a schema this indexer does not own.
+    describe('a same-named relation in another schema', () => {
+      const idxState = async (schema: string, name: string) =>
+        (await rows(`SELECT i.indisvalid AS v FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '${schema}' AND c.relname = '${name}'`))[0]?.v as boolean | undefined
+      beforeAll(async () => {
+        await conn.unsafe('DROP SCHEMA IF EXISTS sweep_other CASCADE')
+        await conn.unsafe('DROP TABLE IF EXISTS sweep_same, sweep_part CASCADE')
+        await conn.unsafe('CREATE SCHEMA sweep_other')
+        // other: an INVALID sweep_same_idx (a failed unique build) and a PARTITIONED sweep_part
+        await conn.unsafe('CREATE TABLE sweep_other.sweep_same (a integer)')
+        await conn.unsafe('INSERT INTO sweep_other.sweep_same VALUES (1), (1)')
+        await expect(conn.unsafe('CREATE UNIQUE INDEX CONCURRENTLY sweep_same_idx ON sweep_other.sweep_same (a)')).rejects.toThrow()
+        await conn.unsafe('CREATE TABLE sweep_other.sweep_part (a integer) PARTITION BY RANGE (a)')
+        // public: a VALID sweep_same_idx and a plain sweep_part
+        await conn.unsafe('CREATE TABLE sweep_same (a integer)')
+        await conn.unsafe('CREATE INDEX sweep_same_idx ON sweep_same (a)')
+        await conn.unsafe('CREATE TABLE sweep_part (a integer)')
+      })
+      afterAll(async () => {
+        if (DISPOSABLE) {
+          await conn.unsafe('DROP SCHEMA IF EXISTS sweep_other CASCADE')
+          await conn.unsafe('DROP TABLE IF EXISTS sweep_same, sweep_part CASCADE')
+        }
+      })
+
+      it('the sweep leaves our valid index alone, and does not touch the other schema either', async () => {
+        expect(await idxState('sweep_other', 'sweep_same_idx'), 'fixture: invalid in the other schema').toBe(false)
+        expect(await idxState('public', 'sweep_same_idx'), 'fixture: valid in public').toBe(true)
+        const dropped = await sweepInvalidIndexes()
+        expect(dropped).not.toContain('sweep_same_idx')
+        expect(await idxState('public', 'sweep_same_idx'), 'public.sweep_same_idx survives').toBe(true)
+        expect(await idxState('sweep_other', 'sweep_same_idx'), 'not ours to drop').toBe(false)
+      })
+
+      it('isPartitioned answers for the relation search_path resolves, not for any schema\'s namesake', async () => {
+        expect(await isPartitioned('sweep_part')).toBe(false)
+      })
     })
 
     it('gives up on a drop it cannot lock within the timeout, logs it, and retries on the next sweep', async () => {

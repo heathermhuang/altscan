@@ -687,12 +687,20 @@ export async function ensureSchema(): Promise<void> {
  * stalling this boot and, because the queued request blocks every later one, every
  * writer of the table until the build finishes (measured on PG16 against a held build).
  * A build that DIED has no progress row, so it is still swept.
+ *
+ * `n.nspname = current_schema()` is just as load-bearing: this indexer owns ONE schema,
+ * but the query reads the whole cluster's catalog and the DROP below used to be an
+ * UNQUALIFIED `DROP INDEX "name"`, which resolves through search_path. An invalid
+ * `x_idx` in some other schema therefore dropped a perfectly VALID `x_idx` in ours.
+ * The sweep now selects only our schema's indexes, and drops them schema-qualified.
  */
 export const INVALID_INDEX_SWEEP_SQL = `
-      SELECT c.relname as index_name
+      SELECT n.nspname as schema_name, c.relname as index_name
       FROM pg_index i
       JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE NOT i.indisvalid AND c.relkind = 'i'
+        AND n.nspname = current_schema()
         AND NOT EXISTS (
           SELECT 1 FROM pg_stat_progress_create_index p
           WHERE p.index_relid = c.oid
@@ -714,11 +722,12 @@ export async function sweepInvalidIndexes(db: ReturnType<typeof getDb> = getDb()
   const invalid = await db.execute(sql.raw(INVALID_INDEX_SWEEP_SQL))
   for (const row of Array.from(invalid)) {
     const name = (row as Record<string, unknown>).index_name as string
+    const schemaName = (row as Record<string, unknown>).schema_name as string
     console.log(`[indexer] Dropping invalid index: ${name}`)
     try {
       await db.transaction(async (tx) => {
         await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${INVALID_INDEX_DROP_LOCK_TIMEOUT}'`))
-        await tx.execute(sql.raw(`DROP INDEX IF EXISTS "${name}"`))
+        await tx.execute(sql.raw(`DROP INDEX IF EXISTS "${schemaName.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`))
       })
       dropped.push(name)
     } catch (err) {
@@ -1053,13 +1062,19 @@ async function addColumnIfMissing(table: string, column: string, type: string): 
   await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`))
 }
 
-/** True if `table` is a declaratively-partitioned (RANGE/LIST/HASH) table. */
+/**
+ * True if `table` is a declaratively-partitioned (RANGE/LIST/HASH) table.
+ *
+ * The catalog helpers below resolve their NAME with to_regclass() — the same search_path
+ * resolution every unqualified statement in this file uses — and never by bare relname.
+ * A relname match is cluster-wide, so a same-named relation in another schema answered
+ * for ours (and a DROP then acted on whichever one search_path found).
+ */
 export async function isPartitioned(table: string): Promise<boolean> {
   const db = getDb()
   const res = await db.execute(sql`
     SELECT 1 FROM pg_partitioned_table p
-    JOIN pg_class c ON c.oid = p.partrelid
-    WHERE c.relname = ${table}
+    WHERE p.partrelid = to_regclass(${table})
     LIMIT 1
   `)
   return Array.from(res).length > 0
@@ -1117,7 +1132,7 @@ async function plainIndexIsValid(name: string): Promise<boolean> {
   const res = await db.execute(sql`
     SELECT i.indisvalid FROM pg_class c
     JOIN pg_index i ON i.indexrelid = c.oid
-    WHERE c.relname = ${name} AND c.relkind = 'i'
+    WHERE c.oid = to_regclass(${name}) AND c.relkind = 'i'
     LIMIT 1
   `)
   const row = Array.from(res)[0] as Record<string, unknown> | undefined
@@ -1130,7 +1145,7 @@ async function partitionedIndexIsValid(name: string): Promise<boolean> {
   const res = await db.execute(sql`
     SELECT i.indisvalid FROM pg_class c
     JOIN pg_index i ON i.indexrelid = c.oid
-    WHERE c.relname = ${name} AND c.relkind = 'I'
+    WHERE c.oid = to_regclass(${name}) AND c.relkind = 'I'
     LIMIT 1
   `)
   const row = Array.from(res)[0] as Record<string, unknown> | undefined
@@ -1145,7 +1160,7 @@ async function listAttachedChildIndexes(parent: string): Promise<Set<string>> {
     FROM pg_inherits inh
     JOIN pg_class c ON c.oid = inh.inhrelid
     JOIN pg_class pc ON pc.oid = inh.inhparent
-    WHERE pc.relname = ${parent} AND pc.relkind = 'I'
+    WHERE pc.oid = to_regclass(${parent}) AND pc.relkind = 'I'
   `)
   return new Set(Array.from(res).map(r => String((r as Record<string, unknown>).name)))
 }
@@ -1216,7 +1231,7 @@ async function listPartitionsWithAttachedIndex(parent: string): Promise<Map<stri
     JOIN pg_class ci ON ci.oid = inh.inhrelid
     JOIN pg_index i ON i.indexrelid = ci.oid
     JOIN pg_class t ON t.oid = i.indrelid
-    WHERE pc.relname = ${parent} AND pc.relkind = 'I'
+    WHERE pc.oid = to_regclass(${parent}) AND pc.relkind = 'I'
   `)
   return new Map(Array.from(res).map(r => [String((r as Record<string, unknown>).name), String((r as Record<string, unknown>).child)]))
 }
