@@ -28,7 +28,7 @@ describe('keyRequestTimestampError', () => {
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
     ['null', null],
-    ['an object', { valueOf: () => NOW }],
+    ['an object', { valueOf: (): number => NOW }],
   ])('rejects %s', (_label, value) => {
     expect(keyRequestTimestampError(value, NOW)).toMatch(/integer/)
   })
