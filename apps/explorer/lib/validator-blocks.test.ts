@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { blocksIn24h, blocksProduced, minerCounts } from '@/lib/validator-blocks'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import { blocksProduced, minerCounts, validatorBlocksQuery } from '@/lib/validator-blocks'
 
-describe('blocksIn24h', () => {
-  it('is 24h of blocks at the chain block time', () => {
-    expect(blocksIn24h(0.45)).toBe(192_000) // BNB
-    expect(blocksIn24h(12)).toBe(7_200)     // ETH
+describe('validatorBlocksQuery', () => {
+  const { sql: text, params } = new PgDialect().sqlToQuery(validatorBlocksQuery())
+  const flat = text.replace(/\s+/g, ' ')
+
+  it('windows by timestamp: 24 hours before the NEWEST block, not before now() and not a block count', () => {
+    expect(flat).toContain("(SELECT timestamp FROM blocks ORDER BY number DESC LIMIT 1) - INTERVAL '24 hours'")
+    expect(flat).not.toMatch(/now\(\)/i)
+    expect(flat).not.toMatch(/max\(number\)/i)
+    expect(params).toEqual([])   // no block-time constant reaches the statement
   })
 
-  it('rounds to a whole number of blocks', () => {
-    expect(Number.isInteger(blocksIn24h(3))).toBe(true)
-    expect(blocksIn24h(3)).toBe(28_800)
-    expect(Number.isInteger(blocksIn24h(0.7))).toBe(true)
+  it('resolves the lower bound with one probe of the timestamp index, ties broken by block number', () => {
+    expect(flat).toContain('WHERE timestamp >= ')
+    expect(flat).toContain('ORDER BY timestamp ASC, number ASC LIMIT 1')
+  })
+
+  it('counts over the primary-key range from that block up, grouped by miner', () => {
+    expect(flat).toContain('WHERE number >= (SELECT number FROM first_block) GROUP BY miner')
+    expect(flat).toContain('count(*)::int AS n')
   })
 })
 

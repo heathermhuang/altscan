@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc, sql } from 'drizzle-orm'
+import { desc } from 'drizzle-orm'
 import { formatNumber, safeBigInt } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
@@ -7,7 +7,7 @@ import { notFound } from 'next/navigation'
 import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
-import { blocksIn24h, blocksProduced, minerCounts, type MinerCount } from '@/lib/validator-blocks'
+import { blocksProduced, minerCounts, validatorBlocksQuery, type MinerCount } from '@/lib/validator-blocks'
 import { validatorDisplays } from '@/lib/validator-display'
 import { producerLegend, producerStrip, producerSummary } from '@/lib/producers'
 import { TileStrip } from '@/components/tape/TileStrip'
@@ -20,14 +20,10 @@ export const metadata: Metadata = {
 
 export const revalidate = 300
 
-/** Blocks each miner produced over the last 24h of block numbers; null if the query fails. */
+/** Blocks each miner produced in the 24h before the newest block; null if the query fails. */
 async function fetchBlocks24h(): Promise<Map<string, number> | null> {
   try {
-    const rows = await db.execute(sql`
-      SELECT miner, count(*)::int AS n FROM blocks
-      WHERE number > (SELECT max(number) FROM blocks) - ${blocksIn24h(chainConfig.blockTime)}::bigint
-      GROUP BY miner
-    `)
+    const rows = await db.execute(validatorBlocksQuery())
     return minerCounts(Array.from(rows) as unknown as MinerCount[])
   } catch (e) {
     swallow('validators/blocks24h', e)
