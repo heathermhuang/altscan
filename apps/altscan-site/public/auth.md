@@ -4,7 +4,7 @@ You are an agent. This document tells you which credentials the Altscan sites us
 
 ## altscan.io: nothing needs a credential, and a token is optional
 
-- MCP server: `https://altscan.io/mcp` (Streamable HTTP). No registration and no key: connect and call `tools/list`. It allows about 60 requests per minute per client IP and answers 429 above that. With an OAuth access token, the same limit counts per address instead of per IP.
+- MCP server: `https://altscan.io/mcp` (Streamable HTTP). No registration and no key: connect and call `tools/list`. It allows about 60 requests per minute per client IP and answers 429 above that. With an OAuth access token, the same limit counts per address instead of per IP, and all the addresses used from one IP share a ceiling of about 120 requests per minute.
 - Chain status feed: `https://altscan.io/api/chains.json`. Keyless.
 
 ## Getting a token: OAuth 2.1, signed with a wallet
@@ -80,7 +80,7 @@ Send `Authorization: Bearer <access_token>` with each `POST https://altscan.io/m
 | 400 | `/oauth/token` | `invalid_grant`: the code is unknown, used, expired, or the verifier does not match | Start again at Step 2 |
 | 401 | `/oauth/token` | `invalid_client` | Use the client_id you registered |
 | 401 | `/mcp` | `invalid_token`: the token is altered or expired | Get a new token, or call without one |
-| 429 | any of the above | 20 register, authorize or token requests a minute per IP; 60 /mcp calls a minute | Back off and retry after a minute |
+| 429 | any of the above | 20 register, authorize or token requests a minute per IP; 60 /mcp calls a minute per IP, or per address with a token, and 120 a minute per IP across addresses | Back off and retry after a minute |
 
 There is no revocation endpoint: a token expires after one hour.
 

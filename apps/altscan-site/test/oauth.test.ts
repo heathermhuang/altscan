@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { handleOAuthRequest, type CodeGrant } from '@altscan/oauth';
-import { isOAuthPath, mcpCaller, oauthConfig, oauthResponse } from '../src/lib/oauth.ts';
+import { isOAuthPath, mcpCaller, mcpWithinLimits, oauthConfig, oauthResponse } from '../src/lib/oauth.ts';
 
 let passed = 0;
 async function t(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log('ok -', name); }
@@ -56,6 +56,39 @@ await t('mcpCaller: per IP without a token or without OAuth; per address with a 
   }), issuing);
   const { access_token } = await tok!.json();
   assert.deepEqual(await mcpCaller(req(`Bearer ${access_token}`), cfg, '1.2.3.4'), { key: `sub:${owner}` });
+});
+
+await t('mcpWithinLimits: a token caller is limited per address AND, more loosely, per IP', async () => {
+  // Fake Workers rate limiters: each key gets `cap` calls.
+  const limiter = (cap: number) => {
+    const used = new Map<string, number>();
+    const seen: string[] = [];
+    return { seen, limit: async ({ key }: { key: string }) => {
+      seen.push(key);
+      const n = (used.get(key) ?? 0) + 1; used.set(key, n);
+      return { success: n <= cap };
+    } };
+  };
+  // Anonymous: the IP is the caller, and only the per-caller limiter is consulted.
+  let perCaller = limiter(60), perIp = limiter(120);
+  assert.equal(await mcpWithinLimits('1.2.3.4', '1.2.3.4', { perCaller, perIp }), true);
+  assert.deepEqual(perCaller.seen, ['1.2.3.4']);
+  assert.deepEqual(perIp.seen, []);
+  // Token callers: one IP opening many addresses gets each its own 60, but 120 in all.
+  perCaller = limiter(60); perIp = limiter(120);
+  let allowed = 0;
+  for (let i = 0; i < 300; i++) {
+    if (await mcpWithinLimits(`sub:0x${String(i).padStart(40, '0')}`, '5.6.7.8', { perCaller, perIp })) allowed++;
+  }
+  assert.equal(allowed, 120);
+  // Another IP is unaffected.
+  assert.equal(await mcpWithinLimits('sub:0xabc', '9.9.9.9', { perCaller, perIp }), true);
+  // A per-address limit still binds on its own.
+  perCaller = limiter(2); perIp = limiter(120);
+  const one = () => mcpWithinLimits('sub:0xdef', '5.6.7.8', { perCaller, perIp });
+  assert.deepEqual([await one(), await one(), await one()], [true, true, false]);
+  // Unbound limiters (local dev) allow.
+  assert.equal(await mcpWithinLimits('sub:0xdef', '5.6.7.8', {}), true);
 });
 
 await t('mcpCaller: an invalid token is a 401 a browser client can read', async () => {

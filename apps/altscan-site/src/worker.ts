@@ -5,7 +5,7 @@ import { handle } from '@astrojs/cloudflare/handler';
 import type { CodeGrant } from '@altscan/oauth';
 import { homeResponse } from './lib/home';
 import { clientHash, handleMcp, usagePoint, type UsagePoint } from './lib/mcp';
-import { isOAuthPath, mcpCaller, oauthConfig, oauthResponse } from './lib/oauth';
+import { isOAuthPath, mcpCaller, mcpWithinLimits, oauthConfig, oauthResponse } from './lib/oauth';
 
 export { OAuthCodes } from './oauth-codes';
 
@@ -18,6 +18,8 @@ type Env = {
   MCP_ENABLED?: string;
   /** Per-client limit for /mcp (wrangler.jsonc ratelimits). */
   MCP_RATE_LIMITER?: RateLimit;
+  /** Per-IP ceiling for /mcp token callers, across every address they use (wrangler.jsonc ratelimits). */
+  MCP_IP_RATE_LIMITER?: RateLimit;
   /** Secret shared with the explorers, which give it its own rate-limit bucket. */
   ALTSCAN_SERVICE_TOKEN?: string;
   /** One row per tool call, for the pilot's usage report (wrangler.jsonc analytics_engine_datasets). */
@@ -56,11 +58,11 @@ async function mcp(request: Request, env: Env): Promise<Response> {
     });
   }
   // The explorers see every Worker request as one client, so the per-client limit lives here: per IP,
-  // or per address for a caller with a valid OAuth token.
+  // or per address for a caller with a valid OAuth token, which is also capped per IP (mcpWithinLimits).
   const client = request.headers.get('cf-connecting-ip') ?? 'unknown';
   const caller = await mcpCaller(request, oauthFor(request, env), client);
   if ('reject' in caller) return caller.reject;
-  if (env.MCP_RATE_LIMITER && !(await env.MCP_RATE_LIMITER.limit({ key: caller.key })).success) {
+  if (!(await mcpWithinLimits(caller.key, client, { perCaller: env.MCP_RATE_LIMITER, perIp: env.MCP_IP_RATE_LIMITER }))) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
       status: 429,
       headers: { 'content-type': 'application/json', 'retry-after': '60' },
