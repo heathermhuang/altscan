@@ -68,6 +68,15 @@ const METHOD_TYPES: Record<string, string> = {
   '0x42966c68': 'Burn',
 }
 
+/**
+ * The grantee and amount of an approve(address,uint256) call, read from its calldata; null when the
+ * calldata is missing, pruned, cut short or not an approve at all.
+ */
+function parseApproveCalldata(input: string | null | undefined): { spender: string; amount: bigint } | null {
+  if (!input || !/^0x095ea7b3[0-9a-fA-F]{128}/.test(input)) return null
+  return { spender: `0x${input.slice(34, 74)}`.toLowerCase(), amount: BigInt(`0x${input.slice(74, 138)}`) }
+}
+
 export function decodeTx(tx: {
   hash: string
   fromAddress: string
@@ -76,6 +85,10 @@ export function decodeTx(tx: {
   methodId: string | null
   status: boolean
   methodName?: string | null
+  /** The calldata, for decoding what the headline names. Absent or pruned reads as unknown. */
+  input?: string | null
+  /** The symbol of the contract at toAddress, already through safeTransferSymbol (an approve goes to its token). */
+  toTokenSymbol?: string | null
 }, transfers: TxTransferInfo[], nativeCurrency = 'BNB'): DecodedTx {
   // Contract deployment
   if (!tx.toAddress) {
@@ -109,10 +122,16 @@ export function decodeTx(tx: {
 
   const methodType = METHOD_TYPES[tx.methodId] ?? tx.methodName ?? null
 
-  // Token approval
+  // Token approval. An approve is sent TO the token, so toAddress is the token contract and the
+  // grantee is in the calldata; naming toAddress here named the wrong address as the spender.
   if (tx.methodId === '0x095ea7b3') {
-    const spenderLabel = toLabel ?? `${tx.toAddress.slice(0, 12)}…`
-    return { summary: `Approved ${spenderLabel} to spend tokens`, type: 'approval' }
+    const approval = parseApproveCalldata(tx.input)
+    if (!approval) return { summary: 'Approved a token allowance', type: 'approval' }
+    const spender = getAddressLabel(approval.spender) ?? `${approval.spender.slice(0, 12)}…`
+    const token = tx.toTokenSymbol || 'tokens'
+    if (approval.amount === 0n) return { summary: `Revoked ${spender}'s approval to spend ${token}`, type: 'approval' }
+    const unlimited = approval.amount >= 2n ** 255n ? 'unlimited ' : ''
+    return { summary: `Approved ${spender} to spend ${unlimited}${token}`, type: 'approval' }
   }
 
   // Swap detection.
@@ -189,6 +208,7 @@ const OUTCOME_VERBS: Record<string, { base: string; ing: string }> = {
   Sent: { base: 'send', ing: 'Sending' },
   Swapped: { base: 'swap', ing: 'Swapping' },
   Approved: { base: 'approve', ing: 'Approving' },
+  Revoked: { base: 'revoke', ing: 'Revoking' },
   Transferred: { base: 'transfer', ing: 'Transferring' },
   Called: { base: 'call', ing: 'Calling' },
   Deployed: { base: 'deploy', ing: 'Deploying' },

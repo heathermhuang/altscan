@@ -263,3 +263,70 @@ describe('headline of a transfer of a token whose symbol is a URL', () => {
     expect(many.summary).toBe('2 token transfers to 2 recipients')
   })
 })
+
+// approve(spender, amount) is sent TO the token contract, so tx.toAddress is the token and the
+// grantee is in the calldata. The headline used to name the token contract as the one "approved to
+// spend tokens": it pointed the reader at the wrong address on the very action where the right one
+// matters most.
+describe('decodeTx approvals', () => {
+  const TOKEN = '0x55d398326f99059ff775485246999027b3197955'
+  const SPENDER = '0x1111111111111111111111111111111111111111'
+  const ROUTER = '0x10ed43c718714eb63d5aa57b78b54704e256024e' // labelled "PancakeSwap: Router v2" on BNB
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const approveInput = (spender: string, amount: bigint) =>
+    '0x095ea7b3' + word(spender) + word(amount.toString(16))
+  const approve = (input: string | null | undefined, over: { toTokenSymbol?: string } = {}) =>
+    decodeTx({ ...base, toAddress: TOKEN, methodId: '0x095ea7b3', input, ...over }, [], 'BNB')
+
+  it('names the spender from the calldata, not the token contract the tx was sent to', () => {
+    const out = approve(approveInput(SPENDER, 1000n))
+    expect(out.type).toBe('approval')
+    expect(out.summary).toContain(SPENDER.slice(0, 12))
+    expect(out.summary).not.toContain(TOKEN.slice(0, 12))
+    expect(out.summary).not.toContain('USDT (BSC)') // the token contract's own address label
+  })
+
+  it('uses the address label of the spender when it has one', () => {
+    expect(approve(approveInput(ROUTER, 1000n)).summary).toBe('Approved PancakeSwap: Router v2 to spend tokens')
+  })
+
+  it('names the token by its symbol when the page resolved one', () => {
+    expect(approve(approveInput(SPENDER, 1000n), { toTokenSymbol: 'USDT' }).summary)
+      .toBe(`Approved ${SPENDER.slice(0, 12)}… to spend USDT`)
+  })
+
+  it('says unlimited from 2^255 up, and only then', () => {
+    const max = 2n ** 256n - 1n
+    expect(approve(approveInput(SPENDER, max), { toTokenSymbol: 'USDT' }).summary).toContain('to spend unlimited USDT')
+    expect(approve(approveInput(SPENDER, 2n ** 255n)).summary).toContain('to spend unlimited tokens')
+    expect(approve(approveInput(SPENDER, 2n ** 255n - 1n)).summary).not.toContain('unlimited')
+  })
+
+  it('reads an approval of zero as a revocation, not a grant', () => {
+    const out = approve(approveInput(SPENDER, 0n), { toTokenSymbol: 'USDT' })
+    expect(out.type).toBe('approval')
+    expect(out.summary).toBe(`Revoked ${SPENDER.slice(0, 12)}…'s approval to spend USDT`)
+    expect(attemptedSummary(out.summary)).toMatch(/^Tried to revoke /)
+    expect(pendingSummary(out.summary)).toMatch(/^Revoking /)
+  })
+
+  it.each([
+    ['no calldata at all', undefined],
+    ['null calldata', null],
+    ['calldata pruned to 0x', '0x'],
+    ['calldata cut short', '0x095ea7b3' + word(SPENDER)],
+    ['non-hex calldata', '0x095ea7b3' + 'zz'.repeat(64)],
+    ['calldata for another method', '0xa9059cbb' + word(SPENDER) + word('1')],
+  ])('does not name the token contract as the spender when it has %s', (_what, input) => {
+    const out = approve(input)
+    expect(out.type).toBe('approval')
+    expect(out.summary).toBe('Approved a token allowance')
+    expect(out.summary).not.toContain(TOKEN.slice(0, 12))
+    expect(out.summary).not.toContain('USDT (BSC)')
+  })
+
+  it('reads a long (truncated-at-500-chars) approve the same as a short one', () => {
+    const long = approveInput(SPENDER, 1000n) + 'ab'.repeat(200)
+    expect(approve(long).summary).toBe(`Approved ${SPENDER.slice(0, 12)}… to spend tokens`)
+  })
+})

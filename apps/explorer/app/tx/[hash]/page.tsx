@@ -340,8 +340,10 @@ export default async function TxDetailPage({
     : decodeTransferLogs(txLogs)
 
   // Batch token lookups into single query (was N+1: one query per transfer)
+  // An approve is sent to its token, which no transfer names: resolve that token alongside the transfers'.
+  const approvedToken = tx.methodId === '0x095ea7b3' && tx.toAddress ? tx.toAddress.toLowerCase() : null
   const { valid: uniqueTokenAddrs, invalid: badTokenAddrs } =
-    splitTokenAddrs([...new Set(effectiveTransfers.map(t => t.tokenAddress))])
+    splitTokenAddrs([...new Set([...effectiveTransfers.map(t => t.tokenAddress), ...(approvedToken ? [approvedToken] : [])])])
   if (badTokenAddrs.length > 0) {
     // The column is notNull and the log decoder only emits strings, so an
     // undefined here has come from a HOLE in the query result: postgres.js
@@ -430,6 +432,8 @@ export default async function TxDetailPage({
       methodId: tx.methodId,
       status: tx.status,
       methodName,
+      input: effectiveInput,
+      toTokenSymbol: approvedToken ? safeTransferSymbol(approvedToken, tokenLookup.get(approvedToken)?.symbol, chainConfig.key) : undefined,
     },
     transferInfos,
     chainConfig.currency
