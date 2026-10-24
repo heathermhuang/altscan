@@ -10,10 +10,10 @@
  * signatures. Losing WEBHOOK_SECRET_KEY makes sealed webhooks undeliverable; their
  * owners must register them again.
  *
- * secret_enc is created by ensure-schema.ts and deliberately NOT declared in
- * packages/db/schema.ts: drizzle's insert lists every declared column, so an
- * explorer deployed ahead of the indexer's DDL would fail every webhook creation.
- * Only the indexer touches it, through raw SQL.
+ * secret_enc is created by ensure-schema.ts and written only by the indexer. The
+ * explorer's registration insert names its columns (apps/explorer/lib/webhook-insert.ts):
+ * drizzle's insert lists every declared column, so an explorer deployed ahead of
+ * this DDL would otherwise fail every webhook creation.
  */
 import crypto from 'crypto'
 

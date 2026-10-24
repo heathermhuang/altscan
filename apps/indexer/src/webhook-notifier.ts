@@ -6,7 +6,7 @@
 import { getDb, schema, unwrapDbError } from './db'
 import { indexerConfig } from './config-instance'
 import { openSigningKey, parseWebhookSecretKey, sealSigningKey } from './webhook-secret'
-import { eq, or, and, inArray, isNull, sql } from 'drizzle-orm'
+import { eq, or, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm'
 import crypto from 'crypto'
 import dns from 'node:dns/promises'
 import net from 'node:net'
@@ -156,17 +156,17 @@ function signingKeyFor(w: { id: number; secret: string | null; secretEnc: string
  */
 export async function sealPlaintextWebhookSecrets(key: Buffer): Promise<number> {
   const db = getDb()
-  const rows = Array.from(await db.execute(sql`
-    SELECT id, secret FROM webhooks WHERE secret IS NOT NULL AND secret_enc IS NULL ORDER BY id LIMIT 500
-  `) as Iterable<{ id: number; secret: string }>)
+  const w = schema.webhooks
+  const rows = await db.select({ id: w.id, secret: w.secret }).from(w)
+    .where(and(isNotNull(w.secret), isNull(w.secretEnc))).orderBy(w.id).limit(500)
   let sealed = 0
   for (const row of rows) {
-    const res = await db.execute(sql`
-      UPDATE webhooks SET secret_enc = ${sealSigningKey(row.secret, key, row.id)}, secret = NULL
-       WHERE id = ${row.id} AND secret = ${row.secret} AND secret_enc IS NULL
-      RETURNING id
-    `)
-    sealed += Array.from(res as Iterable<unknown>).length
+    if (!row.secret) continue
+    const done = await db.update(w)
+      .set({ secretEnc: sealSigningKey(row.secret, key, row.id), secret: null })
+      .where(and(eq(w.id, row.id), eq(w.secret, row.secret), isNull(w.secretEnc)))
+      .returning({ id: w.id })
+    sealed += done.length
   }
   return sealed
 }
@@ -225,8 +225,7 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
       id: schema.webhooks.id,
       url: schema.webhooks.url,
       secret: schema.webhooks.secret,
-      // Not in packages/db/schema.ts on purpose — see webhook-secret.ts.
-      secretEnc: sql<string | null>`secret_enc`,
+      secretEnc: schema.webhooks.secretEnc,
       watchAddress: schema.webhooks.watchAddress,
       eventTypes: schema.webhooks.eventTypes,
     }).from(schema.webhooks).where(

@@ -261,12 +261,14 @@ export const webhooks = pgTable('webhooks', {
   watchAddress:     varchar('watch_address', { length: 42 }),
   eventTypes:       text('event_types').array().notNull().default(['tx'] as string[]),
   // sha256(raw secret) in hex: the HMAC signing key, so a read of it can forge
-  // signatures. With WEBHOOK_SECRET_KEY set, the indexer seals it into an
-  // indexer-only `secret_enc` column and clears this one. That column is
-  // deliberately NOT declared here: drizzle's insert lists every declared column,
-  // so an explorer deployed ahead of the indexer's DDL would fail every webhook
-  // creation. See apps/indexer/src/webhook-secret.ts.
+  // signatures. With WEBHOOK_SECRET_KEY set, the indexer seals it into
+  // `secretEnc` and clears this one (apps/indexer/src/webhook-secret.ts).
   secret:           varchar('secret', { length: 64 }),
+  // Indexer-owned: created by ensure-schema.ts, written only by the indexer. The
+  // explorer's registration insert names its columns (apps/explorer/lib/webhook-insert.ts)
+  // so it never depends on this one existing yet; don't switch it back to
+  // `insert(schema.webhooks)`, which lists every column declared here.
+  secretEnc:        text('secret_enc'),
   active:           boolean('active').notNull().default(true),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastTriggeredAt:  timestamp('last_triggered_at', { withTimezone: true }),
