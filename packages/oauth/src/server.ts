@@ -16,6 +16,8 @@ import { randomToken } from './crypto'
 import { mintAccessToken, mintClientId, readAccessToken, readClientId, type ClientRecord } from './tokens'
 
 export interface CodeGrant {
+  /** The issuer that minted the code. The exchange refuses a code from another one, even on a shared store and secret. */
+  iss: string
   client_id: string
   redirect_uri: string
   code_challenge: string
@@ -233,7 +235,7 @@ export async function handleAuthorize(req: Request, cfg: OAuthConfig): Promise<R
   const code = randomToken(32)
   try {
     await cfg.codes.put(code, {
-      client_id: a.clientId, redirect_uri: a.redirectUri, code_challenge: a.codeChallenge, scope: a.scope, sub: address.toLowerCase(),
+      iss: cfg.issuer, client_id: a.clientId, redirect_uri: a.redirectUri, code_challenge: a.codeChallenge, scope: a.scope, sub: address.toLowerCase(),
     }, CODE_TTL_S)
   } catch {
     return redirectBack(a.redirectUri, { error: 'temporarily_unavailable', error_description: 'Could not store the authorization code; try again.' }, a.state, cfg)
@@ -288,7 +290,8 @@ async function codeGrant(p: URLSearchParams, cfg: OAuthConfig): Promise<Response
   } catch {
     return tokenError(503, 'temporarily_unavailable', 'Try again.')
   }
-  if (!g || g.client_id !== clientId) return tokenError(400, 'invalid_grant', 'The code is unknown, used, expired, or for another client.')
+  // A grant without `iss` (stored before codes carried one) is a mismatch, not a pass.
+  if (!g || g.iss !== cfg.issuer || g.client_id !== clientId) return tokenError(400, 'invalid_grant', 'The code is unknown, used, expired, or for another client or issuer.')
   const redirectUri = p.get('redirect_uri')
   if (redirectUri !== null && redirectUri !== g.redirect_uri) return tokenError(400, 'invalid_grant', 'redirect_uri does not match.')
   if (!(await pkceMatches(p.get('code_verifier') ?? '', g.code_challenge))) return tokenError(400, 'invalid_grant', 'code_verifier does not match code_challenge.')

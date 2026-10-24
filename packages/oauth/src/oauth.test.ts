@@ -237,6 +237,35 @@ describe('sign-in to token', () => {
     expect((await again.json()).error).toBe('invalid_grant')
   })
 
+  it('refuses a code minted under another issuer, even on a shared store and secret', async () => {
+    const shared = memoryCodes()
+    const A = config({ codes: shared })
+    const B = config({ codes: shared, issuer: 'https://other.example' })
+    cfg = A
+    const { clientId, pkce: p, location } = await signIn(Wallet.createRandom())
+    const code = location.searchParams.get('code')!
+    const res = await exchange(clientId, code, p.verifier, B)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_grant')
+    // The refusal still spends the code: it is not left for a retry on the issuer that minted it.
+    expect((await exchange(clientId, code, p.verifier, A)).status).toBe(400)
+
+    const again = await signIn(Wallet.createRandom())
+    const ok = await exchange(again.clientId, again.location.searchParams.get('code')!, again.pkce.verifier, config({ codes: shared }))
+    expect(ok.status).toBe(200)
+  })
+
+  it('refuses a stored grant that carries no issuer', async () => {
+    const { client_id } = await (await register()).json()
+    const p = pkce()
+    await cfg.codes.put('legacy-code', {
+      client_id, redirect_uri: REDIRECT, code_challenge: p.challenge, scope: 'api', sub: '0x' + 'ab'.repeat(20),
+    } as CodeGrant, 60)
+    const res = await exchange(client_id, 'legacy-code', p.verifier)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_grant')
+  })
+
   it('refuses a code for another client', async () => {
     const { pkce: p, location } = await signIn(Wallet.createRandom())
     const { client_id: other } = await (await register()).json()
