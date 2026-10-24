@@ -1,7 +1,7 @@
 import { getChainConfig } from '@altscan/chain-config'
-import { decodeV2Swap, SWAP_V2_TOPIC } from './dex-swap'
+import { decodeV2Swap, resolveV2Pair, SWAP_V2_TOPIC, V2_FACTORIES, type V2Pair, type V2PairReader } from './dex-swap'
 import { indexerConfig } from './config-instance'
-import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id } from 'ethers'
+import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256id, isError } from 'ethers'
 import { sql } from 'drizzle-orm'
 import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError } from './db'
 import { withTimeout } from './rpc-failover'
@@ -16,7 +16,6 @@ const TRANSFER_SINGLE_TOPIC = keccak256id('TransferSingle(address,address,addres
 // Every V2-shaped swap is recorded under the chain's best-known AMM: "PancakeSwap
 // V2" on BNB, "Uniswap V2" on Ethereum. It was hard-coded to PancakeSwap, which
 // would have labelled every Ethereum trade as a BNB Chain DEX.
-const DEX_V2_LABEL = `${getChainConfig().dex.primary} V2`
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const abi = AbiCoder.defaultAbiCoder()
@@ -211,7 +210,8 @@ type DexTradeRow = {
 const tokenCache = new Set<string>()
 const TOKEN_CACHE_MAX = 50_000
 
-const pairCache = new Map<string, [string, string]>()
+// null: not a listed factory's pair (dex-swap.ts V2_FACTORIES), remembered so it is not re-read every block.
+const pairCache = new Map<string, V2Pair | null>()
 const PAIR_CACHE_MAX = 10_000
 
 // ── Main entry ──────────────────────────────────────────────────────
@@ -696,16 +696,16 @@ async function processReceiptsBatch(
         // log_index is the natural key now, so an unusable one is not cosmetic.
         if (!isUsableLogIndex(log.index)) continue
         const pairAddress = log.address.toLowerCase()
-        const tokens = pairCache.get(pairAddress)
-        if (!tokens) continue
+        const pair = pairCache.get(pairAddress)
+        if (!pair) continue
 
-        const swap = decodeV2Swap(log, tokens)
+        const swap = decodeV2Swap(log, pair.tokens)
         if (!swap) continue
 
         dexRows.push({
           txHash,
           logIndex: log.index,
-          dex: DEX_V2_LABEL,
+          dex: pair.dex,
           pairAddress,
           ...swap,
           blockNumber,
@@ -1786,18 +1786,42 @@ async function ensureTokensBatch(
 const PAIR_ABI = [
   'function token0() view returns (address)',
   'function token1() view returns (address)',
+  'function factory() view returns (address)',
 ]
+const FACTORY_ABI = ['function getPair(address, address) view returns (address)']
+
+/** A revert, or an empty return ethers cannot decode: the contract answered that it has no such function. */
+function answeredNo(err: unknown): boolean {
+  return isError(err, 'CALL_EXCEPTION') || (isError(err, 'BAD_DATA') && err.value === '0x')
+}
+
+function v2PairReader(provider: JsonRpcProvider): V2PairReader {
+  return {
+    async pairInfo(pairAddress) {
+      const pair = new Contract(pairAddress, PAIR_ABI, provider)
+      try {
+        const [token0, token1, factory] = await Promise.all([pair.token0(), pair.token1(), pair.factory()])
+        return { token0: String(token0), token1: String(token1), factory: String(factory) }
+      } catch (err) {
+        if (answeredNo(err)) return null
+        throw err
+      }
+    },
+    async getPair(factory, tokenA, tokenB) {
+      return String(await new Contract(factory, FACTORY_ABI, provider).getPair(tokenA, tokenB))
+    },
+  }
+}
 
 async function fetchPairTokens(pairAddress: string, provider: JsonRpcProvider): Promise<void> {
   try {
-    const pair = new Contract(pairAddress, PAIR_ABI, provider)
-    const [t0, t1] = await Promise.all([pair.token0(), pair.token1()])
+    const pair = await resolveV2Pair(pairAddress, V2_FACTORIES[getChainConfig().key], v2PairReader(provider))
     if (pairCache.size >= PAIR_CACHE_MAX) {
       pairCache.delete(pairCache.keys().next().value!)
     }
-    pairCache.set(pairAddress, [String(t0).toLowerCase(), String(t1).toLowerCase()])
+    pairCache.set(pairAddress, pair)
   } catch {
-    // Not a valid pair, skip
+    // A read failed: nothing is remembered, and the pair is read again when it next swaps.
   }
 }
 
