@@ -65,7 +65,7 @@ async function indexValid(name: string): Promise<{ exists: boolean; valid: boole
   const r = await db.execute(sql`
     SELECT i.indisvalid AS valid FROM pg_class c
     JOIN pg_index i ON i.indexrelid = c.oid
-    WHERE c.relkind = 'i' AND c.relname = ${name} LIMIT 1
+    WHERE c.relkind = 'i' AND c.oid = to_regclass(${name}) LIMIT 1
   `)
   const row = Array.from(r)[0] as Record<string, unknown> | undefined
   return { exists: !!row, valid: !!row?.valid }
@@ -73,7 +73,7 @@ async function indexValid(name: string): Promise<{ exists: boolean; valid: boole
 
 async function tableExists(name: string): Promise<boolean> {
   const db = getDb()
-  const r = await db.execute(sql`SELECT 1 FROM pg_class WHERE relkind IN ('r','p') AND relname = ${name} LIMIT 1`)
+  const r = await db.execute(sql`SELECT 1 FROM pg_class WHERE relkind IN ('r','p') AND oid = to_regclass(${name}) LIMIT 1`)
   return Array.from(r).length > 0
 }
 
@@ -81,7 +81,7 @@ async function constraintExists(table: string, name: string): Promise<boolean> {
   const db = getDb()
   const r = await db.execute(sql`
     SELECT 1 FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid
-    WHERE c.relname = ${table} AND con.conname = ${name} LIMIT 1
+    WHERE c.oid = to_regclass(${table}) AND con.conname = ${name} LIMIT 1
   `)
   return Array.from(r).length > 0
 }

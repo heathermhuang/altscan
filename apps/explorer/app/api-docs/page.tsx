@@ -253,12 +253,14 @@ const endpoints: Endpoint[] = [
       { name: 'ownerAddress', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
       { name: 'url', type: 'string', required: true, description: 'Your HTTPS endpoint to receive events' },
       { name: 'watchAddress', type: 'string', required: false, description: 'Address to watch for events' },
-      { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types (default: ["tx"]). "token_transfer" and "new_block" are accepted but not delivered yet; only "tx" events are sent.' },
+      { name: 'eventTypes', type: 'string[]', required: false, description: 'Event types (default: ["tx"]). Only "tx" events are delivered, so the list must include "tx" (400 otherwise). Any other value, such as "token_transfer" or "new_block", is not stored and is returned in ignoredEventTypes.' },
     ],
     exampleResponse: JSON.stringify(
       {
         id: 1,
         secret: 'abc123...',
+        eventTypes: ['tx'],
+        ignoredEventTypes: [],
         message: 'Webhook created. Keep the secret — it will not be shown again.',
       },
       null,

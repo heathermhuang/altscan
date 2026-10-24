@@ -242,8 +242,14 @@ export function readIndexerConfig(
     /** Non-zero forces a start height, ignoring the stored cursor. */
     forceStartBlock: r.int('FORCE_START_BLOCK', 0, { min: 0 }),
     startBlock: r.int('START_BLOCK', defaults.startBlock, { min: 0 }),
-    /** Beyond this lag the indexer abandons the gap and jumps to the tip. */
-    maxLagBlocks: r.int('MAX_LAG_BLOCKS', 1000, { min: 1 }),
+    /**
+     * Beyond this lag the indexer abandons the gap and jumps to the tip. The
+     * floor is MAX_LAG_SKIP_KEEP + 1 (index-gaps.ts): the skip lands 200 blocks
+     * behind the tip, so a smaller value fires on lag it cannot shrink — the old
+     * code then REWOUND the cursor and livelocked. A value below it is rejected
+     * (default used, flagged in the boot config line) rather than clamped.
+     */
+    maxLagBlocks: r.int('MAX_LAG_BLOCKS', 1000, { min: 201 }),
     /** Per-block phase breakdown every N blocks; 0 disables. */
     profileBlocks: r.int('PROFILE_BLOCKS', 0, { min: 0 }),
   }

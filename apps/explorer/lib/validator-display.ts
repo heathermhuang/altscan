@@ -25,6 +25,16 @@ export type ValidatorDisplay = {
   powerUnknown: boolean
 }
 
+/**
+ * The commission cell. The stored value is a fraction (`0.0900` = 9%), and NULL means StakeHub gave the
+ * syncer no answer — shown as a dash, never as a number (it used to be stored as `0.1`, rendering "10.0%").
+ */
+export function formatCommission(commission: string | null): string {
+  if (commission === null) return '—'
+  const pct = Number.parseFloat(commission) * 100
+  return Number.isFinite(pct) ? `${pct.toFixed(1)}%` : '—'
+}
+
 const PLACEHOLDER_MONIKER = /^Validator \d+$/
 
 const noPower = (v: ValidatorRow) => safeBigInt(v.votingPower) === 0n

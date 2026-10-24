@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validatorDisplays } from '@/lib/validator-display'
+import { formatCommission, validatorDisplays } from '@/lib/validator-display'
 import { shortenAddress } from '@/lib/address-display'
 
 const A = '0x75b851a27d7101438f45fce31816501193239a83'
@@ -172,5 +172,27 @@ describe('validatorDisplays: Standby', () => {
     const out = validatorDisplays([row(A, 'Figment', '0'), row(B, 'Idle', '0')], counts({ [A]: 72 }))
     expect(out.map(d => d.status.label)).toEqual(['active', 'Standby'])
     expect(out.map(d => d.powerUnknown)).toEqual([true, true])
+  })
+})
+
+describe('formatCommission', () => {
+  it('shows the stored fraction as a percentage', () => {
+    expect(formatCommission('0.0900')).toBe('9.0%')
+    expect(formatCommission('1.0000')).toBe('100.0%')
+  })
+
+  it('shows a real 0% commission as 0.0%', () => {
+    expect(formatCommission('0.0000')).toBe('0.0%')
+  })
+
+  // The syncer used to store the default '0.1' when the commission read failed, which rendered as a real
+  // "10.0%". An unread commission is NULL and must read as unknown, not as a rate.
+  it('shows an unknown (NULL) commission as a dash, not as 0% or 10%', () => {
+    expect(formatCommission(null)).toBe('—')
+  })
+
+  it('shows an unparseable stored value as a dash rather than NaN%', () => {
+    expect(formatCommission('')).toBe('—')
+    expect(formatCommission('n/a')).toBe('—')
   })
 })

@@ -163,11 +163,12 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
 
             <div>
               <h3 className="mb-2 text-sm font-semibold text-ink">Webhook Payload Format</h3>
-              <CodeBlock label="Webhook Payload Format">{`// One POST per block, batching that block's matching transactions:
+              <CodeBlock label="Webhook Payload Format">{`// One POST per block, batching that block's matching transactions (chainId is 56 on BNB Chain, 1 on Ethereum):
 {
   "event": "tx",
   "timestamp": "2024-01-01T00:00:00.000Z",
   "blockNumber": 42000000,
+  "chainId": 56,
   "count": 1,
   "data": [
     {
