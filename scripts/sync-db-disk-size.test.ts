@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain ESM script, no type declarations (CI runs Node 20,
 // which has no type stripping, so the runnable half cannot be TypeScript).
@@ -36,7 +37,7 @@ describe('planDiskGbSync', () => {
     })
   })
 
-  it('updates in BOTH directions — the first sync must be allowed to shrink', () => {
+  it('allows upward growth and a small downward correction', () => {
     // DB_DISK_GB=150 currently OVERSTATES a 147 GiB disk, so an "only ever
     // raise" rule would permanently block the correction that matters most.
     expect(planDiskGbSync({ capacityBytes: 147 * GIB, currentGb: 150 }).action).toBe('update')
@@ -44,6 +45,30 @@ describe('planDiskGbSync', () => {
       action: 'update',
       targetGb: 300,
     })
+  })
+
+  it('REFUSES a large decrease — Render disks only grow, so it is a bad sample', () => {
+    // A single bad low reading would shrink the denominator, raise the computed
+    // disk-%, and fire the destructive emergency path (compactDays:1) early.
+    const plan = planDiskGbSync({ capacityBytes: 20 * GIB, currentGb: 147 })
+    expect(plan.action).toBe('refuse')
+    expect(plan).not.toHaveProperty('targetGb')
+  })
+
+  it('draws the shrink line at 10% of the current value, inclusive', () => {
+    // 150 -> 135 is exactly -10% and stays allowed; 134 is past it.
+    expect(planDiskGbSync({ capacityBytes: 135 * GIB, currentGb: 150 }).action).toBe('update')
+    expect(planDiskGbSync({ capacityBytes: 134 * GIB, currentGb: 150 }).action).toBe('refuse')
+  })
+
+  it('refuses a capacity below the disk usage reading, and skips the check when usage is unknown', () => {
+    // A volume cannot hold more than its capacity: usage above it proves the
+    // capacity sample is wrong, even when the drop is within the 10% band.
+    const plan = planDiskGbSync({ capacityBytes: 140 * GIB, currentGb: 147, usageBytes: 141 * GIB })
+    expect(plan.action).toBe('refuse')
+    // A blind run (usage metric failed) must not block the corrective sync.
+    expect(planDiskGbSync({ capacityBytes: 140 * GIB, currentGb: 147, usageBytes: undefined }).action).toBe('update')
+    expect(planDiskGbSync({ capacityBytes: 140 * GIB, currentGb: 147, usageBytes: 130 * GIB }).action).toBe('update')
   })
 
   it('refuses a missing or nonsensical capacity instead of writing a denominator', () => {
@@ -65,6 +90,13 @@ describe('planDiskGbSync', () => {
       targetGb: 147,
     })
     expect(planDiskGbSync({ capacityBytes: 147 * GIB, currentGb: 0 }).action).toBe('update')
+  })
+})
+
+describe('main() wiring', () => {
+  it('hands the raw disk-usage reading to the planner, or the cross-check is dead code', () => {
+    const src = readFileSync(new URL('./sync-db-disk-size.mjs', import.meta.url), 'utf8')
+    expect(src).toMatch(/planDiskGbSync\(\{[^}]*\busageBytes\b[^}]*\}\)/)
   })
 })
 
