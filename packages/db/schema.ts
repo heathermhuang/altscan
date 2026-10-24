@@ -238,7 +238,8 @@ export const validators = pgTable('validators', {
   address:      varchar('address', { length: 42 }).primaryKey(),
   moniker:      varchar('moniker', { length: 255 }).notNull(),
   votingPower:  numeric('voting_power', { precision: 36, scale: 0 }).notNull().default('0'),
-  commission:   numeric('commission', { precision: 5, scale: 4 }).notNull().default('0'),
+  // NULL = StakeHub gave no answer. It used to default to a number, which the page rendered as a real rate.
+  commission:   numeric('commission', { precision: 5, scale: 4 }),
   uptime:       numeric('uptime', { precision: 5, scale: 4 }).notNull().default('0'),
   status:       validatorStatusEnum('status').notNull().default('active'),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull(),

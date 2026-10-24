@@ -36,7 +36,7 @@ description: ${JSON.stringify(skillDescription())}
 
 ## Auth
 
-All \`/api/v1/*\` endpoints are public and require no authentication. There is no OAuth authorization server and no OAuth-protected resource at this origin; do not look for \`/.well-known/openid-configuration\` or \`/.well-known/oauth-protected-resource\` — they are intentionally absent. Rate limiting is per IP; AI crawlers see additional limits on heavy paths (see \`/robots.txt\`).
+The \`GET\` chain-data endpoints listed below need no credential. Four endpoints take an API key in the \`X-API-Key\` header: \`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\`. A key gives the request its own rate-limit budget, and \`/api/v1/webhooks\` and \`GET /api/v1/keys\` answer 401 without one. How to get a key, and how to use OAuth where this origin has it switched on, is in https://${c.domain}/auth.md, which describes what this origin serves right now. Keyless requests are rate limited per IP; AI crawlers see additional limits on heavy paths (see \`/robots.txt\`).
 
 ## Endpoints
 

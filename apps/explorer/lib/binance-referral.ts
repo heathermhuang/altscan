@@ -83,11 +83,13 @@ export function isBinanceIntentQuery(query: string): boolean {
   ].some((term) => normalized.includes(term))
 }
 
-export function isStablecoinToken(symbol: string | null | undefined, name?: string | null): boolean {
-  const haystack = `${symbol ?? ''} ${name ?? ''}`.toLowerCase()
-  return ['usdt', 'usdc', 'busd', 'dai', 'fdusd', 'tusd', 'usde', 'stablecoin'].some((term) =>
-    haystack.includes(term),
-  )
+/**
+ * Whether `address` is one of the chain's configured stablecoins (chain-config `whales.stablecoins`). By contract
+ * address, never by name: anyone can call a token "BabyUSDT" or "Daisy", and a name match put the stablecoin CTA on them.
+ */
+export function isStablecoinToken(address: string, chain: Pick<ChainConfig, 'whales'>): boolean {
+  const a = address.toLowerCase()
+  return chain.whales.stablecoins.some((s) => s.address.toLowerCase() === a)
 }
 
 export function getBinanceReferralCopy(

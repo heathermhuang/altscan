@@ -14,6 +14,7 @@
  */
 import { formatCompactUsd, formatDecimalAmount, formatTokenAmount } from './format'
 import type { ProviderTokenBalance } from './providers'
+import type { Lookalike } from './lookalike-note'
 
 export type TrackedToken = { address: string; symbol: string; decimals: number; kind: 'stablecoin' | 'wrapped' }
 
@@ -33,6 +34,8 @@ export type HoldingRow = {
   usd: number | null
   basis: HoldingBasis | null
   tracked: boolean
+  /** The server's verdict that this token reads as a well-known one it is not (lib/lookalike); undefined = not judged. A browser cannot judge it. */
+  lookalike?: Lookalike | null
 }
 
 /** The tokens whose balance is read live and priced: the chain's stablecoins and wrapped native token. */
@@ -91,6 +94,7 @@ export function holdingFromIndex(r: {
   name: string | null
   symbol: string | null
   decimals: number | null
+  lookalike?: Lookalike | null
 }): HoldingRow {
   return {
     tokenAddress: r.tokenAddress.toLowerCase(),
@@ -102,11 +106,12 @@ export function holdingFromIndex(r: {
     usd: null,
     basis: null,
     tracked: false,
+    lookalike: r.lookalike,
   }
 }
 
-/** A row from the data provider's balances response, which may carry its own USD value. */
-export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
+/** A row from the data provider's balances response, which may carry its own USD value. `lookalike`: the route's flag. */
+export function holdingFromProvider(t: ProviderTokenBalance & { lookalike?: Lookalike | null }): HoldingRow {
   const usd = t.usdValue == null || t.usdValue === '' ? NaN : Number(t.usdValue)
   const priced = Number.isFinite(usd) && usd >= 0
   // The raw balance and decimals are exact, so they come first. The provider's formatted string is for when
@@ -123,6 +128,7 @@ export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
     usd: priced ? usd : null,
     basis: priced ? 'provider' : null,
     tracked: false,
+    lookalike: t.lookalike,
   }
 }
 
@@ -147,6 +153,17 @@ export function mergeHoldings(
     rows.push(r)
   }
   return rows.sort((a, b) => (a.usd === null ? (b.usd === null ? 0 : 1) : b.usd === null ? -1 : b.usd - a.usd))
+}
+
+/**
+ * How many tokens the provider is asked for at once: Moralis `getAddressTokenBalances` sends `limit=20`
+ * (packages/providers/src/moralis.ts) and there is no next page. A response of exactly this many was cut off.
+ */
+export const PROVIDER_HOLDINGS_LIMIT = 20
+
+/** The line under the table when the provider's list stopped at its limit, else null. `providerRows`: how many tokens it returned. */
+export function holdingsCapNote(providerRows: number): string | null {
+  return providerRows >= PROVIDER_HOLDINGS_LIMIT ? `First ${PROVIDER_HOLDINGS_LIMIT} tokens shown.` : null
 }
 
 /** Below this the clause is dust, and the native balance's own USD figure uses the same floor. */

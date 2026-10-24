@@ -32,7 +32,7 @@ import {
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
-import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock } from './index-gaps'
+import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock, planMaxLagSkip } from './index-gaps'
 import {
   PoisonBlockTracker, shouldQuarantine, poisonGapReason,
 } from './poison-block'
@@ -557,9 +557,9 @@ async function main() {
         resumeGapBackfillUntil = null
       }
 
-      if (resumeGapBackfillUntil === null && latest - lastIndexed > MAX_LAG) {
-        const abandonedFrom = lastIndexed + 1
-        const abandonedTo = latest - 200
+      const lagSkip = resumeGapBackfillUntil === null ? planMaxLagSkip(latest, lastIndexed, MAX_LAG) : null
+      if (lagSkip) {
+        const { abandonedFrom, abandonedTo } = lagSkip
         console.warn(`${TAG} ⚠ ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — ABANDONING blocks ${abandonedFrom}..${abandonedTo} and skipping to ${abandonedTo}`)
         // Record the range before moving the cursor. This skip has always existed
         // and always recorded nothing, so falling behind cost CORRECTNESS, not just
@@ -588,11 +588,11 @@ async function main() {
           await sleep(1000)
           continue
         }
-        lastIndexed = latest - 200
+        lastIndexed = abandonedTo
         // Jump the transfer watermark with the skip — these blocks are deliberately
         // abandoned (same gap the pre-existing skip already creates in `blocks`), so
         // the watermark must not stay stuck waiting for transfers that never come.
-        if (ASYNC_TT_WRITER) setDurableFloor(latest - 200)
+        if (ASYNC_TT_WRITER) setDurableFloor(abandonedTo)
       }
 
       // A3: validate the batch boundary before processing — detects any reorg at or

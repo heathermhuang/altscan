@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { recordIndexGap, isPoisonBlock, recordPoisonGapIfAbsent } from './index-gaps'
+import { recordIndexGap, isPoisonBlock, recordPoisonGapIfAbsent, planMaxLagSkip } from './index-gaps'
 
 /**
  * The MAX_LAG_BLOCKS skip has always existed and always recorded nothing, so
@@ -112,5 +112,43 @@ describe('recordPoisonGapIfAbsent reads shapes as strictly as isPoisonBlock', ()
     const execute = vi.fn()
     expect(await recordPoisonGapIfAbsent({ execute } as never, 5, REASON, NaN)).toBe(false)
     expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('planMaxLagSkip', () => {
+  it('abandons everything from the cursor up to 200 behind the tip', () => {
+    expect(planMaxLagSkip(10_000, 5_000, 1000)).toEqual({ abandonedFrom: 5_001, abandonedTo: 9_800 })
+  })
+
+  it('does nothing at or under the lag threshold', () => {
+    expect(planMaxLagSkip(6_000, 5_000, 1000)).toBeNull()
+    expect(planMaxLagSkip(5_000, 5_000, 1000)).toBeNull()
+  })
+
+  // maxLag 100 < the 200 keep distance: lag 150 > 100 fires the old skip, whose
+  // target (latest - 200) is BELOW the cursor. It rewound lastIndexed and
+  // re-fired forever. No skip must be planned — no rewind, nothing to log.
+  it('plans no skip when the range would be inverted (maxLag below the keep distance)', () => {
+    expect(planMaxLagSkip(5_150, 5_000, 100)).toBeNull()
+    expect(planMaxLagSkip(5_199, 5_000, 100)).toBeNull()
+  })
+
+  it('never plans a target at or below the cursor', () => {
+    for (let lag = 1; lag < 400; lag++) {
+      const plan = planMaxLagSkip(10_000 + lag, 10_000, 1)
+      if (plan) {
+        expect(plan.abandonedTo).toBeGreaterThanOrEqual(plan.abandonedFrom)
+        expect(plan.abandonedTo).toBeGreaterThan(10_000)
+      }
+    }
+  })
+
+  it('plans a single-block range at the boundary', () => {
+    expect(planMaxLagSkip(5_201, 5_000, 1)).toEqual({ abandonedFrom: 5_001, abandonedTo: 5_001 })
+  })
+
+  it('plans nothing for non-finite inputs', () => {
+    expect(planMaxLagSkip(NaN, 5_000, 1000)).toBeNull()
+    expect(planMaxLagSkip(10_000, NaN, 1000)).toBeNull()
   })
 })

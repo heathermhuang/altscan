@@ -102,6 +102,43 @@ export function decodeCallTracerBlock(
 }
 
 /**
+ * Pure and NEVER throws: decode a block's traces into rows, keeping only the
+ * entries that belong to the block.
+ *
+ * Two things the bare decoder does not do, both fatal where processBlock used to
+ * call it (after the first write, outside any try/catch):
+ *
+ *  - It trusts `txHash`. The trace endpoint is a second provider outside the
+ *    failover pool, so a stale or misrouted answer would have stored another
+ *    block's frames under this block's number. Entries whose hash is not one of
+ *    the block's own transactions are dropped (a wholly foreign answer therefore
+ *    decodes to nothing), as are entries with no usable `txHash`.
+ *  - It throws on a malformed frame (`BigInt('zz')`, a null entry). Past the first
+ *    write that pinned the cursor and blocked quarantine, over a secondary table.
+ *    A decode failure now yields no rows plus the error for the caller to report.
+ *
+ * Call it ABOVE the first write so even a bug here cannot half-persist a block.
+ */
+export function prepareInternalTxRows(
+  raw: readonly RawTraceTx[],
+  blockNumber: number,
+  timestamp: Date,
+  blockTxHashes: readonly string[],
+): { rows: InternalTxRow[]; dropped: number; problem: unknown | null } {
+  try {
+    const own = new Set(blockTxHashes.map(h => h.toLowerCase()))
+    const kept = raw.filter(t => typeof t?.txHash === 'string' && own.has(t.txHash.toLowerCase()))
+    return {
+      rows: decodeCallTracerBlock(kept, blockNumber, timestamp),
+      dropped: raw.length - kept.length,
+      problem: null,
+    }
+  } catch (err) {
+    return { rows: [], dropped: 0, problem: err }
+  }
+}
+
+/**
  * Trace one block. Belongs in processBlock's PURE-READ phase, above the first
  * write, so a failure here can only ever abandon reads.
  *

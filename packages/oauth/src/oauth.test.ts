@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet } from 'ethers'
 import { createHash, randomBytes } from 'node:crypto'
+import { redirectUriAllowed } from './checks'
+import { mintAccessToken, mintClientId, readAccessToken, readClientId } from './tokens'
 import {
   authorizationServerMetadata,
   handleOAuthRequest,
@@ -155,6 +157,47 @@ describe('registration', () => {
     expect((await register(['http://127.0.0.1:33418/cb', 'http://localhost/cb', 'cursor://anysphere/oauth'])).status).toBe(201)
   })
 
+  it('refuses schemes that launch an OS protocol handler or another program', async () => {
+    for (const uri of [
+      'ms-msdt:/id PCWDiagnostic /skip force /param "IT_RebrowseForFile=?"',
+      'ms-excel:ofe|u|https://client.example/x.xlsx',
+      'MS-Word:ofe|u|https://client.example/x.docx',
+      'search-ms:query=x&crumb=location:\\\\client.example\\share',
+      'search:query=x',
+      'smb://client.example/share',
+      'ssh://client.example',
+      'telnet://client.example',
+      'mailto:a@client.example',
+      'tel:+15551234567',
+      'sms:+15551234567',
+      'intent://scan/#Intent;scheme=zxing;end',
+      'view-source:https://client.example/',
+      'chrome://settings',
+      'chrome-extension://abcdefgh/cb',
+      'chrome-untrusted://x/',
+      'moz-extension://abcdefgh/cb',
+      'moz-icon://x',
+    ]) {
+      expect(redirectUriAllowed(uri), uri).toBe(false)
+    }
+    expect((await register(['ms-msdt:/id PCWDiagnostic'])).status).toBe(400)
+    expect((await register([REDIRECT, 'search-ms:query=x'])).status).toBe(400)
+  })
+
+  it('still accepts https, loopback http and native-app private-use schemes', () => {
+    for (const uri of [
+      REDIRECT,
+      'http://127.0.0.1:33418/cb',
+      'http://localhost/cb',
+      'http://[::1]:8080/cb',
+      'cursor://anysphere.cursor-mcp/oauth/callback',
+      'vscode://vscode.github-authentication/did-authenticate',
+      'com.example.app:/oauth2redirect',
+    ]) {
+      expect(redirectUriAllowed(uri), uri).toBe(true)
+    }
+  })
+
   it('refuses confidential clients', async () => {
     expect((await register([REDIRECT], { token_endpoint_auth_method: 'client_secret_basic' })).status).toBe(400)
   })
@@ -176,6 +219,16 @@ describe('authorization endpoint', () => {
     const res = await call(`/oauth/authorize?${authorizeQuery(client_id, pkce().challenge, { redirect_uri: 'https://evil.example/cb' })}`)
     expect(res.status).toBe(400)
     expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('shows an error, never redirects, for a client id registered before a scheme was blocked', async () => {
+    // A client id carries its own registration and never expires, so ones minted under the old rules still verify.
+    const legacy = await mintClientId(cfg.secret, { redirect_uris: ['search-ms:query=x'], client_name: null, iat: T0 / 1000 })
+    for (const extra of [{}, { response_type: 'token' }, { code_challenge_method: 'plain' }] as Array<Record<string, string>>) {
+      const res = await call(`/oauth/authorize?${authorizeQuery(legacy, pkce().challenge, { redirect_uri: 'search-ms:query=x', ...extra })}`)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('location')).toBeNull()
+    }
   })
 
   it('sends protocol errors back to the client: missing PKCE, other scopes, other resources', async () => {
@@ -235,6 +288,35 @@ describe('sign-in to token', () => {
     const again = await exchange(clientId, code, p.verifier)
     expect(again.status).toBe(400)
     expect((await again.json()).error).toBe('invalid_grant')
+  })
+
+  it('refuses a code minted under another issuer, even on a shared store and secret', async () => {
+    const shared = memoryCodes()
+    const A = config({ codes: shared })
+    const B = config({ codes: shared, issuer: 'https://other.example' })
+    cfg = A
+    const { clientId, pkce: p, location } = await signIn(Wallet.createRandom())
+    const code = location.searchParams.get('code')!
+    const res = await exchange(clientId, code, p.verifier, B)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_grant')
+    // The refusal still spends the code: it is not left for a retry on the issuer that minted it.
+    expect((await exchange(clientId, code, p.verifier, A)).status).toBe(400)
+
+    const again = await signIn(Wallet.createRandom())
+    const ok = await exchange(again.clientId, again.location.searchParams.get('code')!, again.pkce.verifier, config({ codes: shared }))
+    expect(ok.status).toBe(200)
+  })
+
+  it('refuses a stored grant that carries no issuer', async () => {
+    const { client_id } = await (await register()).json()
+    const p = pkce()
+    await cfg.codes.put('legacy-code', {
+      client_id, redirect_uri: REDIRECT, code_challenge: p.challenge, scope: 'api', sub: '0x' + 'ab'.repeat(20),
+    } as CodeGrant, 60)
+    const res = await exchange(client_id, 'legacy-code', p.verifier)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_grant')
   })
 
   it('refuses a code for another client', async () => {
@@ -323,6 +405,31 @@ describe('bearer verification', () => {
     expect(await verifyBearer(`Bearer ${t}`, config({ secret: 't'.repeat(40) }))).toBe('invalid')
     expect(await verifyBearer(`Bearer ${t}`, config({ issuer: 'https://other.example' }))).toBe('invalid')
     expect(await verifyBearer(`Bearer ${t}`, config({ scope: 'mcp' }))).toBe('invalid')
+  })
+
+  it('accepts one spelling of a signature: the canonical base64url, not its trailing-bit siblings', async () => {
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    // A 32-byte HMAC is 43 characters whose last one carries 4 bits and 2 padding bits that decoders ignore.
+    const sibling = (signed: string) => signed.slice(0, -1) + ALPHABET[ALPHABET.indexOf(signed.at(-1)!) ^ 1]
+    const nowSeconds = T0 / 1000
+    const expected = { issuer: ISSUER, scope: 'api', nowSeconds }
+
+    const token = await mintAccessToken(cfg.secret, {
+      iss: ISSUER, aud: ISSUER, sub: '0x' + 'ab'.repeat(20), client_id: 'ac1.x', scope: 'api', iat: nowSeconds, exp: nowSeconds + 3600, jti: 'j',
+    })
+    const otherToken = sibling(token)
+    expect(otherToken).not.toBe(token)
+    // Same bytes, so a lenient decoder would call it the same signature.
+    expect(Buffer.from(otherToken.split('.')[2], 'base64url').equals(Buffer.from(token.split('.')[2], 'base64url'))).toBe(true)
+    expect((await readAccessToken(cfg.secret, token, expected))?.client_id).toBe('ac1.x')
+    expect(await readAccessToken(cfg.secret, otherToken, expected)).toBeNull()
+    expect(await verifyBearer(`Bearer ${otherToken}`, cfg)).toBe('invalid')
+
+    const clientId = await mintClientId(cfg.secret, { redirect_uris: [REDIRECT], client_name: null, iat: nowSeconds })
+    const otherClientId = sibling(clientId)
+    expect(otherClientId).not.toBe(clientId)
+    expect(await readClientId(cfg.secret, clientId)).not.toBeNull()
+    expect(await readClientId(cfg.secret, otherClientId)).toBeNull()
   })
 
   it('points a 401 at the protected-resource metadata', () => {

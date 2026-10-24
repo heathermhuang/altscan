@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
-import { decodeCallTracerBlock, fetchBlockTraces, type RawTraceTx } from './internal-tx'
+import { decodeCallTracerBlock, fetchBlockTraces, prepareInternalTxRows, type RawTraceTx } from './internal-tx'
 
 /**
  * Real ETH mainnet `debug_traceBlockByNumber` (callTracer) output for block
@@ -156,5 +156,40 @@ describe('fetchBlockTraces', () => {
   it('throws on a null response instead of returning an empty block', async () => {
     const provider = { send: vi.fn().mockResolvedValue(null) } as unknown as JsonRpcProvider
     await expect(fetchBlockTraces(provider, BLOCK)).rejects.toThrow(/traces unavailable/)
+  })
+})
+
+describe('prepareInternalTxRows — trust and never throw', () => {
+  const ADDR = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const withValue = (txHash: string | undefined): RawTraceTx => ({
+    txHash,
+    result: { type: 'CALL', from: ADDR, to: ADDR, value: '0x1', calls: [{ type: 'CALL', from: ADDR, to: ADDR, value: '0x2' }] },
+  } as RawTraceTx)
+
+  it('keeps entries for the block\'s own transactions (case-insensitively) and drops foreign ones', () => {
+    const own = '0x' + 'ab'.repeat(32)
+    const out = prepareInternalTxRows([withValue(own.toUpperCase().replace('0X', '0x')), withValue('0x' + 'ee'.repeat(32))], BLOCK, TS, [own])
+    expect(out.rows.map(r => r.txHash)).toEqual([own])
+    expect(out.dropped).toBe(1)
+    expect(out.problem).toBeNull()
+  })
+
+  it('a wholly foreign answer (another block\'s traces) decodes to nothing', () => {
+    const out = prepareInternalTxRows([withValue('0x' + 'ee'.repeat(32))], BLOCK, TS, ['0x' + 'ab'.repeat(32)])
+    expect(out).toEqual({ rows: [], dropped: 1, problem: null })
+  })
+
+  it('an entry with no txHash is dropped, not thrown on', () => {
+    expect(() => prepareInternalTxRows([withValue(undefined)], BLOCK, TS, ['0x' + 'ab'.repeat(32)])).not.toThrow()
+    expect(prepareInternalTxRows([withValue(undefined), null as unknown as RawTraceTx], BLOCK, TS, []).dropped).toBe(2)
+  })
+
+  it('a malformed frame yields no rows plus the error to report, never a throw', () => {
+    const own = '0x' + 'ab'.repeat(32)
+    const bad = withValue(own)
+    bad.result!.calls![0].value = '0xzz'
+    const out = prepareInternalTxRows([bad], BLOCK, TS, [own])
+    expect(out.rows).toEqual([])
+    expect(out.problem).toBeInstanceOf(Error)
   })
 })

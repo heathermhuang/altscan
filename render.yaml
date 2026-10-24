@@ -17,7 +17,7 @@ services:
     # therefore imports chain-config by source path. Keep it that way — the same
     # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
     # stay build-step-free.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    buildCommand: cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
@@ -82,7 +82,7 @@ services:
     # therefore imports chain-config by source path. Keep it that way — the same
     # property is what lets deploy/render/blueprint.yaml and docker/Dockerfile.explorer
     # stay build-step-free.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
+    buildCommand: cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @altscan/explorer build && cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node --max-old-space-size=1280 server.js
     healthCheckPath: /api/ping
     autoDeploy: true
@@ -149,7 +149,7 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
+    buildCommand: cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN
@@ -205,7 +205,7 @@ services:
     # is now gone, and this asserts the artifact exists, parses, and that every
     # workspace package the runtime require()s actually resolves — which is the
     # exact failure this commit fixes, verified at build time instead of at boot.
-    buildCommand: cd ../.. && pnpm install --no-frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
+    buildCommand: cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @altscan/chain-config build && pnpm --filter @altscan/explorer-core build && pnpm --filter @altscan/providers build && pnpm --filter @altscan/db build && pnpm --filter @altscan/indexer build && test -s apps/indexer/dist/index.js && node --check apps/indexer/dist/index.js && test -s packages/chain-config/dist/index.js && test -s packages/providers/dist/index.js && test -s packages/explorer-core/dist/index.js && cd apps/indexer && node -e "const p=require.resolve('@altscan/chain-config'); if(!p.endsWith('.js')) throw new Error('[build-check] chain-config resolves to '+p+', expected compiled .js — a TS-source entry only loads via Node type-stripping'); require('@altscan/chain-config'); require('@altscan/providers'); console.log('[build-check] chain-config -> '+p+' loads; @altscan/providers loads (transitively proves explorer-core)')"
     startCommand: node dist/index.js
     envVars:
       - key: CHAIN

@@ -3,10 +3,11 @@ import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } f
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, hasSupply, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
+import { formatNumber, formatTokenAmount, formatUsdPrice, formatCompactUsd, formatPercent, tokenText, tokenTextOr, tokenUnit } from '@/lib/format'
+import { readDecimals, supplyText } from '@/lib/token-units'
+import { transfersEmptyState, TRANSFERS_EMPTY_TEXT } from '@/lib/transfers-empty-state'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Badge } from '@/components/ui/Badge'
-import { Icon } from '@/components/ui/Icon'
 import { Pagination } from '@/components/ui/Pagination'
 import { AdReserve } from '@/components/ads/AdReserve'
 import Link from 'next/link'
@@ -24,6 +25,7 @@ import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
 import { isStablecoinToken } from '@/lib/binance-referral'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { HoldersLazy, HoldersFact } from './HoldersLazy'
+import { RiskSignals } from './RiskSignals'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
@@ -38,8 +40,10 @@ const ERC20_ABI = [
 type OnDemandToken = {
   name: string
   symbol: string
-  decimals: number
-  totalSupply: string
+  /** null = the decimals() read failed: unknown, never 18 (ETH USDT and USDC are 6). */
+  decimals: number | null
+  /** null = the totalSupply() read failed: unknown, never 0. */
+  totalSupply: string | null
   holderCount: number
   address: string
   type: string
@@ -62,15 +66,15 @@ const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | nu
     const [name, symbol, decimals, totalSupply] = await Promise.all([
       contract.name().catch(() => null),
       contract.symbol().catch(() => null),
-      contract.decimals().catch(() => 18),
-      contract.totalSupply().catch(() => 0n),
+      contract.decimals().catch(() => null),
+      contract.totalSupply().catch(() => null),
     ])
     if (!name && !symbol) return null
     return {
       name: name ?? 'Unknown Token',
       symbol: symbol ?? '???',
-      decimals: Number(decimals),
-      totalSupply: totalSupply.toString(),
+      decimals: readDecimals(decimals),
+      totalSupply: totalSupply === null ? null : totalSupply.toString(),
       holderCount: 0,
       address: addr,
       type: chainConfig.tokenStandard,
@@ -100,7 +104,7 @@ async function healPlaceholderMeta(
     ...token,
     name: token.name === 'Unknown' && rpc.name !== 'Unknown Token' ? rpc.name : token.name,
     symbol: token.symbol === '???' && rpc.symbol !== '???' ? rpc.symbol : token.symbol,
-    totalSupply: token.totalSupply === '0' && rpc.totalSupply !== '0' ? rpc.totalSupply : token.totalSupply,
+    totalSupply: token.totalSupply === '0' && rpc.totalSupply !== null && rpc.totalSupply !== '0' ? rpc.totalSupply : token.totalSupply,
   }
 }
 
@@ -204,7 +208,9 @@ export default async function TokenDetailPage({
   // For indexed tokens, time-box every heavy query so a slow aggregation on a
   // mega-token (USDT/WBNB had millions of transfers) renders a partial page instead
   // of hanging until the connection drops ("Connection closed").
-  const TRANSFERS_FALLBACK: typeof schema.tokenTransfers.$inferSelect[] = []
+  // A live token has no local transfer data at all: an empty list there is the answer. A query that FAILED or timed
+  // out is null instead, which the table must not read as "no transfers" (lib/transfers-empty-state).
+  const NO_LOCAL_TRANSFERS: typeof schema.tokenTransfers.$inferSelect[] = []
   // Market data is independent of local indexing (external DEX/CoinGecko), so fetch it for
   // every real token — including live/not-yet-indexed ones. Holders need Moralis or local
   // transfer data, so they stay gated to indexed tokens (matches the "live" banner).
@@ -215,13 +221,13 @@ export default async function TokenDetailPage({
   // unguarded SSR Moralis call; the edge /token/ Managed Challenge + holders bucket cap remain.
   const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
-    ? [TRANSFERS_FALLBACK, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
+    ? [NO_LOCAL_TRANSFERS, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
         withTimeout(
           selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset })
-            .catch(() => TRANSFERS_FALLBACK),
+            .catch(() => null),
           6000,
-          TRANSFERS_FALLBACK,
+          null,
         ),
         // Counts at most one row past the list. -1 = "unknown" (timed out /
         // errored) so we never render a misleading "0 total".
@@ -244,20 +250,14 @@ export default async function TokenDetailPage({
     : formatNumber(totalTransfers)
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
+  const pageRows = transfers ?? []
+  const transfersState = transfersEmptyState({ rows: transfers, count: totalTransfersRaw, offset })
   const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
     ? totalTransfers
-    : offset + transfers.length + (transfers.length === PAGE_SIZE ? PAGE_SIZE : 0))
+    : offset + pageRows.length + (pageRows.length === PAGE_SIZE ? PAGE_SIZE : 0))
 
-  const displaySupply = (() => {
-    try {
-      const divisor = 10n ** BigInt(token.decimals)
-      const whole = BigInt(token.totalSupply ?? '0') / divisor
-      return whole.toLocaleString()
-    } catch (e) {
-      swallow('token/transfers', e)
-      return (token.totalSupply ?? '0').slice(0, 20)
-    }
-  })()
+  // The DB column is NOT NULL, so only a token resolved live can have unknown decimals (a failed decimals() read).
+  const decimals = readDecimals(token.decimals)
 
   // A token the indexer could not read (and the live re-resolve could not either) keeps its
   // '???' / 'Unknown' placeholders: those are "missing", so the header says "—", not a name.
@@ -279,7 +279,7 @@ export default async function TokenDetailPage({
     : riskSignals
 
   // A flagged lookalike must not read as a stablecoin: that would put the stablecoin referral CTA on a scam token.
-  const tokenReferralContext = !lookalike && isStablecoinToken(token.symbol, token.name)
+  const tokenReferralContext = !lookalike && isStablecoinToken(addr, chainConfig)
     ? 'stablecoin'
     : 'token_research'
 
@@ -342,8 +342,8 @@ export default async function TokenDetailPage({
       )}
 
       <dl className={`ledger mb-6 ${isLive ? '[--cols:2]' : '[--cols:3]'}`}>
-        <Fact label="Decimals">{token.decimals}</Fact>
-        <Fact label="Total Supply">{hasSupply(token.totalSupply) ? displaySupply : '—'}</Fact>
+        <Fact label="Decimals">{decimals ?? '—'}</Fact>
+        <Fact label="Total Supply">{supplyText(token.totalSupply, decimals)}</Fact>
         {!isLive && (
           <HoldersFact address={addr} fallback={holdersResult.holderCount ?? token.holderCount} />
         )}
@@ -430,31 +430,7 @@ export default async function TokenDetailPage({
       {adAfterHolders && tokenAd}
 
       {/* Risk Signals */}
-      {signals.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-3 flex items-center gap-2 font-semibold tracking-[-0.02em] text-ink">
-            <Icon name="shield" className="h-4 w-4 text-mut" />Risk Signals
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {signals.map((s, i) => (
-              <div key={i} className={`flex items-start gap-2 rounded-xl border border-hair border-l-[3px] px-3 py-2 text-sm
-                ${s.severity === 'danger' ? 'border-l-warn bg-warn-t' : s.severity === 'warn' ? 'border-l-warn bg-card' : 'border-l-acc bg-card'}`}>
-                <Icon
-                  name={s.ok ? 'check' : s.severity === 'danger' ? 'danger' : 'warn'}
-                  className={`mt-0.5 h-4 w-4 ${s.ok ? 'text-live' : 'text-warn'}`}
-                />
-                <div>
-                  <p className="font-medium text-ink">
-                    <span className="sr-only">{s.ok ? 'Pass: ' : s.severity === 'danger' ? 'Danger: ' : 'Warning: '}</span>
-                    {s.label}
-                  </p>
-                  <p className="text-xs text-ink2">{s.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <RiskSignals signals={signals} />
 
       {/* Token Transfers */}
       <div className="flex items-center justify-between mb-3">
@@ -479,7 +455,7 @@ export default async function TokenDetailPage({
             </tr>
           </thead>
           <tbody>
-            {transfers.map((t) => {
+            {pageRows.map((t) => {
               // Four places, a dust transfer as "<0.0001" rather than "0".
               const amount = formatTokenAmount(t.value ?? '0', token.decimals, 4)
               return (
@@ -505,10 +481,10 @@ export default async function TokenDetailPage({
                 </tr>
               )
             })}
-            {transfers.length === 0 && (
+            {transfersState !== 'rows' && (
               <tr>
                 <td colSpan={5} className="py-8 text-center font-sans text-mut">
-                  No transfers yet.
+                  {TRANSFERS_EMPTY_TEXT[transfersState]}
                 </td>
               </tr>
             )}

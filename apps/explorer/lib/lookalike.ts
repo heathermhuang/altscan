@@ -5,11 +5,18 @@
  * USDT at a glance, so the explorer LABELS them. Nothing is hidden or deleted; /search ranks them
  * after every real token.
  *
- * Pure on purpose: no DB or RPC import (the only import is a type, erased at build), so it
- * is cheap to call once per row in a list. The chain is a PARAMETER, never read from env
+ * Pure on purpose: no DB or RPC import (a type, erased at build, and the pure sanitizer the pages print symbols
+ * through), so it is cheap to call once per row in a list. The chain is a PARAMETER, never read from env
  * here — pass `chainConfig.key` from the server-side '@/lib/chain'.
  */
 import type { ChainKey } from '@altscan/chain-config'
+import { sanitizeSymbol } from '@altscan/explorer-core/format'
+import type { Lookalike } from './lookalike-note'
+
+// The flag's shape and its sentence live in lookalike-note.ts, which client components may import; re-exported here so
+// the server-side callers keep one import.
+export { lookalikeNote } from './lookalike-note'
+export type { Lookalike } from './lookalike-note'
 
 type WellKnown = {
   symbol: string
@@ -404,11 +411,16 @@ const FOLDED = Object.fromEntries(
   ]),
 ) as Record<ChainKey, Folded[]>
 
-export type Lookalike = {
-  /** The well-known symbol it reads as, e.g. 'USDT'. */
-  symbol: string
-  /** That token's primary contract on this chain, or null when it is the chain's native coin. */
-  canonical: string | null
+/**
+ * The folded forms a symbol or name can be read as: its own, and the one the pages print (sanitizeSymbol strips every
+ * non-ASCII character the glyph table has no entry for, which the fold keeps, so "US<euro>DT" is printed as USDT yet folds to
+ * something else).
+ */
+function readAs(text: string | null | undefined): string[] {
+  if (!text) return []
+  const forms = new Set([foldConfusables(text), foldConfusables(sanitizeSymbol(text))])
+  forms.delete('')
+  return [...forms]
 }
 
 /**
@@ -416,27 +428,32 @@ export type Lookalike = {
  * symbol equals a well-known symbol, or its folded name equals that token's canonical name
  * or one of its symbols (either also counting the token's aliases: a token NAMED "USDT" is
  * shown as "USDT"), AND it is not one of that token's contracts. Address compare ignores case.
+ * Each of symbol and name is judged as typed AND as the pages print it (`readAs`).
  */
 export function lookalikeOf(
   token: { address: string; symbol?: string | null; name?: string | null },
   chain: ChainKey,
 ): Lookalike | null {
-  const symbol = token.symbol ? foldConfusables(token.symbol) : ''
-  const name = token.name ? foldConfusables(token.name) : ''
-  if (!symbol && !name) return null
+  const symbols = readAs(token.symbol)
+  const names = readAs(token.name)
+  if (symbols.length === 0 && names.length === 0) return null
   const address = token.address.toLowerCase()
   for (const w of FOLDED[chain]) {
-    if (!(w.foldedSymbols.includes(symbol) || w.foldedNames.includes(name) || w.foldedSymbols.includes(name))) continue
+    if (!(symbols.some((s) => w.foldedSymbols.includes(s)) || names.some((n) => w.foldedNames.includes(n) || w.foldedSymbols.includes(n)))) continue
     if (w.addresses.some((a) => a.toLowerCase() === address)) return null
     return { symbol: w.symbol, canonical: w.addresses[0] ?? null }
   }
   return null
 }
 
-/** One sentence saying what a flagged token imitates, for the token page and the list badge's tooltip. */
-export function lookalikeNote({ symbol, canonical }: Lookalike): string {
-  if (!canonical) {
-    return `Its symbol or name reads as ${symbol}, which is the chain's native coin and has no token contract. Likely impersonation.`
-  }
-  return `Its symbol or name reads as ${symbol}, but this is not the ${symbol} contract (${canonical.slice(0, 6)}…${canonical.slice(-4)}). Likely impersonation.`
+/**
+ * `rows` with the verdict attached as `lookalike`, for a payload a client component draws (it cannot compute the verdict:
+ * lib/lookalike.ts stays out of the browser). `token` says which fields of a row name the token.
+ */
+export function withLookalikes<T>(
+  rows: readonly T[],
+  chain: ChainKey,
+  token: (row: T) => { address: string; symbol?: string | null; name?: string | null },
+): (T & { lookalike: Lookalike | null })[] {
+  return rows.map((row) => ({ ...row, lookalike: lookalikeOf(token(row), chain) }))
 }

@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import { insertWebhookSql } from '@/lib/webhook-insert'
+import { resolveEventTypes } from '@/lib/webhook-event-types'
 import crypto from 'crypto'
 import { chainConfig } from '@/lib/chain'
 
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     eventTypes?: string[]
   }
 
-  const { ownerAddress, url, watchAddress, eventTypes = ['tx'] } = body
+  const { ownerAddress, url, watchAddress, eventTypes } = body
 
   if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
@@ -87,12 +88,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid watchAddress' }, { status: 400 })
   }
 
-  // Validate eventTypes
-  const VALID_EVENTS = new Set(['tx', 'token_transfer', 'new_block'])
-  const sanitizedEvents = (eventTypes ?? ['tx']).filter(e => VALID_EVENTS.has(e))
-  if (sanitizedEvents.length === 0) {
-    return NextResponse.json({ error: 'eventTypes must contain at least one of: tx, token_transfer, new_block' }, { status: 400 })
+  // Only 'tx' is delivered: refuse a list without it, and store just 'tx' from a mixed one.
+  const resolved = resolveEventTypes(eventTypes)
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 })
   }
+  const sanitizedEvents = resolved.eventTypes
 
   // Generate a raw secret and store its SHA-256. The raw secret is returned once
   // and never stored, but it is NOT the signing key: delivery uses the stored
@@ -151,6 +152,8 @@ export async function POST(request: Request) {
   return NextResponse.json({
     id: created.id,
     secret: rawSecret,
-    message: `Webhook created. Keep the secret — it will not be shown again. ${chainConfig.brandName} sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.`,
+    eventTypes: sanitizedEvents,
+    ignoredEventTypes: resolved.ignoredEventTypes,
+    message: `Webhook created. Keep the secret — it will not be shown again. ${chainConfig.brandName} sends ONE POST per block with an X-BNBScan-Signature header (HMAC-SHA256 of the raw JSON body using sha256(yourSecret) as the HMAC key). The body batches matching transactions: { event, timestamp, blockNumber, chainId, count, data: [ { hash, blockNumber, from, to, value }, ... ] }.`,
   }, { status: 201 })
 }

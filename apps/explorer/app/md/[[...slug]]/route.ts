@@ -122,7 +122,7 @@ function apiDocsMarkdown(): string {
     '',
     '## Auth',
     '',
-    'All documented endpoints are public and require no authentication. Admin-only endpoints are out of scope for agent integrations.',
+    `The endpoints above need no credential; keyless requests are rate limited per IP. \`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\` take an API key in \`X-API-Key\`, and webhooks and key management require one: see https://${c.domain}/auth.md. Admin-only endpoints are out of scope for agent integrations.`,
     '',
   ].join('\n')
 }
@@ -223,12 +223,28 @@ async function blockMarkdown(num: number): Promise<string | null> {
   return lines.join('\n')
 }
 
+// The path and the id come out of the URL already percent-decoded, and this body is read by agents:
+// a %60 closes a code span and a %0A starts a new line, so an echoed value could add headings, links
+// or instructions of the caller's choosing. A value is echoed only when it is plain path characters;
+// anything else gets the generic text with no part of it.
+const SAFE_ECHO = /^[A-Za-z0-9/._-]{0,200}$/
+
 function notFoundMarkdown(kind: 'tx' | 'block', id: string): string {
   const c = chainConfig
+  const title = `# ${kind === 'tx' ? 'Transaction' : 'Block'} not found`
+  const retention = 'Either it has not been indexed yet, or it has fallen outside the retention window. Recent chain state is kept on a rolling window; for full history, query a node RPC directly.'
+  if (!SAFE_ECHO.test(id)) {
+    return [
+      title,
+      '',
+      `That ${kind === 'tx' ? 'transaction hash' : 'block number'} is not valid, or is not in the ${c.brandDomain} index. ${retention}`,
+      '',
+    ].join('\n')
+  }
   return [
-    `# ${kind === 'tx' ? 'Transaction' : 'Block'} not found`,
+    title,
     '',
-    `\`${id}\` is not in the ${c.brandDomain} index. Either it has not been indexed yet, or it has fallen outside the retention window. Recent chain state is kept on a rolling window; for full history, query a node RPC directly.`,
+    `\`${id}\` is not in the ${c.brandDomain} index. ${retention}`,
     '',
     `- Web view: https://${c.domain}/${kind === 'tx' ? 'tx' : 'blocks'}/${id}`,
     `- API: https://${c.domain}/api/v1/${kind === 'tx' ? 'transactions' : 'blocks'}/${id}`,
@@ -238,6 +254,9 @@ function notFoundMarkdown(kind: 'tx' | 'block', id: string): string {
 
 function unsupportedMarkdown(path: string): string {
   const c = chainConfig
+  if (!SAFE_ECHO.test(path)) {
+    return `# Not available as markdown\n\nThis path does not have a markdown representation. For structured data, use the REST API at https://${c.domain}/api/v1/*.\n`
+  }
   return `# Not available as markdown\n\nPath \`${path}\` does not have a markdown representation. HTML is served at https://${c.domain}${path}. For structured data, use the REST API at https://${c.domain}/api/v1/*.\n`
 }
 

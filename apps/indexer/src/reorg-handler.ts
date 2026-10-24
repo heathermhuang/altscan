@@ -218,8 +218,11 @@ export async function detectReorgPinned<P>(
       onFailover,
       // Reorg checks gate every batch, so they must respect the same demotion the
       // block fetches do — otherwise a sick endpoint keeps taxing the one call
-      // that runs before any block work can start.
+      // that runs before any block work can start. Tracked as its own kind: an
+      // endpoint that serves the tip but not older headers must not have its reorg
+      // failures cleared by tip reads (see HealthKind).
       health,
+      'reorg',
     )
   } catch (err) {
     const needed = Math.min(2, providers.length)

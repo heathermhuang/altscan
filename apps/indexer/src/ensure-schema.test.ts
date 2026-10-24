@@ -551,4 +551,10 @@ describe('INVALID_INDEX_SWEEP_SQL leaves indexes under construction alone', () =
   it('bounds its DROP with a lock timeout', () => {
     expect(INVALID_INDEX_DROP_LOCK_TIMEOUT).toMatch(/^\d+s$/)
   })
+  // The drop is schema-qualified, so the select must be scoped to the schema it drops from. The behaviour is
+  // proven against a real same-named index in another schema in tt-whale-index.pg.test.ts.
+  it('only selects indexes in the schema it drops from', () => {
+    expect(normalized).toMatch(/JOIN pg_namespace n ON n\.oid = c\.relnamespace/)
+    expect(normalized).toMatch(/n\.nspname = current_schema\(\)/)
+  })
 })

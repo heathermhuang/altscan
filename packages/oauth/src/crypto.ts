@@ -64,5 +64,8 @@ export async function hmacSign(secret: string, purpose: string, data: string): P
 export async function hmacVerify(secret: string, purpose: string, data: string, signature: string): Promise<boolean> {
   const sig = b64urlDecode(signature)
   if (!sig || sig.length !== 32) return false
+  // atob ignores the unused trailing bits, so several spellings decode to one signature. Accept only
+  // the canonical one: a token then has exactly one string form.
+  if (b64url(sig) !== signature) return false
   return crypto.subtle.verify('HMAC', await keyFor(secret, purpose), sig, utf8(data))
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { readIndexerConfig, formatResolvedConfig, redact, type ConfigDefaults } from './config'
+import { MAX_LAG_SKIP_KEEP } from './index-gaps'
 
 const DEFAULTS: ConfigDefaults = {
   startBlock: 38_000_000,
@@ -262,6 +263,16 @@ describe('the boot log', () => {
     const lines = formatResolvedConfig(read({ MAX_LAG_BLOCKS: 'lots' }).resolutions)
     const warn = lines.find(l => l.includes('MAX_LAG_BLOCKS'))
     expect(warn).toMatch(/ignored invalid "lots", using 1000/)
+  })
+
+  // The skip lands MAX_LAG_SKIP_KEEP behind the tip, so a threshold at or below it
+  // fires on lag the skip cannot shrink (the old code rewound the cursor and
+  // livelocked). The floor in config.ts is hardcoded; this ties it to the constant.
+  it('rejects a MAX_LAG_BLOCKS the skip could not satisfy, and accepts the first one it can', () => {
+    const lag = (v: string) => read({ MAX_LAG_BLOCKS: v }).config.indexing.maxLagBlocks
+    expect(lag(String(MAX_LAG_SKIP_KEEP))).toBe(1000)
+    expect(lag('100')).toBe(1000)
+    expect(lag(String(MAX_LAG_SKIP_KEEP + 1))).toBe(MAX_LAG_SKIP_KEEP + 1)
   })
 
   it('does not print an unset variable as env-sourced', () => {

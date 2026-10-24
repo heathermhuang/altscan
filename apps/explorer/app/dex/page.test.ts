@@ -7,7 +7,7 @@ import { shortenAddress } from '@/lib/address-display'
 // real server component, with the swaps stubbed.
 const A = '0x' + 'a'.repeat(40)
 const B = '0x' + 'b'.repeat(40)
-const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, fail: false, empty: false }))
+const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, decimals: {} as Record<string, number>, fail: false, empty: false }))
 const trade = {
   id: 1, txHash: '0x' + 'e'.repeat(64), logIndex: 0, dex: 'PancakeSwap', pairAddress: '0x' + 'd'.repeat(40),
   tokenIn: A, tokenOut: B, amountIn: '1500000000000000000', amountOut: '2000000000000000000',
@@ -23,7 +23,7 @@ vi.mock('@/lib/dex-page', () => ({
     if (h.fail) throw new Error('query failed')
     return {
       trades: h.empty ? [] : [trade], totalTrades: h.empty ? 0 : 1, topPairs: [], nativeUsd: null,
-      tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: 18, symbol })),
+      tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: h.decimals[address] ?? 18, symbol })),
     }
   },
 }))
@@ -35,8 +35,8 @@ const render = async () => {
   return renderToStaticMarkup(await DexPage({ searchParams: Promise.resolve({}) }))
 }
 const legs = (html: string) =>
-  [...html.matchAll(/<td>([\d.,]+[A-Za-z]*)(?:<span class="inline-block text-mut ml-1 text-xs">(.*?)<\/span>)?<\/td>/g)].map((m) => [m[1], m[2] ?? ''])
-beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.fail = false; h.empty = false })
+  [...html.matchAll(/<td>([\d.,]+[A-Za-z]*|—)(?:<span class="inline-block text-mut ml-1 text-xs">(.*?)<\/span>)?<\/td>/g)].map((m) => [m[1], m[2] ?? ''])
+beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.decimals = {}; h.fail = false; h.empty = false })
 
 describe('/dex swap legs', () => {
   it('an ordinary swap reads as before', async () => {
@@ -59,9 +59,14 @@ describe('/dex swap legs', () => {
     expect(legs(await render())).toEqual([['1.5', 'USDT.z'], ['2', 'WETH.e']])
   })
 
-  it('placeholders and an unknown token keep their old reading', async () => {
+  it('placeholders keep their old reading; a token with no metadata row has no known decimals, so its amount is "—", not scaled by 18', async () => {
     h.symbols = { [A]: '???' }   // B has no metadata row at all
-    expect(legs(await render())).toEqual([['1.5', 'Unknown token'], ['2', '']])
+    expect(legs(await render())).toEqual([['1.5', 'Unknown token'], ['—', '']])
+  })
+
+  it('scales each leg by its own token\'s decimals', async () => {
+    h.decimals = { [A]: 6, [B]: 8 }   // 1.5e18 raw / 1e6 = 1.5 trillion; 2e18 / 1e8 = 20 billion
+    expect(legs(await render())).toEqual([['1.5T', 'CAKE'], ['20B', 'WBNB']])
   })
 
   it('a symbol with non-ASCII characters is printed verbatim: only the URL rule is new (sanitising "BTCΞ" would read "BTC")', async () => {

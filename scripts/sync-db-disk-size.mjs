@@ -43,6 +43,14 @@ const API = 'https://api.render.com/v1'
  *  metric turning into an absurd denominator that disables the safety trigger. */
 const MAX_PLAUSIBLE_GB = 100_000
 
+/** Largest drop in DB_DISK_GB a single sync may apply, as a fraction of the
+ *  current value. Render disks only GROW, so a materially lower reading is a bad
+ *  sample, not a real shrink — and a smaller denominator raises the computed
+ *  disk-% and can fire the DESTRUCTIVE emergency path early. The only real
+ *  downward corrections are small ones (the first sync trimmed a hand-set 150
+ *  to the true 147). A larger gap is refused loudly for a human to resolve. */
+const MAX_SHRINK_FRACTION = 0.1
+
 /** Deploys here take ~1.5 min; budget well past that. On timeout we roll back
  *  and let the next run retry, which costs at most one extra deploy and can
  *  never wedge — whereas trusting an unfinished deploy can. */
@@ -85,7 +93,7 @@ export function redactIds(text) {
  * the safety trigger fires EARLIER. When in doubt about a safety threshold,
  * err toward firing early, never toward firing late.
  */
-export function planDiskGbSync({ capacityBytes, currentGb }) {
+export function planDiskGbSync({ capacityBytes, currentGb, usageBytes }) {
   if (typeof capacityBytes !== 'number' || !Number.isFinite(capacityBytes) || capacityBytes <= 0) {
     return { action: 'refuse', reason: `capacity metric unusable (${capacityBytes})` }
   }
@@ -93,8 +101,27 @@ export function planDiskGbSync({ capacityBytes, currentGb }) {
   if (targetGb < 1 || targetGb > MAX_PLAUSIBLE_GB) {
     return { action: 'refuse', reason: `implausible capacity ${targetGb}GiB` }
   }
+  // A volume cannot hold more than its capacity, so usage above the capacity
+  // reading proves the capacity sample is wrong. Usage is advisory and may be
+  // unavailable (a blind run), in which case this cross-check is simply skipped.
+  if (typeof usageBytes === 'number' && Number.isFinite(usageBytes) && usageBytes > capacityBytes) {
+    return {
+      action: 'refuse',
+      reason: `capacity ${targetGb}GiB is below the disk usage reading — one of the two metrics is wrong`,
+    }
+  }
   if (typeof currentGb !== 'number' || !Number.isFinite(currentGb) || currentGb <= 0) {
     return { action: 'update', targetGb, reason: `DB_DISK_GB unset or unusable (${currentGb})` }
+  }
+  // Integer form of `targetGb < currentGb * (1 - MAX_SHRINK_FRACTION)`.
+  if (targetGb < currentGb && targetGb * 10 < currentGb * 9) {
+    return {
+      action: 'refuse',
+      reason:
+        `real capacity ${targetGb}GiB is more than ${MAX_SHRINK_FRACTION * 100}% below ` +
+        `DB_DISK_GB ${currentGb}GiB — disks only grow, so this is a bad sample; ` +
+        `a smaller denominator could fire the destructive emergency path early`,
+    }
   }
   if (targetGb === currentGb) {
     return { action: 'noop', targetGb, reason: `already ${targetGb}GiB` }
@@ -420,12 +447,10 @@ async function main() {
       // `continue` past the sync, so a monitoring blip could stop DB_DISK_GB
       // being fixed — the opposite of what this job is for.
       let usage = { ok: false, reason: 'not measured' }
+      let usageBytes // kept for planDiskGbSync's capacity-vs-usage cross-check
       try {
-        usage = assessUtilisation({
-          usageBytes: await fetchUsageBytes(postgresId, key),
-          capacityBytes,
-          criticalPct,
-        })
+        usageBytes = await fetchUsageBytes(postgresId, key)
+        usage = assessUtilisation({ usageBytes, capacityBytes, criticalPct })
       } catch (metricErr) {
         usage = {
           ok: false,
@@ -457,7 +482,7 @@ async function main() {
         continue
       }
 
-      const plan = planDiskGbSync({ capacityBytes, currentGb })
+      const plan = planDiskGbSync({ capacityBytes, currentGb, usageBytes })
       if (plan.action === 'refuse') {
         failed++
         console.error(`REFUSE ${label}: ${plan.reason}`)

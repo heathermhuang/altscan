@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { getChainConfig } from '@altscan/chain-config'
 import { chainConfig } from '@/lib/chain-client'
+import { peerHref } from '@/lib/peer-href'
 
 const isDev = process.env.NODE_ENV === 'development'
 const PEER_URL = isDev ? chainConfig.peerDevUrl : chainConfig.peerUrl
@@ -82,7 +83,7 @@ export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | '
           </p>
           {NETWORKS.map(net => {
             const isCurrent = net.id === currentKey
-            const href = isCurrent ? null : `${PEER_URL}${pathname}`
+            const href = isCurrent ? null : peerHref(PEER_URL, pathname)
             const mark = (
               <span
                 className="net-mark w-7 h-7 rounded-[3px] flex items-center justify-center shrink-0"
@@ -130,7 +131,7 @@ export function NetworkSwitcher({ direction = 'down' }: { direction?: 'down' | '
           })}
           <div className="px-3 py-2 border-t border-hair bg-canvas">
             <p className="font-mono text-[11px] text-mut">
-              Same page on the other chain
+              Same page when both chains have it, else the other chain&apos;s home
             </p>
           </div>
         </div>

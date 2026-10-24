@@ -8,7 +8,7 @@ import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
-import { fetchBlockTraces, decodeCallTracerBlock, type RawTraceTx } from './internal-tx'
+import { fetchBlockTraces, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
@@ -161,6 +161,12 @@ export type NormalizedLog = {
 export type NormalizedReceipt = {
   status: boolean
   gasUsed: bigint
+  /**
+   * What the transaction actually paid per gas. `tx.gasPrice` is the type-2
+   * MAX fee on some nodes (and absent on others), so the receipt is the source of
+   * truth; absent here means the node did not report a parseable value.
+   */
+  effectiveGasPrice?: bigint
   logs: NormalizedLog[]
 }
 
@@ -356,6 +362,14 @@ export async function processBlock(
   }
   if (!block) throw new Error(`Block ${blockNumber} not found`)
   if (!block.hash) throw new Error(`Block ${blockNumber} has no hash (pending block?)`)
+  // An endpoint that answers a DIFFERENT height must not be believed: the async
+  // transfer writer DELETEs the rows of the block number it is handed and then
+  // inserts what it decoded, so a block N+1 response processed as N would wipe
+  // N+1's transfers and label them N. Strictly above the first write, so
+  // rpc-failover retries the block on another endpoint.
+  if (block.number !== blockNumber) {
+    throw new Error(`Block ${blockNumber} response is for height ${block.number}`)
+  }
 
   // Refuse a partially-covered block BEFORE the first write, so rpc-failover can
   // retry it on another endpoint with nothing half-written. See the function.
@@ -367,6 +381,21 @@ export async function processBlock(
   )
 
   const timestamp = new Date(Number(block.timestamp) * 1000)
+
+  // Decode the traces HERE, above the first write: the decoder walks untrusted
+  // JSON and used to run after the block insert with nothing around it, so one
+  // malformed frame threw with the block half-persisted (pinning the cursor and
+  // blocking quarantine). It is also where traces for transactions that are not
+  // in this block are dropped. Never throws — see prepareInternalTxRows.
+  let itxRows: InternalTxRow[] = []
+  if (rawTraces) {
+    const prepared = prepareInternalTxRows(rawTraces, blockNumber, timestamp, block.prefetchedTransactions.map(tx => tx.hash))
+    itxRows = prepared.rows
+    if (prepared.problem) reportInternalTxProblem('trace', blockNumber, prepared.problem)
+    else if (prepared.dropped > 0) {
+      reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.dropped} trace entr(ies) do not belong to the block, dropped`))
+    }
+  }
 
   // Map tx hash → receipt so we can populate tx.status / tx.gasUsed at INSERT
   // time instead of via a follow-up UPDATE pass.
@@ -405,9 +434,11 @@ export async function processBlock(
       toAddress: tx.to?.toLowerCase() ?? null,
       value: tx.value.toString(),
       gas: tx.gasLimit,
-      gasPrice: tx.gasPrice?.toString() ?? '0',
+      gasPrice: rec?.effectiveGasPrice?.toString() ?? tx.gasPrice?.toString() ?? '0',
       gasUsed: rec?.gasUsed ?? 0n,
       input: tx.data.length > 500 ? tx.data.slice(0, 500) : tx.data,
+      // `rec` is absent only under skipLogs (no receipts fetched); a fetched receipt
+      // always carries a proven status — see parseReceiptStatus.
       status: rec?.status ?? true,
       methodId: tx.data.length >= 10 ? tx.data.slice(0, 10) : null,
       txIndex: idx,
@@ -438,20 +469,17 @@ export async function processBlock(
     }
   }
 
-  // ── 2b. Internal transactions (traces already awaited above) ───
+  // ── 2b. Internal transactions (traces already awaited and decoded above) ───
   // Natural key (block_number, tx_hash, trace_address) + onConflictDoNothing:
   // a replay is a no-op, never a duplicate. Degrades rather than throws — writes
   // have begun, and a throw here would hand a partially persisted block to the
   // poison path over a secondary table.
-  if (rawTraces) {
-    const itxRows = decodeCallTracerBlock(rawTraces, blockNumber, timestamp)
-    for (let i = 0; i < itxRows.length; i += SQL_BATCH_CHUNK) {
-      try {
-        await db.insert(schema.internalTransactions).values(itxRows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
-      } catch (err) {
-        reportInternalTxProblem('insert', blockNumber, err)
-        break
-      }
+  for (let i = 0; i < itxRows.length; i += SQL_BATCH_CHUNK) {
+    try {
+      await db.insert(schema.internalTransactions).values(itxRows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
+    } catch (err) {
+      reportInternalTxProblem('insert', blockNumber, err)
+      break
     }
   }
 
@@ -1773,6 +1801,36 @@ async function fetchPairTokens(pairAddress: string, provider: JsonRpcProvider): 
   }
 }
 
+/**
+ * A receipt's success flag. `'0x1'` is success, `'0x0'` is failure, and nothing
+ * else is guessed at: the old `r.status === '0x1'` stored a missing or garbled
+ * status as a FAILED transaction, silently.
+ *
+ * A receipt with no `status` but a state `root` is pre-Byzantium (before block
+ * 4,370,000 on mainnet), which had no failure flag; it counts as success. A
+ * receipt with neither proves nothing, so this throws and rpc-failover retries
+ * the block on another endpoint (strictly above the first write).
+ */
+export function parseReceiptStatus(
+  r: { transactionHash?: string; status?: string | null; root?: string | null },
+  blockNumber: number,
+): boolean {
+  const s = r.status
+  if (s === undefined || s === null) {
+    if (typeof r.root === 'string' && r.root.length > 2) return true
+    throw new Error(`Block ${blockNumber} receipt for ${r.transactionHash} has neither status nor root`)
+  }
+  if (typeof s === 'string' && /^0x0*1$/i.test(s)) return true
+  if (typeof s === 'string' && /^0x0*$/i.test(s)) return false
+  throw new Error(`Block ${blockNumber} receipt for ${r.transactionHash} has unrecognised status ${JSON.stringify(s)}`)
+}
+
+/** Secondary field: a missing or malformed value falls back to tx.gasPrice, never throws. */
+function parseEffectiveGasPrice(v: unknown): bigint | undefined {
+  if (typeof v !== 'string' || !/^0x[0-9a-f]+$/i.test(v)) return undefined
+  return BigInt(v)
+}
+
 // ── eth_getBlockReceipts ─────────────────────────────────────────────
 // No auto-disable: all target chains (BSC, ETH mainnet) support this method on
 // every RPC we use. A failure here means a transient issue (rate-limit 429,
@@ -1787,8 +1845,11 @@ export async function fetchBlockReceipts(
   const blockHex = '0x' + blockNumber.toString(16)
   const raw = await provider.send('eth_getBlockReceipts', [blockHex]) as Array<{
     transactionHash: string
-    status: string
+    status?: string | null
+    /** Pre-Byzantium receipts carry a state root instead of a status. */
+    root?: string | null
     gasUsed: string
+    effectiveGasPrice?: string | null
     logs: Array<{ address: string; topics: string[]; data: string; logIndex: string }>
   }> | null
 
@@ -1817,8 +1878,9 @@ export async function fetchBlockReceipts(
       // case-SENSITIVE, so a case variant could slip past them too.
       txHash: r.transactionHash.toLowerCase(),
       receipt: {
-        status: r.status === '0x1',
+        status: parseReceiptStatus(r, blockNumber),
         gasUsed: BigInt(r.gasUsed),
+        effectiveGasPrice: parseEffectiveGasPrice(r.effectiveGasPrice),
         logs: r.logs.map(l => ({
           address: l.address.toLowerCase(),
           topics: l.topics,

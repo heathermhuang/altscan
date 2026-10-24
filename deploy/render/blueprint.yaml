@@ -22,7 +22,7 @@ services:
     plan: starter
     rootDir: apps/explorer
     buildCommand: >-
-      cd ../.. && pnpm install --no-frozen-lockfile &&
+      cd ../.. && pnpm install --frozen-lockfile &&
       pnpm --filter @altscan/explorer build &&
       cp -r apps/explorer/.next/static apps/explorer/.next/standalone/apps/explorer/.next/static
     startCommand: cd .next/standalone/apps/explorer && node server.js
@@ -83,7 +83,7 @@ services:
     # fails the build if chain-config's entry is ever a non-.js file again, which
     # would only load via Node type-stripping and is pinned by nothing.
     buildCommand: >-
-      cd ../.. && pnpm install --no-frozen-lockfile &&
+      cd ../.. && pnpm install --frozen-lockfile &&
       pnpm --filter @altscan/chain-config build &&
       pnpm --filter @altscan/explorer-core build &&
       pnpm --filter @altscan/providers build &&

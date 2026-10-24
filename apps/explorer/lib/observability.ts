@@ -15,7 +15,9 @@
  * be found with a single `?text=` query against the Render logs.
  */
 
+import { inspect } from 'node:util'
 import { unwrapDbError } from '@altscan/db'
+import { redactSecrets } from './redact'
 
 /**
  * First occurrence per tag is always emitted; repeats are suppressed for this
@@ -42,7 +44,11 @@ export function swallow(tag: string, err: unknown): void {
     if (lastLoggedAt.size > 500) lastLoggedAt.clear()
     // A failed query logs what the database said, not drizzle's SQL-and-params wrapper.
     const e = unwrapDbError(err)
-    console.error(`[${tag}]`, e instanceof Error ? e.stack ?? e.message : e)
+    // Formatted to a string and scrubbed: an ethers RPC error carries the keyed
+    // endpoint as `requestUrl` in both its message and its `info`, and handing
+    // console.error the object itself would print that too.
+    const text = e instanceof Error ? e.stack ?? e.message : typeof e === 'string' ? e : inspect(e)
+    console.error(`[${tag}]`, redactSecrets(text))
   } catch {
     // Logging must never be able to break the page it is reporting on.
   }

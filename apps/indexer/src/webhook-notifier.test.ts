@@ -52,3 +52,34 @@ describe('notifyWebhooks in-flight cap', () => {
     expect(h.selects).toBe(MAX_INFLIGHT_NOTIFY_RUNS + 1)
   })
 })
+
+// f027. Both chains deliver the same shape from the same code, so a consumer registered on BNB and ETH had no
+// way to tell a payload's chain apart. The field is additive: nothing existing moves or changes type.
+describe('notifyWebhooks payload', () => {
+  const deliveredBody = async (): Promise<Record<string, unknown>> => {
+    let sent: RequestInit | undefined
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent = init
+      return new Response(null, { status: 200 })
+    })
+    const { notifyWebhooks } = await import('./webhook-notifier')
+    await notifyWebhooks(tx, 42, new Date(0), '0x42')
+    if (!sent) throw new Error('no delivery was attempted')
+    return JSON.parse(sent.body as string)
+  }
+
+  afterEach(() => { delete process.env.CHAIN })
+
+  it('carries the chain id, 56 on bnb and 1 on eth', async () => {
+    process.env.CHAIN = 'bnb'
+    expect((await deliveredBody()).chainId).toBe(56)
+    process.env.CHAIN = 'eth'
+    expect((await deliveredBody()).chainId).toBe(1)
+  })
+
+  it('keeps every existing field', async () => {
+    const body = await deliveredBody()
+    expect(Object.keys(body).sort()).toEqual(['blockNumber', 'chainId', 'count', 'data', 'event', 'timestamp'])
+    expect(body).toMatchObject({ event: 'tx', blockNumber: 42, count: 1 })
+  })
+})

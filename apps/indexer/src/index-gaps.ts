@@ -132,6 +132,33 @@ export async function isPoisonBlock(db: DbLike, block: number): Promise<boolean>
   return rowCount(res) > 0
 }
 
+/** Blocks left un-abandoned behind the tip when the MAX_LAG skip fires. */
+export const MAX_LAG_SKIP_KEEP = 200
+
+/**
+ * Pure. Decide whether the MAX_LAG skip fires, and over which range.
+ *
+ * The skip jumps the cursor to `latest - MAX_LAG_SKIP_KEEP`. When `maxLag` is
+ * below the keep distance the computed range is INVERTED (`abandonedTo <
+ * abandonedFrom`): nothing is abandoned, yet the old inline code still moved
+ * `lastIndexed` to `latest - 200` — a REWIND, which re-indexed up to ~200 blocks
+ * and re-triggered the skip on the next pass, forever. `recordIndexGap` already
+ * refuses the inverted range (returning false), but the caller ignored that, so
+ * the guard protected the table and not the cursor. An inverted range means no
+ * skip at all: no rewind, no log line, the loop just catches up normally.
+ */
+export function planMaxLagSkip(
+  latest: number,
+  lastIndexed: number,
+  maxLag: number,
+): { abandonedFrom: number; abandonedTo: number } | null {
+  if (!(latest - lastIndexed > maxLag)) return null
+  const abandonedFrom = lastIndexed + 1
+  const abandonedTo = latest - MAX_LAG_SKIP_KEEP
+  if (!(abandonedTo >= abandonedFrom)) return null
+  return { abandonedFrom, abandonedTo }
+}
+
 export async function recordIndexGap(
   db: DbLike,
   fromBlock: number,

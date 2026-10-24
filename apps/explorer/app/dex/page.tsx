@@ -6,7 +6,8 @@ import {
 import { dexEmptyState } from '@/lib/dex-empty'
 import { parsePageParam } from '@/lib/list-pages'
 import { MAX_LIST_ROWS } from '@/lib/list-depth'
-import { timeAgo, formatAmountCompact, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
+import { timeAgo, formatEstimate, tokenTextOr, tokenUnit, UNKNOWN_TOKEN } from '@/lib/format'
+import { legAmount } from '@/lib/token-units'
 import { Pagination } from '@/components/ui/Pagination'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain'
@@ -186,9 +187,10 @@ export default async function DexPage({
           </thead>
           <tbody>
             {trades.map(t => {
-              // Look up token decimals from enriched data, default to 18
-              const inDecimals = tokenDecimalsMap.get(t.tokenIn?.toLowerCase() ?? '') ?? 18
-              const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '') ?? 18
+              // Token decimals from the enriched data. A token with no metadata row has UNKNOWN decimals: its leg reads "—",
+              // never an amount scaled by a guessed 18 (a 6-decimals token's amount would print a trillion times too small).
+              const inDecimals = tokenDecimalsMap.get(t.tokenIn?.toLowerCase() ?? '')
+              const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '')
               const inSymbol = symbolText(t.tokenIn)
               const outSymbol = symbolText(t.tokenOut)
               return (
@@ -203,11 +205,11 @@ export default async function DexPage({
                     <AddressLink address={t.pairAddress} />
                   </td>
                   <td>
-                    {formatAmountCompact(t.amountIn, inDecimals)}
+                    {legAmount(t.amountIn, inDecimals)}
                     {inSymbol && <span className="inline-block text-mut ml-1 text-xs">{inSymbol}</span>}
                   </td>
                   <td>
-                    {formatAmountCompact(t.amountOut, outDecimals)}
+                    {legAmount(t.amountOut, outDecimals)}
                     {outSymbol && <span className="inline-block text-mut ml-1 text-xs">{outSymbol}</span>}
                   </td>
                   <td className="hidden sm:table-cell">

@@ -8,7 +8,7 @@ import { chainConfig } from '@/lib/chain'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { blocksProduced, minerCounts, validatorBlocksQuery, type MinerCount } from '@/lib/validator-blocks'
-import { validatorDisplays } from '@/lib/validator-display'
+import { formatCommission, validatorDisplays } from '@/lib/validator-display'
 import { producerLegend, producerStrip, producerSummary } from '@/lib/producers'
 import { TileStrip } from '@/components/tape/TileStrip'
 
@@ -116,7 +116,7 @@ export default async function ValidatorsPage() {
                   <Badge variant={display[i].status.variant}>{display[i].status.label}</Badge>
                 </td>
                 <td className="whitespace-nowrap">{display[i].powerUnknown ? '—' : `${formatNumber(safeBigInt(v.votingPower) / 10n ** 18n)} ${chainConfig.currency}`}</td>
-                <td>{(parseFloat(v.commission ?? '0') * 100).toFixed(1)}%</td>
+                <td>{formatCommission(v.commission)}</td>
                 <td>{blocksCell(v.address)}</td>
               </tr>
             ))}

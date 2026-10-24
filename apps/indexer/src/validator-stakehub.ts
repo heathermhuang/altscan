@@ -33,3 +33,44 @@ export const COMMISSION_BASE = 10_000
 export function toCommissionFraction(rate: bigint): string {
   return (Number(rate) / COMMISSION_BASE).toFixed(4)
 }
+
+/**
+ * One validator's upsert, decided from what the chain actually answered.
+ *
+ * A read that failed is UNKNOWN, not a default: the syncer used to store commission
+ * '0.1' (rendered "10.0%") for it and replace a good stored moniker with a generated
+ * `Validator N`, both on every run where a single RPC call hiccuped. So an unread
+ * commission is NULL, and `update` (the ON CONFLICT SET) omits any column whose read
+ * failed, leaving the last good stored value alone. `values` still carries a moniker
+ * for the first INSERT, where a placeholder beats a NOT NULL error.
+ */
+export type ValidatorWrite = {
+  values: { address: string; moniker: string; votingPower: string; commission: string | null; status: 'active'; updatedAt: Date }
+  update: { votingPower: string; status: 'active'; updatedAt: Date; moniker?: string; commission?: string }
+}
+
+export function buildValidatorWrite(input: {
+  address: string
+  /** What to insert when the chain gave no moniker: the known-validator name or `Validator N`. */
+  fallbackMoniker: string
+  /** The on-chain description's moniker, or null when the read failed or it was empty. */
+  chainMoniker: string | null
+  /** The on-chain commission rate, or null when the read failed. */
+  commissionRate: bigint | null
+  votingPower: bigint
+  now: Date
+}): ValidatorWrite {
+  const moniker = input.chainMoniker && input.chainMoniker.length > 0 ? input.chainMoniker : null
+  const commission = input.commissionRate === null ? null : toCommissionFraction(input.commissionRate)
+  const votingPower = input.votingPower.toString()
+  return {
+    values: { address: input.address, moniker: moniker ?? input.fallbackMoniker, votingPower, commission, status: 'active', updatedAt: input.now },
+    update: {
+      votingPower,
+      status: 'active',
+      updatedAt: input.now,
+      ...(moniker !== null ? { moniker } : {}),
+      ...(commission !== null ? { commission } : {}),
+    },
+  }
+}
