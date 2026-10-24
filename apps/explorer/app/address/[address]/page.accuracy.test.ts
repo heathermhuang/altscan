@@ -173,3 +173,23 @@ describe('address page, metadata description', () => {
     expect(await description({ ...ROW, txCount: 1 })).toMatch(/, 1 transaction$/)
   })
 })
+
+describe('address page, metadata for a malformed address', () => {
+  it.each(['vitalik.eth', '0x1234', '0x' + 'g'.repeat(40), ''])('returns noindex for %j without a provider or database call', async (bad) => {
+    const { page } = await load()
+    const meta = await page.generateMetadata({ params: Promise.resolve({ address: bad }) })
+    expect(meta.robots).toEqual({ index: false, follow: false })
+    expect(meta.alternates).toBeUndefined()
+    expect(h.providerCalls).toBe(0)
+    expect(h.dbSelects).toBe(0)
+  })
+
+  it('still looks a well-formed address up', async () => {
+    const { page } = await load()
+    const meta = await page.generateMetadata({ params: Promise.resolve({ address: ME.toUpperCase().replace('0X', '0x') }) })
+    expect(meta.robots).toBeUndefined()
+    expect(meta.alternates?.canonical).toBe(`/address/${ME}`)
+    expect(h.providerCalls).toBe(1)
+    expect(h.dbSelects).toBeGreaterThan(0)
+  })
+})

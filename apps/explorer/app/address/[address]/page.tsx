@@ -92,8 +92,17 @@ const getAddressChainState = cache(async (addr: string) => {
   }
 })
 
+const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
+
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
+  // Validate BEFORE any lookup: the chain-state read below hands the string to the RPC provider,
+  // and on ETH ethers resolves an ENS-like name ("vitalik.eth") rather than rejecting it, so a
+  // crawler's garbage URL would cost RPC calls. The page body 404s the same input. noindex
+  // rather than notFound(), which cannot set a reliable status from metadata (see the tx page).
+  if (!ADDRESS_REGEX.test(address)) {
+    return { title: 'Address Not Found', robots: { index: false, follow: false } }
+  }
   let info: typeof schema.addresses.$inferSelect | null = null
   try {
     const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
@@ -142,7 +151,7 @@ export default async function AddressPage({
   const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
   const offset = (page - 1) * PAGE_SIZE
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) notFound()
+  if (!ADDRESS_REGEX.test(addr)) notFound()
 
   // `addr` stays lowercase for every DB lookup and href; only display
   // and the copy button use the checksummed form.
