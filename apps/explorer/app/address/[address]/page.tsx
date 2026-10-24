@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, safeBigInt, groupDigits } from '@/lib/format'
+import { formatCompactUsd, formatNativeToken, formatNumber, formatUtc, timeAgo, groupDigits } from '@/lib/format'
 import { Badge } from '@/components/ui/Badge'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
@@ -38,6 +38,8 @@ import { selectByAddress } from '@/lib/address-query'
 import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
+import { FLOW_SAMPLE_CAP, flowLabel, flowValue, parseFlowRow, type FlowSample } from '@/lib/address-analytics'
+import { resolveTxCount } from '@/lib/address-tx-count'
 
 export const revalidate = 300
 
@@ -90,14 +92,25 @@ const getAddressChainState = cache(async (addr: string) => {
   }
 })
 
+const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
+
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
+  // Validate BEFORE any lookup: the chain-state read below hands the string to the RPC provider,
+  // and on ETH ethers resolves an ENS-like name ("vitalik.eth") rather than rejecting it, so a
+  // crawler's garbage URL would cost RPC calls. The page body 404s the same input. noindex
+  // rather than notFound(), which cannot set a reliable status from metadata (see the tx page).
+  if (!ADDRESS_REGEX.test(address)) {
+    return { title: 'Address Not Found', robots: { index: false, follow: false } }
+  }
   let info: typeof schema.addresses.$inferSelect | null = null
   try {
     const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
     info = row ?? null
   } catch (e) { swallow('addr/metadata', e) }  // DB error
-  const { status, balance } = await getAddressChainState(address.toLowerCase())
+  const { status, balance, nonce } = await getAddressChainState(address.toLowerCase())
+  // No row (or a failed read) is no count: say nothing rather than "0 transactions".
+  const txs = resolveTxCount({ indexed: info ? info.txCount : null, nonce: status.isContract ? null : nonce })
   // Only claim "Contract" when we actually know. An unknown address keeps the
   // neutral wording rather than being mislabelled an EOA.
   const type = status.isContract ? 'Contract' : 'Address'
@@ -110,7 +123,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${type} ${address.slice(0, 14)}…`,
-    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — ${balanceText}, ${info?.txCount ?? 0} transactions`,
+    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — ${balanceText}${txs.known ? `, ${txs.text} ${txs.total === 1 ? 'transaction' : 'transactions'}` : ''}`,
     alternates: { canonical: `/address/${address.toLowerCase()}` },
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
@@ -138,7 +151,7 @@ export default async function AddressPage({
   const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
   const offset = (page - 1) * PAGE_SIZE
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) notFound()
+  if (!ADDRESS_REGEX.test(addr)) notFound()
 
   // `addr` stays lowercase for every DB lookup and href; only display
   // and the copy button use the checksummed form.
@@ -166,7 +179,6 @@ export default async function AddressPage({
     // DB not connected
   }
 
-  const txCount = addressInfo?.txCount ?? 0
   const firstTxTimestamp = addressInfo?.firstSeen ?? null
 
   // Enrich with external data — split into two batches to reduce peak memory.
@@ -177,7 +189,6 @@ export default async function AddressPage({
   // reading headers() forfeits no caching that was actually in effect. Bots get the local-index
   // view; humans still get the Moralis fallback. (The transfers/holdings/nfts tabs already honor this.)
   const isBot = isBotRequest((await headers()).get('user-agent'))
-  const noLocalData = txCount === 0 && !addressInfo
 
   // Batch 1: lightweight lookups (name resolution, risk check, price)
   const [resolvedName, riskData, nativePrice] = await Promise.all([
@@ -199,15 +210,20 @@ export default async function AddressPage({
   // maintains, so falling back turned an RPC blip into a confident wrong zero.
   const displayBalance = balance.value
   const balanceKnown = balance.known
-  // Transaction count: prefer DB, then RPC nonce. Moralis history is now loaded lazily on the
-  // client, so we no longer have it available here during SSR.
-  const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || 0
+  // Transaction count: the index's, or unknown. The RPC nonce counts only OUTGOING transactions,
+  // so it is never presented as the total (lib/address-tx-count.ts); it is labelled on the fact
+  // instead. Moralis history is loaded lazily on the client, so it is not available here.
+  const txDisplay = resolveTxCount({
+    indexed: addressInfo ? addressInfo.txCount : null,
+    nonce: contractStatus.isContract ? null : rpcTxCount,   // a contract's nonce counts contracts it created
+  })
+  const displayTxCount = txDisplay.total
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
     : null
-  // No index row and no RPC nonce: the tab says history is not in the local
-  // index, so a bare "0" here would claim a count we do not have.
-  const txCountText = noLocalData && displayTxCount === 0 ? '—' : formatNumber(displayTxCount)
+  // No index row: the tab says history is not in the local index, so a bare "0" here
+  // would claim a count we do not have.
+  const txCountText = txDisplay.text
   // USD value of native token balance
   const nativeUsd = balanceKnown && nativePrice && displayBalance
     ? (Number(displayBalance) / 1e18 * nativePrice)
@@ -303,6 +319,7 @@ export default async function AddressPage({
         <Fact
           label="Transactions"
           value={txCountText}
+          sub={txDisplay.nonceNote ?? undefined}
         />
         <Fact
           label="First indexed"
@@ -632,31 +649,31 @@ async function AnalyticsTab({
   addr: string
   addressInfo: typeof schema.addresses.$inferSelect | null
 }) {
-  let totalSentNative = '0'
-  let totalReceivedNative = '0'
+  // null = the read failed, which renders "—": a DB error must not print as a confident zero.
+  let sent: FlowSample | null = null
+  let received: FlowSample | null = null
   const firstSeen: Date | null = addressInfo?.firstSeen ? new Date(addressInfo.firstSeen) : null
   const lastSeen: Date | null = addressInfo?.lastSeen ? new Date(addressInfo.lastSeen) : null
 
   try {
-    // Use a capped sample (last 1000 txs) instead of full-table SUM scans.
+    // Use a capped sample (last 1000 successful txs) instead of full-table SUM scans.
     // Full SUM on 36M+ row transactions table was the #1 cause of OOM crashes.
+    // Failed txs moved no value, so `status` keeps their `value` out of the sums; the labels
+    // (lib/address-analytics.ts) say these are samples of the index, not lifetime totals.
+    const cap = sql.raw(String(FLOW_SAMPLE_CAP))
     const [sentResult, receivedResult] = await Promise.all([
       db.execute(sql`
-        SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM (SELECT value FROM transactions WHERE from_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
+        SELECT COALESCE(SUM(value::numeric), 0) as total, COUNT(*) as n
+        FROM (SELECT value FROM transactions WHERE from_address = ${addr} AND status = true ORDER BY timestamp DESC LIMIT ${cap}) sub
       `),
       db.execute(sql`
-        SELECT COALESCE(SUM(value::numeric), 0) as total
-        FROM (SELECT value FROM transactions WHERE to_address = ${addr} ORDER BY timestamp DESC LIMIT 1000) sub
+        SELECT COALESCE(SUM(value::numeric), 0) as total, COUNT(*) as n
+        FROM (SELECT value FROM transactions WHERE to_address = ${addr} AND status = true ORDER BY timestamp DESC LIMIT ${cap}) sub
       `),
     ])
 
-    totalSentNative = String(
-      (Array.from(sentResult)[0] as Record<string, unknown>)?.total ?? '0',
-    )
-    totalReceivedNative = String(
-      (Array.from(receivedResult)[0] as Record<string, unknown>)?.total ?? '0',
-    )
+    sent = parseFlowRow(Array.from(sentResult)[0])
+    received = parseFlowRow(Array.from(receivedResult)[0])
 
     // first_seen/last_seen are pre-computed by the indexer in the addresses table.
     // All 1.9M+ addresses have these fields populated, so no fallback needed.
@@ -666,23 +683,12 @@ async function AnalyticsTab({
     // DB error
   }
 
-  const formatWei = (raw: string) => {
-    try {
-      return formatNativeToken(safeBigInt(raw))
-    } catch {
-      return '0.0000'
-    }
-  }
-
   return (
     <div className="bg-card rounded-xl border border-hair p-6">
       <h2 className="mb-4 font-semibold tracking-[-0.02em] text-ink">Address Analytics</h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        <AnalyticItem label="Total Sent" value={`${formatWei(totalSentNative)} ${chainConfig.currency}`} />
-        <AnalyticItem
-          label="Total Received"
-          value={`${formatWei(totalReceivedNative)} ${chainConfig.currency}`}
-        />
+        <AnalyticItem label={flowLabel('Sent', sent)} value={flowValue(sent, chainConfig.currency)} />
+        <AnalyticItem label={flowLabel('Received', received)} value={flowValue(received, chainConfig.currency)} />
         <AnalyticItem
           label="First indexed"
           value={firstSeen ? formatUtc(firstSeen) : 'Unknown'}

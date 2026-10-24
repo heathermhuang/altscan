@@ -9,37 +9,13 @@ import { getWebProvider } from '@/lib/rpc'
 import { classifyCode, resolveContractStatusFromClass, type CodeClass } from '@/lib/contract-status'
 import { codeClassCache } from '@/lib/code-cache'
 import { chainConfig } from '@/lib/chain'
-import { getRetentionFloor, isLocalHistoryIncomplete } from '@/lib/retention'
+import { readCoverage } from '@/lib/address-coverage'
 import { trackedTokens } from '@/lib/holdings'
 import { readTrackedBalances } from '@/lib/tracked-balances'
 
 export const dynamic = 'force-dynamic'
 
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
-
-/**
- * Whether retention has cut this address's lists short. The index keeps only a
- * few days, so empty lists alone cannot tell "no activity" from "nothing
- * recent". addresses.first_seen is never pruned, so a first_seen older than the
- * retention floor means the index has dropped this address's earliest
- * transactions: the check the address page makes (lib/retention.ts). null when either
- * side is unknown, including an address the index has no row for: whatever
- * history it has, the index cannot vouch for it.
- */
-async function readCoverage(address: string) {
-  const [firstSeen, indexedFrom] = await Promise.all([
-    db
-      .select({ firstSeen: schema.addresses.firstSeen })
-      .from(schema.addresses)
-      .where(eq(schema.addresses.address, address))
-      .limit(1)
-      .then((r) => r[0]?.firstSeen ?? null)
-      .catch(swallowed('api/v1/addresses/coverage', null)),
-    getRetentionFloor(),
-  ])
-  const historyComplete = firstSeen && indexedFrom ? !isLocalHistoryIncomplete(firstSeen, indexedFrom) : null
-  return { historyComplete, indexedFrom }
-}
 
 /**
  * Live balances from the chain: the native coin, and the tracked tokens (the

@@ -107,6 +107,19 @@ function logUpstreamFailure(endpoint: string, status: number): void {
 }
 
 /**
+ * An NFT's image is token-controlled metadata that the explorer puts in an <img src>. Only an
+ * https URL is accepted: not http (mixed content), ipfs:// (not loadable), data: or javascript:.
+ */
+function httpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    return new URL(value).protocol === 'https:' ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Build a clean, human-readable summary for a Moralis history item.
  * Moralis's own `summary` field is garbled for swaps — e.g. it returns
  * "Swapped 0.134 WBNB and 0.134 BNB for 0.134 WBNB and 0.134 BNB" (same tokens
@@ -1085,7 +1098,7 @@ export function createMoralisAdapter(
       if (!auth.ok) return auth
       try {
         const res = await fetch(
-          `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false`,
+          `${BASE}/${address}/nft?chain=${CHAIN}&limit=25&media_items=false&exclude_spam=true`,
           { headers: auth.headers, next: { revalidate: 300 }, signal: AbortSignal.timeout(10000) } as RequestInit,
         )
         if (!res.ok) {
@@ -1099,10 +1112,14 @@ export function createMoralisAdapter(
             name: string
             symbol: string
             metadata: string | null
+            owner_of?: string
             media?: { original_media_url?: string }
           }>
         }
-        const result = data.result.map(n => {
+        // The response is for the wallet we asked about; an item Moralis attributes to a different
+        // owner is not that wallet's holding, so it is dropped rather than shown as theirs.
+        const owned = data.result.filter(n => !n.owner_of || n.owner_of.toLowerCase() === address.toLowerCase())
+        const result = owned.map(n => {
           let metadata: Record<string, unknown> | null = null
           try { metadata = n.metadata ? JSON.parse(n.metadata) : null } catch { /* ignore */ }
           return {
@@ -1111,7 +1128,7 @@ export function createMoralisAdapter(
             name: n.name,
             symbol: n.symbol,
             metadata,
-            imageUrl: (metadata?.image as string) ?? n.media?.original_media_url ?? null,
+            imageUrl: httpsUrl(metadata?.image) ?? httpsUrl(n.media?.original_media_url),
           }
         })
         await cacheSetJson(cacheKey, result)
