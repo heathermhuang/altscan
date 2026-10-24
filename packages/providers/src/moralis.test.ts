@@ -168,3 +168,51 @@ describe('createMoralisAdapter — A4b-0 host context', () => {
     }
   })
 })
+
+describe('createMoralisAdapter — getAddressNfts', () => {
+  const nft = (over: Record<string, unknown>) => ({
+    token_address: '0xc011', token_id: '1', name: 'Apes', symbol: 'APE', metadata: null, ...over,
+  })
+  const stubNfts = (result: unknown[]) => {
+    vi.stubEnv('MORALIS_API_KEY', 'k')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ result }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('asks Moralis to exclude spam, like the erc20 endpoint', async () => {
+    const fetchMock = stubNfts([])
+    await createMoralisAdapter(CFG).getAddressNfts('0xa4a-nft-spam')
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('exclude_spam')).toBe('true')
+  })
+
+  it('drops an item Moralis attributes to a different owner, matching the wallet case-insensitively', async () => {
+    const me = '0xA4A00000000000000000000000000000000000AA'
+    stubNfts([
+      nft({ token_id: '1', owner_of: me.toLowerCase() }),
+      nft({ token_id: '2', owner_of: '0x' + '9'.repeat(40) }),
+      nft({ token_id: '3' }),   // no owner_of: nothing contradicts the request
+    ])
+    const r = await createMoralisAdapter(CFG).getAddressNfts(me)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data.map((n) => n.tokenId)).toEqual(['1', '3'])
+  })
+
+  it('accepts only https image URLs, falling back to the media URL when it is https', async () => {
+    stubNfts([
+      nft({ token_id: '1', metadata: JSON.stringify({ image: 'https://cdn.example/1.png' }) }),
+      nft({ token_id: '2', metadata: JSON.stringify({ image: 'http://cdn.example/2.png' }) }),
+      nft({ token_id: '3', metadata: JSON.stringify({ image: 'ipfs://bafy/3.png' }), media: { original_media_url: 'https://cdn.example/3.png' } }),
+      nft({ token_id: '4', metadata: JSON.stringify({ image: 'javascript:alert(1)' }) }),
+      nft({ token_id: '5', metadata: JSON.stringify({ image: 'data:image/svg+xml;base64,PHN2Zz4=' }) }),
+      nft({ token_id: '6', metadata: JSON.stringify({ image: { not: 'a string' } }), media: { original_media_url: 'http://cdn.example/6.png' } }),
+    ])
+    const r = await createMoralisAdapter(CFG).getAddressNfts('0xa4a-nft-image')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.map((n) => n.imageUrl)).toEqual([
+        'https://cdn.example/1.png', null, 'https://cdn.example/3.png', null, null, null,
+      ])
+    }
+  })
+})
