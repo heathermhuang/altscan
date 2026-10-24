@@ -8,6 +8,8 @@ const COINGECKO = /api\.coingecko\.com/
 const COINCAP = /api\.coincap\.io/
 const cc = chainConfig.market.cryptoCompareSymbol
 const cgId = chainConfig.coingeckoId
+const bsym = chainConfig.market.binanceSymbol
+const capId = chainConfig.market.coincapId
 
 type Reply = { ok: boolean; body?: unknown } | Error
 let replies: Array<[RegExp, Reply]> = []
@@ -34,7 +36,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('fetchNativeQuote', () => {
   it('reads the Binance 24h ticker first and stops there', async () => {
-    replies = [[BINANCE, { ok: true, body: { lastPrice: '731.25', priceChangePercent: '-1.5' } }]]
+    replies = [[BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '731.25', priceChangePercent: '-1.5' } }]]
     expect(await fetchNativeQuote()).toEqual({ price: 731.25, change24h: -1.5 })
     expect(calls).toHaveLength(1)
     expect(calls[0]).toContain(`symbol=${chainConfig.market.binanceSymbol}`)
@@ -53,7 +55,7 @@ describe('fetchNativeQuote', () => {
   })
 
   it('falls through CoinGecko to CoinCap', async () => {
-    replies = [[COINCAP, { ok: true, body: { data: { priceUsd: '705.5', changePercent24Hr: '3.1' } } }]]
+    replies = [[COINCAP, { ok: true, body: { data: { id: capId, priceUsd: '705.5', changePercent24Hr: '3.1' } } }]]
     expect(await fetchNativeQuote()).toEqual({ price: 705.5, change24h: 3.1 })
   })
 
@@ -61,18 +63,40 @@ describe('fetchNativeQuote', () => {
     // The tx page's old inline copy returned `usd ?? null` here and never reached CoinCap; a 0 passed as a price.
     replies = [
       [COINGECKO, { ok: true, body: { [cgId]: { usd: 0, usd_24h_change: 5 } } }],
-      [COINCAP, { ok: true, body: { data: { priceUsd: '705.5', changePercent24Hr: '1' } } }],
+      [COINCAP, { ok: true, body: { data: { id: capId, priceUsd: '705.5', changePercent24Hr: '1' } } }],
     ]
     expect(await fetchNativeQuote()).toEqual({ price: 705.5, change24h: 1 })
     expect(calls.some(u => COINCAP.test(u))).toBe(true)
   })
 
+  describe('a response must name this chain\'s own instrument', () => {
+    it.each([
+      ['another symbol', { symbol: 'BTCUSDT', lastPrice: '65000', priceChangePercent: '1' }],
+      ['no symbol', { lastPrice: '65000', priceChangePercent: '1' }],
+    ])('Binance with %s falls through to the next source', async (_label, body) => {
+      replies = [
+        [BINANCE, { ok: true, body }],
+        [CRYPTOCOMPARE, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: 700, CHANGEPCT24HOUR: 2.25 } } } } }],
+      ]
+      expect(await fetchNativeQuote()).toEqual({ price: 700, change24h: 2.25 })
+      expect(calls.filter(u => BINANCE.test(u)).map(u => new URL(u).host)).toEqual(['api.binance.us', 'api.binance.com'])
+    })
+
+    it.each([
+      ['another id', { data: { id: 'bitcoin', priceUsd: '65000', changePercent24Hr: '1' } }],
+      ['no id', { data: { priceUsd: '65000', changePercent24Hr: '1' } }],
+    ])('CoinCap with %s is not a price: the search ends with null', async (_label, body) => {
+      replies = [[COINCAP, { ok: true, body }]]
+      expect(await fetchNativeQuote()).toBeNull()
+    })
+  })
+
   it('never reports a zero, negative or non-numeric price, and is null when every source is down', async () => {
     replies = [
-      [BINANCE, { ok: true, body: { lastPrice: '0', priceChangePercent: '1' } }],
+      [BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '0', priceChangePercent: '1' } }],
       [CRYPTOCOMPARE, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: -3 } } } } }],
       [COINGECKO, { ok: true, body: {} }],
-      [COINCAP, { ok: true, body: { data: { priceUsd: 'n/a' } } }],
+      [COINCAP, { ok: true, body: { data: { id: capId, priceUsd: 'n/a' } } }],
     ]
     expect(await fetchNativeQuote()).toBeNull()
     replies = []
@@ -81,10 +105,10 @@ describe('fetchNativeQuote', () => {
 
   describe('the order of the sources', () => {
     const answers = {
-      binance: [BINANCE, { ok: true, body: { lastPrice: '701', priceChangePercent: '1' } }],
+      binance: [BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '701', priceChangePercent: '1' } }],
       cryptocompare: [CRYPTOCOMPARE, { ok: true, body: { RAW: { [cc]: { USD: { PRICE: 702, CHANGEPCT24HOUR: 2 } } } } }],
       coingecko: [COINGECKO, { ok: true, body: { [cgId]: { usd: 703, usd_24h_change: 3 } } }],
-      coincap: [COINCAP, { ok: true, body: { data: { priceUsd: '704', changePercent24Hr: '4' } } }],
+      coincap: [COINCAP, { ok: true, body: { data: { id: capId, priceUsd: '704', changePercent24Hr: '4' } } }],
     } as const
     const hit = (u: string) => (BINANCE.test(u) ? new URL(u).host : CRYPTOCOMPARE.test(u) ? 'cryptocompare' : COINGECKO.test(u) ? 'coingecko' : COINCAP.test(u) ? 'coincap' : u)
 
@@ -107,20 +131,20 @@ describe('fetchNativeQuote', () => {
 
   describe('a source that gives a price but no 24h change reports the change as null, never 0', () => {
     it.each([
-      ['Binance, field missing', BINANCE, { lastPrice: '731.25' }],
-      ['Binance, not a number', BINANCE, { lastPrice: '731.25', priceChangePercent: 'n/a' }],
+      ['Binance, field missing', BINANCE, { symbol: bsym, lastPrice: '731.25' }],
+      ['Binance, not a number', BINANCE, { symbol: bsym, lastPrice: '731.25', priceChangePercent: 'n/a' }],
       ['CryptoCompare, field missing', CRYPTOCOMPARE, { RAW: { [cc]: { USD: { PRICE: 731.25 } } } }],
       ['CoinGecko, field missing', COINGECKO, { [cgId]: { usd: 731.25 } }],
       ['CoinGecko, null', COINGECKO, { [cgId]: { usd: 731.25, usd_24h_change: null } }],
-      ['CoinCap, field missing', COINCAP, { data: { priceUsd: '731.25' } }],
-      ['CoinCap, not a number', COINCAP, { data: { priceUsd: '731.25', changePercent24Hr: 'n/a' } }],
+      ['CoinCap, field missing', COINCAP, { data: { id: capId, priceUsd: '731.25' } }],
+      ['CoinCap, not a number', COINCAP, { data: { id: capId, priceUsd: '731.25', changePercent24Hr: 'n/a' } }],
     ])('%s', async (_label, source, body) => {
       replies = [[source, { ok: true, body }]]
       expect(await fetchNativeQuote()).toEqual({ price: 731.25, change24h: null })
     })
 
     it('but a reported change of exactly 0 stays 0', async () => {
-      replies = [[BINANCE, { ok: true, body: { lastPrice: '731.25', priceChangePercent: '0.000' } }]]
+      replies = [[BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '731.25', priceChangePercent: '0.000' } }]]
       expect(await fetchNativeQuote()).toEqual({ price: 731.25, change24h: 0 })
     })
   })
@@ -150,7 +174,7 @@ describe('fetchNativeQuote', () => {
 
 describe('fetchNativeUsd', () => {
   it('is the quote chain\'s price, without the change', async () => {
-    replies = [[BINANCE, { ok: true, body: { lastPrice: '731.25', priceChangePercent: '-1.5' } }]]
+    replies = [[BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '731.25', priceChangePercent: '-1.5' } }]]
     expect(await fetchNativeUsd()).toBe(731.25)
     expect(calls).toHaveLength(1)
   })
@@ -167,7 +191,7 @@ describe('fetchNativeUsd', () => {
 
   it('is null when every source is down, or none gives a usable price', async () => {
     expect(await fetchNativeUsd()).toBeNull()
-    replies = [[BINANCE, { ok: true, body: { lastPrice: '0' } }], [COINCAP, { ok: true, body: { data: { priceUsd: 'n/a' } } }]]
+    replies = [[BINANCE, { ok: true, body: { symbol: bsym, lastPrice: '0' } }], [COINCAP, { ok: true, body: { data: { id: capId, priceUsd: 'n/a' } } }]]
     expect(await fetchNativeUsd()).toBeNull()
   })
 })
