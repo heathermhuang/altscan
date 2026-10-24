@@ -13,6 +13,8 @@ const h = vi.hoisted(() => ({
   execError: null as Error | null,
   sqls: [] as string[],
   nonce: 0 as number | null,
+  code: '0x',
+  selectError: null as Error | null,
   providerCalls: 0,
   dbSelects: 0,
 }))
@@ -25,7 +27,8 @@ vi.mock('@/lib/db', async () => {
     const q: Record<string, unknown> = {}
     for (const m of ['where', 'orderBy', 'limit', 'offset', 'groupBy', 'leftJoin', 'innerJoin']) q[m] = () => q
     q.from = (t: unknown) => { table = t; return q }
-    q.then = (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve(h.tables.get(table) ?? []).then(resolve, reject)
+    q.then = (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) =>
+      (h.selectError ? Promise.reject(h.selectError) : Promise.resolve(h.tables.get(table) ?? [])).then(resolve, reject)
     return q
   }
   return {
@@ -47,7 +50,7 @@ vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound'
 vi.mock('@/lib/rpc', () => ({
   getWebProvider: async () => {
     h.providerCalls++
-    return { getBalance: async () => 2n * 10n ** 18n, getTransactionCount: async () => h.nonce, getCode: async () => '0x' }
+    return { getBalance: async () => 2n * 10n ** 18n, getTransactionCount: async () => h.nonce, getCode: async () => h.code }
   },
 }))
 vi.mock('@/lib/name-resolver', () => ({ resolveName: async () => null }))
@@ -79,6 +82,8 @@ beforeEach(() => {
   h.execError = null
   h.sqls = []
   h.nonce = 0
+  h.code = '0x'
+  h.selectError = null
   h.providerCalls = 0
   h.dbSelects = 0
 })
@@ -101,5 +106,70 @@ describe('address page, Analytics tab', () => {
     expect(t).toMatch(/Sent —/)
     expect(t).toMatch(/Received —/)
     expect(t).not.toMatch(/0\.0000|\b0 BNB/)
+  })
+})
+
+const ROW = { address: ME, txCount: 0, firstSeen: new Date('2026-10-22T00:00:00Z'), lastSeen: new Date('2026-10-23T00:00:00Z'), label: null }
+const description = async (row?: Row) => {
+  const { schema, page } = await load()
+  if (row) h.tables.set(schema.addresses, [row])
+  return (await page.generateMetadata({ params: Promise.resolve({ address: ME }) })).description as string
+}
+
+describe('address page, transaction count', () => {
+  it('does not present the outgoing-only RPC nonce as the wallet\'s transactions when the index has no row', async () => {
+    h.nonce = 500
+    const html = await render('txns')
+    const t = text(html)
+    expect(t).toMatch(/Transactions — 500 sent \(nonce\)/)
+    expect(t).not.toMatch(/500 transactions/)
+    expect(t).not.toMatch(/across/)
+    expect(t).toContain('Transactions (—)')
+  })
+
+  it('does the same when the index row says 0 but the chain shows sends', async () => {
+    h.nonce = 500
+    const t = text(await render('txns', { ...ROW, txCount: 0 }))
+    expect(t).toMatch(/Transactions — 500 sent \(nonce\)/)
+    expect(t).not.toMatch(/500 transactions/)
+  })
+
+  it('prints the indexed count, and no nonce note, when the index has one', async () => {
+    h.nonce = 500
+    const t = text(await render('txns', { ...ROW, txCount: 1234 }))
+    expect(t).toContain('across 1,234 transactions')
+    expect(t).toContain('Transactions (1,234)')
+    expect(t).not.toMatch(/nonce/)
+  })
+
+  it('does not label a contract\'s nonce (contracts created) as transactions sent', async () => {
+    h.nonce = 1
+    h.code = '0x6080604052348015600f57600080fd5b50'
+    expect(text(await render('txns'))).not.toMatch(/nonce/)
+  })
+})
+
+describe('address page, metadata description', () => {
+  it('prints no transaction count when the index has no row for the address', async () => {
+    h.nonce = 500
+    const d = await description()
+    expect(d).toContain('Balance: 2 BNB')
+    expect(d).not.toMatch(/transaction/)
+  })
+
+  it('prints no transaction count when the addresses read failed', async () => {
+    h.selectError = new Error('statement timeout')
+    expect(await description()).not.toMatch(/transaction/)
+  })
+
+  it('does not turn the nonce into a count beside an indexed 0', async () => {
+    h.nonce = 500
+    const d = await description({ ...ROW, txCount: 0 })
+    expect(d).not.toMatch(/transaction/)
+  })
+
+  it('prints the indexed count, singular or plural', async () => {
+    expect(await description({ ...ROW, txCount: 7 })).toMatch(/, 7 transactions$/)
+    expect(await description({ ...ROW, txCount: 1 })).toMatch(/, 1 transaction$/)
   })
 })

@@ -39,6 +39,7 @@ import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
 import { FLOW_SAMPLE_CAP, flowLabel, flowValue, parseFlowRow, type FlowSample } from '@/lib/address-analytics'
+import { resolveTxCount } from '@/lib/address-tx-count'
 
 export const revalidate = 300
 
@@ -98,7 +99,9 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
     const [row] = await db.select().from(schema.addresses).where(eq(schema.addresses.address, address.toLowerCase())).limit(1)
     info = row ?? null
   } catch (e) { swallow('addr/metadata', e) }  // DB error
-  const { status, balance } = await getAddressChainState(address.toLowerCase())
+  const { status, balance, nonce } = await getAddressChainState(address.toLowerCase())
+  // No row (or a failed read) is no count: say nothing rather than "0 transactions".
+  const txs = resolveTxCount({ indexed: info ? info.txCount : null, nonce: status.isContract ? null : nonce })
   // Only claim "Contract" when we actually know. An unknown address keeps the
   // neutral wording rather than being mislabelled an EOA.
   const type = status.isContract ? 'Contract' : 'Address'
@@ -111,7 +114,7 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   return {
     // No brand suffix: the layout title template (`%s — ${brandDomain}`) appends it
     title: `${type} ${address.slice(0, 14)}…`,
-    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — ${balanceText}, ${info?.txCount ?? 0} transactions`,
+    description: `${chainConfig.name} ${type.toLowerCase()} ${address} — ${balanceText}${txs.known ? `, ${txs.text} ${txs.total === 1 ? 'transaction' : 'transactions'}` : ''}`,
     alternates: { canonical: `/address/${address.toLowerCase()}` },
     openGraph: {
       title: `${type} ${address.slice(0, 14)}…`,
@@ -167,7 +170,6 @@ export default async function AddressPage({
     // DB not connected
   }
 
-  const txCount = addressInfo?.txCount ?? 0
   const firstTxTimestamp = addressInfo?.firstSeen ?? null
 
   // Enrich with external data — split into two batches to reduce peak memory.
@@ -178,7 +180,6 @@ export default async function AddressPage({
   // reading headers() forfeits no caching that was actually in effect. Bots get the local-index
   // view; humans still get the Moralis fallback. (The transfers/holdings/nfts tabs already honor this.)
   const isBot = isBotRequest((await headers()).get('user-agent'))
-  const noLocalData = txCount === 0 && !addressInfo
 
   // Batch 1: lightweight lookups (name resolution, risk check, price)
   const [resolvedName, riskData, nativePrice] = await Promise.all([
@@ -200,15 +201,20 @@ export default async function AddressPage({
   // maintains, so falling back turned an RPC blip into a confident wrong zero.
   const displayBalance = balance.value
   const balanceKnown = balance.known
-  // Transaction count: prefer DB, then RPC nonce. Moralis history is now loaded lazily on the
-  // client, so we no longer have it available here during SSR.
-  const displayTxCount = txCount || addressInfo?.txCount || rpcTxCount || 0
+  // Transaction count: the index's, or unknown. The RPC nonce counts only OUTGOING transactions,
+  // so it is never presented as the total (lib/address-tx-count.ts); it is labelled on the fact
+  // instead. Moralis history is loaded lazily on the client, so it is not available here.
+  const txDisplay = resolveTxCount({
+    indexed: addressInfo ? addressInfo.txCount : null,
+    nonce: contractStatus.isContract ? null : rpcTxCount,   // a contract's nonce counts contracts it created
+  })
+  const displayTxCount = txDisplay.total
   const displayFirstSeen = addressInfo?.firstSeen
     ? new Date(addressInfo.firstSeen)
     : null
-  // No index row and no RPC nonce: the tab says history is not in the local
-  // index, so a bare "0" here would claim a count we do not have.
-  const txCountText = noLocalData && displayTxCount === 0 ? '—' : formatNumber(displayTxCount)
+  // No index row: the tab says history is not in the local index, so a bare "0" here
+  // would claim a count we do not have.
+  const txCountText = txDisplay.text
   // USD value of native token balance
   const nativeUsd = balanceKnown && nativePrice && displayBalance
     ? (Number(displayBalance) / 1e18 * nativePrice)
@@ -304,6 +310,7 @@ export default async function AddressPage({
         <Fact
           label="Transactions"
           value={txCountText}
+          sub={txDisplay.nonceNote ?? undefined}
         />
         <Fact
           label="First indexed"
