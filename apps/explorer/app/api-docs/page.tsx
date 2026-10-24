@@ -51,7 +51,7 @@ const endpoints: Endpoint[] = [
     description: 'Returns a paginated list of blocks ordered by block number descending.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 25, max: 100)' },
+      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -104,10 +104,14 @@ const endpoints: Endpoint[] = [
   {
     method: 'GET',
     path: '/api/v1/tokens',
-    description: 'Returns a paginated list of BEP20/BEP721/BEP1155 tokens tracked by the indexer.',
+    description:
+      'Returns a paginated list of BEP20/BEP721/BEP1155 tokens tracked by the indexer (on Ethereum, BEP20 means ERC-20, BEP721 ERC-721, BEP1155 ERC-1155), ordered by indexed holder count, highest first. ' +
+      'holderCount is a frozen snapshot of the holders the indexer saw, lower than the real holder count. ' +
+      'total is a planner estimate of all indexed token rows and ignores the type filter.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 25, max: 100)' },
+      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
+      { name: 'type', type: 'string', description: 'Filter by token standard: BEP20, BEP721 or BEP1155. Other values are ignored.' },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -229,7 +233,7 @@ const endpoints: Endpoint[] = [
             id: 1,
             url: 'https://your-app.com/webhook',
             watchAddress: '0xabc...',
-            eventTypes: ['tx', 'token_transfer'],
+            eventTypes: ['tx'],
             active: true,
             createdAt: '2024-01-01T00:00:00Z',
             lastTriggeredAt: null,
