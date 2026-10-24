@@ -4,6 +4,8 @@
  * Called by block-processor after each block is indexed.
  */
 import { getDb, schema, unwrapDbError } from './db'
+import { indexerConfig } from './config-instance'
+import { openSigningKey, parseWebhookSecretKey, sealSigningKey } from './webhook-secret'
 import { eq, or, and, inArray, isNull, sql } from 'drizzle-orm'
 import crypto from 'crypto'
 import dns from 'node:dns/promises'
@@ -102,6 +104,74 @@ async function deliverWebhook(url: string, secretHash: string, payload: WebhookP
 const WEBHOOK_FAIL_LIMIT = 5
 
 /**
+ * WEBHOOK_SECRET_KEY, parsed once (webhook-secret.ts). null = unset, or malformed:
+ * either way nothing is sealed, and sealed rows cannot be opened, so they are not
+ * delivered. A malformed key fails CLOSED for sealed rows rather than falling
+ * back to anything.
+ */
+let secretKey: Buffer | null | undefined
+export function webhookSecretKey(): Buffer | null {
+  if (secretKey === undefined) {
+    try {
+      secretKey = parseWebhookSecretKey(indexerConfig.webhooks.secretKey)
+    } catch (err) {
+      console.error(`[webhook-notifier] ${(err as Error).message} — signing keys will NOT be sealed, and sealed webhooks will not be delivered`)
+      secretKey = null
+    }
+  }
+  return secretKey
+}
+
+/** Webhooks already reported undeliverable, so a broken row logs once, not every block. */
+const reportedUnopenable = new Set<number>()
+
+/**
+ * The HMAC key for a webhook: its sealed key opened, else the legacy plaintext.
+ * null = cannot sign, so the webhook is skipped exactly as a row with no secret
+ * always was — before its delivery is claimed, and without counting a failure,
+ * because the endpoint did nothing wrong.
+ */
+function signingKeyFor(w: { id: number; secret: string | null; secretEnc: string | null }): string | null {
+  if (!w.secretEnc) return w.secret
+  const key = webhookSecretKey()
+  try {
+    if (!key) throw new Error('WEBHOOK_SECRET_KEY is unset or malformed')
+    return openSigningKey(w.secretEnc, key, w.id)
+  } catch (err) {
+    if (!reportedUnopenable.has(w.id)) {
+      reportedUnopenable.add(w.id)
+      console.error(`[webhook-notifier] cannot open the sealed signing key of webhook ${w.id} — not delivering it: ${(err as Error).message}`)
+    }
+    return null
+  }
+}
+
+/**
+ * Seal every plaintext signing key (webhook-secret.ts) and clear the plaintext.
+ *
+ * Idempotent, and guarded on the plaintext it read, so a row changed in between is
+ * left for the next pass rather than overwritten. Safe beside an older binary that
+ * still reads only `secret`: to it a cleared row has no secret, which it skips
+ * without counting a failure.
+ */
+export async function sealPlaintextWebhookSecrets(key: Buffer): Promise<number> {
+  const db = getDb()
+  const rows = Array.from(await db.execute(sql`
+    SELECT id, secret FROM webhooks WHERE secret IS NOT NULL AND secret_enc IS NULL ORDER BY id LIMIT 500
+  `) as Iterable<{ id: number; secret: string }>)
+  let sealed = 0
+  for (const row of rows) {
+    const res = await db.execute(sql`
+      UPDATE webhooks SET secret_enc = ${sealSigningKey(row.secret, key, row.id)}, secret = NULL
+       WHERE id = ${row.id} AND secret = ${row.secret} AND secret_enc IS NULL
+      RETURNING id
+    `)
+    sealed += Array.from(res as Iterable<unknown>).length
+  }
+  return sealed
+}
+
+/**
  * notifyWebhooks is fired once per block without being awaited (block-processor),
  * and a run waits on each delivery in turn, up to 10s apiece. Endpoints that
  * answer slowly therefore stack one run per block, each holding its block's txs
@@ -149,12 +219,14 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
   const addrList = [...addresses]
 
   // Query active webhooks watching any of these addresses, or global (no watchAddress)
-  let webhooks: { id: number; url: string; secret: string | null; watchAddress: string | null; eventTypes: string[] }[]
+  let webhooks: { id: number; url: string; secret: string | null; secretEnc: string | null; watchAddress: string | null; eventTypes: string[] }[]
   try {
     webhooks = await db.select({
       id: schema.webhooks.id,
       url: schema.webhooks.url,
       secret: schema.webhooks.secret,
+      // Not in packages/db/schema.ts on purpose — see webhook-secret.ts.
+      secretEnc: sql<string | null>`secret_enc`,
       watchAddress: schema.webhooks.watchAddress,
       eventTypes: schema.webhooks.eventTypes,
     }).from(schema.webhooks).where(
@@ -178,7 +250,8 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
   const failedIds = new Set<number>()
 
   for (const webhook of webhooks) {
-    if (!webhook.secret) continue
+    const signingKey = signingKeyFor(webhook)
+    if (!signingKey) continue
     if (!webhook.eventTypes.includes('tx')) continue
 
     // Filter: if watchAddress set, only deliver txs involving that address
@@ -245,7 +318,7 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
     }
     if (!claimed) continue
 
-    const ok = await deliverWebhook(webhook.url, webhook.secret, payload)
+    const ok = await deliverWebhook(webhook.url, signingKey, payload)
     if (ok) {
       succeededIds.add(webhook.id)
     } else {

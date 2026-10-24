@@ -260,6 +260,12 @@ export const webhooks = pgTable('webhooks', {
   url:              text('url').notNull(),
   watchAddress:     varchar('watch_address', { length: 42 }),
   eventTypes:       text('event_types').array().notNull().default(['tx'] as string[]),
+  // sha256(raw secret) in hex: the HMAC signing key, so a read of it can forge
+  // signatures. With WEBHOOK_SECRET_KEY set, the indexer seals it into an
+  // indexer-only `secret_enc` column and clears this one. That column is
+  // deliberately NOT declared here: drizzle's insert lists every declared column,
+  // so an explorer deployed ahead of the indexer's DDL would fail every webhook
+  // creation. See apps/indexer/src/webhook-secret.ts.
   secret:           varchar('secret', { length: 64 }),
   active:           boolean('active').notNull().default(true),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

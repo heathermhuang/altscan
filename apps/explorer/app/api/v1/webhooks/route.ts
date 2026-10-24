@@ -96,7 +96,9 @@ export async function POST(request: Request) {
   // Generate a raw secret and store its SHA-256. The raw secret is returned once
   // and never stored, but it is NOT the signing key: delivery uses the stored
   // SHA-256 as the HMAC key (webhook-notifier.ts), so anyone who can read this
-  // column can forge signatures for this webhook.
+  // column can forge signatures for this webhook. With WEBHOOK_SECRET_KEY set on
+  // the indexer, it seals the value into an encrypted column and clears this one
+  // within a minute (apps/indexer/src/webhook-secret.ts).
   const rawSecret = crypto.randomBytes(32).toString('hex')
   const secretHash = crypto.createHash('sha256').update(rawSecret).digest('hex')
 

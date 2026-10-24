@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
 
 ### Security
+- Webhook signing keys can be encrypted at rest. A webhook's HMAC key is stored in the database, so a read of that table was enough to forge its signatures. With `WEBHOOK_SECRET_KEY` set on the indexer, it encrypts each key (AES-256-GCM, bound to the webhook) within a minute of its creation and clears the plaintext. Signatures do not change. Unset, keys stay in plaintext as before.
 - `POST /api/v1/keys` rejects a signature timestamp that is not an integer or is more than 5 minutes from the server clock in either direction. A non-numeric timestamp made the age check compare against `NaN` and pass, and a future one passed until its date arrived, so either signature never expired.
 - The self-hosting guide says to run the explorer behind a proxy that sets the client-IP headers. Published directly, a client can choose the address the rate limits and denylist see.
 - The self-host Docker stack publishes Postgres on `127.0.0.1` only, and both Render blueprints keep their databases on the private network.
