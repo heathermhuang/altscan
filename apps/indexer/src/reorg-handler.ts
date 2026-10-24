@@ -198,7 +198,7 @@ export async function detectReorgPinned<P>(
  * every table with a block-number column must appear here exactly once.
  */
 export const UNWIND_ORDER = [
-  'logs', 'tokenTransfers', 'dexTrades', 'gasHistory', 'transactions', 'blocks',
+  'logs', 'tokenTransfers', 'dexTrades', 'internalTransactions', 'gasHistory', 'transactions', 'blocks',
 ] as const
 
 /** Delete every block-scoped index row for blocks >= fromBlockNumber, in UNWIND_ORDER. */
@@ -248,6 +248,10 @@ export async function unwindFrom(fromBlockNumber: number): Promise<void> {
       case 'logs':           await db.delete(schema.logs).where(gte(schema.logs.blockNumber, fromBlockNumber)); break
       case 'tokenTransfers': await db.delete(schema.tokenTransfers).where(gte(schema.tokenTransfers.blockNumber, fromBlockNumber)); break
       case 'dexTrades':      await db.delete(schema.dexTrades).where(gte(schema.dexTrades.blockNumber, fromBlockNumber)); break
+      // Without this an orphaned trace survives the unwind, and its replay key
+      // (block_number, tx_hash, trace_address) makes onConflictDoNothing keep the
+      // stale row when the same tx is re-included at the same height.
+      case 'internalTransactions': await db.delete(schema.internalTransactions).where(gte(schema.internalTransactions.blockNumber, fromBlockNumber)); break
       case 'gasHistory':     await db.delete(schema.gasHistory).where(gte(schema.gasHistory.blockNumber, fromBlockNumber)); break
       case 'transactions':   await db.delete(schema.transactions).where(gte(schema.transactions.blockNumber, fromBlockNumber)); break
       case 'blocks':         await db.delete(schema.blocks).where(gte(schema.blocks.number, fromBlockNumber)); break
