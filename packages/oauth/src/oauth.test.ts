@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet } from 'ethers'
 import { createHash, randomBytes } from 'node:crypto'
 import { redirectUriAllowed } from './checks'
+import { mintClientId } from './tokens'
 import {
   authorizationServerMetadata,
   handleOAuthRequest,
@@ -218,6 +219,16 @@ describe('authorization endpoint', () => {
     const res = await call(`/oauth/authorize?${authorizeQuery(client_id, pkce().challenge, { redirect_uri: 'https://evil.example/cb' })}`)
     expect(res.status).toBe(400)
     expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('shows an error, never redirects, for a client id registered before a scheme was blocked', async () => {
+    // A client id carries its own registration and never expires, so ones minted under the old rules still verify.
+    const legacy = await mintClientId(cfg.secret, { redirect_uris: ['search-ms:query=x'], client_name: null, iat: T0 / 1000 })
+    for (const extra of [{}, { response_type: 'token' }, { code_challenge_method: 'plain' }] as Array<Record<string, string>>) {
+      const res = await call(`/oauth/authorize?${authorizeQuery(legacy, pkce().challenge, { redirect_uri: 'search-ms:query=x', ...extra })}`)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('location')).toBeNull()
+    }
   })
 
   it('sends protocol errors back to the client: missing PKCE, other scopes, other resources', async () => {

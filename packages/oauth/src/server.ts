@@ -180,7 +180,11 @@ type Checked = { ok: AuthzRequest } | { fail: Response }
 async function checkAuthorize(p: URLSearchParams, cfg: OAuthConfig): Promise<Checked> {
   const clientId = p.get('client_id') ?? ''
   const client = await readClientId(cfg.secret, clientId)
-  if (!client) return { fail: errorPage(400, 'This app is not registered here (unknown or altered client_id).', cfg) }
+  // Ids minted before a scheme was blocked still verify: judge their URIs by today's rules, since this
+  // is the one place a registered URI is redirected to.
+  if (!client || !client.redirect_uris.every(redirectUriAllowed)) {
+    return { fail: errorPage(400, 'This app is not registered here (unknown or altered client_id).', cfg) }
+  }
   const asked = p.get('redirect_uri')
   const redirectUri = asked ?? (client.redirect_uris.length === 1 ? client.redirect_uris[0] : null)
   if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
