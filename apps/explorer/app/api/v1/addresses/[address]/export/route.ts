@@ -2,8 +2,11 @@ import { db, schema } from '@/lib/db'
 import { eq, or, desc } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { chainConfig } from '@/lib/chain'
+import { readCoverage } from '@/lib/address-coverage'
 
 export const dynamic = 'force-dynamic'
+
+const EXPORT_LIMIT = 1000
 
 /**
  * Sanitize a CSV field to prevent formula injection.
@@ -35,12 +38,15 @@ export async function GET(
     return new Response('Invalid address', { status: 400 })
   }
 
+  // Alongside the query; it cannot reject (a failure degrades to unknown). Same answer as the JSON route.
+  const coverage = readCoverage(addr)
+
   let txs: typeof schema.transactions.$inferSelect[] = []
   try {
     txs = await db.select().from(schema.transactions)
       .where(or(eq(schema.transactions.fromAddress, addr), eq(schema.transactions.toAddress, addr)))
       .orderBy(desc(schema.transactions.timestamp))
-      .limit(1000)
+      .limit(EXPORT_LIMIT)
   } catch {
     return new Response('Database error', { status: 500 })
   }
@@ -65,11 +71,18 @@ export async function GET(
     ].join(',')
   }).join('\n')
 
-  return new Response(header + rows, {
-    headers: {
-      'Content-Type': 'text/csv',
-      'Content-Disposition': `attachment; filename="txs-${addr.slice(0, 10)}.csv"`,
-      'Cache-Control': 'no-store',
-    },
-  })
+  // The body is just rows, so a script cannot tell a wallet's whole history from the slice the index
+  // still holds. These say which it got. Complete is omitted when unknown (no index row, no retention
+  // floor), as the JSON route reports null.
+  const { historyComplete, indexedFrom } = await coverage
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/csv',
+    'Content-Disposition': `attachment; filename="txs-${addr.slice(0, 10)}.csv"`,
+    'Cache-Control': 'no-store',
+  }
+  if (historyComplete !== null) headers['X-History-Complete'] = String(historyComplete)
+  if (indexedFrom) headers['X-Indexed-From'] = indexedFrom.toISOString()
+  if (txs.length >= EXPORT_LIMIT) headers['X-History-Truncated'] = 'true'
+
+  return new Response(header + rows, { headers })
 }
