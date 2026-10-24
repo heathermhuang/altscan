@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderToReadableStream } from 'react-dom/server'
-import { PgDialect } from 'drizzle-orm/pg-core'
+import type { SQL } from 'drizzle-orm'
 
 // What the address page CLAIMS: the Analytics tab's sums, the transaction count, and the metadata that crawlers read.
 // The real page renders with the database and RPC stubbed, so each claim is checked where a visitor (or a crawler)
@@ -9,7 +9,7 @@ const ME = '0x' + '7'.repeat(40)
 type Row = Record<string, unknown>
 const h = vi.hoisted(() => ({
   tables: new Map<unknown, Row[]>(),
-  exec: (_sql: string): Row[] => [],
+  exec: (() => []) as (sql: string) => Row[],
   execError: null as Error | null,
   sqls: [] as string[],
   nonce: 0 as number | null,
@@ -35,7 +35,7 @@ vi.mock('@/lib/db', async () => {
     schema,
     db: {
       select: () => { h.dbSelects++; return builder() },
-      execute: async (query: Parameters<InstanceType<typeof PgDialect>['sqlToQuery']>[0]) => {
+      execute: async (query: SQL) => {
         const text = new PgDialect().sqlToQuery(query).sql
         h.sqls.push(text)
         if (h.execError) throw h.execError
