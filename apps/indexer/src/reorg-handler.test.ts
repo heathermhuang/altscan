@@ -3,7 +3,8 @@ import {
   detectReorg, detectReorgPinned, resolveReorgDepth, UNWIND_ORDER, type ReorgDeps,
 } from './reorg-handler'
 import { schema } from '@altscan/db'
-import { getTableColumns } from 'drizzle-orm'
+import { getTableColumns, is } from 'drizzle-orm'
+import { PgTable } from 'drizzle-orm/pg-core'
 
 /** Fake chain state: stored = what our DB has, rpc = canonical chain. */
 function deps(stored: Record<number, string>, rpc: Record<number, { hash: string; parentHash: string }>): ReorgDeps {
@@ -67,14 +68,18 @@ describe('resolveReorgDepth', () => {
 
 describe('UNWIND_ORDER guardrail — every block-scoped table is unwound, children first', () => {
   it('covers exactly the schema tables carrying a block-number column', () => {
-    const tables = {
-      logs: schema.logs, tokenTransfers: schema.tokenTransfers, dexTrades: schema.dexTrades,
-      gasHistory: schema.gasHistory, transactions: schema.transactions, blocks: schema.blocks,
-      tokens: schema.tokens, tokenBalances: schema.tokenBalances, addresses: schema.addresses,
-    } as const
+    // Every exported table, not a hand-kept subset: a hand-kept list is how
+    // internal_transactions was added without anyone unwinding it. A table that
+    // must NOT be unwound has to be excluded here by name, with the reason.
+    const NOT_INDEX_DERIVED = new Set([
+      // Moralis history caches keyed by address, filled by the backfill worker
+      // and never by processBlock — a reorg of our own index does not touch them.
+      'backfillAddressTxs', 'backfillTokenTransfers',
+    ])
     const blockScoped = new Set<string>()
-    for (const [name, t] of Object.entries(tables)) {
-      const cols = Object.keys(getTableColumns(t as never))
+    for (const [name, t] of Object.entries(schema)) {
+      if (!is(t, PgTable) || NOT_INDEX_DERIVED.has(name)) continue
+      const cols = Object.keys(getTableColumns(t))
       if (cols.includes('blockNumber') || name === 'blocks') blockScoped.add(name)
     }
     expect(new Set(UNWIND_ORDER)).toEqual(blockScoped)
