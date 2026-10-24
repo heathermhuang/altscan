@@ -14,8 +14,10 @@ import { withTimeout } from '@/lib/with-timeout'
  * What is measured, per transaction: gas_price - the block's base fee, floored at 0 (the tx page's rule for
  * a malformed row). On an EIP-1559 chain gas_price is the EFFECTIVE price, so that is the priority fee (tip);
  * BNB's blocks carry a base fee of 0, so it is the gas price itself. Zero-priced transactions (BNB's system
- * transactions) are not a fee anyone chose and are left out. Where the newest block has a base fee (the tip
- * regime), a block with NO base fee has no knowable tip, and COALESCE(.., 0) would read its whole price as tip:
+ * transactions) are not a fee anyone chose and are left out. The regime (and the base fee the tiles add the tip to)
+ * is read from the newest block that HAS a base fee, not simply the newest block: a NULL on the newest row alone would
+ * otherwise flip an EIP-1559 chain into the price regime and print tips as prices. Where that block has a base fee (the
+ * tip regime), a block with NO base fee has no knowable tip, and COALESCE(.., 0) would read its whole price as tip:
  * those blocks are left out of the sample (where there is no base fee the column is not used, so none are).
  *
  * percentile_disc, not _cont: it returns a value some transaction actually paid, so no tier is an interpolation.
@@ -25,12 +27,14 @@ export function gasTiersQuery(): SQL {
   return sql`
     WITH recent AS (
       SELECT number, base_fee_per_gas FROM blocks ORDER BY number DESC LIMIT ${sql.raw(String(GAS_TIER_BLOCKS))}
+    ), newest_fee AS (
+      SELECT base_fee_per_gas AS fee FROM recent WHERE base_fee_per_gas IS NOT NULL ORDER BY number DESC LIMIT 1
     ), tip_regime AS (
-      SELECT COALESCE((SELECT base_fee_per_gas FROM recent ORDER BY number DESC LIMIT 1), 0) > 0 AS tips
+      SELECT COALESCE((SELECT fee FROM newest_fee), 0) > 0 AS tips
     )
     SELECT
       (SELECT count(*) FROM recent)::int AS blocks,
-      (SELECT base_fee_per_gas FROM recent ORDER BY number DESC LIMIT 1)::text AS base_fee,
+      (SELECT fee FROM newest_fee)::text AS base_fee,
       count(t.hash)::int AS txs,
       (percentile_disc(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (
         ORDER BY GREATEST(t.gas_price - COALESCE(r.base_fee_per_gas, 0), 0)

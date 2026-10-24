@@ -32,12 +32,33 @@ export function blockTxsHref(blockNumber: number, page: number): string {
   return page === 1 ? `/blocks/${blockNumber}` : `/blocks/${blockNumber}/txs/${page}`
 }
 
-/** Count in the "Transactions (…)" heading: `12`, `50 of 141` on a capped page 1, `51–100 of 141` after it. */
+/**
+ * Count in the "Transactions (…)" heading: `12`, `50 of 141` on a capped page 1, `51–100 of 141` after it.
+ * A short page 1 of a block that claims more (`40 of 141`) is rows not indexed: a bare `40` would read as all of them.
+ */
 export function txsLabel(page: number, shown: number, txCount: number): string {
   if (page === 1) {
-    return shown === BLOCK_TXS_PER_PAGE && txCount > shown ? `${shown} of ${formatNumber(txCount)}` : `${shown}`
+    return txCount > shown ? `${shown} of ${formatNumber(txCount)}` : `${shown}`
   }
   if (shown === 0) return `0 of ${formatNumber(txCount)}`
   const first = (page - 1) * BLOCK_TXS_PER_PAGE + 1
   return `${formatNumber(first)}–${formatNumber(first + shown - 1)} of ${formatNumber(txCount)}`
+}
+
+/** Rows a page lists when every one of the block's `txCount` transactions is indexed. */
+export function expectedOnPage(page: number, txCount: number): number {
+  return Math.max(0, Math.min(BLOCK_TXS_PER_PAGE, txCount - (page - 1) * BLOCK_TXS_PER_PAGE))
+}
+
+/**
+ * The table lists indexed rows, but the totals (the heading, the ledger tile, the page count) come from the block's own
+ * `tx_count`. When a page lists fewer rows than that count implies, say so rather than let the table pass for the whole
+ * block. Null when the page is complete.
+ */
+export function indexedNote(page: number, shown: number, txCount: number): string | null {
+  const expected = expectedOnPage(page, txCount)
+  if (shown >= expected) return null
+  return page === 1 && txCount <= BLOCK_TXS_PER_PAGE
+    ? `${shown} of ${formatNumber(txCount)} transactions indexed. The rest are not listed here.`
+    : `${shown} of ${expected} transactions on this page indexed. The rest are not listed here.`
 }

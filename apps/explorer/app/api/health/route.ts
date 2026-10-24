@@ -18,6 +18,11 @@ export async function GET(request: NextRequest) {
     let lagSeconds: number | null = null
     let latestBlockNumber: number | null = null
     let database: Record<string, unknown> | null = null
+    // The chain head is the one number this endpoint exists to report. A blocks
+    // read that throws, times out or returns no row must NOT read as `ok` —
+    // the status page would show a healthy chain with no head. Stays HTTP 200
+    // so pollers still parse the body.
+    let blocksReadOk = false
 
     try {
       const queries: Promise<unknown>[] = [
@@ -61,6 +66,7 @@ export async function GET(request: NextRequest) {
       lagSeconds = latest
         ? Math.floor((Date.now() - new Date(latest.timestamp).getTime()) / 1000)
         : null
+      blocksReadOk = latest != null
 
       if (isAdmin && results[1]) {
         const row = Array.from(results[1] as Iterable<Record<string, unknown>>)[0]
@@ -75,7 +81,7 @@ export async function GET(request: NextRequest) {
         }
       }
     } catch {
-      // DB slow or down — still report basic health
+      // DB slow or down — still report basic health, but as degraded (below)
     }
 
     // Index completeness — separate from liveness, because they fail
@@ -131,6 +137,7 @@ export async function GET(request: NextRequest) {
     // missing: status.altscan.io polls unauthenticated, so gating it behind the
     // admin secret would reproduce exactly the blind spot being fixed.
     if (completeness?.status === 'degraded') response.status = 'degraded'
+    if (!blocksReadOk) response.status = 'degraded'
 
     // Memory pressure drives the top-level status for ALL callers — the public
     // status page (status.altscan.io) polls unauthenticated and must still see

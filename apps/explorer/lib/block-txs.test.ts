@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, parseTxsPage, txsLabel, txsPageCount } from '@/lib/block-txs'
+import {
+  BLOCK_TXS_PER_PAGE, blockTxsHref, expectedOnPage, indexedNote, pageExists, parseTxsPage, txsLabel, txsPageCount,
+} from '@/lib/block-txs'
 
 describe('parseTxsPage', () => {
   it.each([['2', 2], ['3', 3], ['10', 10], ['2000', 2000]])('%s is page %i', (raw, page) => {
@@ -60,8 +62,10 @@ describe('txsLabel', () => {
     expect(txsLabel(1, 50, 141)).toBe('50 of 141')
     expect(txsLabel(1, 50, 1234)).toBe('50 of 1,234')
   })
-  it('page 1: a short page is a plain count even if the block claims more (rows not indexed yet)', () => {
-    expect(txsLabel(1, 40, 141)).toBe('40')
+  it('page 1: a short page of a block that claims more is "N of M": a bare count would read as the whole block (rows not indexed)', () => {
+    expect(txsLabel(1, 40, 141)).toBe('40 of 141')
+    expect(txsLabel(1, 12, 30)).toBe('12 of 30')
+    expect(txsLabel(1, 0, 5)).toBe('0 of 5')
   })
   it('later pages: the range of rows shown', () => {
     expect(txsLabel(2, 50, 141)).toBe('51–100 of 141')
@@ -70,5 +74,35 @@ describe('txsLabel', () => {
   })
   it('later pages: no rows at all does not print an inverted range', () => {
     expect(txsLabel(3, 0, 141)).toBe('0 of 141')
+  })
+})
+
+describe('expectedOnPage', () => {
+  it.each([
+    [1, 0, 0], [1, 12, 12], [1, 50, 50], [1, 141, 50], [2, 141, 50], [3, 141, 41], [4, 141, 0],
+  ])('page %i of a %i-tx block lists %i', (page, txCount, expected) => {
+    expect(expectedOnPage(page, txCount)).toBe(expected)
+  })
+})
+
+describe('indexedNote', () => {
+  it('is null when the page lists everything the block count implies', () => {
+    expect(indexedNote(1, 0, 0)).toBeNull()
+    expect(indexedNote(1, 12, 12)).toBeNull()
+    expect(indexedNote(1, 50, 141)).toBeNull()
+    expect(indexedNote(3, 41, 141)).toBeNull()
+  })
+  it('is null when more rows are indexed than the block claims: nothing is missing', () => {
+    expect(indexedNote(1, 50, 0)).toBeNull()
+    expect(indexedNote(1, 3, 2)).toBeNull()
+  })
+  it('a one-page block with rows missing says "N of M transactions indexed"', () => {
+    expect(indexedNote(1, 12, 30)).toBe('12 of 30 transactions indexed. The rest are not listed here.')
+    expect(indexedNote(1, 0, 5)).toBe('0 of 5 transactions indexed. The rest are not listed here.')
+  })
+  it('a short page of a multi-page block says how many that page should have', () => {
+    expect(indexedNote(1, 40, 141)).toBe('40 of 50 transactions on this page indexed. The rest are not listed here.')
+    expect(indexedNote(3, 30, 141)).toBe('30 of 41 transactions on this page indexed. The rest are not listed here.')
+    expect(indexedNote(2, 0, 141)).toBe('0 of 50 transactions on this page indexed. The rest are not listed here.')
   })
 })

@@ -9,7 +9,7 @@ import { formatCompact } from '@/lib/format'
 
 export const metadata: Metadata = {
   title: 'Ethereum Staking',
-  description: `Ethereum staking — the total ETH ever deposited to the ETH2 deposit contract, and how staking works, on ${chainConfig.brandDomain}.`,
+  description: `Ethereum staking — the ETH held by the ETH2 deposit contract (about the total ever deposited), and how staking works, on ${chainConfig.brandDomain}.`,
   alternates: { canonical: '/staking' },
 }
 
@@ -20,7 +20,9 @@ if (!chainConfig.features.hasStaking) {
 }
 
 // The deposit contract only ever receives ETH (withdrawals are paid by the beacon chain, not
-// from it), so its balance is everything ever deposited. It is not the amount staked today.
+// from it), so its balance is approximately everything ever deposited. Not exactly: ETH forced into it
+// without a deposit() call (a selfdestruct, a block reward) also raises the balance. It is not the amount
+// staked today.
 async function fetchDepositedEth(): Promise<number | null> {
   try {
     const DEPOSIT_CONTRACT = '0x00000000219ab540356cbb839cbe05303d7705fa'
@@ -59,18 +61,18 @@ export default async function StakingPage() {
         <p className="mt-2 max-w-3xl text-sm text-ink2">
           Ethereum uses Proof of Stake consensus since The Merge (September 2022).
           Validators stake at least 32 ETH to participate in block validation and earn rewards.
-          This page shows the total ETH ever deposited to the ETH2 deposit contract.
+          This page shows the ETH held by the ETH2 deposit contract, which is about the total ever deposited.
         </p>
       </div>
 
       {/* Stats */}
       <dl className="ledger [--cols:1] mb-6">
         <StatCard
-          label="Deposited to the deposit contract (all time)"
+          label="ETH held by the deposit contract (≈ total deposited)"
           value={deposited
             ? `${formatCompact(deposited)} ETH`
             : '—'}
-          note="Balance of the ETH2 deposit contract, which only receives deposits"
+          note="Balance of the ETH2 deposit contract. Deposits fill it and nothing pays out of it, but ETH sent to it without a deposit also counts here"
         />
       </dl>
 

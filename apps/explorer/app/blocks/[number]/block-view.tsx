@@ -18,7 +18,7 @@ import { BlockTape } from '@/components/home/BlockTape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
 import { getBlockStrip } from '@/lib/block-strip'
 import { encodeTape, TAPE_AFTER, TAPE_BEFORE, toTapeTuple } from '@/lib/tape'
-import { BLOCK_TXS_PER_PAGE, blockTxsHref, pageExists, txsLabel, txsPageCount } from '@/lib/block-txs'
+import { BLOCK_TXS_PER_PAGE, blockTxsHref, indexedNote, pageExists, txsLabel, txsPageCount } from '@/lib/block-txs'
 
 // One DB→RPC lookup per request, shared by generateMetadata and the page render
 // (cache() dedupes).
@@ -144,6 +144,8 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
   const txsCount = fromRpc
     ? `${rpcBlock?.txHashes.length ?? 0}`
     : txsLabel(page, txs.length, block.txCount)
+  // The totals come from the block's tx_count; when fewer rows than that are indexed the table is not the whole block.
+  const gapNote = fromRpc ? null : indexedNote(page, txs.length, block.txCount)
 
   return (
     <>
@@ -229,6 +231,7 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
       <h2 className="mb-4 text-lg font-semibold tracking-[-0.02em] text-ink">
         Transactions ({txsCount})
       </h2>
+      {gapNote && <p className="mb-3 text-sm text-ink2">{gapNote}</p>}
       {fromRpc && rpcBlock && rpcBlock.txs.length > 0 ? (
         // Same table as the indexed path. The bodies arrive with the block, so
         // From / To / Value are all available; only Status is genuinely unknown
@@ -237,7 +240,7 @@ export async function BlockView({ blockNumber, page }: { blockNumber: number; pa
         <TxTable txs={rpcBlock.txs.slice(0, 50)} showStatus={false} />
       ) : txs.length > 0 ? (
         <TxTable txs={txs} />
-      ) : (
+      ) : gapNote ? null : (
         <p className="text-mut">{page > 1 ? 'No transactions on this page.' : 'No transactions in this block.'}</p>
       )}
       {!fromRpc && txsPageCount(block.txCount) > 1 && (

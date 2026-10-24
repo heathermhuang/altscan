@@ -69,7 +69,7 @@ export default async function TransactionsPage({
     <div className={`max-w-7xl mx-auto px-4 pb-8${strip ? ' pt-6' : ''}`}>
       <TxTable txs={txs} />
       <div className="mt-4 flex justify-end">
-        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} baseUrl="/txs" />
+        <Pagination page={page} total={Math.min(total, MAX_LIST_ROWS)} perPage={PER_PAGE} rowsOnPage={txs.length} baseUrl="/txs" />
       </div>
     </div>
     </>

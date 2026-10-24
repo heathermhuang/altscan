@@ -7,7 +7,7 @@ import { shortenAddress } from '@/lib/address-display'
 // real server component, with the swaps stubbed.
 const A = '0x' + 'a'.repeat(40)
 const B = '0x' + 'b'.repeat(40)
-const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, decimals: {} as Record<string, number> }))
+const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, decimals: {} as Record<string, number>, fail: false, empty: false }))
 const trade = {
   id: 1, txHash: '0x' + 'e'.repeat(64), logIndex: 0, dex: 'PancakeSwap', pairAddress: '0x' + 'd'.repeat(40),
   tokenIn: A, tokenOut: B, amountIn: '1500000000000000000', amountOut: '2000000000000000000',
@@ -19,10 +19,13 @@ vi.mock('@/lib/dex-page', () => ({
   DEX_PAGE_SIZE: 25,
   TOP_PAIRS_WINDOW: 50_000,
   parseDexTrade: (t: typeof trade) => ({ ...t, timestamp: new Date(t.timestamp) }),
-  fetchDexPage: async () => ({
-    trades: [trade], totalTrades: 1, topPairs: [], nativeUsd: null,
-    tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: h.decimals[address] ?? 18, symbol })),
-  }),
+  fetchDexPage: async () => {
+    if (h.fail) throw new Error('query failed')
+    return {
+      trades: h.empty ? [] : [trade], totalTrades: h.empty ? 0 : 1, topPairs: [], nativeUsd: null,
+      tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: h.decimals[address] ?? 18, symbol })),
+    }
+  },
 }))
 vi.mock('@/components/ads/AdReserve', () => ({ AdReserve: () => null }))
 
@@ -33,7 +36,7 @@ const render = async () => {
 }
 const legs = (html: string) =>
   [...html.matchAll(/<td>([\d.,]+[A-Za-z]*|—)(?:<span class="inline-block text-mut ml-1 text-xs">(.*?)<\/span>)?<\/td>/g)].map((m) => [m[1], m[2] ?? ''])
-beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.decimals = {} })
+beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.decimals = {}; h.fail = false; h.empty = false })
 
 describe('/dex swap legs', () => {
   it('an ordinary swap reads as before', async () => {
@@ -90,5 +93,22 @@ describe('/dex swap legs', () => {
     }
     h.symbols = { [A]: 'claim-bnb.xyz', [B]: 'WBNB' }
     expect(stripPair(await render())).toBe(`${shortenAddress(A)} → WBNB`)
+  })
+})
+
+describe('/dex empty table', () => {
+  it('a failed query says the data is unavailable, never that there are no trades', async () => {
+    h.fail = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const out = await render()
+    expect(out).toContain('DEX data is temporarily unavailable')
+    expect(out).not.toContain('No DEX trades found')
+  })
+
+  it('a successful read with no swaps still says none were found', async () => {
+    h.empty = true
+    const out = await render()
+    expect(out).toContain('No DEX trades found')
+    expect(out).not.toContain('temporarily unavailable')
   })
 })
