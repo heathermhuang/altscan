@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The explorer's abuse-source IP denylist matches IPv6 ranges too, and blocks eight leased IPv6 proxy pools whose ~4,000 rotating addresses flooded uncached transaction pages and crashed the hosted ETH explorer.
 - A webhook is deactivated after five consecutive failed deliveries, as documented; the count never got past one before. The indexer also caps how many per-block notification runs can wait on slow endpoints at once.
 - Environment examples now match local explorer development and Docker self-hosting, document optional retention, disk, analytics and referral settings, and remove the unused root example.
+- The indexer no longer deletes recent history on one RPC endpoint's say-so. When no stored block hash matched an endpoint's chain within the reorg depth, it rolled back to that depth as if a common ancestor had been found, so a single endpoint serving a different chain could delete canonical blocks. That endpoint now fails over like any other bad read; the indexer rolls back to the depth limit only when two endpoints independently agree (or only one is configured), and otherwise waits and retries.
 
 ### Security
 - `POST /api/v1/keys` rejects a signature timestamp that is not an integer or is more than 5 minutes from the server clock in either direction. A non-numeric timestamp made the age check compare against `NaN` and pass, and a future one passed until its date arrived, so either signature never expired.
