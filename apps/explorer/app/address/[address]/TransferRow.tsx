@@ -4,6 +4,9 @@ import { formatNumber, formatTokenAmount, tokenText } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { LookalikeBadge } from '@/components/ui/LookalikeBadge'
+import { lookalikeOf } from '@/lib/lookalike'
+import { chainConfig } from '@/lib/chain'
 
 export type TransferTokenInfo = { name: string; symbol: string; decimals: number }
 
@@ -14,10 +17,12 @@ export function TransferRow({ t, addr, info }: { t: Transfer; addr: string; info
   // A symbol or name that reads as a URL or handle (lib/link-in-name) keeps its text in the Token cell, badged, and is
   // named by the token's short address after the amount. Flagged rows only: an unflagged cell is the bare link.
   const text = tokenText(info?.symbol, info?.name, t.tokenAddress)
+  // A token passing for a well-known one (lib/lookalike) is badged too: the cell prints the sanitised symbol, which can read as USDT.
+  const lookalike = lookalikeOf({ address: t.tokenAddress, symbol: info?.symbol, name: info?.name }, chainConfig.key)
   const token = (
     <Link
       href={`/token/${t.tokenAddress}`}
-      className={text.linkLike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}
+      className={text.linkLike || lookalike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}
     >
       {text.name}
     </Link>
@@ -37,7 +42,7 @@ export function TransferRow({ t, addr, info }: { t: Transfer; addr: string; info
         <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-        {text.linkLike ? <>{token}<LinkInName className="ml-2" /></> : token}
+        {text.linkLike || lookalike ? <>{token}{text.linkLike && <LinkInName className="ml-2" />}{lookalike && <LookalikeBadge lookalike={lookalike} className="ml-2" />}</> : token}
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
         {(() => {

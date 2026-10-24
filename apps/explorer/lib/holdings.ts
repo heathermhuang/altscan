@@ -14,6 +14,7 @@
  */
 import { formatCompactUsd, formatDecimalAmount, formatTokenAmount } from './format'
 import type { ProviderTokenBalance } from './providers'
+import type { Lookalike } from './lookalike-note'
 
 export type TrackedToken = { address: string; symbol: string; decimals: number; kind: 'stablecoin' | 'wrapped' }
 
@@ -33,6 +34,8 @@ export type HoldingRow = {
   usd: number | null
   basis: HoldingBasis | null
   tracked: boolean
+  /** The server's verdict that this token reads as a well-known one it is not (lib/lookalike); undefined = not judged. A browser cannot judge it. */
+  lookalike?: Lookalike | null
 }
 
 /** The tokens whose balance is read live and priced: the chain's stablecoins and wrapped native token. */
@@ -91,6 +94,7 @@ export function holdingFromIndex(r: {
   name: string | null
   symbol: string | null
   decimals: number | null
+  lookalike?: Lookalike | null
 }): HoldingRow {
   return {
     tokenAddress: r.tokenAddress.toLowerCase(),
@@ -102,11 +106,12 @@ export function holdingFromIndex(r: {
     usd: null,
     basis: null,
     tracked: false,
+    lookalike: r.lookalike,
   }
 }
 
-/** A row from the data provider's balances response, which may carry its own USD value. */
-export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
+/** A row from the data provider's balances response, which may carry its own USD value. `lookalike`: the route's flag. */
+export function holdingFromProvider(t: ProviderTokenBalance & { lookalike?: Lookalike | null }): HoldingRow {
   const usd = t.usdValue == null || t.usdValue === '' ? NaN : Number(t.usdValue)
   const priced = Number.isFinite(usd) && usd >= 0
   // The raw balance and decimals are exact, so they come first. The provider's formatted string is for when
@@ -123,6 +128,7 @@ export function holdingFromProvider(t: ProviderTokenBalance): HoldingRow {
     usd: priced ? usd : null,
     basis: priced ? 'provider' : null,
     tracked: false,
+    lookalike: t.lookalike,
   }
 }
 

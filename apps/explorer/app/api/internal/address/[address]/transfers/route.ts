@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider, isBotRequest } from '@/lib/providers'
 import { guardInternalAddress } from '@/lib/internal-guard'
+import { chainConfig } from '@/lib/chain'
+import { withLookalikes } from '@/lib/lookalike'
 import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/backfill-trigger'
 import {
   cacheUsable,
@@ -21,6 +23,11 @@ import {
 export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'cache-control': 'private, no-store' }
+
+// The tab (a client component) badges a token that passes for a well-known one, but it cannot judge that itself
+// (lib/lookalike stays out of the browser), so every row leaves here with the verdict on it.
+const flagged = <T extends { tokenAddress: string; tokenSymbol: string }>(rows: readonly T[]) =>
+  withLookalikes(rows, chainConfig.key, (r) => ({ address: r.tokenAddress, symbol: r.tokenSymbol }))
 
 export async function GET(
   _req: Request,
@@ -43,7 +50,7 @@ export async function GET(
       )
     }
     return NextResponse.json(
-      { transfers: result.data.transfers, cursor: result.data.cursor, limited: false },
+      { transfers: flagged(result.data.transfers), cursor: result.data.cursor, limited: false },
       { headers: NO_STORE },
     )
   }
@@ -84,7 +91,7 @@ export async function GET(
     }
     return NextResponse.json(
       {
-        transfers: rows,
+        transfers: flagged(rows),
         cursor: next,
         source: 'local',
         complete: wm!.status === 'complete' && next === null,
@@ -110,7 +117,7 @@ export async function GET(
               : null)
         return NextResponse.json(
           {
-            transfers: rows,
+            transfers: flagged(rows),
             cursor: fbNext,
             source: 'local',
             stale: true,
@@ -163,7 +170,7 @@ export async function GET(
   }
 
   return NextResponse.json(
-    { transfers: rows, cursor: next, source: 'provider', limited: false },
+    { transfers: flagged(rows), cursor: next, source: 'provider', limited: false },
     { headers: NO_STORE },
   )
 }

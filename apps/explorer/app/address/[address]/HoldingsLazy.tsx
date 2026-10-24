@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react'
 import { chainConfig } from '@/lib/chain-client'
 import type { ProviderTokenBalance } from '@/lib/providers'
+import type { Lookalike } from '@/lib/lookalike-note'
 import { holdingFromProvider, holdingsNote, mergeHoldings, trackedTokens, type HoldingRow } from '@/lib/holdings'
 import { HoldingsBanner, HoldingsTable } from './HoldingsTable'
 
 type HoldingsResponse = {
-  tokens: ProviderTokenBalance[]
+  tokens: (ProviderTokenBalance & { lookalike?: Lookalike | null })[]
   limited?: boolean
   reason?: string
 }

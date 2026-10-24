@@ -4,17 +4,22 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { chainConfig } from '@/lib/chain-client'
 import type { TokenTransferRow } from '@/lib/providers'
+import type { Lookalike } from '@/lib/lookalike-note'
 import { formatDecimalAmount, timeAgo, tokenText } from '@/lib/format'
 import { shortHash } from '@/lib/address-display'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { LookalikeBadge } from '@/components/ui/LookalikeBadge'
+
+/** A row as the route serves it: `lookalike` is the server's verdict on the token (lib/lookalike), which no client module may compute. */
+type ServedTransfer = TokenTransferRow & { lookalike?: Lookalike | null }
 
 type TransfersResponse = {
   // TokenTransferRow, not ProviderTokenTransfer: the route serves a reduced
   // projection (no tokenName — the backfill table does not store it). This
   // component reads only txHash/blockTimestamp/from/to/tokenAddress/
-  // tokenSymbol/valueFormatted, all of which the row carries.
-  transfers: TokenTransferRow[]
+  // tokenSymbol/valueFormatted (and the route's lookalike flag), all of which the row carries.
+  transfers: ServedTransfer[]
   source?: 'local' | 'provider'
   complete?: boolean
   stale?: boolean
@@ -24,12 +29,14 @@ type TransfersResponse = {
 }
 
 /** One row of the provider's history. Exported so the cells can be rendered without the fetch. */
-export function ProviderTransferRow({ t, addr }: { t: TokenTransferRow; addr: string }) {
+export function ProviderTransferRow({ t, addr }: { t: ServedTransfer; addr: string }) {
   // The provider's symbol is sanitised like the server tab's, and one that reads as a URL or handle (lib/link-in-name)
   // keeps its text in the Token cell, badged, and is named by the token's short address after the amount.
   const text = tokenText(t.tokenSymbol, null, t.tokenAddress)
+  // A token passing for a well-known one (the server's flag) is badged too: the cell prints the sanitised symbol, which can read as USDT.
+  const lookalike = t.lookalike
   const token = (
-    <Link href={`/token/${t.tokenAddress}`} className={text.linkLike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}>
+    <Link href={`/token/${t.tokenAddress}`} className={text.linkLike || lookalike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}>
       {text.name}
     </Link>
   )
@@ -50,7 +57,7 @@ export function ProviderTransferRow({ t, addr }: { t: TokenTransferRow; addr: st
         <AddressLink address={t.toAddress} self={t.toAddress.toLowerCase() === addr} />
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
-        {text.linkLike ? <>{token}<LinkInName className="ml-2" /></> : token}
+        {text.linkLike || lookalike ? <>{token}{text.linkLike && <LinkInName className="ml-2" />}{lookalike && <LookalikeBadge lookalike={lookalike} className="ml-2" />}</> : token}
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">
         {formatDecimalAmount(t.valueFormatted)}{text.symbol ? ` ${text.symbol}` : ''}

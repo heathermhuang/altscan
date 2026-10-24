@@ -83,6 +83,16 @@ describe('address Holdings tab (BNB)', () => {
     expect(rows.some((r) => r[0] === 'USDC')).toBe(false)
   })
 
+  it('badges an indexed token that reads as USDT but is not its contract, and not the real USDT row', async () => {
+    tokenInfo[6] = { ...tokenInfo[6], symbol: 'US€DT' }
+    const html = await tab()
+    expect(html.match(/lookalike<span class="sr-only"> of USDT<\/span>/g)).toHaveLength(1)
+    // the badge is in the row of the impostor (its symbol prints as USDT), not in the live row of the real USDT
+    const rows = [...html.matchAll(/<tr class="hover:bg-canvas transition-colors">(.*?)<\/tr>/g)].map((m) => m[1])
+    expect(rows.filter((r) => r.includes('lookalike')).map((r) => r.includes(other(7)))).toEqual([true])
+    expect(rows[0]).not.toContain('lookalike')
+  })
+
   it('says where the numbers come from', async () => {
     const html = await tab()
     expect(html).toContain('USDT, USDC and WBNB are read from the chain just now')
