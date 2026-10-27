@@ -60,5 +60,19 @@ export function register() {
         process.exit(0)
       }
     }, CHECK_INTERVAL_MS)
+
+    // Next never evicts its per-path ISR cache-control map; crawlers grow it by
+    // thousands of paths an hour. See lib/isr-cache-controls-cap.ts.
+    const ISR_CACHE_CONTROLS_MAX = 10_000 // ~3.3 MB; the page LRU holds far fewer
+    import('./lib/isr-cache-controls-cap').then(({ loadIsrCacheControls, trimOldest }) =>
+      loadIsrCacheControls().then((map) => {
+        setInterval(() => {
+          const trimmed = trimOldest(map, ISR_CACHE_CONTROLS_MAX)
+          if (trimmed > 0) console.log(`[isr-cap] trimmed ${trimmed} cache-control entries (cap ${ISR_CACHE_CONTROLS_MAX})`)
+        }, 60_000).unref()
+      }),
+    ).catch((err) => {
+      console.error(`[isr-cap] cannot reach Next's ISR cache-control map — it is UNBOUNDED: ${err instanceof Error ? err.message : err}`)
+    })
   }
 }
