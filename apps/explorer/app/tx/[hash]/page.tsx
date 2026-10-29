@@ -587,7 +587,8 @@ export default async function TxDetailPage({
         </div>
       )}
 
-      {(!tx.status || (gasPercent != null && gasPercent >= 95)) && (
+      {/* Failed only: a plain transfer always uses 100% of its gas limit, so gas % is no sign of failure. */}
+      {outcome === 'failed' && (
         <AdReserve
           context="tx_failed"
           placement="tx_failed"
