@@ -55,8 +55,8 @@ importers:
         specifier: ^7.3.6
         version: 7.3.6(@types/node@24.19.0)(ioredis@5.9.3)(jiti@1.21.7)(tsx@4.23.15)(yaml@2.9.1)
       drizzle-orm:
-        specifier: ^0.45.3
-        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       jose:
         specifier: ^5.9.0
         version: 5.10.0
@@ -138,8 +138,8 @@ importers:
         specifier: ^1.20.0
         version: 1.20.0
       drizzle-orm:
-        specifier: ^0.45.3
-        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       ethers:
         specifier: ^6.17.0
         version: 6.17.0
@@ -214,8 +214,8 @@ importers:
         specifier: ^16.4.0
         version: 16.6.1
       drizzle-orm:
-        specifier: ^0.45.3
-        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       ethers:
         specifier: ^6.17.0
         version: 6.17.0
@@ -258,8 +258,8 @@ importers:
   packages/db:
     dependencies:
       drizzle-orm:
-        specifier: ^0.45.3
-        version: 0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f))
       postgres:
         specifier: ^3.4.0
         version: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
@@ -2452,8 +2452,8 @@ packages:
     resolution: {integrity: sha512-YCYqxTLIB2OCqf6w9/Vef13baBVbwQIPcbT4Y56AfO6B9ajZhDhD8Jkveg/hJvT/iuMloKD/IYYkyMMNhr7Kqg==}
     hasBin: true
 
-  drizzle-orm@0.45.3:
-    resolution: {integrity: sha512-CAloER21cDdcgZ1OmjrZX82EeRNsdP+y0onX/eyoYDaYzki/adrAa91lzM5jWh7zZPK4qUbw/6LGv9J+A+uizA==}
+  drizzle-orm@0.45.4:
+    resolution: {integrity: sha512-NiM1YZpJ2UxyeE67DpDDZ+Tsw4YLX3trSlkNT7Tm9eKoUNb1LvaAaQzXgYQsWs+AQ9TUmmwMmBOCXuqqxUWKKQ==}
     peerDependencies:
       '@aws-sdk/client-rds-data': '>=3'
       '@cloudflare/workers-types': '>=4'
@@ -6198,7 +6198,7 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)):
+  drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261006.1)(postgres@3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261006.1
       postgres: 3.4.8(patch_hash=9cbe116d8108d3dd2b1df11bee662da260f562fb691a4ebc6df4742c4338048f)
@@ -6429,8 +6429,8 @@ snapshots:
       '@typescript-eslint/parser': 8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3)
       eslint: 9.39.5(jiti@1.21.7)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7))
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.5(jiti@1.21.7))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@1.21.7))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.5(jiti@1.21.7))
       eslint-plugin-react: 7.37.5(eslint@9.39.5(jiti@1.21.7))
       eslint-plugin-react-hooks: 5.2.0(eslint@9.39.5(jiti@1.21.7))
@@ -6449,7 +6449,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.5(jiti@1.21.7)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3
@@ -6460,22 +6460,22 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@1.21.7))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.14.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)):
+  eslint-module-utils@2.14.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@1.21.7)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3)
       eslint: 9.39.5(jiti@1.21.7)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.5(jiti@1.21.7))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@1.21.7)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.2.0
@@ -6486,7 +6486,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 9.39.5(jiti@1.21.7)
       eslint-import-resolver-node: 0.3.10
-      eslint-module-utils: 2.14.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7)))(eslint@9.39.5(jiti@1.21.7))
+      eslint-module-utils: 2.14.0(@typescript-eslint/parser@8.71.1(eslint@9.39.5(jiti@1.21.7))(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@1.21.7))
       hasown: 2.0.4
       is-core-module: 2.17.0
       is-glob: 4.0.3
