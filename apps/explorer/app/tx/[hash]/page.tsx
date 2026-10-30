@@ -50,6 +50,11 @@ export async function generateStaticParams(): Promise<Array<{ hash: string }>> {
 // Transfers shown under the summary card; a tx with more has the full list further down.
 const TRANSFER_PREVIEW = 3
 
+// Event logs a tx page lists, in every view. A refetched receipt is not capped by a query: one with
+// 5,003 logs rendered a 16 MB page that took 8 s, was too big for Next's ISR cache, and so re-rendered
+// on every request (ethscan-web failed its health check on 2026-10-30 rendering a dozen at once).
+const TX_LOGS_SHOWN = 50
+
 /**
  * Confirmation depth is a property of the CHAIN, not of our index. Reading
  * MAX(blocks.number) published our own indexer lag as if it were chain state —
@@ -237,7 +242,7 @@ export default async function TxDetailPage({
   const [dbLogs, transfers, internalTxs, methodName, nativePrice, chainTip, strip, fullInput] = await Promise.all([
     (fromRpc || bodyPruned)
       ? Promise.resolve([])
-      : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(50).catch(swallowed('tx/logs', [])),
+      : db.select().from(schema.logs).where(eq(schema.logs.txHash, hash)).limit(TX_LOGS_SHOWN).catch(swallowed('tx/logs', [])),
     fromRpc
       ? Promise.resolve([])
       : db.select().from(schema.tokenTransfers).where(eq(schema.tokenTransfers.txHash, hash)).limit(TX_TRANSFERS_SHOWN + 1).catch(swallowed('tx/transfers', [])),
@@ -268,9 +273,10 @@ export default async function TxDetailPage({
     : resolveStoredInput(tx.input, fullInput)
   // Effective logs: refetched body logs when bodyless, else local DB logs. Both
   // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
+  // The refetched receipt is listed only to TX_LOGS_SHOWN; transfers are decoded from all of it, below.
   const bodyLogs: CachedLog[] = usesBody && body ? body.logs : []
   const txLogs = usesBody
-    ? bodyLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
+    ? bodyLogs.slice(0, TX_LOGS_SHOWN).map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
     : dbLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
@@ -330,10 +336,9 @@ export default async function TxDetailPage({
   // decoded out of the receipt logs we just refetched. `transfers` (DB) wins
   // when present — it is authoritative and already normalised.
   const { shown: shownInternalTxs, truncated: internalTxsTruncated } = capTxInternals(internalTxs)
-  const { shown: shownTransfers, truncated: transfersTruncated } = capTransfers(transfers)
-  const effectiveTransfers = shownTransfers.length > 0
-    ? shownTransfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
-    : decodeTransferLogs(txLogs)
+  const { shown: effectiveTransfers, truncated: transfersTruncated } = capTransfers(transfers.length > 0
+    ? transfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
+    : decodeTransferLogs(usesBody ? bodyLogs : txLogs))
 
   // Batch token lookups into single query (was N+1: one query per transfer)
   // An approve is sent to its token, which no transfer names: resolve that token alongside the transfers'.
