@@ -273,9 +273,10 @@ export default async function TxDetailPage({
     : resolveStoredInput(tx.input, fullInput)
   // Effective logs: refetched body logs when bodyless, else local DB logs. Both
   // branches map to one shape so `txLogs.map(...)` in the render stays single-typed.
-  const bodyLogs: CachedLog[] = usesBody && body ? body.logs.slice(0, TX_LOGS_SHOWN) : []
+  // The refetched receipt is listed only to TX_LOGS_SHOWN; transfers are decoded from all of it, below.
+  const bodyLogs: CachedLog[] = usesBody && body ? body.logs : []
   const txLogs = usesBody
-    ? bodyLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
+    ? bodyLogs.slice(0, TX_LOGS_SHOWN).map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
     : dbLogs.map((l) => ({ address: l.address, topic0: l.topic0, topic1: l.topic1, topic2: l.topic2, topic3: l.topic3, data: l.data }))
 
   const fee = BigInt(tx.gasUsed ?? 0) * BigInt(tx.gasPrice ?? 0)
@@ -337,7 +338,7 @@ export default async function TxDetailPage({
   const { shown: shownInternalTxs, truncated: internalTxsTruncated } = capTxInternals(internalTxs)
   const { shown: effectiveTransfers, truncated: transfersTruncated } = capTransfers(transfers.length > 0
     ? transfers.map((t) => ({ tokenAddress: t.tokenAddress, fromAddress: t.fromAddress, toAddress: t.toAddress, value: t.value ?? '0' }))
-    : decodeTransferLogs(txLogs))
+    : decodeTransferLogs(usesBody ? bodyLogs : txLogs))
 
   // Batch token lookups into single query (was N+1: one query per transfer)
   // An approve is sent to its token, which no transfer names: resolve that token alongside the transfers'.

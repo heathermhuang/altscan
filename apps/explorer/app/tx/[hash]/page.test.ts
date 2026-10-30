@@ -394,6 +394,17 @@ describe('/tx/[hash] logs from the refetched body', () => {
     expect(textOf(tree)).toContain('Showing the first 25 token transfers')
   })
 
+  it('decodes transfers from the whole receipt, not only the 50 logs it lists', async () => {
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, status: true }))
+    const otherEvent = (i: number) => ({ ...transferLog(i), topic0: '0x' + 'ee'.repeat(32) })
+    vi.mocked(getTxBody).mockResolvedValue({
+      input: '0x', logs: [...Array.from({ length: 60 }, (_, i) => otherEvent(i)), ...Array.from({ length: 30 }, (_, i) => transferLog(60 + i))],
+    })
+    const tree = await render()
+    expect(logEls(tree)).toHaveLength(50)
+    expect(heading(tree, 'Token Transfers')).toBe('Token Transfers (25+)')
+  })
+
   it('lists them all, with no note, at or under 25', async () => {
     state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, status: true }))
     bodyWith(25)
