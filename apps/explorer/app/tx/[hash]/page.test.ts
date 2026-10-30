@@ -360,6 +360,49 @@ describe('/tx/[hash] input the index stores cut at 500 characters', () => {
   })
 })
 
+// ---- a refetched receipt with thousands of logs -----------------------------------------------------------
+
+describe('/tx/[hash] logs from the refetched body', () => {
+  // A receipt with 5,003 logs rendered every one of them: a 16 MB page that took 8 s and was too big to cache.
+  const TOKEN = '0x' + '55'.repeat(20)
+  const word = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+  const transferLog = (i: number) => ({
+    address: TOKEN, topic0: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+    topic1: '0x' + word('0x' + '22'.repeat(20)), topic2: '0x' + word('0x' + '33'.repeat(20)), topic3: null,
+    data: '0x' + word('1000'), logIndex: i,
+  })
+  const bodyWith = (n: number) => vi.mocked(getTxBody).mockResolvedValue({ input: '0x', logs: Array.from({ length: n }, (_, i) => transferLog(i)) })
+  const heading = (tree: ReactNode, title: string) =>
+    textOf(findAll(tree, p => Array.isArray(p.children) && p.children[0] === `${title} (`)[0]?.children as ReactNode)
+  const logEls = (tree: ReactNode) => findAll(tree, p => typeof p.className === 'string' && p.className.startsWith('overflow-auto rounded-lg border border-hair bg-canvas p-3'))
+
+  beforeEach(() => { vi.mocked(getTxBody).mockReset().mockResolvedValue(null) })
+
+  it('lists 50 logs of a pruned tx, as the local view does, however many the receipt holds', async () => {
+    state.dbTx = { ...indexedTx(), bodyPruned: true }
+    bodyWith(60)
+    const tree = await render()
+    expect(logEls(tree)).toHaveLength(50)
+    expect(heading(tree, 'Event Logs')).toBe('Event Logs (50)')
+  })
+
+  it('lists 25 of the transfers it decodes for a node-served tx and says there are more', async () => {
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, status: true }))
+    bodyWith(60)
+    const tree = await render()
+    expect(heading(tree, 'Token Transfers')).toBe('Token Transfers (25+)')
+    expect(textOf(tree)).toContain('Showing the first 25 token transfers')
+  })
+
+  it('lists them all, with no note, at or under 25', async () => {
+    state.fetchTxFromRpc.mockResolvedValue(rpcTx({ blockNumber: 500, pending: false, status: true }))
+    bodyWith(25)
+    const tree = await render()
+    expect(heading(tree, 'Token Transfers')).toBe('Token Transfers (25)')
+    expect(textOf(tree)).not.toContain('Showing the first')
+  })
+})
+
 // ---- the headline of an approve, and of a transfer of a token with unknown decimals ------------------------
 
 describe('/tx/[hash] headline', () => {
