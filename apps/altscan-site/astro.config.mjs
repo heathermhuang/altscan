@@ -13,8 +13,13 @@ export default defineConfig({
   output: 'static', // Astro 5: static by default; endpoints opt out via `export const prerender = false`
   // Prerender under Node: the code tape (src/lib/codebase.ts) reads the repository with git and fs.
   adapter: cloudflare({ imageService: 'compile', prerenderEnvironment: 'node' }),
-  // /changelog is rendered by the Worker, so the sitemap cannot discover it.
-  integrations: [sitemap({ customPages: ['https://altscan.io/changelog'] })],
+  // The sitemap finds /changelog as /changelog/. List the canonical URL instead, once.
+  integrations: [
+    sitemap({
+      customPages: ['https://altscan.io/changelog'],
+      filter: (page) => page !== 'https://altscan.io/changelog/',
+    }),
+  ],
   vite: {
     build: {
       // Never inline bundled component scripts into the HTML. The _headers CSP
