@@ -1,0 +1,2 @@
+# Parallel PRs all add lines to the same [Unreleased] lists. Keep both sides.
+CHANGELOG.md merge=union
