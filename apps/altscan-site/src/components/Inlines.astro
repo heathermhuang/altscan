@@ -1,0 +1,12 @@
+---
+import type { Inline } from '../lib/changelog';
+
+interface Props { tokens: Inline[] }
+const { tokens } = Astro.props;
+---
+{tokens.map((t) =>
+  t.kind === 'bold' ? <strong><Astro.self tokens={t.children} /></strong>
+  : t.kind === 'code' ? <code>{t.text}</code>
+  : t.kind === 'link' ? <a href={t.href}>{t.text}</a>
+  : t.kind === 'pr' ? <a class="cl-pr" href={t.href}>#{t.number}</a>
+  : t.text)}

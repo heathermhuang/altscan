@@ -26,6 +26,10 @@ describe('settings-defaults', () => {
     expect(resolveLinks({ quickLinks: links })).toEqual(links)
   })
 
+  it('links the public changelog by default', () => {
+    expect(DEFAULT_QUICK_LINKS).toContainEqual({ label: 'Changelog', href: 'https://altscan.io/changelog' })
+  })
+
   it('falls back to chain-config footer text', () => {
     expect(resolveFooterText(null, bnb)).toEqual({
       tagline: bnb.tagline,

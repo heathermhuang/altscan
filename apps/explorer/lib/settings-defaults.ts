@@ -19,6 +19,7 @@ export const DEFAULT_QUICK_LINKS: LinksSettings['quickLinks'] = [
   { label: 'Developer', href: '/developer' },
   { label: 'About', href: '/about' },
   { label: 'Status', href: 'https://status.altscan.io' },
+  { label: 'Changelog', href: 'https://altscan.io/changelog' },
   { label: 'GitHub', href: 'https://github.com/heathermhuang/altscan' },
 ]
 
