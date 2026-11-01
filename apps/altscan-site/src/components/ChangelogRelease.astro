@@ -1,0 +1,36 @@
+---
+import Inlines from './Inlines.astro';
+import { GITHUB } from '../data/site';
+import { countChanges, formatDate, highlights, type Release } from '../lib/changelog';
+
+interface Props { release: Release; title: string; note?: string }
+const { release, title, note } = Astro.props;
+const count = countChanges(release);
+const noun = count === 1 ? 'change' : 'changes';
+const tops = highlights(release);
+---
+<article class="cl-rel" id={release.anchor}>
+  <header class="cl-when">
+    <h2><a href={`#${release.anchor}`}>{title}</a></h2>
+    {release.date && <time datetime={release.date}>{formatDate(release.date)}</time>}
+    <span>{count} {noun}</span>
+  </header>
+  <div class="cl-body">
+    {note && <p class="cl-note">{note}</p>}
+    {release.summary.length > 0 && <p class="cl-sum"><Inlines tokens={release.summary} /></p>}
+    {tops.length > 0 && <ul class="cl-high">{tops.map((lead) => <li><Inlines tokens={lead} /></li>)}</ul>}
+    <details class="cl-all">
+      <summary>All {count} {noun}</summary>
+      {release.sections.map((s) => (
+        <section>
+          <h3>{s.title}</h3>
+          <ul>{s.bullets.map((b) => <li><Inlines tokens={b.tokens} /></li>)}</ul>
+        </section>
+      ))}
+    </details>
+    <p class="cl-src">
+      {release.date && <a href={`${GITHUB}/releases/tag/v${release.version}`}>Release ↗</a>}
+      {release.compareUrl && <a href={release.compareUrl}>Compare ↗</a>}
+    </p>
+  </div>
+</article>

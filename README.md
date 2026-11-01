@@ -13,7 +13,8 @@
 <p align="center">
   <a href="https://altscan.io"><strong>altscan.io</strong></a> &nbsp;|&nbsp;
   <a href="https://bnbscan.com"><strong>bnbscan.com</strong></a> &nbsp;|&nbsp;
-  <a href="https://ethscan.io"><strong>ethscan.io</strong></a>
+  <a href="https://ethscan.io"><strong>ethscan.io</strong></a> &nbsp;|&nbsp;
+  <a href="https://altscan.io/changelog"><strong>Changelog</strong></a>
 </p>
 
 <p align="center">
