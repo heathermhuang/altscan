@@ -1,8 +1,8 @@
 name: Changelog
 
-# altscan.io/changelog publishes CHANGELOG.md, so a user-facing PR carries its
-# own line there. Drafts are skipped because the entry cites the PR's number,
-# which only exists once the PR is open: open a draft, add the line, mark it ready.
+# altscan.io/changelog publishes changelog.d/, so a user-facing PR carries its own
+# entry file there. Drafts are skipped because the entry cites the PR's number,
+# which only exists once the PR is open: open a draft, add the file, mark it ready.
 #
 # Runs on `pull_request`, not `pull_request_target`: a fork's PR gets a read-only
 # token and no secrets. `edited`, `labeled` and `unlabeled` re-run it when the

@@ -1,0 +1,41 @@
+name: Publish changelog
+
+# altscan.io/changelog reads one file, and a Worker cannot list changelog.d/
+# without an API token. So this folds the entries into CHANGELOG.md and publishes
+# the result to the changelog-published branch, which the page reads.
+#
+# Runs on `push` to main only, so a PR's code never runs beside the write token.
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+      - changelog.d/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-changelog
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fold the entries
+        run: node scripts/changelog-fragments.mjs --stdout > "$RUNNER_TEMP/CHANGELOG.md"
+
+      - name: Publish
+        run: |
+          git checkout --orphan changelog-published
+          git rm -rfq .
+          cp "$RUNNER_TEMP/CHANGELOG.md" CHANGELOG.md
+          git add CHANGELOG.md
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -qm "Publish CHANGELOG.md from $GITHUB_SHA"
+          git push --force origin changelog-published

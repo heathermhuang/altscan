@@ -182,7 +182,7 @@ await t('loadChangelog: a miss fetches main and stores it for an hour', async ()
   const { calls, fetchImpl } = fetchOf(200, FIXTURE);
   const out = await loadChangelog(ORIGIN, BUNDLED, { fetchImpl, cache });
   assert.equal(out.source, 'miss');
-  assert.deepEqual(calls, ['https://raw.githubusercontent.com/heathermhuang/altscan/main/CHANGELOG.md']);
+  assert.deepEqual(calls, ['https://raw.githubusercontent.com/heathermhuang/altscan/changelog-published/CHANGELOG.md']);
   const stored = cache.store.get('https://altscan.io/__changelog.md');
   assert.equal(await stored?.text(), FIXTURE);
   assert.equal(stored?.headers.get('cache-control'), 'public, max-age=3600');
