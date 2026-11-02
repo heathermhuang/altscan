@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Scratch line B.
 - **A public changelog at [altscan.io/changelog](https://altscan.io/changelog).** Every release and change, read straight from this file, linked from altscan.io and the explorers' footers (#300).
 - **MCP pilot at `https://altscan.io/mcp`**: a keyless, read-only, stateless MCP server with two tools, `get_transaction` and `get_token`, for both chains. It is rate-limited per client, has a kill switch (`MCP_ENABLED`), bounds what it returns, and logs no hashes or addresses. A server card at `/.well-known/mcp/server-card.json` is listed in altscan.io's AI catalog (#254).
 - `/api/v1/tokens/:contract` returns `lookalike`: the well-known token a contract's name or symbol imitates, with that token's real contract, or null. It is evidence, not a safety verdict (#254).
