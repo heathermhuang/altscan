@@ -136,6 +136,8 @@ Every pull request runs CI (tests, lint, builds), CodeQL, the changelog check, a
 
 `chore`, `ci`, `test`, `docs`, `refactor` and `style` titles need no entry. For any other PR that changes nothing for users, a maintainer adds the `no-changelog` label.
 
+If GitHub reports a conflict in `CHANGELOG.md`, run `git merge origin/main` locally and push. Git keeps both sides' entries there, so check they're still in the right section.
+
 ## Reporting issues
 
 Open a GitHub issue with steps to reproduce, expected vs. actual behavior, and the chain/page affected. For security-sensitive reports, follow the [Security Policy](SECURITY.md) and disclose privately rather than in a public issue.
