@@ -1,3 +1,0 @@
-# Parallel PRs all add lines to the same [Unreleased] lists. Keep both sides.
-# Local merges and rebases only: GitHub still reports these as conflicts.
-CHANGELOG.md merge=union

@@ -18,7 +18,7 @@
   Next.js explorer frontend, block indexer, Postgres schema, Astro site.
   TypeScript throughout. License: AGPL-3.0 — read, fork, self-host.
 - [Changelog](https://altscan.io/changelog): every release and change,
-  read directly from the repository's CHANGELOG.md
+  built from the repository's CHANGELOG.md and changelog.d/
 
 ## Data
 

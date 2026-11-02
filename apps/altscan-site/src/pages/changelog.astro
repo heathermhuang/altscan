@@ -28,8 +28,8 @@ const showLive = unreleased && unreleased.sections.some((s) => s.bullets.length 
       <p class="k">// changelog</p>
       <h1>Every change,<br />in public.</h1>
       <p class="cl-lede">
-        Altscan is open source and ships continuously. This page reads
-        <a href={`${GITHUB}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a> straight from the repository, the same record each pull request updates.
+        Altscan is open source and ships continuously. This page is built from
+        <a href={`${GITHUB}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a> and the <a href={`${GITHUB}/tree/main/changelog.d`}>entry each pull request adds</a>.
       </p>
       <p class="cl-count">{releases.length} releases · {total} changes</p>
       <ol class="cl-tape" aria-label="Releases, oldest to newest">
