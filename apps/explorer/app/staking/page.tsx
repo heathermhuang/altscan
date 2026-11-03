@@ -90,6 +90,7 @@ export default async function StakingPage() {
           <span className="break-all">0x00000000219ab540356cbb839cbe05303d7705fa</span>
           <Link
             href="/address/0x00000000219ab540356cbb839cbe05303d7705fa"
+            prefetch={false}
             className="text-xs text-acc-ink hover:underline"
           >
             View →

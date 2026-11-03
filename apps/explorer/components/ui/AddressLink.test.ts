@@ -20,6 +20,14 @@ describe('AddressLink title', () => {
   })
 })
 
+describe('AddressLink prefetch', () => {
+  // Regression: ISSUE-001 — address-link prefetches were 403'd by the edge challenge
+  // Found by /qa on 2026-11-03
+  it('never prefetches: the edge challenges /address/ for any visitor without clearance', () => {
+    expect(AddressLink({ address: ADDR.toLowerCase() }).props.prefetch).toBe(false)
+  })
+})
+
 describe('AddressLink plain', () => {
   it('carries its own accent, hover and mono classes by default', () => {
     expect(html()).toContain('class="text-acc-ink hover:underline font-mono ')

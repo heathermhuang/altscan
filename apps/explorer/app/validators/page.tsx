@@ -108,7 +108,7 @@ export default async function ValidatorsPage() {
               <tr key={v.address}>
                 <td className="text-mut">{i + 1}</td>
                 <td>
-                  <Link href={`/address/${v.address}`} className="text-acc-ink font-medium hover:underline">
+                  <Link href={`/address/${v.address}`} prefetch={false} className="text-acc-ink font-medium hover:underline">
                     {display[i].name}
                   </Link>
                 </td>

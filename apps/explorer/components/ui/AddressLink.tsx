@@ -23,6 +23,9 @@ const SELF = 'text-ink font-semibold'
  * `plain` drops the link's own colour, hover and mono classes, for a container that supplies
  * them (a `dt-a` table: its links are accent links in the table's mono face). `self` still applies
  * there: its colour and weight are the one thing the container's accent must not decide.
+ *
+ * It never prefetches. The edge puts a managed challenge on `/address/`, so every prefetch from a
+ * visitor who has not passed it yet comes back 403, a console error per link in view.
  */
 export function AddressLink({
   address,
@@ -54,6 +57,7 @@ export function AddressLink({
   return (
     <Link
       href={`/address/${address.toLowerCase()}`}
+      prefetch={false}
       title={title ? checksummed : undefined}
       className={plain ? `${self ? SELF : ''} ${className}`.trim() || undefined : `${self ? SELF : 'text-acc-ink hover:underline'} ${label ? '' : 'font-mono'} ${className}`}
     >

@@ -752,7 +752,7 @@ export default async function TxDetailPage({
                 <AddressLink address={n.toAddress} className="text-xs" />
                 <span className="text-mut">For</span>
                 <span className="font-mono text-[13px] text-ink">
-                  <Link href={`/token/${n.tokenAddress}`} className="text-acc-ink hover:underline">
+                  <Link href={`/token/${n.tokenAddress}`} prefetch={false} className="text-acc-ink hover:underline">
                     {getAddressLabel(n.tokenAddress) ?? shortenAddress(n.tokenAddress)}
                   </Link>
                   <span className="ml-1 text-mut">#{n.tokenId}</span>
@@ -880,7 +880,7 @@ function TransferRow({ t }: { t: TransferInfo }) {
       <span className="font-mono text-[13px] text-ink">
         <span title={fullAmount}>{formattedAmount ?? t.value}</span>
         {' '}
-        <Link href={`/token/${t.tokenAddress}`} className="text-acc-ink hover:underline">
+        <Link href={`/token/${t.tokenAddress}`} prefetch={false} className="text-acc-ink hover:underline">
           {tokenTextOr(t.tokenSymbol, UNKNOWN_TOKEN)}
         </Link>
       </span>
@@ -936,7 +936,7 @@ function Row({
   return (
     <RowShell label={label} mono={mono}>
       {link ? (
-        <Link href={link} className="text-acc-ink hover:underline">{value}</Link>
+        <Link href={link} prefetch={false} className="text-acc-ink hover:underline">{value}</Link>
       ) : (
         value
       )}

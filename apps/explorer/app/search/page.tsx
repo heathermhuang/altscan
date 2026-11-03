@@ -106,7 +106,7 @@ export default async function SearchPage({
                 <tbody>
                   {tokenMatches.map(token => {
                     const nameLink = (
-                      <Link href={`/token/${token.address}`} className="text-acc-ink font-medium hover:underline">
+                      <Link href={`/token/${token.address}`} prefetch={false} className="text-acc-ink font-medium hover:underline">
                         {token.name}
                       </Link>
                     )
@@ -131,7 +131,7 @@ export default async function SearchPage({
                         <td className="text-ink">{token.symbol}</td>
                         <td className="text-mut">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</td>
                         <td>
-                          <Link href={`/token/${token.address}`} className="text-acc-ink hover:underline">
+                          <Link href={`/token/${token.address}`} prefetch={false} className="text-acc-ink hover:underline">
                             {token.address.slice(0, 14)}…
                           </Link>
                         </td>
