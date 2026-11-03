@@ -147,7 +147,7 @@ export default async function TokenListPage({
           <tbody>
             {tokens.map((t, i) => {
               const nameLink = (
-                <Link href={`/token/${t.address}`} className="text-acc-ink font-medium hover:underline">
+                <Link href={`/token/${t.address}`} prefetch={false} className="text-acc-ink font-medium hover:underline">
                   {tokenTextOr(t.name, shortenAddress(t.address))}
                 </Link>
               )
