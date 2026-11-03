@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **Altscan** — the open-source, multi-chain block explorer platform powering BNBScan and EthScan — are documented here. Read it at [altscan.io/changelog](https://altscan.io/changelog).
+All notable changes to **Altscan** — the open-source, multi-chain block explorer platform powering BNBScan and EthScan — are documented here. Read it at [altscan.io/changelog](https://altscan.io/changelog). The newest entries wait in [`changelog.d/`](changelog.d/) until a release moves them into this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme.
 

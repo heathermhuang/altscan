@@ -118,8 +118,8 @@ disposable database.
 3. Run the checks above.
 4. Use conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`…). PRs are
    squash-merged, so write the PR title the same way — it becomes the commit.
-5. For user-facing changes, open the PR as a draft, add a line under `[Unreleased]` in
-   [`CHANGELOG.md`](CHANGELOG.md) ending in the PR's number, then mark it ready. See
+5. For user-facing changes, open the PR as a draft, add an entry file to
+   [`changelog.d/`](changelog.d/) named after the PR, then mark it ready. See
    [Writing a changelog entry](#writing-a-changelog-entry).
 6. Open the PR against `main` with a short description of what changed and why.
 
@@ -127,8 +127,11 @@ Every pull request runs CI (tests, lint, builds), CodeQL, the changelog check, a
 
 ## Writing a changelog entry
 
-[`CHANGELOG.md`](CHANGELOG.md) is published at [altscan.io/changelog](https://altscan.io/changelog), so write for a visitor, not a reviewer.
+Add `changelog.d/<PR number>.<section>.md`, for example `changelog.d/312.fixed.md`. The section is `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`. Each entry has its own file, so parallel PRs don't conflict.
 
+Entries are published at [altscan.io/changelog](https://altscan.io/changelog), so write for a visitor, not a reviewer.
+
+- Write one bullet, starting with `- `.
 - Use one or two sentences on what changed for users of the explorers, the API, or self-hosters.
 - Start with a `**bold lead**` if a visitor would notice the change. The page shows that lead up front.
 - End with the PR number: `… (#123).`

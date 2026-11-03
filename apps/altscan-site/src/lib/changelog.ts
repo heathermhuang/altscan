@@ -121,7 +121,8 @@ export function changelogProblems(cl: Changelog): string[] {
   ]);
 }
 
-const SOURCE_URL = 'https://raw.githubusercontent.com/heathermhuang/altscan/main/CHANGELOG.md';
+// publish-changelog.yml keeps this branch equal to CHANGELOG.md plus changelog.d/.
+const SOURCE_URL = 'https://raw.githubusercontent.com/heathermhuang/altscan/changelog-published/CHANGELOG.md';
 const CACHE_PATH = '/__changelog.md';
 const TTL_S = 3600;
 const TIMEOUT_MS = 2000;
