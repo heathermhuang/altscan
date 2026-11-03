@@ -197,6 +197,7 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
 
 ## Conventions
 
+- **A user-facing PR adds its own `changelog.d/<number>.<section>.md`**, a bullet ending in its PR number: open a draft, add the file, mark it ready. Don't edit `[Unreleased]` in `CHANGELOG.md` directly. altscan.io/changelog publishes both, so follow the style note in CONTRIBUTING.md. The `Changelog` check enforces this; `chore`, `ci`, `test`, `docs`, `refactor` and `style` titles are exempt, and the `no-changelog` label covers other internal PRs. At a release, run `node scripts/changelog-fragments.mjs --write` before renaming `[Unreleased]`.
 - `packages/db/schema.ts` is the schema source of truth (Drizzle).
 - Licensed AGPL-3.0. Blockscout relicensed off GPL in 2026, which makes this a
   differentiator — do not relicense the codebase permissive without a decision.

@@ -17,6 +17,8 @@
 - [GitHub](https://github.com/heathermhuang/altscan): the full platform —
   Next.js explorer frontend, block indexer, Postgres schema, Astro site.
   TypeScript throughout. License: AGPL-3.0 — read, fork, self-host.
+- [Changelog](https://altscan.io/changelog): every release and change,
+  built from the repository's CHANGELOG.md and changelog.d/
 
 ## Data
 

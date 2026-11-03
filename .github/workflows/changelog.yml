@@ -1,0 +1,35 @@
+name: Changelog
+
+# altscan.io/changelog publishes changelog.d/, so a user-facing PR carries its own
+# entry file there. Drafts are skipped because the entry cites the PR's number,
+# which only exists once the PR is open: open a draft, add the file, mark it ready.
+#
+# Runs on `pull_request`, not `pull_request_target`: a fork's PR gets a read-only
+# token and no secrets. `edited`, `labeled` and `unlabeled` re-run it when the
+# title or the no-changelog label changes.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit and its base, for the diff the PR adds.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check for an entry
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-changelog.mjs

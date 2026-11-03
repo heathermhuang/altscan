@@ -1,0 +1,61 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import ChangelogRelease from '../components/ChangelogRelease.astro';
+import { GITHUB } from '../data/site';
+import { loadChangelog, releaseTape } from '../lib/changelog';
+import { SECURITY_HEADERS } from '../lib/security-headers';
+import bundled from '../../../../CHANGELOG.md?raw';
+
+// Rendered by the Worker so a merged change appears without a deploy (lib/changelog.ts).
+export const prerender = false;
+
+const { changelog, source } = await loadChangelog(Astro.url.origin, bundled);
+for (const [name, value] of Object.entries(SECURITY_HEADERS)) Astro.response.headers.set(name, value);
+Astro.response.headers.set('cache-control', 'public, max-age=300');
+Astro.response.headers.set('x-altscan-cache', source);
+
+const { unreleased, releases } = changelog;
+const tape = releaseTape(changelog);
+const total = tape.reduce((n, b) => n + b.count, 0);
+const showLive = unreleased && unreleased.sections.some((s) => s.bullets.length > 0);
+---
+<Base title="Changelog — Altscan" description="Every Altscan release and change, from the first explorer to today. Open source, and read directly from the repository's CHANGELOG.md.">
+  <Nav />
+  <main>
+    <header class="wrap cl-head">
+      <p class="k">// changelog</p>
+      <h1>Every change,<br />in public.</h1>
+      <p class="cl-lede">
+        Altscan is open source and ships continuously. This page is built from
+        <a href={`${GITHUB}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a> and the <a href={`${GITHUB}/tree/main/changelog.d`}>entry each pull request adds</a>.
+      </p>
+      <p class="cl-count">{releases.length} releases · {total} changes</p>
+      <ol class="cl-tape" aria-label="Releases, oldest to newest">
+        {tape.map((b) => (
+          <li class={b.pending ? 'pending' : undefined} style={`flex-grow:${b.count};--fill:${b.fill}%`}>
+            <a href={`#${b.anchor}`}>
+              <span class="bar" aria-hidden="true"></span>
+              <span class="lbl">{b.label}</span>
+              <span class="sr-only">{b.count} changes</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+      <p class="cl-key">Width is the number of changes. Fill is the share that were new additions.</p>
+    </header>
+
+    <div class="wrap cl-list">
+      {showLive && (
+        <ChangelogRelease
+          release={unreleased}
+          title="Live now"
+          note={`Merged since v${releases[0].version} and shipping to the hosted sites. Not yet in a tagged release.`}
+        />
+      )}
+      {releases.map((r) => <ChangelogRelease release={r} title={`v${r.version}`} />)}
+    </div>
+  </main>
+  <Footer />
+</Base>
