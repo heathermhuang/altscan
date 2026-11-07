@@ -73,3 +73,25 @@ describe('/md/api-docs', () => {
     expect(body).toMatch(/https:\/\/[^ ]+\/auth\.md/)
   })
 })
+
+describe('/md cache headers', () => {
+  // The middleware answers a markdown request to a page URL (/tx/…, /about, …) by rewriting it to
+  // /md/_negotiated/…. That answer is served at the page's own URL, and Cloudflare's cache ignores
+  // Vary: Accept, so it must never be shared-cacheable: one request could replace the page for every
+  // visitor. A direct /md/… URL is its own URL and keeps its public caching.
+  const headers = async (...slug: string[]) => {
+    const res = await GET({} as NextRequest, { params: Promise.resolve({ slug }) })
+    return { cache: res.headers.get('cache-control'), status: res.status, body: await res.text() }
+  }
+
+  it('a direct /md URL is publicly cacheable', async () => {
+    expect((await headers('about')).cache).toBe('public, max-age=3600')
+  })
+
+  it.each([['about'], ['api-docs'], [], ['tx', '0xabc'], ['nope']])('the negotiated answer for %j is private and otherwise identical', async (...slug) => {
+    const direct = await headers(...slug)
+    const negotiated = await headers('_negotiated', ...slug)
+    expect(negotiated.cache).toBe('private, no-store')
+    expect({ status: negotiated.status, body: negotiated.body }).toEqual({ status: direct.status, body: direct.body })
+  })
+})

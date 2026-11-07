@@ -318,18 +318,28 @@ async function dispatch(path: string): Promise<RouteResult> {
   return { body: unsupportedMarkdown(path), status: 406, cacheControl: 'public, max-age=300' }
 }
 
+/**
+ * Prefix the middleware rewrites to when a page URL (/tx/…, /about, …) is asked for markdown. That answer
+ * is served at the page's own URL, and Cloudflare's cache ignores Vary: Accept, so it is never
+ * shared-cacheable: one request could otherwise replace the page for every visitor. The middleware cannot
+ * set this itself, because Next replaces a middleware Cache-Control with the route's. Read from the path,
+ * not the request, so the route stays ISR. Keep in sync with middleware.ts (both tests pin it).
+ */
+const NEGOTIATED_SEGMENT = '_negotiated'
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ slug?: string[] }> },
 ) {
   const { slug } = await params
-  const path = slugToPath(slug)
+  const negotiated = slug?.[0] === NEGOTIATED_SEGMENT
+  const path = slugToPath(negotiated ? slug!.slice(1) : slug)
   const { body, status, cacheControl } = await dispatch(path)
   return new NextResponse(body, {
     status,
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
-      'Cache-Control': cacheControl,
+      'Cache-Control': negotiated ? 'private, no-store' : cacheControl,
       'Vary': 'Accept',
     },
   })

@@ -11,6 +11,33 @@ function statusFor(ip: string, path = '/tx/0x' + 'ab'.repeat(32)): number {
   return middleware(req).status
 }
 
+describe('markdown negotiation', () => {
+  // A markdown answer at a page URL goes to /md/_negotiated/…, where the /md route marks it private. The
+  // middleware cannot do that itself: Next replaces a middleware Cache-Control with the route's own.
+  const TX = '/tx/0x' + 'ab'.repeat(32)
+  const at = (path: string, accept: string) =>
+    middleware(new NextRequest(`https://ethscan.io${path}`, { headers: { accept, 'user-agent': UA } }))
+  const target = (res: Response) => {
+    const to = res.headers.get('x-middleware-rewrite')
+    return to === null ? null : new URL(to).pathname
+  }
+
+  it.each([
+    [TX, `/md/_negotiated${TX}`],
+    ['/blocks/1', '/md/_negotiated/blocks/1'],
+    ['/block/1', '/md/_negotiated/block/1'],
+    ['/about', '/md/_negotiated/about'],
+    ['/', '/md/_negotiated'],
+  ])('rewrites a markdown request for %s to %s', (path, to) => {
+    expect(target(at(path, 'text/markdown'))).toBe(to)
+  })
+
+  it('leaves browsers on the page and direct /md URLs on the public route', () => {
+    expect(target(at(TX, 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'))).toBeNull()
+    expect(target(at('/md' + TX, 'text/markdown'))).toBeNull()
+  })
+})
+
 describe('middleware IP denylist', () => {
   it('blocks the IPv4 abuse range', () => {
     expect(statusFor('47.79.13.1')).toBe(403)
