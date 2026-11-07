@@ -128,6 +128,17 @@ describe('processBlock — internal transactions never throw after the first wri
     expect(itx?.rows).toHaveLength(1)
     expect(itx?.rows[0]).toMatchObject({ txHash: TX_HASH, blockNumber: H, value: '5' })
   })
+
+  it('a call tree nested past trace_address VARCHAR(128) loses only that frame, not the block', async () => {
+    // Postgres rejects the whole chunk over one overlong value, so the deep frame must never reach the INSERT.
+    let deep: Record<string, unknown> = { type: 'CALL', from: ADDR, to: ADDR, value: '0x7' }
+    for (let d = 1; d < 65; d++) deep = { type: 'CALL', from: ADDR, to: ADDR, value: '0x0', calls: [deep] }
+    const own = trace({ txHash: TX_HASH })
+    ;(own.result.calls as unknown[]).push(deep) // trace address '1' + '.0' x 64 = 129 characters
+    await processBlock(H, providerFor(blockStub({}, [txStub()])), true, undefined, traceProv([own]))
+    const itx = inserts.find(i => i.table === schema.internalTransactions)
+    expect(itx?.rows.map((r: { traceAddress: string; value: string }) => [r.traceAddress, r.value])).toEqual([['0', '5']])
+  })
 })
 
 describe('processBlock — gas price', () => {
