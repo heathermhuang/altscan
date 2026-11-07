@@ -354,6 +354,23 @@ describe('parseCriticalPct', () => {
   })
 })
 
+describe('workflow: the Render key reaches only main', () => {
+  // A trigger list limits when THIS file runs, not which workflow can read a repository secret: a workflow on any
+  // same-repository branch could. So the key and the target ids live in a GitHub environment whose deployment
+  // branches are limited to main, and this job is the only one that names it.
+  const workflow = readFileSync(new URL('../.github/workflows/sync-db-disk-size.yml', import.meta.url), 'utf8')
+  const code = workflow.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n')
+
+  it('triggers on schedule only', () => {
+    const on = code.match(/^on:\n((?:[ \t]+.*\n|\n)*)/m)?.[1] ?? ''
+    expect(on.match(/^ {2}[a-z_]+:/gm)).toEqual(['  schedule:'])
+  })
+
+  it('binds the sync job to the render-disk-sync environment', () => {
+    expect(code).toMatch(/^ {2}sync:\n(?: {4}.*\n)*? {4}environment: render-disk-sync\n/m)
+  })
+})
+
 describe('shouldFailRun', () => {
   it('passes only when nothing is wrong', () => {
     expect(shouldFailRun({ failed: 0, critical: 0, blind: 0 })).toBe(false)

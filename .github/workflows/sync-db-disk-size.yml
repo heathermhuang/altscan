@@ -17,6 +17,11 @@ name: Sync DB_DISK_GB
 # To re-run after a failure, use "Re-run jobs" on the run itself — that replays
 # the same default-branch commit. To try changes, run the script locally with
 # --dry-run (it needs only RENDER_API_KEY and DISK_SYNC_TARGETS).
+#
+# The trigger list only limits when THIS file runs. It does not stop another
+# workflow from reading a repository secret, and anyone who can push a branch can
+# add one. So both secrets live in the `render-disk-sync` environment, whose
+# deployment branches are limited to main, and never as repository secrets.
 on:
   schedule:
     # Every 2 hours. Retention runs roughly every 6h, so at most one retention
@@ -35,6 +40,7 @@ jobs:
   sync:
     name: Sync
     runs-on: ubuntu-latest
+    environment: render-disk-sync
     steps:
       # Actions are pinned to immutable commit SHAs, not tags. A moved or
       # compromised tag would otherwise be able to swap the checked-out script
