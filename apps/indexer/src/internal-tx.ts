@@ -14,6 +14,9 @@ import type { JsonRpcProvider } from 'ethers'
  * chains); Parity-style `trace_block` was NOT available on BSC.
  */
 
+/** Width of `internal_transactions.trace_address` (VARCHAR(128) in ensure-schema.ts). */
+export const MAX_TRACE_ADDRESS_LEN = 128
+
 /** One frame of a callTracer tree. Only the fields the decoder reads are typed. */
 export type RawTraceFrame = {
   type?: string
@@ -117,6 +120,11 @@ export function decodeCallTracerBlock(
  *    write that pinned the cursor and blocked quarantine, over a secondary table.
  *    A decode failure now yields no rows plus the error for the caller to report.
  *
+ * It also skips (and counts as `overlong`) any row whose trace address is too long
+ * for the column. Postgres rejects a whole multi-row INSERT over one such value,
+ * so a single call tree nested 65+ deep, which anyone can build, used to erase the
+ * internal transactions of every transaction in the block.
+ *
  * Call it ABOVE the first write so even a bug here cannot half-persist a block.
  */
 export function prepareInternalTxRows(
@@ -124,17 +132,20 @@ export function prepareInternalTxRows(
   blockNumber: number,
   timestamp: Date,
   blockTxHashes: readonly string[],
-): { rows: InternalTxRow[]; dropped: number; problem: unknown | null } {
+): { rows: InternalTxRow[]; dropped: number; overlong: number; problem: unknown | null } {
   try {
     const own = new Set(blockTxHashes.map(h => h.toLowerCase()))
     const kept = raw.filter(t => typeof t?.txHash === 'string' && own.has(t.txHash.toLowerCase()))
+    const decoded = decodeCallTracerBlock(kept, blockNumber, timestamp)
+    const rows = decoded.filter(r => r.traceAddress.length <= MAX_TRACE_ADDRESS_LEN)
     return {
-      rows: decodeCallTracerBlock(kept, blockNumber, timestamp),
+      rows,
       dropped: raw.length - kept.length,
+      overlong: decoded.length - rows.length,
       problem: null,
     }
   } catch (err) {
-    return { rows: [], dropped: 0, problem: err }
+    return { rows: [], dropped: 0, overlong: 0, problem: err }
   }
 }
 

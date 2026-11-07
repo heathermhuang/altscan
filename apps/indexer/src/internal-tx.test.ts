@@ -1,6 +1,15 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
-import { decodeCallTracerBlock, fetchBlockTraces, prepareInternalTxRows, type RawTraceTx } from './internal-tx'
+import {
+  decodeCallTracerBlock,
+  fetchBlockTraces,
+  MAX_TRACE_ADDRESS_LEN,
+  prepareInternalTxRows,
+  type RawTraceFrame,
+  type RawTraceTx,
+} from './internal-tx'
 
 /**
  * Real ETH mainnet `debug_traceBlockByNumber` (callTracer) output for block
@@ -176,12 +185,38 @@ describe('prepareInternalTxRows — trust and never throw', () => {
 
   it('a wholly foreign answer (another block\'s traces) decodes to nothing', () => {
     const out = prepareInternalTxRows([withValue('0x' + 'ee'.repeat(32))], BLOCK, TS, ['0x' + 'ab'.repeat(32)])
-    expect(out).toEqual({ rows: [], dropped: 1, problem: null })
+    expect(out).toEqual({ rows: [], dropped: 1, overlong: 0, problem: null })
   })
 
   it('an entry with no txHash is dropped, not thrown on', () => {
     expect(() => prepareInternalTxRows([withValue(undefined)], BLOCK, TS, ['0x' + 'ab'.repeat(32)])).not.toThrow()
     expect(prepareInternalTxRows([withValue(undefined), null as unknown as RawTraceTx], BLOCK, TS, []).dropped).toBe(2)
+  })
+
+  it('skips a frame nested too deep for trace_address VARCHAR(128) and keeps every other row', () => {
+    // The column rejects the whole multi-row INSERT for one overlong value (22001), and the
+    // chunk loop then gives up on the block, so one deep call tree used to erase the internal
+    // transactions of every transaction in the block. Seen on ETH 22 times in Oct–Nov 2026.
+    const own = '0x' + 'ab'.repeat(32)
+    const deep = (depth: number): RawTraceTx => {
+      let frame: RawTraceFrame = { type: 'CALL', from: ADDR, to: ADDR, value: '0x1' }
+      for (let d = 1; d < depth; d++) frame = { type: 'CALL', from: ADDR, to: ADDR, value: '0x0', calls: [frame] }
+      return { txHash: own, result: { type: 'CALL', from: ADDR, to: ADDR, value: '0x0', calls: [frame] } }
+    }
+    // 65 levels: '0' joined 65 times is 129 characters, one over the column.
+    const out = prepareInternalTxRows([withValue(own), deep(65)], BLOCK, TS, [own])
+    expect(out.rows.map(r => r.traceAddress)).toEqual(['0'])
+    expect(out.overlong).toBe(1)
+    expect(out.problem).toBeNull()
+    // 64 levels is 127 characters: stored.
+    const control = prepareInternalTxRows([deep(64)], BLOCK, TS, [own])
+    expect(control.rows.map(r => r.traceAddress.length)).toEqual([127])
+    expect(control.overlong).toBe(0)
+  })
+
+  it('MAX_TRACE_ADDRESS_LEN is the column width ensure-schema creates', () => {
+    const ddl = readFileSync(join(__dirname, 'ensure-schema.ts'), 'utf8')
+    expect(ddl).toContain(`trace_address VARCHAR(${MAX_TRACE_ADDRESS_LEN}) NOT NULL`)
   })
 
   it('a malformed frame yields no rows plus the error to report, never a throw', () => {
