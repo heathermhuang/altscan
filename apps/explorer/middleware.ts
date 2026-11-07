@@ -238,14 +238,17 @@ export function middleware(request: NextRequest) {
   }
 
   // Markdown content negotiation — rewrite (not redirect) so the URL stays
-  // canonical and caches key on Accept via the Vary header emitted by /md.
+  // canonical. Vary: Accept alone cannot keep the two answers apart (Cloudflare's
+  // cache ignores it), so the rewrite goes to /md/_negotiated/…, which the /md
+  // route answers with Cache-Control: private, no-store. Setting that header
+  // here does nothing: Next replaces it with the route's own.
   if (
     !pathname.startsWith('/md') &&
     hasMarkdownRepresentation(pathname) &&
     prefersMarkdown(request.headers.get('accept'))
   ) {
     const url = request.nextUrl.clone()
-    url.pathname = pathname === '/' ? '/md' : `/md${pathname}`
+    url.pathname = pathname === '/' ? '/md/_negotiated' : `/md/_negotiated${pathname}`
     const rewritten = NextResponse.rewrite(url)
     rewritten.headers.set('Vary', 'Accept')
     return rewritten
