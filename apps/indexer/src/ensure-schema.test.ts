@@ -11,6 +11,7 @@ import {
   INVALID_INDEX_DROP_LOCK_TIMEOUT,
   INVALID_INDEX_SWEEP_SQL,
   partitionRangesToCreate,
+  coveredUpTo,
   retireOldDexKeySql,
   retireOldTokensHealIndexSql,
   retireOldTxWhaleIndexSql,
@@ -363,6 +364,25 @@ describe('partitionRangesToCreate — the ladder for a table partitioned from da
     const ranges = partitionRangesToCreate(existing, W, 100 * W, 102 * W)
     for (const r of ranges) expect(r.lo).toBeGreaterThanOrEqual(100 * W + 3_000)
     expect(ranges[0]).toEqual({ lo: 100 * W + 3_000, hi: 100 * W + 3_000 + W })
+  })
+})
+
+describe('coveredUpTo — what the catalog says is covered', () => {
+  const ladder = [{ lo: 0, hi: 100 }, { lo: 100, hi: 200 }, { lo: 300, hi: 400 }]
+
+  it('follows an unbroken run of partitions to its end', () => {
+    expect(coveredUpTo(ladder, 0)).toBe(200)
+    expect(coveredUpTo(ladder, 150)).toBe(200)
+  })
+
+  it('stops at a hole, whatever lies beyond it', () => {
+    expect(coveredUpTo(ladder, 199)).toBe(200)
+    expect(coveredUpTo(ladder, 300)).toBe(400)
+  })
+
+  it('returns the block itself when no partition holds it', () => {
+    expect(coveredUpTo(ladder, 250)).toBe(250)
+    expect(coveredUpTo([], 7)).toBe(7)
   })
 })
 

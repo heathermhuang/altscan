@@ -163,6 +163,19 @@ jobs:
           TT_WHALE_INDEX_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/whale_idx_test
         run: npx vitest run apps/indexer/src/tt-whale-index.pg.test.ts
 
+      # A MAX_LAG skip lands only where token_transfers already has partitions: a skip past the
+      # last bound is covered first, a ladder whose partitions retention dropped is re-seeded at the
+      # cursor, and a lock timeout or a name CREATE TABLE IF NOT EXISTS skips is caught by reading the
+      # catalog back. It creates and drops token_transfers and blocks in public, so it gets a
+      # database of its own.
+      - name: Create partition-coverage-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE partition_cov_test'
+
+      - name: PG-gated indexer suite (token_transfers partitions cover a MAX_LAG skip)
+        env:
+          PARTITION_COVERAGE_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/partition_cov_test
+        run: npx vitest run apps/indexer/src/partition-coverage.pg.test.ts
+
       # POST /api/v1/query's filter.address: an OR across from/to ordered by
       # block_number walked the whole table and hit the web statement_timeout
       # ~95x/hour on BNB. Asserts rows read, not wall time. Its tables are TEMP,

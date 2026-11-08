@@ -186,6 +186,9 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
     if (!/test/.test(String(name))) throw new Error(`${ENV} connected to "${name}", which is not a disposable database`)
     await conn.unsafe('DROP TABLE IF EXISTS token_transfers CASCADE')
     await conn.unsafe('DROP TABLE IF EXISTS tokens CASCADE')
+    // ensureForwardPartitions reads MAX(blocks.number) too; empty, as on a database whose blocks were pruned.
+    await conn.unsafe('DROP TABLE IF EXISTS blocks CASCADE')
+    await conn.unsafe('CREATE TABLE blocks (number bigint PRIMARY KEY)')
   }, 60_000)
 
   afterAll(async () => {
@@ -193,6 +196,7 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
     if (DISPOSABLE) {
       await conn.unsafe('DROP TABLE IF EXISTS token_transfers CASCADE')
       await conn.unsafe('DROP TABLE IF EXISTS tokens CASCADE')
+      await conn.unsafe('DROP TABLE IF EXISTS blocks CASCADE')
     }
     await conn.end({ timeout: 5 })
   })
