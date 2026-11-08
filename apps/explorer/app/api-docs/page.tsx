@@ -333,7 +333,7 @@ const endpoints: Endpoint[] = [
     description: 'Flexible query endpoint for fetching any entity with filters, ordering, and pagination. Supports: transactions, blocks, tokens, token_transfers, dex_trades.',
     params: [
       { name: 'entity', type: 'string', required: true, description: 'One of: transactions, blocks, tokens, token_transfers, dex_trades' },
-      { name: 'filter', type: 'object', required: false, description: 'Filter object: { address, from, to, blockNumber, blockFrom, blockTo, tokenAddress, dex }' },
+      { name: 'filter', type: 'object', required: false, description: 'transactions: one of address, from or to, with an optional blockNumber or blockFrom/blockTo. token_transfers: one of address, from, to or tokenAddress, with an optional blockFrom/blockTo. blocks and dex_trades: blockFrom/blockTo. tokens: none. Block numbers are non-negative integers; any other field, or two of address/from/to/tokenAddress at once, is a 400' },
       { name: 'orderBy', type: 'string', required: false, description: '"asc" or "desc" (default: "desc")' },
       { name: 'limit', type: 'number', required: false, description: 'Number of results (default: 25, max: 100)' },
       { name: 'offset', type: 'number', required: false, description: 'Pagination offset (default: 0, max: 10000)' },
