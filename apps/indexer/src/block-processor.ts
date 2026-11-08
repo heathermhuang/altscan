@@ -8,7 +8,7 @@ import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
-import { fetchBlockTraces, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
+import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
@@ -394,6 +394,9 @@ export async function processBlock(
     if (prepared.problem) reportInternalTxProblem('trace', blockNumber, prepared.problem)
     else if (prepared.dropped > 0) {
       reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.dropped} trace entr(ies) do not belong to the block, dropped`))
+    }
+    if (prepared.overlong > 0) {
+      reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.overlong} frame(s) nested too deep to store (trace address over ${MAX_TRACE_ADDRESS_LEN} characters), skipped`))
     }
   }
 
