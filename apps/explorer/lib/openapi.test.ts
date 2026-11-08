@@ -131,9 +131,9 @@ describe('documented 200 bodies match what the routes return', () => {
     ['/api/v1/addresses/:address', { ...addressBody, historyComplete: true, nativeBalance: 0n, trackedTokenBalances: [{ ...trackedBalance, balance: '0' }] }],
     ['/api/v1/addresses/:address', { ...addressBody, historyComplete: null, indexedFrom: null, nativeBalance: null, trackedTokenBalances: null }],
     ['/api/v1/tokens', { tokens: [token], total: 1 }],
-    ['/api/v1/tokens/:contract', { token, lookalike }],
-    ['/api/v1/tokens/:contract', { token, lookalike: null }],
-    ['/api/v1/tokens/:contract', { token, lookalike: { symbol: 'BNB', canonical: null } }],
+    ['/api/v1/tokens/:contract', { token, lookalike, directionalControls: false }],
+    ['/api/v1/tokens/:contract', { token, lookalike: null, directionalControls: true }],
+    ['/api/v1/tokens/:contract', { token, lookalike: { symbol: 'BNB', canonical: null }, directionalControls: false }],
     ['/api/v1/contracts/:address', { contract }],
   ])('%s', (path, body) => {
     expect(validate200(path, body)).toEqual([])
@@ -146,7 +146,7 @@ describe('documented 200 bodies match what the routes return', () => {
     expect(validate200('/api/v1/transactions/:hash', { transaction: chainTx, source: 'index' })).not.toEqual([])
     expect(validate200('/api/v1/transactions/:hash', { transaction: indexedTx, source: 'index' })).not.toEqual([])   // no inputTruncated
     expect(validate200('/api/v1/transactions/:hash', { transaction: { ...chainTx, inputTruncated: true }, source: 'chain' })).not.toEqual([])
-    const { lookalike: _drop, ...noLookalike } = { token, lookalike }
+    const { lookalike: _drop, ...noLookalike } = { token, lookalike, directionalControls: false }
     expect(validate200('/api/v1/tokens/:contract', noLookalike)).not.toEqual([])
     const { historyComplete: _dropToo, ...noCoverage } = addressBody
     expect(validate200('/api/v1/addresses/:address', noCoverage)).not.toEqual([])

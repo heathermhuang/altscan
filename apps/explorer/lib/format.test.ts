@@ -330,9 +330,14 @@ describe('tokenUnit', () => {
   const ADDR = '0x0291bcbffc61d96f288e635d6ce3a31be03dff8e'
 
   it('is the symbol as given for anything that is not a URL or handle, even what the sanitiser would change or strip', () => {
-    for (const symbol of ['CAKE', 'USDT.z', '???', 'Unknown', '币安', 'BTCΞ', 'BAN人生', 'U\u202eSDT', ' USDT ']) {
+    for (const symbol of ['CAKE', 'USDT.z', '???', 'Unknown', '币安', 'BTCΞ', 'BAN人生', ' USDT ']) {
       expect(tokenUnit(symbol, ADDR), symbol).toBe(symbol)
     }
+  })
+
+  // Except Unicode direction controls (lib/directional-controls): U+202E made 'U' + RLO + 'SDT' draw as 'UTDS'.
+  it('strips direction controls, so the symbol draws in the order it is stored', () => {
+    expect(tokenUnit('U\u202eSDT', ADDR)).toBe('USDT')
   })
 
   it('is the short token address for a symbol that reads as a URL or handle, as typed or once sanitised', () => {
