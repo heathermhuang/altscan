@@ -6,7 +6,8 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./format": { "types": "./dist/format.d.ts", "default": "./dist/format.js" }
+    "./format": { "types": "./dist/format.d.ts", "default": "./dist/format.js" },
+    "./cloudflare-ranges": { "types": "./dist/cloudflare-ranges.d.ts", "default": "./dist/cloudflare-ranges.js" }
   },
   "scripts": {
     "build": "tsc",

@@ -25,6 +25,7 @@ export default defineConfig({
       // '@altscan/explorer-core/format' into '<...>/src/index.ts/format'. The
       // more specific key must come first.
       '@altscan/explorer-core/format': fileURLToPath(new URL('./packages/explorer-core/src/format.ts', import.meta.url)),
+      '@altscan/explorer-core/cloudflare-ranges': fileURLToPath(new URL('./packages/explorer-core/src/cloudflare-ranges.ts', import.meta.url)),
       '@altscan/explorer-core': fileURLToPath(new URL('./packages/explorer-core/src/index.ts', import.meta.url)),
       '@altscan/providers': fileURLToPath(new URL('./packages/providers/src/index.ts', import.meta.url)),
       // Same reason again: chain-config moved from `main: ./src/index.ts` to a
