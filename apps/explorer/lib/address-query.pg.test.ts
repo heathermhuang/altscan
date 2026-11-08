@@ -454,45 +454,6 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
     })
   })
 
-  // The address page's NFTs tab (nft-transfers.ts). As `(to = a OR from = a) AND token_id IS NOT NULL ORDER BY
-  // block_number` it read a busy wallet's every transfer to find that it had no NFTs.
-  describe('NFTs tab', () => {
-    // Rows read from tables only: rowsRead would also count the CTEs' Subquery Scans, which read nothing.
-    const tableRows = (n: PlanNode & { 'Relation Name'?: string }): number =>
-      (n['Relation Name'] && n['Node Type'] !== 'Bitmap Index Scan'
-        ? (n['Actual Rows'] + (n['Rows Removed by Filter'] ?? 0)) * n['Actual Loops'] : 0)
-      + (n.Plans ?? []).reduce((s, c) => s + tableRows(c), 0)
-    const readOf = async (q: SQL) => {
-      const { sql: text, params } = new PgDialect().sqlToQuery(q)
-      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${text}`, params as never[])
-      return tableRows(explained.Plan)
-    }
-    const rowsOf = async (q: SQL) => Array.from(await db.execute(q)) as Record<string, unknown>[]
-
-    it.each([S, X, Z])('a busy wallet with no NFTs costs an empty index probe: %s', async (address) => {
-      expect(await rowsOf(nftTransfersQuery(address, 50))).toEqual([])
-      expect(await readOf(nftTransfersQuery(address, 50))).toBeLessThan(10)
-    })
-
-    it('a wallet with only BEP-1155s reads its NFT rows at most, never more, and shows none', async () => {
-      expect(await rowsOf(nftTransfersQuery(N1, 50))).toEqual([])
-      // 3,000 a side. With this few the planner reads each side through the NFT index and sorts it rather than
-      // walking it in order and stopping at NFT_SIDE_SCAN; either way the cost is the wallet's NFT rows.
-      expect(await readOf(nftTransfersQuery(N1, 50))).toBeLessThanOrEqual(2 * 3_000 + 10)
-    })
-
-    it('returns exactly what the OR query returns, newest BEP-721 first, a transfer to itself once', async () => {
-      const want = ((await conn.unsafe(
-        `SELECT tt.tx_hash FROM token_transfers tt JOIN tokens t ON t.address = tt.token_address AND t.type = 'BEP721'
-         WHERE (tt.to_address = $1 OR tt.from_address = $1) AND tt.token_id IS NOT NULL ORDER BY tt.block_number DESC LIMIT 500`, [N2],
-      )) as unknown as { tx_hash: string }[]).map(r => r.tx_hash)
-      const got = await rowsOf(nftTransfersQuery(N2, 500))
-      expect(want).toHaveLength(500)
-      expect(got.map(r => r.txHash)).toEqual(want)
-      expect(got.filter(r => Number(r.blockNumber) === 7000)).toHaveLength(1)
-    })
-  })
-
   // POST /api/v1/query mid-prune on BNB: retention has published a cutoff and DELETEd
   // the rows below it, and VACUUM has not yet removed their index entries. An
   // uncommitted DELETE leaves the same entries, and no scan can mark them dead, so a
@@ -540,6 +501,45 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
       expect(rows.every(r => Number(r.blockNumber) >= cutoff)).toBe(true)
       const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sent.query}`, sent.params as never[])
       expect(explained.Plan['Local Hit Blocks'] + explained.Plan['Local Read Blocks']).toBeLessThan(50)
+    })
+  })
+
+  // The address page's NFTs tab (nft-transfers.ts). As `(to = a OR from = a) AND token_id IS NOT NULL ORDER BY
+  // block_number` it read a busy wallet's every transfer to find that it had no NFTs.
+  describe('NFTs tab', () => {
+    // Rows read from tables only: rowsRead would also count the CTEs' Subquery Scans, which read nothing.
+    const tableRows = (n: PlanNode & { 'Relation Name'?: string }): number =>
+      (n['Relation Name'] && n['Node Type'] !== 'Bitmap Index Scan'
+        ? (n['Actual Rows'] + (n['Rows Removed by Filter'] ?? 0)) * n['Actual Loops'] : 0)
+      + (n.Plans ?? []).reduce((s, c) => s + tableRows(c), 0)
+    const readOf = async (q: SQL) => {
+      const { sql: text, params } = new PgDialect().sqlToQuery(q)
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${text}`, params as never[])
+      return tableRows(explained.Plan)
+    }
+    const rowsOf = async (q: SQL) => Array.from(await db.execute(q)) as Record<string, unknown>[]
+
+    it.each([S, X, Z])('a busy wallet with no NFTs costs an empty index probe: %s', async (address) => {
+      expect(await rowsOf(nftTransfersQuery(address, 50))).toEqual([])
+      expect(await readOf(nftTransfersQuery(address, 50))).toBeLessThan(10)
+    })
+
+    it('a wallet with only BEP-1155s reads its NFT rows at most, never more, and shows none', async () => {
+      expect(await rowsOf(nftTransfersQuery(N1, 50))).toEqual([])
+      // 3,000 a side. With this few the planner reads each side through the NFT index and sorts it rather than
+      // walking it in order and stopping at NFT_SIDE_SCAN; either way the cost is the wallet's NFT rows.
+      expect(await readOf(nftTransfersQuery(N1, 50))).toBeLessThanOrEqual(2 * 3_000 + 10)
+    })
+
+    it('returns exactly what the OR query returns, newest BEP-721 first, a transfer to itself once', async () => {
+      const want = ((await conn.unsafe(
+        `SELECT tt.tx_hash FROM token_transfers tt JOIN tokens t ON t.address = tt.token_address AND t.type = 'BEP721'
+         WHERE (tt.to_address = $1 OR tt.from_address = $1) AND tt.token_id IS NOT NULL ORDER BY tt.block_number DESC LIMIT 500`, [N2],
+      )) as unknown as { tx_hash: string }[]).map(r => r.tx_hash)
+      const got = await rowsOf(nftTransfersQuery(N2, 500))
+      expect(want).toHaveLength(500)
+      expect(got.map(r => r.txHash)).toEqual(want)
+      expect(got.filter(r => Number(r.blockNumber) === 7000)).toHaveLength(1)
     })
   })
 })
