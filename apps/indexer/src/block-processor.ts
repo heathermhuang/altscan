@@ -9,6 +9,8 @@ import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
+import { ensureForwardPartitions } from './ensure-schema'
+import { recordIndexGapIfAbsent } from './index-gaps'
 
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
@@ -1517,6 +1519,8 @@ export function purgeTransferQueueAbove(forkPoint: number): void {
     }
   }
   for (const n of transferWritten) if (n > forkPoint) transferWritten.delete(n)
+  // A failure above the fork was about the orphaned block, not its replacement.
+  for (const n of blockWriteFailures.keys()) if (n > forkPoint) blockWriteFailures.delete(n)
   if (dropped > 0) {
     console.warn(`[tt-writer] reorg purge: dropped ${dropped} queued rows above block ${forkPoint}`)
     evaluateTransferQueueHighWater()
@@ -1548,6 +1552,7 @@ export async function rollbackTransferWriterTo(forkPoint: number): Promise<void>
     pendingFloors = pendingFloors
       .map(f => ({ after: f.after, to: Math.min(f.to, forkPoint) }))
       .filter(f => f.to > f.after)
+    transferHighestQueued = Math.min(transferHighestQueued, forkPoint)
     if (transferWriterSeeded && durableBlock > forkPoint) {
       const prev = durableBlock
       durableBlock = forkPoint
@@ -1599,6 +1604,7 @@ export function enqueueTransferWrite(blockNumber: number, rows: TokenTransferRow
   // a real decode arriving for a quarantined height revokes the quarantine for free.
   transferPending.set(blockNumber, { rows, quarantine: false })
   transferPendingRows += rows.length
+  if (blockNumber > transferHighestQueued) transferHighestQueued = blockNumber
   evaluateTransferQueueHighWater()
   runTransferWriter()
 }
@@ -1633,8 +1639,208 @@ export function enqueueQuarantinedBlock(blockNumber: number): void {
   // a real batch leaves the count unchanged, so nothing observable would change.
   if (prev) transferPendingRows -= prev.rows.length
   transferPending.set(blockNumber, { rows: [], quarantine: true })
+  if (blockNumber > transferHighestQueued) transferHighestQueued = blockNumber
   evaluateTransferQueueHighWater()
   runTransferWriter()
+}
+
+/**
+ * Why one block's write failed, from its SQLSTATE, so the writer knows what may move W.
+ *
+ *  - `data` (class 22, e.g. 22P02): the block's own rows are bad, and every replay fails
+ *    the same way. After TT_BLOCK_REJECT_AFTER attempts the block is rejected.
+ *  - `missing-partition` (23514 "no partition of relation … found for row"): the range
+ *    has no token_transfers partition yet. Partitions are made and the block retried;
+ *    it never counts toward rejection.
+ *  - `infra` (classes 08, 40, 57, or a socket or connection error from the driver):
+ *    nothing is wrong with the block. The whole drain is retried quietly.
+ *  - `unknown`: anything else. Retried alone, forever, and never moves W, so a failure
+ *    mode nobody has seen cannot step W over a block.
+ */
+export type WriteFailureKind = 'data' | 'missing-partition' | 'infra' | 'unknown'
+
+export function classifyWriteFailure(err: unknown): { kind: WriteFailureKind; sqlstate: string } {
+  const e = unwrapDbError(err) as { name?: unknown; code?: unknown; message?: unknown } | null
+  const code = typeof e?.code === 'string' ? e.code : ''
+  if (e?.name !== 'PostgresError') {
+    // Not from the server. A socket or connection code (ECONNRESET, CONNECT_TIMEOUT,
+    // CONNECTION_CLOSED) is the connection, not the block; any other driver error
+    // (UNDEFINED_VALUE, MAX_PARAMETERS_EXCEEDED) may well be the block's own.
+    if (/^(E[A-Z]+|CONNECT_TIMEOUT|CONNECTION_[A-Z]+)$/.test(code)) return { kind: 'infra', sqlstate: code }
+    return { kind: 'unknown', sqlstate: code || 'none' }
+  }
+  if (code === '23514' && /no partition of relation/i.test(String(e.message))) return { kind: 'missing-partition', sqlstate: code }
+  if (code.startsWith('22')) return { kind: 'data', sqlstate: code }
+  if (/^(08|40|57)/.test(code)) return { kind: 'infra', sqlstate: code }
+  return { kind: 'unknown', sqlstate: code || 'none' }
+}
+
+/** Data failures before a block is rejected: recorded as a gap, then stepped over. */
+export const TT_BLOCK_REJECT_AFTER = 5
+const TT_BLOCK_RETRY_BASE_MS = 250
+const TT_BLOCK_RETRY_MAX_MS = 30_000
+
+/**
+ * Heights whose own write failed. Each is retried ALONE, after a capped backoff, while
+ * the blocks around it commit: W folds contiguously, so it stays below the failing
+ * block, and a restart replays from there, which is replay-safe. `rejections` counts
+ * only data failures; `attempts` drives the backoff.
+ */
+const blockWriteFailures = new Map<number, { rejections: number; attempts: number; retryAt: number; sqlstate: string }>()
+let blockRetryTimer: ReturnType<typeof setTimeout> | null = null
+let transferHighestQueued = 0
+let watermarkLagAlerting = false
+
+/** Take every queued batch that is not waiting out a backoff. */
+function takeDueBatches(now: number): Map<number, PendingBatch> {
+  const due = new Map<number, PendingBatch>()
+  for (const [n, batch] of transferPending) {
+    const f = blockWriteFailures.get(n)
+    if (!f || f.retryAt <= now) due.set(n, batch)
+  }
+  for (const [n, batch] of due) {
+    transferPending.delete(n)
+    transferPendingRows -= batch.rows.length
+  }
+  return due
+}
+
+/** One transaction for these batches. A quarantine batch is never deleted or inserted. */
+async function writeBatches(batches: Map<number, PendingBatch>): Promise<void> {
+  const deleteNums: number[] = []
+  const rows: TokenTransferRow[] = []
+  for (const [n, batch] of batches) {
+    if (!batch.quarantine) deleteNums.push(n)
+    for (const r of batch.rows) rows.push(r)
+  }
+  if (deleteNums.length === 0 && rows.length === 0) return
+  // Sort by (block_number, log_index): keeps tt_block_idx writes sequential
+  // and clusters same-block rows for better index-leaf locality.
+  rows.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
+  await writeTransferBlocks(deleteNums, rows)
+}
+
+function requeueBatch(n: number, batch: PendingBatch): void {
+  // Don't clobber a newer decode of the same block.
+  if (transferPending.has(n)) return
+  transferPending.set(n, batch)
+  transferPendingRows += batch.rows.length
+}
+
+/**
+ * Write a drained set and return the heights that are now durable. The set goes in one
+ * transaction; if that fails for a reason that is not infrastructure, each block is
+ * written alone, in order, so one bad block no longer holds back every block after it.
+ * Blocks already failing go alone from the start. Throws only for an infrastructure
+ * failure, which the caller retries as a whole.
+ */
+async function writeDrained(drained: Map<number, PendingBatch>): Promise<number[]> {
+  const healthy = new Map([...drained].filter(([n]) => !blockWriteFailures.has(n)))
+  const alone = [...drained.keys()].filter(n => blockWriteFailures.has(n))
+  const written: number[] = []
+  if (healthy.size > 0) {
+    try {
+      await writeBatches(healthy)
+      written.push(...healthy.keys())
+    } catch (err) {
+      const c = classifyWriteFailure(err)
+      if (c.kind === 'infra') throw err
+      console.warn(`[tt-writer] write of ${healthy.size} block(s) failed (${c.sqlstate}); writing each alone to find the one that fails`)
+      alone.push(...healthy.keys())
+    }
+  }
+  alone.sort((a, b) => a - b)
+  let partitionsMade = false
+  for (const n of alone) {
+    const batch = drained.get(n)!
+    try {
+      await writeBatches(new Map([[n, batch]]))
+      written.push(n)
+      blockWriteFailures.delete(n)
+    } catch (err) {
+      const c = classifyWriteFailure(err)
+      if (c.kind === 'infra') throw err
+      requeueBatch(n, batch)
+      const prev = blockWriteFailures.get(n)
+      const attempts = (prev?.attempts ?? 0) + 1
+      const rejections = (prev?.rejections ?? 0) + (c.kind === 'data' ? 1 : 0)
+      blockWriteFailures.set(n, {
+        rejections,
+        attempts,
+        retryAt: Date.now() + Math.min(TT_BLOCK_RETRY_BASE_MS * 2 ** (attempts - 1), TT_BLOCK_RETRY_MAX_MS),
+        sqlstate: c.sqlstate,
+      })
+      const msg = dbErrorMessage(err).slice(0, 300)
+      if (c.kind === 'missing-partition') {
+        console.error(`[tt-writer] ALERT block ${n} has no token_transfers partition (${c.sqlstate}): making partitions and retrying`)
+        if (!partitionsMade) {
+          partitionsMade = true
+          const covered = await ensureForwardPartitions({ anchor: n }).catch(e => {
+            console.warn('[tt-writer] ensureForwardPartitions warning:', dbErrorMessage(e))
+            return n
+          })
+          // Covered now: no reason to wait out the backoff.
+          if (covered === null || covered > n) blockWriteFailures.get(n)!.retryAt = Date.now()
+        }
+      } else if (c.kind === 'data') {
+        console.error(`[tt-writer] ALERT block ${n} rejected: ${c.sqlstate} (${rejections}/${TT_BLOCK_REJECT_AFTER}), W held at ${durableBlock}: ${msg}`)
+        if (rejections >= TT_BLOCK_REJECT_AFTER) await rejectBlock(n, batch, c.sqlstate)
+      } else {
+        console.error(`[tt-writer] ALERT block ${n} write failed with unrecognised ${c.sqlstate}, retrying alone, W held at ${durableBlock}: ${msg}`)
+      }
+    }
+  }
+  return written
+}
+
+/**
+ * A block whose own rows fail the same way every time: record it as a 1-block gap
+ * (`tt_rejected(<sqlstate>)`, /api/health then reports degraded), and only once that
+ * row has committed, replace its batch with a quarantine batch so the fold can carry W
+ * past it. If the gap write fails, nothing is replaced and W stays: the block is
+ * retried and rejected again later. A restart before the fold replays the block, which
+ * fails again and finds its gap row already there.
+ */
+async function rejectBlock(n: number, batch: PendingBatch, sqlstate: string): Promise<void> {
+  try {
+    await recordIndexGapIfAbsent(getDb(), n, `tt_rejected(${sqlstate})`)
+  } catch (err) {
+    console.error(`[tt-writer] ALERT block ${n}: could not record its gap, so it is kept and W stays at ${durableBlock}: ${dbErrorMessage(err)}`)
+    return
+  }
+  // Only the batch that failed: a newer decode of the block gets its own attempts.
+  if (transferPending.get(n) !== batch) return
+  transferPending.set(n, { rows: [], quarantine: true })
+  transferPendingRows -= batch.rows.length
+  blockWriteFailures.delete(n)
+  console.error(`[tt-writer] ALERT block ${n} rejected ${TT_BLOCK_REJECT_AFTER} times (${sqlstate}): recorded as a 1-block index gap; its transfers are left out and W may pass it`)
+}
+
+/** Edge-triggered: W pinned below a failing block while the blocks above it keep committing. */
+function evaluateWatermarkLag(): void {
+  const lag = transferHighestQueued - durableBlock
+  if (!watermarkLagAlerting && lag > TT_QUEUE_HIGH_WATER_BLOCKS) {
+    watermarkLagAlerting = true
+    const held = [...blockWriteFailures.entries()].sort((a, b) => a[0] - b[0])[0]
+    console.error(`[tt-writer] ALERT W trails cursor by ${lag} blocks (W=${durableBlock}, newest queued ${transferHighestQueued}${held ? `, held at block ${held[0]} by ${held[1].sqlstate}` : ''})`)
+  } else if (watermarkLagAlerting && lag <= TT_QUEUE_HIGH_WATER_BLOCKS) {
+    watermarkLagAlerting = false
+    console.log(`[tt-writer] W caught up: trails by ${lag} blocks`)
+  }
+}
+
+/** Come back for the earliest block waiting out a backoff. */
+function scheduleBlockRetry(): void {
+  let next = Infinity
+  for (const n of transferPending.keys()) {
+    const f = blockWriteFailures.get(n)
+    if (f) next = Math.min(next, f.retryAt)
+  }
+  if (blockRetryTimer) clearTimeout(blockRetryTimer)
+  blockRetryTimer = null
+  if (next === Infinity) return
+  blockRetryTimer = setTimeout(() => { blockRetryTimer = null; runTransferWriter() }, Math.max(0, next - Date.now()))
+  blockRetryTimer.unref?.()
 }
 
 function runTransferWriter(): void {
@@ -1643,35 +1849,20 @@ function runTransferWriter(): void {
   if (transferWriterRunning) return
   if (transferPending.size === 0 && !floorReady()) return
   transferWriterRunning = true
-  // Fire-and-forget single drainer — coalesces the entire current queue per pass.
+  // Fire-and-forget single drainer — coalesces the due queue per pass.
   ;(async () => {
     try {
       // Checking paused per iteration lets an in-flight drain finish its current
       // batch (commit or requeue) and then yield to a waiting reorg rollback.
-      // A ready floor alone runs a pass with nothing to write, so W steps over the
-      // abandoned range even when no block is queued.
-      while (!transferWriterPaused && (transferPending.size > 0 || floorReady())) {
-        const drained = transferPending
-        transferPending = new Map()
-        transferPendingRows = 0
-
-        // blockNums drives the FOLD (every drained height counts, quarantined or
-        // not — that is the whole point of a quarantine batch). deleteNums drives
-        // the DELETE, and deliberately excludes quarantined heights so a stale
-        // retry can never destroy rows written by a heal in the meantime.
-        const blockNums = Array.from(drained.keys())
-        const deleteNums: number[] = []
-        const rows: TokenTransferRow[] = []
-        for (const [n, batch] of drained) {
-          if (!batch.quarantine) deleteNums.push(n)
-          for (const r of batch.rows) rows.push(r)
-        }
-        // Sort by (block_number, log_index): keeps tt_block_idx writes sequential
-        // and clusters same-block rows for better index-leaf locality.
-        rows.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
+      while (!transferWriterPaused) {
+        // A block waiting out a backoff stays queued and is not taken. A ready floor
+        // alone runs a pass with nothing to write, so W steps over the abandoned range
+        // even when no block is queued.
+        const drained = takeDueBatches(Date.now())
+        if (drained.size === 0 && !floorReady()) break
 
         try {
-          if (blockNums.length > 0) await writeTransferBlocks(deleteNums, rows)
+          const written = await writeDrained(drained)
 
           // Fold written blocks into W through the contiguous prefix. Compute the new
           // watermark first and only advance durableBlock / clear transferWritten AFTER
@@ -1681,8 +1872,9 @@ function runTransferWriter(): void {
           // sustained indexer_cursor outage. Holding state until the persist lands makes
           // the failure recur every cycle, so it both retries and feeds the failure ALERT.
           // An abandoned range is stepped over only once the prefix has reached its
-          // `after`, and the floors are dropped only after the persist lands.
-          for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
+          // `after`, and the floors are dropped only after the persist lands. A block
+          // that failed is not in `written`, so W stops below it.
+          for (const n of written) if (n > durableBlock) transferWritten.add(n)
           let newDurable = durableBlock
           let floorsUsed = 0
           for (;;) {
@@ -1701,6 +1893,7 @@ function runTransferWriter(): void {
 
           // Rows are durable now — let holder-balance tracking see them.
           // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
+          const rows = written.flatMap(n => drained.get(n)!.rows)
           if (rows.length > 0) enqueueHolderBalanceUpdate(rows)
 
           // Only clear the failure streak after the FULL cycle succeeded (write AND
@@ -1712,23 +1905,21 @@ function runTransferWriter(): void {
             console.log(`[tt-writer] writer recovered after ${ttWriterConsecutiveFailures} consecutive failure(s)`)
           }
           ttWriterConsecutiveFailures = 0
+          evaluateWatermarkLag()
 
           if (++ttWriterDrainCount % 200 === 0) {
             console.log(`[tt-writer] W=${durableBlock} pending=${transferPending.size}blk/${transferPendingRows}rows ahead=${transferWritten.size}`)
           }
         } catch (err) {
+          // Infrastructure, or the W persist: nothing here is about one block, so nothing
+          // counts toward a rejection.
           ttWriterConsecutiveFailures++
           const msg = dbErrorMessage(err)
           // Re-queue (don't clobber a newer decode of the same block). The
           // quarantine flag travels inside the batch, so a requeued quarantine
           // stays a no-op and a requeued real batch stays a real write — no
           // separate bookkeeping to fall out of step across the retry.
-          for (const [n, batch] of drained) {
-            if (!transferPending.has(n)) {
-              transferPending.set(n, batch)
-              transferPendingRows += batch.rows.length
-            }
-          }
+          for (const [n, batch] of drained) requeueBatch(n, batch)
           // A requeue can push the pending count back over the bound without an enqueue —
           // re-evaluate so a breach during a failure storm still surfaces. No-op when the
           // flag is already set, so it won't flap against the per-retry failure alert below.
@@ -1748,11 +1939,11 @@ function runTransferWriter(): void {
           await new Promise(r => setTimeout(r, 250))
         }
       }
-      // Loop exits only when transferPending is empty, so the queue is durably drained
-      // here — fire the recovery log if we'd alerted (the writer cleared it, not an enqueue).
+      // Fire the recovery log if we'd alerted (the writer cleared it, not an enqueue).
       evaluateTransferQueueHighWater()
     } finally {
       transferWriterRunning = false
+      scheduleBlockRetry()
     }
   })()
 }

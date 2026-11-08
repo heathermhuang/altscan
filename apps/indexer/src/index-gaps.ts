@@ -159,6 +159,19 @@ export function planMaxLagSkip(
   return { abandonedFrom, abandonedTo }
 }
 
+/**
+ * A 1-block gap, recorded only when no row starts at that height: an existing row,
+ * its reason and its range are left exactly as they are, where recordIndexGap's
+ * upsert would overwrite the reason.
+ */
+export async function recordIndexGapIfAbsent(db: DbLike, block: number, reason: string): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO index_gaps (from_block, to_block, reason)
+    VALUES (${block}, ${block}, ${reason})
+    ON CONFLICT (from_block) DO NOTHING
+  `)
+}
+
 export async function recordIndexGap(
   db: DbLike,
   fromBlock: number,
