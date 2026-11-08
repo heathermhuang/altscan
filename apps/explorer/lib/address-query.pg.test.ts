@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { selectByAddress, selectInTimeOrder } from './address-query'
-import { nftTransfersQuery, NFT_SIDE_SCAN } from './nft-transfers'
+import { nftTransfersQuery } from './nft-transfers'
 
 // The mid-prune cases run the route itself on this suite's connection, and log the SQL it sends.
 const route = vi.hoisted(() => ({ db: undefined as unknown, sent: [] as { query: string; params: unknown[] }[] }))
