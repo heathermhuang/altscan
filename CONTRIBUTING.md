@@ -96,6 +96,7 @@ schema instead).
 | `apps/indexer/src/webhook-notifier.pg.test.ts` | `WEBHOOK_TEST_PG_URL` |
 | `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` (needs a database of its own) |
 | `apps/indexer/src/partition-coverage.pg.test.ts` | `PARTITION_COVERAGE_TEST_PG_URL` (needs a database of its own) |
+| `apps/indexer/src/tt-writer-isolation.pg.test.ts` | `TT_WRITER_ISOLATION_TEST_PG_URL` (needs a database of its own) |
 | `packages/db/client.pg.test.ts` | `DB_CLIENT_TEST_PG_URL` |
 | `packages/providers/src/moralis-cu-budget.redis.test.ts` | `MORALIS_TEST_REDIS_URL` (changes server config — use a throwaway Redis only) |
 
