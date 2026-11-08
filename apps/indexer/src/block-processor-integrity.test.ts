@@ -184,3 +184,55 @@ describe('fetchBlockReceipts — status', () => {
     await expect(statusOf({ status: '' })).rejects.toThrow(/unrecognised status/)
   })
 })
+
+describe('fetchBlockReceipts — log fields are checked before the first write', () => {
+  // One odd endpoint's malformed log used to pass straight through: a NaN or
+  // out-of-int4 logIndex, or an oversized topic, only failed at the async
+  // transfer writer's INSERT, after the cursor had moved past the block, so the
+  // coalesced drain retried forever with W frozen. Throwing here instead hands
+  // the block to rpc-failover while nothing has been written.
+  const TOPIC = '0x' + 'dd'.repeat(32)
+  const log = (over: Record<string, unknown> = {}) =>
+    ({ address: ADDR, topics: [TOPIC, TOPIC, TOPIC], data: '0x', logIndex: '0x0', ...over })
+  const fetchWith = (l: Record<string, unknown>) => fetchBlockReceipts({
+    send: vi.fn(async () => [{ transactionHash: TX_HASH, status: '0x1', gasUsed: '0x1', logs: [l] }]),
+  } as unknown as JsonRpcProvider, H)
+
+  it('keeps a well-formed log, lower-casing its address', async () => {
+    const upper = '0x' + 'AB'.repeat(20)
+    const [r] = await fetchWith(log({ address: upper, logIndex: '0x7fffffff' }))
+    expect(r.receipt.logs).toEqual([{ address: upper.toLowerCase(), topics: [TOPIC, TOPIC, TOPIC], data: '0x', index: 0x7fffffff }])
+    expect((await fetchWith(log({ topics: [] })))[0].receipt.logs[0].topics).toEqual([])
+  })
+
+  it.each([
+    ['missing', undefined], ['null', null], ['non-hex', '0xzz'], ['empty', ''], ['bare 0x', '0x'],
+    ['unprefixed', '12'], ['a number', 5], ['past int4', '0x80000000'],
+  ])('rejects a %s logIndex', async (_, logIndex) => {
+    await expect(fetchWith(log({ logIndex }))).rejects.toThrow(/logIndex/)
+  })
+
+  it.each([
+    ['31 bytes', ['0x' + 'dd'.repeat(31)]], ['33 bytes', ['0x' + 'dd'.repeat(33)]],
+    ['non-hex', ['0x' + 'zz'.repeat(32)]], ['not a string', [7]],
+    ['more than four', [TOPIC, TOPIC, TOPIC, TOPIC, TOPIC]], ['not an array', TOPIC],
+  ])('rejects topics that are %s', async (_, topics) => {
+    await expect(fetchWith(log({ topics }))).rejects.toThrow(/topic/)
+  })
+
+  it.each([
+    ['short', '0x' + '11'.repeat(19)], ['long', '0x' + '11'.repeat(21)],
+    ['non-hex', '0x' + 'zz'.repeat(20)], ['missing', undefined],
+  ])('rejects a %s address', async (_, address) => {
+    await expect(fetchWith(log({ address }))).rejects.toThrow(/address/)
+  })
+
+  it('refuses the whole block before any write, so failover can retry it', async () => {
+    const onWritesBegan = vi.fn()
+    const receipts = [{ transactionHash: TX_HASH, status: '0x1', gasUsed: '0x5208', logs: [log({ logIndex: '0x80000000' })] }]
+    await expect(processBlock(H, providerFor(blockStub({}, [txStub()]), receipts), false, onWritesBegan))
+      .rejects.toThrow(/logIndex/)
+    expect(onWritesBegan).not.toHaveBeenCalled()
+    expect(inserts).toEqual([])
+  })
+})

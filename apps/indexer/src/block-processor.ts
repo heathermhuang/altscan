@@ -1855,6 +1855,34 @@ function parseEffectiveGasPrice(v: unknown): bigint | undefined {
   return BigInt(v)
 }
 
+const HEX_QUANTITY = /^0x[0-9a-fA-F]+$/
+const TOPIC_RE = /^0x[0-9a-fA-F]{64}$/
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+const INT4_MAX = 0x7fffffff
+
+/**
+ * Check one receipt log's fields before anything is written. A missing, non-hex or
+ * out-of-int4 logIndex, or a topic or address of the wrong shape, used to pass
+ * through and only fail at the async transfer writer's INSERT, after the cursor
+ * had already moved past the block. The coalesced drain then retried forever with
+ * W frozen. Throwing here runs above the first write, so rpc-failover retries the
+ * block on another endpoint with nothing to roll back.
+ */
+function normalizeReceiptLog(l: { address: unknown; topics: unknown; data: string; logIndex: unknown }, where: string) {
+  const bad = (field: string, v: unknown) =>
+    new Error(`Malformed receipt log (${where}): invalid ${field} ${String(JSON.stringify(v)).slice(0, 80)}`)
+  const { address, topics, logIndex } = l
+  if (typeof logIndex !== 'string' || !HEX_QUANTITY.test(logIndex) || parseInt(logIndex, 16) > INT4_MAX) {
+    throw bad('logIndex', logIndex)
+  }
+  // EVM logs carry 0–4 topics (LOG0–LOG4), each exactly 32 bytes.
+  if (!Array.isArray(topics) || topics.length > 4 || !topics.every(t => typeof t === 'string' && TOPIC_RE.test(t))) {
+    throw bad('topics', topics)
+  }
+  if (typeof address !== 'string' || !ADDRESS_RE.test(address)) throw bad('address', address)
+  return { address: address.toLowerCase(), topics: topics as string[], data: l.data, index: parseInt(logIndex, 16) }
+}
+
 // ── eth_getBlockReceipts ─────────────────────────────────────────────
 // No auto-disable: all target chains (BSC, ETH mainnet) support this method on
 // every RPC we use. A failure here means a transient issue (rate-limit 429,
@@ -1905,12 +1933,7 @@ export async function fetchBlockReceipts(
         status: parseReceiptStatus(r, blockNumber),
         gasUsed: BigInt(r.gasUsed),
         effectiveGasPrice: parseEffectiveGasPrice(r.effectiveGasPrice),
-        logs: r.logs.map(l => ({
-          address: l.address.toLowerCase(),
-          topics: l.topics,
-          data: l.data,
-          index: parseInt(l.logIndex, 16),
-        })),
+        logs: r.logs.map((l, i) => normalizeReceiptLog(l, `block ${blockNumber} tx ${r.transactionHash} log ${i}`)),
       },
     })
   }
