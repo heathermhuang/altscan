@@ -5,6 +5,7 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { sql, type SQL } from 'drizzle-orm'
 import {
   exactMatchQuery, searchCandidatesQuery, SEARCH_POPULAR_ROWS, suggestQuery, suggestRows, SUGGEST_TIMEOUT_MS, withStatementTimeout,
+  tokenListSearch,
 } from './token-suggest'
 import { withTimeout } from './with-timeout'
 
@@ -21,6 +22,7 @@ import { withTimeout } from './with-timeout'
  * Gated on TOKEN_SUGGEST_TEST_PG_URL. The table is TEMP on a single non-recycled connection, so the suite
  * cannot collide with another that shares the database; the DDL mirrors ensure-schema.ts's two indexes.
  */
+const RARE_NFT = '0x' + '0'.repeat(37) + 'ad0'
 const ENV = 'TOKEN_SUGGEST_TEST_PG_URL'
 const PG_URL = process.env[ENV]
 
@@ -53,6 +55,11 @@ const FIXTURE = `
   -- ...and 12 better-held tokens merely NAMED it, also beyond the cutoff: an exact name ranks below an exact symbol.
   INSERT INTO tokens (address, name, symbol, holder_count)
   SELECT '0x' || md5('named' || i) || '00000000', 'Dupe', 'XDP' || i, 100 + i FROM generate_series(1, 12) i;
+
+  -- /token's type tabs: three well-held NFTs (inside the most-held cut) and one rare one.
+  INSERT INTO tokens (address, name, symbol, holder_count, type)
+  SELECT '0x' || md5('nft' || i) || '00000000', 'Zeta Art ' || i, 'ZART', 8000000 - i, 'BEP721' FROM generate_series(1, 3) i;
+  INSERT INTO tokens (address, name, symbol, holder_count, type) VALUES ('${RARE_NFT}', 'Quiet Gallery', 'QGAL', 1, 'BEP721');
 
   CREATE INDEX tokens_holder_count_idx ON tokens (holder_count DESC);
   CREATE INDEX tokens_lower_symbol_idx ON tokens (lower(symbol) text_pattern_ops);
@@ -261,6 +268,51 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
     it('leaves a low-holder token to exactMatchQuery', async () => {
       expect(await searchCandidatesQuery(db, 'rare name', 50)).toEqual([])
       expect((await exactMatchQuery(db, 'rare name coin', 10)).map((r) => r.symbol)).toEqual(['RNC'])
+    })
+  })
+
+  // /token?q=. It ran '%q%' over every token of the tab's type ordered by holders, so a q few rows match read all
+  // of them. Now: the two bounded lookups above, with the type applied outside their row limits.
+  describe('tokenListSearch', () => {
+    it.each(['BEP20', 'BEP721', 'BEP1155'] as const)('with type %s, still reads at most SEARCH_POPULAR_ROWS by holders, and the expression indexes for exact', async (type) => {
+      const byHolders = await planOf(searchCandidatesQuery(db, 'qqqqqq', 50, type))
+      expect(byHolders.seqScan).toBe(false)
+      expect(byHolders.rowsRead).toBeLessThanOrEqual(SEARCH_POPULAR_ROWS)
+      const exact = await planOf(exactMatchQuery(db, 'qqqqqq', 50, type))
+      expect(exact.seqScan).toBe(false)
+      expect(exact.indexes).toEqual(expect.arrayContaining(['tokens_lower_symbol_idx', 'tokens_lower_name_idx']))
+    })
+
+    it('keeps the tab\'s type', async () => {
+      expect((await tokenListSearch(db, 'zeta art', 'BEP721', 50)).map((r) => r.symbol)).toEqual(['ZART', 'ZART', 'ZART'])
+      expect(await tokenListSearch(db, 'zeta art', 'BEP20', 50)).toEqual([])
+      expect(await tokenListSearch(db, 'usdt', 'BEP721', 50)).toEqual([])
+    })
+
+    it('finds a rare token of the type by its exact name or symbol, no longer by part of it', async () => {
+      expect((await tokenListSearch(db, 'Quiet Gallery', 'BEP721', 50)).map((r) => r.symbol)).toEqual(['QGAL'])
+      expect((await tokenListSearch(db, 'QGAL', 'BEP721', 50)).map((r) => r.symbol)).toEqual(['QGAL'])
+      expect(await tokenListSearch(db, 'quiet gal', 'BEP721', 50)).toEqual([])
+    })
+
+    it('looks up a full address by its primary key, in its own type only', async () => {
+      expect((await tokenListSearch(db, RARE_NFT.replace('ad0', 'AD0'), 'BEP721', 50)).map((r) => r.address)).toEqual([RARE_NFT])
+      expect(await tokenListSearch(db, RARE_NFT, 'BEP20', 50)).toEqual([])
+      expect(await tokenListSearch(db, RARE_NFT.slice(0, 20), 'BEP721', 50)).toEqual([])   // part of an address
+    })
+
+    it('returns the most-held first, at most limit, each token once', async () => {
+      const rows = await tokenListSearch(db, 'usdt', 'BEP20', 50)
+      expect(rows).toHaveLength(50)
+      expect(new Set(rows.map((r) => r.address)).size).toBe(50)
+      expect(rows.map((r) => r.holderCount)).toEqual([...rows.map((r) => r.holderCount)].sort((a, b) => b - a))
+    })
+
+    it('takes % and _ literally, and drops what is past 64 characters before trimming', async () => {
+      expect(await tokenListSearch(db, '%', 'BEP20', 50)).toEqual([])
+      expect(await tokenListSearch(db, '_', 'BEP20', 50)).toEqual([])
+      expect((await tokenListSearch(db, '100%', 'BEP20', 50)).map((r) => r.symbol)).toEqual(['100%'])
+      expect(await tokenListSearch(db, 'zeta art' + ' '.repeat(56) + 'zzz', 'BEP721', 50)).toHaveLength(3)
     })
   })
 })
