@@ -38,11 +38,16 @@ vi.mock('@/lib/token-transfers-query', () => ({
 vi.mock('@/lib/market-data', () => ({ getTokenMarketData: async () => h.market }))
 vi.mock('@/lib/holders', () => ({ getTokenHolders: async () => h.holders, EMPTY_HOLDERS: { holders: [] } }))
 vi.mock('@/lib/token-risk', () => ({ analyzeTokenRisk: async () => [] }))
-vi.mock('@/lib/rpc', () => ({ getWebProvider: () => ({}) }))
-// A token the index has not seen is read live from the node: name(), symbol(), decimals(), totalSupply().
+// name() and symbol() are raw eth_calls through the provider (lib/token-text-call.ts), ABI-encoded like a node's answer.
+vi.mock('@/lib/rpc', async () => {
+  const { AbiCoder } = await import('ethers')
+  const enc = (s: string) => AbiCoder.defaultAbiCoder().encode(['string'], [s])
+  return { getWebProvider: () => ({ call: async ({ data }: { data: string }) => enc(data === '0x06fdde03' ? h.rpc.name : h.rpc.symbol) }) }
+})
+// A token the index has not seen is read live from the node: name() and symbol() above, decimals() and totalSupply() here.
 vi.mock('ethers', async (orig) => {
   const real = await orig<typeof import('ethers')>()
-  return { ...real, Contract: class { name = async () => h.rpc.name; symbol = async () => h.rpc.symbol; decimals = async () => 18; totalSupply = async () => 0n } }
+  return { ...real, Contract: class { decimals = async () => 18; totalSupply = async () => 0n } }
 })
 vi.mock('@/components/ads/AdReserve', () => ({ AdReserve: () => null }))
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound') } }))
