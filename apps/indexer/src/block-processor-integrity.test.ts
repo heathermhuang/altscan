@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 
+import { AbiCoder, JsonRpcProvider as RealJsonRpcProvider, Network } from 'ethers'
+import { getChainConfig } from '@altscan/chain-config'
+import { SWAP_V2_TOPIC, V2_FACTORIES } from './dex-swap'
+
 /**
  * processBlock must refuse an endpoint's answer BEFORE the first write when it
  * cannot be trusted (so rpc-failover retries elsewhere), and must never throw
@@ -232,6 +236,69 @@ describe('processBlock — gas price', () => {
       .rejects.toThrow(/neither status nor root/)
     expect(onWritesBegan).not.toHaveBeenCalled()
     expect(inserts).toEqual([])
+  })
+})
+
+describe('processBlock — a node refusing a pair read is not the pair answering', () => {
+  // The first swap from an unknown pair reads token0/token1/factory and remembers the
+  // verdict. ethers reports an eth_call the NODE refused (a rate limit) as CALL_EXCEPTION,
+  // the same code as a revert, so a throttle was remembered as "not a pair" and every
+  // later swap on a real pair was skipped. pairCache is module-level: one pair per test.
+  const coder = AbiCoder.defaultAbiCoder()
+  const word = (addr: string) => coder.encode(['address'], [addr])
+  const FACTORY = V2_FACTORIES[getChainConfig().key][0]
+  const TOKEN_A = '0x' + 'a0'.repeat(20)
+  const TOKEN_B = '0x' + 'b0'.repeat(20)
+
+  /** The pair's honest answers: token0, token1, factory, and getPair pointing back at it. */
+  const honest = (pair: string) => async (tx: { data: string }) =>
+    ({ '0x0dfe1681': word(TOKEN_A), '0xd21220a7': word(TOKEN_B), '0xc45a0155': word(FACTORY.address), '0xe6a43905': word(pair) })[tx.data.slice(0, 10)]!
+
+  /** The error ethers itself builds from this JSON-RPC error body, not a hand-made lookalike. */
+  async function ethersCallError(error: { code: number; message: string }): Promise<unknown> {
+    const net = Network.from(getChainConfig().chainId)
+    class Endpoint extends RealJsonRpcProvider {
+      async _send(payload: unknown) {
+        return ((Array.isArray(payload) ? payload : [payload]) as Array<{ id: number }>).map(r => ({ id: r.id, error })) as never
+      }
+    }
+    const p = new Endpoint('http://endpoint.invalid', net, { staticNetwork: net, batchMaxCount: 1 })
+    return p.call({ to: ADDR, data: '0x0dfe1681' }).then(() => { throw new Error('expected a rejection') }, (e: unknown) => e)
+  }
+
+  const swapBlock = (n: number, pair: string, call: (tx: { data: string }) => Promise<string>) => {
+    const topic = '0x' + '00'.repeat(12) + ADDR.slice(2)
+    const receipt = {
+      transactionHash: TX_HASH, status: '0x1', gasUsed: '0x5208',
+      logs: [{ address: pair, logIndex: '0x0', topics: [SWAP_V2_TOPIC, topic, topic], data: coder.encode(['uint256', 'uint256', 'uint256', 'uint256'], [100n, 0n, 0n, 99n]) }],
+    }
+    return Object.assign(providerFor(blockStub({ number: n }, [txStub()]), [receipt]), { call: vi.fn(call) })
+  }
+  const dexRows = () => inserts.filter(i => i.table === schema.dexTrades).flatMap(i => i.rows)
+
+  it('a rate-limited read remembers nothing, and the next swap reads the pair again', async () => {
+    const pair = '0x' + 'd1'.repeat(20)
+    const throttled = await ethersCallError({ code: -32005, message: 'method eth_call in batch triggered rate limit' })
+    expect((throttled as { code: string }).code).toBe('CALL_EXCEPTION') // why the code alone cannot tell
+    await processBlock(H, swapBlock(H, pair, async () => { throw throttled }))
+    expect(dexRows()).toEqual([])
+
+    const next = swapBlock(H + 1, pair, honest(pair))
+    await processBlock(H + 1, next)
+    expect(next.call).toHaveBeenCalled()
+    expect(dexRows()).toHaveLength(1)
+    expect(dexRows()[0]).toMatchObject({ pairAddress: pair, dex: FACTORY.dex, blockNumber: H + 1, tokenIn: TOKEN_A, tokenOut: TOKEN_B })
+  })
+
+  it('a contract that reverts is still remembered as not a pair', async () => {
+    const pair = '0x' + 'd2'.repeat(20)
+    const reverted = await ethersCallError({ code: 3, message: 'execution reverted' })
+    await processBlock(H, swapBlock(H, pair, async () => { throw reverted }))
+
+    const next = swapBlock(H + 1, pair, honest(pair))
+    await processBlock(H + 1, next)
+    expect(next.call).not.toHaveBeenCalled()
+    expect(dexRows()).toEqual([])
   })
 })
 

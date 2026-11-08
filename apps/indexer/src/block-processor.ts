@@ -7,7 +7,7 @@ import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError } from './db'
 import { withTimeout } from './rpc-failover'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
-import { fetchTokenMetadata, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
+import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
@@ -1836,8 +1836,13 @@ const PAIR_ABI = [
 ]
 const FACTORY_ABI = ['function getPair(address, address) view returns (address)']
 
-/** A revert, or an empty return ethers cannot decode: the contract answered that it has no such function. */
+/**
+ * A revert, or an empty return ethers cannot decode: the contract answered that it has no such function.
+ * Not a call the node refused: ethers reports a rate limit as CALL_EXCEPTION too, and remembering that
+ * as "not a pair" skipped every later swap on a real pair until the cache evicted it.
+ */
 function answeredNo(err: unknown): boolean {
+  if (isTransportError(err)) return false
   return isError(err, 'CALL_EXCEPTION') || (isError(err, 'BAD_DATA') && err.value === '0x')
 }
 
