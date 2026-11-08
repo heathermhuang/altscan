@@ -231,22 +231,26 @@ describe('authorization endpoint', () => {
     }
   })
 
-  it('sends protocol errors back to the client: missing PKCE, other scopes, other resources', async () => {
+  it('shows protocol errors before sign-in here and never redirects them (no open redirector)', async () => {
+    // Registration is open and needs no credential, so a registered redirect_uri proves nothing about who owns it.
+    // Redirecting on these errors let anyone turn this origin into a redirect to their own site (RFC 9700 §4.11.2).
     const { client_id } = await (await register()).json()
     const cases: Array<[Record<string, string>, string]> = [
       [{ code_challenge_method: 'plain' }, 'invalid_request'],
       [{ scope: 'admin' }, 'invalid_scope'],
       [{ resource: 'https://other.example/mcp' }, 'invalid_target'],
       [{ response_type: 'token' }, 'unsupported_response_type'],
+      [{ state: 'x'.repeat(1025) }, 'invalid_request'],
     ]
     for (const [extra, error] of cases) {
-      const res = await call(`/oauth/authorize?${authorizeQuery(client_id, pkce().challenge, extra)}`)
-      expect(res.status).toBe(303)
-      const loc = new URL(res.headers.get('location')!)
-      expect(loc.origin + loc.pathname).toBe(REDIRECT)
-      expect(loc.searchParams.get('error')).toBe(error)
-      expect(loc.searchParams.get('state')).toBe('st8')
-      expect(loc.searchParams.get('iss')).toBe(ISSUER)
+      for (const res of [
+        await call(`/oauth/authorize?${authorizeQuery(client_id, pkce().challenge, extra)}`),
+        await call('/oauth/authorize', form(Object.fromEntries(new URLSearchParams(authorizeQuery(client_id, pkce().challenge, extra))))),
+      ]) {
+        expect(res.status).toBe(400)
+        expect(res.headers.get('location')).toBeNull()
+        expect(await res.text()).toContain(error)
+      }
     }
   })
 

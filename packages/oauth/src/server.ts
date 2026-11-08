@@ -174,8 +174,10 @@ interface AuthzRequest {
 type Checked = { ok: AuthzRequest } | { fail: Response }
 
 /**
- * RFC 6749 §4.1.2.1: until client_id and redirect_uri check out, errors are shown here and never
- * redirected (an open redirector otherwise). After that, errors go back to the client.
+ * Every error here is shown on this origin and never redirected, even once client_id and redirect_uri check out.
+ * RFC 6749 §4.1.2.1 would send those to the client, but registration is open and needs no credential, so a
+ * registered redirect_uri proves nothing about who owns it. Redirecting before sign-in would make this origin an
+ * open redirector (RFC 9700 §4.11.2). Only the outcome of a sign-in the user submitted goes back to the client.
  */
 async function checkAuthorize(p: URLSearchParams, cfg: OAuthConfig): Promise<Checked> {
   const clientId = p.get('client_id') ?? ''
@@ -191,18 +193,18 @@ async function checkAuthorize(p: URLSearchParams, cfg: OAuthConfig): Promise<Che
     return { fail: errorPage(400, 'The redirect_uri is not one this app registered.', cfg) }
   }
   const state = p.get('state')
-  const back = (error: string, description: string) => ({ fail: redirectBack(redirectUri, { error, error_description: description }, state, cfg) })
-  if (state !== null && state.length > 1024) return back('invalid_request', 'state is longer than 1024 characters.')
-  if (p.get('response_type') !== 'code') return back('unsupported_response_type', 'Only response_type=code is supported.')
+  const reject = (error: string, description: string) => ({ fail: errorPage(400, `${description} (${error})`, cfg) })
+  if (state !== null && state.length > 1024) return reject('invalid_request', 'state is longer than 1024 characters.')
+  if (p.get('response_type') !== 'code') return reject('unsupported_response_type', 'Only response_type=code is supported.')
   const codeChallenge = p.get('code_challenge') ?? ''
   if (p.get('code_challenge_method') !== 'S256' || !CODE_CHALLENGE.test(codeChallenge)) {
-    return back('invalid_request', 'PKCE is required: send code_challenge with code_challenge_method=S256.')
+    return reject('invalid_request', 'PKCE is required: send code_challenge with code_challenge_method=S256.')
   }
   const scopes = (p.get('scope') ?? cfg.scope).split(' ').filter(Boolean)
-  if (scopes.length === 0 || scopes.some((s) => s !== cfg.scope)) return back('invalid_scope', `The only scope is "${cfg.scope}".`)
+  if (scopes.length === 0 || scopes.some((s) => s !== cfg.scope)) return reject('invalid_scope', `The only scope is "${cfg.scope}".`)
   const resource = p.get('resource')
   if (resource !== null && !sameOrigin(resource, cfg.issuer)) {
-    return back('invalid_target', `Tokens from this server are for ${cfg.issuer} only.`)
+    return reject('invalid_target', `Tokens from this server are for ${cfg.issuer} only.`)
   }
   return { ok: { client, clientId, redirectUri, state, codeChallenge, scope: cfg.scope } }
 }
