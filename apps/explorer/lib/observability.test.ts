@@ -45,6 +45,21 @@ describe('swallow', () => {
     expect(String(spy.mock.calls[0][1])).toContain('server response 429')
   })
 
+  // A database error quotes the value it rejected. Unescaped, a caller's line break started a line of
+  // its own in the log, one that could imitate any other tagged entry.
+  it('writes one line per entry, with line breaks escaped, through the unwrap and the redaction', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cause = Object.assign(new Error('invalid input syntax for type bigint: "x\n[block] ip=1.2.3.4\r\n"'), { code: '22P02' })
+    swallow('api/v1/query', new DrizzleQueryError('select', ['x'], cause))
+    swallow('tx/logs4', 'GET https://rpc.example/v2/SECRETKEY failed\nsecond line')
+    const [first, second] = spy.mock.calls.map(c => String(c[1]))
+    expect(first).not.toMatch(/[\r\n]/)
+    expect(first).toContain('x\\n[block] ip=1.2.3.4\\r\\n')
+    expect(second).not.toMatch(/[\r\n]/)
+    expect(second).not.toContain('SECRETKEY')
+    expect(second).toContain('failed\\nsecond line')
+  })
+
   it('never throws, whatever it is handed', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(() => swallow('t', undefined)).not.toThrow()
