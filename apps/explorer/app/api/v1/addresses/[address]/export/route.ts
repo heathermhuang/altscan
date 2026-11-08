@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { eq, or, desc } from 'drizzle-orm'
+import { selectByAddress } from '@/lib/address-query'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { chainConfig } from '@/lib/chain'
 import { readCoverage } from '@/lib/address-coverage'
@@ -43,10 +43,13 @@ export async function GET(
 
   let txs: typeof schema.transactions.$inferSelect[] = []
   try {
-    txs = await db.select().from(schema.transactions)
-      .where(or(eq(schema.transactions.fromAddress, addr), eq(schema.transactions.toAddress, addr)))
-      .orderBy(desc(schema.transactions.timestamp))
-      .limit(EXPORT_LIMIT)
+    // selectByAddress, not `from = a OR to = a`: no index serves that filter in this order, so for
+    // a busy address the OR form read far more than these 1,000 rows, which is why the JSON route
+    // and the address page stopped running it. Same order as the address page's transactions tab,
+    // tx_index breaking ties within a block.
+    txs = await selectByAddress(db, schema.transactions, addr, [], {
+      order: 'desc', limit: EXPORT_LIMIT, offset: 0, tieBreak: schema.transactions.txIndex,
+    }) as typeof txs
   } catch {
     return new Response('Database error', { status: 500 })
   }
