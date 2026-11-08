@@ -46,8 +46,17 @@ export function buildCacheKey(
  */
 const inFlight = new Map<string, Promise<unknown>>()
 
-/** Distinct keys querying at once. Past this a new key is refused, not queued on the web service's few connections. */
+/**
+ * Queries running at once. Past this a new key is refused, not queued on the web service's few connections.
+ *
+ * Counted apart from `inFlight`: a query whose key was forgotten at the deadline is still running, and freeing its slot
+ * then let eight more start every 8 s while the first eight held their connections. A query holds its slot until it
+ * settles, or for PAGE_CACHE_SLOT_MAX_MS at most, by when the statement_timeout has cancelled any query the server can
+ * still reach. Only one on a dead connection outlives that, and eight of those must not refuse every cold page for good.
+ */
 export const PAGE_CACHE_MAX_IN_FLIGHT = 8
+export const PAGE_CACHE_SLOT_MAX_MS = 30_000
+let running = 0
 
 function flightFor<A extends unknown[], T>(
   name: string,
@@ -57,17 +66,19 @@ function flightFor<A extends unknown[], T>(
   const key = JSON.stringify(buildCacheKey(name, [JSON.stringify(args)]))
   const existing = inFlight.get(key) as Promise<T> | undefined
   if (existing) return existing
-  if (inFlight.size >= PAGE_CACHE_MAX_IN_FLIGHT) {
-    return Promise.reject(new Error(`page-cache: ${inFlight.size} queries already in flight, not starting ${name}`))
+  if (running >= PAGE_CACHE_MAX_IN_FLIGHT) {
+    return Promise.reject(new Error(`page-cache: ${running} queries already in flight, not starting ${name}`))
   }
   const flight = query(...args)
   inFlight.set(key, flight)
+  running++
+  let held = true
+  const release = () => { if (held) { held = false; running-- } }
   const forget = () => { if (inFlight.get(key) === flight) inFlight.delete(key) }
   const deadline = setTimeout(forget, DB_TIMEOUT_MS)
-  flight.then(
-    () => { clearTimeout(deadline); forget() },
-    () => { clearTimeout(deadline); forget() },
-  )
+  const slotCap = setTimeout(release, PAGE_CACHE_SLOT_MAX_MS)
+  const settled = () => { clearTimeout(deadline); clearTimeout(slotCap); forget(); release() }
+  flight.then(settled, settled)
   return flight
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createPageCache, PAGE_CACHE_MAX_IN_FLIGHT } from '@/lib/page-cache'
+import { createPageCache, PAGE_CACHE_MAX_IN_FLIGHT, PAGE_CACHE_SLOT_MAX_MS } from '@/lib/page-cache'
 import { DB_TIMEOUT_MS } from '@/lib/with-timeout'
 
 // The same stand-in for Next 15.5's `unstable_cache` as page-cache-staleness.test.ts: a cold miss runs the callback
@@ -31,7 +31,6 @@ const { store, background, refresh, swallow, fakeUnstableCache } = vi.hoisted(()
   return { store, background, refresh, swallow, fakeUnstableCache }
 })
 vi.mock('next/cache', () => ({ unstable_cache: fakeUnstableCache }))
-vi.mock('@/lib/observability', () => ({ swallow }))
 vi.mock('@/lib/observability', () => ({ swallow }))
 
 const T0 = Date.UTC(2026, 10, 8, 12, 0, 0)
@@ -127,6 +126,39 @@ describe('a bound on distinct keys in flight', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(cold.query).toHaveBeenCalledTimes(PAGE_CACHE_MAX_IN_FLIGHT + 1)
     cold.resolveAll('later')
+    expect(await later).toBe('later:999')
+  })
+
+  // A forgotten key is a query still running: its connection is still taken.
+  it('keeps a slow query\'s slot past the page deadline, until it settles', async () => {
+    const slow = controlled()
+    const readSlow = createPageCache('slots-slow', 60, slow.query)
+    const hung = Array.from({ length: PAGE_CACHE_MAX_IN_FLIGHT }, (_, i) => readSlow(i + 1))
+    await vi.advanceTimersByTimeAsync(DB_TIMEOUT_MS + 1_000)   // every key forgotten, every query still running
+
+    await expect(readSlow(999)).rejects.toThrow(/queries already in flight/)
+    expect(slow.query).toHaveBeenCalledTimes(PAGE_CACHE_MAX_IN_FLIGHT)
+
+    slow.resolveAll('done')
+    await Promise.all(hung)
+    const later = readSlow(999)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(slow.query).toHaveBeenCalledTimes(PAGE_CACHE_MAX_IN_FLIGHT + 1)
+    slow.resolveAll('later')
+    expect(await later).toBe('later:999')
+  })
+
+  it('frees a slot after PAGE_CACHE_SLOT_MAX_MS even if its query never settles', async () => {
+    const dead = controlled()
+    const readDead = createPageCache('slots-dead', 60, dead.query)
+    Array.from({ length: PAGE_CACHE_MAX_IN_FLIGHT }, (_, i) => readDead(i + 1))   // never resolved
+    await vi.advanceTimersByTimeAsync(PAGE_CACHE_SLOT_MAX_MS - 1)
+    await expect(readDead(999)).rejects.toThrow(/queries already in flight/)
+    await vi.advanceTimersByTimeAsync(1)
+    const later = readDead(999)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(dead.query).toHaveBeenCalledTimes(PAGE_CACHE_MAX_IN_FLIGHT + 1)
+    dead.resolveAll('later')
     expect(await later).toBe('later:999')
   })
 })
