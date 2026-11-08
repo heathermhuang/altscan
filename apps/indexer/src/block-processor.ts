@@ -5,12 +5,12 @@ import { JsonRpcProvider, Log as EthersLog, AbiCoder, Contract, id as keccak256i
 import { sql } from 'drizzle-orm'
 import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError } from './db'
 import { withTimeout } from './rpc-failover'
+import { ensureForwardPartitions } from './ensure-schema'
+import { recordIndexGapIfAbsent } from './index-gaps'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
-import { ensureForwardPartitions } from './ensure-schema'
-import { recordIndexGapIfAbsent } from './index-gaps'
 
 // ── Topic signatures ────────────────────────────────────────────────
 const TRANSFER_TOPIC = keccak256id('Transfer(address,address,uint256)')
