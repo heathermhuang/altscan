@@ -33,6 +33,7 @@ import {
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock, planMaxLagSkip } from './index-gaps'
+import { corroborateTip, corroboratorsFor } from './tip-corroboration'
 import {
   PoisonBlockTracker, shouldQuarantine, poisonGapReason,
 } from './poison-block'
@@ -214,8 +215,22 @@ async function main() {
   // happen once we are already behind — so without this the sick endpoint taxes
   // ~1/N of blocks an 8s timeout exactly when throughput matters most.
   const endpointHealth = createEndpointHealth<JsonRpcProvider>()
-  const readTip = () =>
-    readWithFailover(providers, readCursor++, p => p.getBlockNumber(), RPC_READ_TIMEOUT_MS, reportReadFailover, endpointHealth)
+  // The tip AND the endpoint that reported it: a MAX_LAG skip asks another endpoint
+  // to corroborate it before abandoning anything (tip-corroboration.ts).
+  const readTipWithSource = () =>
+    readWithFailover(providers, readCursor++, async p => ({ latest: await p.getBlockNumber(), source: p }), RPC_READ_TIMEOUT_MS, reportReadFailover, endpointHealth)
+  const readTip = () => readTipWithSource().then(r => r.latest)
+  const endpointUrls = providers.map((provider, i) => ({ provider, url: RPC_URLS[i] }))
+  {
+    const levels = providers.map(p => corroboratorsFor(p, endpointUrls).level)
+    const weakest = levels.includes('none') ? 'none' : levels.includes('host') ? 'host' : 'provider'
+    console.log(`${TAG} MAX_LAG skip corroboration: ${
+      weakest === 'provider' ? 'by another provider'
+        : weakest === 'host' ? 'by another hostname only — every block endpoint is on one provider'
+          : 'IMPOSSIBLE, every block endpoint is on one hostname — every skip will be refused'
+    }`)
+  }
+  let skipRefusalLoggedAt = 0
   // Deps bound to ONE provider. detectReorgPinned fails the whole check over;
   // per-read failover here would mix chain views mid-walk. (codex P1.)
   const reorgDepsFor = (p: JsonRpcProvider) => makeReorgDepsFrom(async n => {
@@ -528,7 +543,7 @@ async function main() {
 
   while (running) {
     try {
-      const latest = await readTip()
+      const { latest, source: tipSource } = await readTipWithSource()
       // Feeds the gap healer's lag guard. Without this it would read a boot-time
       // tip forever and think it was caught up while falling behind.
       //
@@ -558,7 +573,19 @@ async function main() {
       }
 
       const lagSkip = resumeGapBackfillUntil === null ? planMaxLagSkip(latest, lastIndexed, MAX_LAG) : null
-      if (lagSkip) {
+      // Corroborated before anything moves: one endpoint's inflated tip must not
+      // abandon real blocks or push the cursor and W past the chain. Refused, the
+      // loop keeps indexing normally; a real lag is skipped once another endpoint
+      // holds the landing block.
+      const skipRefusal = lagSkip
+        ? await corroborateTip(tipSource, lagSkip.abandonedTo, corroboratorsFor(tipSource, endpointUrls).providers, RPC_READ_TIMEOUT_MS)
+        : null
+      if (lagSkip && skipRefusal !== null) {
+        if (Date.now() - skipRefusalLoggedAt >= 60_000) {
+          skipRefusalLoggedAt = Date.now()
+          console.warn(`${TAG} ⚠ MAX_LAG skip refused: tip ${latest} not corroborated (${skipRefusal})`)
+        }
+      } else if (lagSkip) {
         const { abandonedFrom, abandonedTo } = lagSkip
         console.warn(`${TAG} ⚠ ${latest - lastIndexed} blocks behind (>${MAX_LAG}) — ABANDONING blocks ${abandonedFrom}..${abandonedTo} and skipping to ${abandonedTo}`)
         // Record the range before moving the cursor. This skip has always existed
@@ -589,10 +616,10 @@ async function main() {
           continue
         }
         lastIndexed = abandonedTo
-        // Jump the transfer watermark with the skip — these blocks are deliberately
-        // abandoned (same gap the pre-existing skip already creates in `blocks`), so
-        // the watermark must not stay stuck waiting for transfers that never come.
-        if (ASYNC_TT_WRITER) setDurableFloor(abandonedTo)
+        // Let the transfer watermark step over the abandoned range — those blocks are
+        // never enqueued, so W must not stay stuck waiting for them. It steps only once
+        // everything up to the old cursor is durable (see setDurableFloor).
+        if (ASYNC_TT_WRITER) setDurableFloor({ after: abandonedFrom - 1, to: abandonedTo })
       }
 
       // A3: validate the batch boundary before processing — detects any reorg at or
@@ -788,9 +815,9 @@ async function main() {
             // Move the transfer watermark with a QUARANTINE batch, not with
             // setDurableFloor() and not with an empty ordinary batch.
             //
-            // setDurableFloor jumps W unconditionally. That is fine for the bulk
-            // MAX_LAG skip, which leaps to `latest - 200` over blocks nothing has
-            // touched, but it is wrong here: quarantine steps over `lastIndexed + 1`,
+            // setDurableFloor used to jump W unconditionally, which is wrong here (and,
+            // it turned out, for the bulk skip too; it now waits for the fold):
+            // quarantine steps over `lastIndexed + 1`,
             // directly above blocks the indexer just finished. Workers advance
             // lastIndexed when processBlock RETURNS and processBlock only ENQUEUES
             // transfers, so blocks below the blocker are routinely written-but-
