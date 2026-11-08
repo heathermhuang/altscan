@@ -288,6 +288,20 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
       expect(read).toBeLessThan(100)
     })
 
+    // The CSV export's read (app/api/v1/addresses/[address]/export): 1,000 rows, newest first. S has
+    // ~5,000 rows, nearly all self-sends on the to side; Z's newest rows sit at the far end.
+    it.each([S, Z])('the CSV export\'s 1,000-row read stays O(limit) and matches the OR query for %s', async (address) => {
+      const q = selectByAddress(db, schema.transactions, address, [], { order: 'desc', limit: 1000, offset: 0, tieBreak })
+      const { sql: text, params } = q.toSQL()
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${text}`, params as never[])
+      expect(rowsRead(explained.Plan)).toBeLessThan(10 * 1000)
+      const expected = (await conn.unsafe(
+        `SELECT hash FROM transactions WHERE from_address = $1 OR to_address = $1
+         ORDER BY timestamp DESC, block_number DESC, tx_index DESC LIMIT 1000`, [address],
+      )) as unknown as { hash: string }[]
+      expect((await q).map(r => String((r as Record<string, unknown>).hash))).toEqual(expected.map(r => r.hash))
+    })
+
     it('pages through several rows per block in exactly the OR query order', async () => {
       const all = (await conn.unsafe(
         `SELECT hash AS key, block_number, tx_index FROM transactions WHERE from_address = $1 OR to_address = $1`, [W],

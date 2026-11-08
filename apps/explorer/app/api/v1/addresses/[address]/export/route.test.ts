@@ -13,28 +13,27 @@ const h = vi.hoisted(() => ({
   txError: null as Error | null,
   floor: null as Date | null,
   limit: 0,
+  calls: [] as unknown[][],
 }))
 
 vi.mock('@/lib/api-rate-limit', () => ({ checkIpRateLimit: async () => true }))
+// The coverage read goes through db.select (addresses); the transactions through selectByAddress.
 vi.mock('@/lib/db', async () => {
   const { schema } = await import('@altscan/db')
   const select = () => {
-    let table: unknown
-    const chain = {
-      from: (t: unknown) => { table = t; return chain },
-      where: () => chain,
-      orderBy: () => chain,
-      limit: async (n: number) => {
-        if (table === schema.addresses) return h.addressRows
-        h.limit = n
-        if (h.txError) throw h.txError
-        return h.txRows
-      },
-    }
+    const chain = { from: () => chain, where: () => chain, orderBy: () => chain, limit: async () => h.addressRows }
     return chain
   }
   return { schema, db: { select } }
 })
+vi.mock('@/lib/address-query', () => ({
+  selectByAddress: async (...args: unknown[]) => {
+    h.calls.push(args)
+    h.limit = (args[4] as { limit: number }).limit
+    if (h.txError) throw h.txError
+    return h.txRows
+  },
+}))
 vi.mock('@/lib/retention', async (orig) => ({
   ...(await orig<typeof import('@/lib/retention')>()),
   getRetentionFloor: async () => h.floor,
@@ -56,6 +55,7 @@ beforeEach(() => {
   h.txError = null
   h.floor = FLOOR
   h.limit = 0
+  h.calls = []
 })
 
 describe('GET /api/v1/addresses/:address/export completeness headers', () => {
@@ -112,5 +112,18 @@ describe('GET /api/v1/addresses/:address/export body', () => {
     h.txError = new Error('db down')
     expect((await get()).status).toBe(500)
     expect((await get('0x1234')).status).toBe(400)
+  })
+})
+
+describe('GET /api/v1/addresses/:address/export query', () => {
+  it('reads through selectByAddress, newest first, as the address page orders them, never the OR query', async () => {
+    const { schema } = await import('@altscan/db')
+    await get('0x' + 'AB'.repeat(20))
+    expect(h.calls).toHaveLength(1)
+    const [, table, address, conditions, page] = h.calls[0]
+    expect(table).toBe(schema.transactions)
+    expect(address).toBe('0x' + 'ab'.repeat(20))
+    expect(conditions).toEqual([])
+    expect(page).toEqual({ order: 'desc', limit: 1000, offset: 0, tieBreak: schema.transactions.txIndex })
   })
 })
