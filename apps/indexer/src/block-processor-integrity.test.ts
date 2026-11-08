@@ -9,7 +9,11 @@ import type { JsonRpcProvider } from 'ethers'
  * The db is a recorder, never a connection: every insert is captured in `inserts`
  * and awaiting one resolves to no rows.
  */
-const { inserts } = vi.hoisted(() => ({ inserts: [] as Array<{ table: unknown; rows: any[] }> }))
+const { inserts, holdInserts } = vi.hoisted(() => ({
+  inserts: [] as Array<{ table: unknown; rows: any[] }>,
+  /** While set, every insert stays pending until it resolves. */
+  holdInserts: { until: null as Promise<void> | null },
+}))
 
 vi.mock('./db', async importOriginal => {
   const actual = await importOriginal<typeof import('./db')>()
@@ -20,7 +24,7 @@ vi.mock('./db', async importOriginal => {
         const done: any = {
           onConflictDoNothing: () => done,
           returning: async () => [],
-          then: (res: any, rej: any) => Promise.resolve([]).then(res, rej),
+          then: (res: any, rej: any) => Promise.resolve(holdInserts.until).then(() => []).then(res, rej),
         }
         return done
       },
@@ -265,6 +269,26 @@ describe('a block whose trace failed is re-traced a few blocks later', () => {
     await settle()
     expect(t.send).toHaveBeenCalledTimes(2)
     expect(itxRows()).toHaveLength(1)
+  })
+
+  it('a block whose re-trace is still inserting is not re-traced again', async () => {
+    const t = tracer(notFound)
+    t.send.mockImplementationOnce(notFound).mockResolvedValue([ownTrace])
+    await missBlock(H, t)
+    let release!: () => void
+    holdInserts.until = new Promise<void>(res => { release = res })
+    try {
+      retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+      await vi.waitFor(() => expect(itxRows()).toHaveLength(1)) // the insert has started and is held
+      retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+      expect(t.send).toHaveBeenCalledTimes(2)
+    } finally {
+      holdInserts.until = null
+      release()
+    }
+    await settle()
+    expect(itxRows()).toHaveLength(1)
+    expect(retraceBacklogStats().pending).toBe(0)
   })
 
   it('a reorg unwind waits for an open re-trace and keeps its rows out', async () => {

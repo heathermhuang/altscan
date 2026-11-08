@@ -428,7 +428,6 @@ function noteTraceMiss(blockNumber: number, timestamp: Date, txHashes: string[])
 
 async function retrace(provider: JsonRpcProvider, blockNumber: number, miss: TraceMiss): Promise<void> {
   const raw = await traceWithinBudget(provider, blockNumber, { maxInFlight: RETRACE_MAX_IN_FLIGHT })
-  miss.tracing = false
   // A reorg unwind forgot this block while the trace was open: its rows are not wanted.
   if (traceMisses.get(blockNumber) !== miss) return
   if (raw) {
@@ -454,8 +453,10 @@ export function retraceMissedBlocks(provider: JsonRpcProvider, latest: number, m
     if (miss.tracing) continue
     if (latest - blockNumber > maxLag) { dropTraceMiss(blockNumber, `more than ${maxLag} blocks behind the tip`); continue }
     if (latest < miss.dueAt || tracesInFlight() >= RETRACE_MAX_IN_FLIGHT) continue
+    // Held until the whole retrace ends, insert included: a slow insert must not let
+    // the next batch start the same block again, outside the cap and the attempt count.
     miss.tracing = true
-    const task = retrace(provider, blockNumber, miss).finally(() => { retraces.delete(task) })
+    const task = retrace(provider, blockNumber, miss).finally(() => { miss.tracing = false; retraces.delete(task) })
     retraces.add(task)
   }
 }
