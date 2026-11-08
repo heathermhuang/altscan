@@ -19,6 +19,7 @@ import { LinkInName } from '@/components/ui/LinkInName'
 import { tokenTypeLabel } from '@/lib/token-type-label'
 import { Contract } from 'ethers'
 import { getWebProvider } from '@/lib/rpc'
+import { readTokenNameAndSymbol } from '@/lib/token-text-call'
 import { chainConfig } from '@/lib/chain'
 import { getTokenMarketData } from '@/lib/market-data'
 import { getTokenHolders, EMPTY_HOLDERS } from '@/lib/holders'
@@ -31,8 +32,6 @@ import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
 
 const ERC20_ABI = [
-  'function name() view returns (string)',
-  'function symbol() view returns (string)',
   'function decimals() view returns (uint8)',
   'function totalSupply() view returns (uint256)',
 ]
@@ -62,10 +61,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 // not-yet-indexed tokens).
 const fetchTokenFromRpc = cache(async (addr: string): Promise<OnDemandToken | null> => {
   try {
-    const contract = new Contract(addr, ERC20_ABI, await getWebProvider())
-    const [name, symbol, decimals, totalSupply] = await Promise.all([
-      contract.name().catch(() => null),
-      contract.symbol().catch(() => null),
+    const provider = await getWebProvider()
+    const contract = new Contract(addr, ERC20_ABI, provider)
+    // name() and symbol() through the bounded raw read, capped as the indexer caps them (token-text-call.ts):
+    // the contract chooses how much it returns, and this page prints both several times on every request.
+    const [{ name, symbol }, decimals, totalSupply] = await Promise.all([
+      readTokenNameAndSymbol(provider, addr),
       contract.decimals().catch(() => null),
       contract.totalSupply().catch(() => null),
     ])

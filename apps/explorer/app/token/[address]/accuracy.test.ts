@@ -43,15 +43,18 @@ vi.mock('@/lib/token-transfers-query', () => ({
 vi.mock('@/lib/market-data', () => ({ getTokenMarketData: async () => null }))
 vi.mock('@/lib/holders', () => ({ getTokenHolders: async () => ({ holders: [], holderCount: null, source: 'local' }), EMPTY_HOLDERS: { holders: [] } }))
 vi.mock('@/lib/token-risk', () => ({ analyzeTokenRisk: async () => [] }))
-vi.mock('@/lib/rpc', () => ({ getWebProvider: () => ({}) }))
+// name() and symbol() are raw eth_calls through the provider (lib/token-text-call.ts), ABI-encoded like a node's answer.
+vi.mock('@/lib/rpc', async () => {
+  const { AbiCoder } = await import('ethers')
+  const enc = (s: string) => AbiCoder.defaultAbiCoder().encode(['string'], [s])
+  return { getWebProvider: () => ({ call: async ({ data }: { data: string }) => enc(data === '0x06fdde03' ? 'Tether USD' : 'USDT') }) }
+})
 vi.mock('ethers', async (orig) => {
   const real = await orig<typeof import('ethers')>()
   const read = <T>(v: T | 'fail') => async () => { if (v === 'fail') throw new Error('missing response'); return v }
   return {
     ...real,
     Contract: class {
-      name = async () => 'Tether USD'
-      symbol = async () => 'USDT'
       decimals = read(h.rpc.decimals)
       totalSupply = read(h.rpc.totalSupply)
     },

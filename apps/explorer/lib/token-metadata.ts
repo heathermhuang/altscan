@@ -16,11 +16,11 @@ import { Contract } from 'ethers'
 import { swallow } from './observability'
 import { getWebProvider } from './rpc'
 import { registerCache } from './cache-registry'
+import { isDefinitiveRevert, readTokenText } from './token-text-call'
 
 export type TokenMeta = { symbol: string | null; decimals: number | null }
 
 const ERC20_ABI = [
-  'function symbol() view returns (string)',
   'function decimals() view returns (uint8)',
 ]
 
@@ -39,15 +39,6 @@ function readCache(addr: string): TokenMeta | null {
 function writeCache(addr: string, meta: TokenMeta): void {
   if (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value!)
   cache.set(addr, { meta, expires: Date.now() + TTL_MS })
-}
-
-/**
- * A call that REVERTED is settled: the contract reverts the same way every time.
- * ethers reports that as CALL_EXCEPTION; a timeout, rate limit or 5xx carries
- * another code and must be asked again.
- */
-function isRevert(err: unknown): boolean {
-  return (err as { code?: unknown } | null)?.code === 'CALL_EXCEPTION'
 }
 
 /**
@@ -87,15 +78,18 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
     let transportFailed = false
     const failed = (e: unknown) => {
       firstErr ??= e
-      if (!isRevert(e)) transportFailed = true
+      if (!isDefinitiveRevert(e)) transportFailed = true
       return null
     }
     try {
       const c = new Contract(addr, ERC20_ABI, provider)
-      const [symbol, decimals] = await Promise.all([
-        c.symbol().catch(failed),
+      // symbol() through the bounded raw read (token-text-call.ts): the contract chooses how much it returns.
+      const [symbolRead, decimals] = await Promise.all([
+        readTokenText(provider, addr, 'symbol'),
         c.decimals().catch(failed),
       ])
+      if (!symbolRead.settled) failed(symbolRead.err)
+      const symbol = symbolRead.settled ? symbolRead.text : null
       if (symbol == null && decimals == null) {
         swallow('token/metadata', firstErr ?? new Error(`${addr}: no symbol() or decimals()`))
         // Both reverted: this contract has no metadata to give, on this visit or

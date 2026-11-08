@@ -10,13 +10,20 @@ const fakes = vi.hoisted(() => {
   return { FakeContract, behaviours }
 })
 
-vi.mock('ethers', () => ({ Contract: fakes.FakeContract }))
-vi.mock('./rpc', () => ({ getWebProvider: vi.fn(async () => ({})) }))
+// symbol() is a raw eth_call through the provider (token-text-call.ts), decimals() still a Contract call. The real
+// AbiCoder decodes what the fake symbol() returns.
+vi.mock('ethers', async (orig) => ({ ...(await orig<typeof import('ethers')>()), Contract: fakes.FakeContract }))
+vi.mock('./rpc', () => ({
+  getWebProvider: vi.fn(async () => ({ call: (tx: { to: string }) => fakes.behaviours.get(tx.to)!.symbol() })),
+}))
 vi.mock('./cache-registry', () => ({ registerCache: vi.fn() }))
 vi.mock('./observability', () => ({ swallow: vi.fn() }))
 
 import { fetchTokenMetadata } from './token-metadata'
 import { swallow } from './observability'
+import { AbiCoder } from 'ethers'
+
+const enc = (s: string) => Promise.resolve(AbiCoder.defaultAbiCoder().encode(['string'], [s]))
 
 const addrOf = (n: string) => '0x' + n.repeat(40)
 
@@ -42,7 +49,7 @@ describe('fetchTokenMetadata observability', () => {
     vi.mocked(swallow).mockClear()
     const addr = addrOf('2')
     fakes.behaviours.set(addr, {
-      symbol: () => Promise.resolve('USDT'),
+      symbol: () => enc('USDT'),
       decimals: () => Promise.resolve(18),
     })
 
@@ -104,7 +111,7 @@ describe('fetchTokenMetadata caching', () => {
   // unscaled amount on the page for the whole TTL.
   it('does not cache a partial answer whose other call hit a transport failure', async () => {
     const addr = addrOf('6')
-    const calls = stub(addr, () => Promise.resolve('ABC'), timeout)
+    const calls = stub(addr, () => enc('ABC'), timeout)
     expect((await fetchTokenMetadata([addr])).get(addr)).toEqual({ symbol: 'ABC', decimals: null })
     await fetchTokenMetadata([addr])
     expect(calls.n).toBe(4)
@@ -112,9 +119,31 @@ describe('fetchTokenMetadata caching', () => {
 
   it('caches a partial answer whose other call reverted', async () => {
     const addr = addrOf('7')
-    const calls = stub(addr, () => Promise.resolve('ABC'), revert)
+    const calls = stub(addr, () => enc('ABC'), revert)
     await fetchTokenMetadata([addr])
     expect((await fetchTokenMetadata([addr])).get(addr)).toEqual({ symbol: 'ABC', decimals: null })
+    expect(calls.n).toBe(2)
+  })
+
+  // ethers reports a node's rate limit as CALL_EXCEPTION, the same code as a revert: it used to be cached as "this
+  // token has no symbol" for 24 hours.
+  it('never caches a rate limit that arrives as a CALL_EXCEPTION', async () => {
+    const addr = addrOf('8')
+    const throttled = () => Promise.reject(Object.assign(new Error('missing revert data'), {
+      code: 'CALL_EXCEPTION', info: { error: { code: -32005, message: 'method eth_call in batch triggered rate limit' } },
+    }))
+    const calls = stub(addr, throttled, throttled)
+    await fetchTokenMetadata([addr])
+    await fetchTokenMetadata([addr])
+    expect(calls.n).toBe(4)
+  })
+
+  // The contract chooses how much symbol() returns; past the bound it is no symbol, and that is settled.
+  it('takes an oversized symbol as none, and caches that', async () => {
+    const addr = addrOf('9')
+    const calls = stub(addr, () => enc('S'.repeat(5_000)), () => Promise.resolve(6))
+    expect((await fetchTokenMetadata([addr])).get(addr)).toEqual({ symbol: null, decimals: 6 })
+    await fetchTokenMetadata([addr])
     expect(calls.n).toBe(2)
   })
 })
