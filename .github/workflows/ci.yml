@@ -176,6 +176,19 @@ jobs:
           PARTITION_COVERAGE_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/partition_cov_test
         run: npx vitest run apps/indexer/src/partition-coverage.pg.test.ts
 
+      # One block whose own rows fail no longer stalls the transfer writer: the blocks around it
+      # commit, W stays below it, a repeating data error becomes a 1-block index gap and only then
+      # lets W pass, and a missing partition, an unknown SQLSTATE or a failed W persist never moves
+      # W. Real SQLSTATEs, so a real server. It creates and drops token_transfers, blocks,
+      # index_gaps and indexer_cursor in public, so it gets a database of its own.
+      - name: Create tt-isolation-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE tt_isolation_test'
+
+      - name: PG-gated indexer suite (transfer writer isolates a failing block)
+        env:
+          TT_WRITER_ISOLATION_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/tt_isolation_test
+        run: npx vitest run apps/indexer/src/tt-writer-isolation.pg.test.ts
+
       # POST /api/v1/query's filter.address: an OR across from/to ordered by
       # block_number walked the whole table and hit the web statement_timeout
       # ~95x/hour on BNB. Asserts rows read, not wall time. Its tables are TEMP,

@@ -27,7 +27,7 @@ pnpm test    # vitest run (root config, all workspaces)
 ## Testing gotchas
 
 - **PG-gated suites are silently SKIPPED by a bare `pnpm test`.** Each is gated on its own
-  env var, and CI runs fourteen of the sixteen by name:
+  env var, and CI runs fifteen of the seventeen by name:
   | Suite | Gate | In CI? |
   |---|---|---|
   | `apps/indexer/src/backfill-worker.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes |
@@ -39,6 +39,7 @@ pnpm test    # vitest run (root config, all workspaces)
   | `apps/indexer/src/webhook-notifier.pg.test.ts` | `WEBHOOK_TEST_PG_URL` | yes |
   | `apps/indexer/src/tt-whale-index.pg.test.ts` | `TT_WHALE_INDEX_TEST_PG_URL` | yes (own DB, `whale_idx_test`) |
   | `apps/indexer/src/partition-coverage.pg.test.ts` | `PARTITION_COVERAGE_TEST_PG_URL` | yes (own DB, `partition_cov_test`) |
+  | `apps/indexer/src/tt-writer-isolation.pg.test.ts` | `TT_WRITER_ISOLATION_TEST_PG_URL` | yes (own DB, `tt_isolation_test`) |
   | `apps/explorer/lib/token-suggest.pg.test.ts` | `TOKEN_SUGGEST_TEST_PG_URL` | yes |
   | `apps/explorer/lib/whales.pg.test.ts` | `WHALES_TEST_PG_URL` | yes |
   | `apps/explorer/lib/token-transfers-query.pg.test.ts` | `TOKEN_TRANSFERS_TEST_PG_URL` | yes |
