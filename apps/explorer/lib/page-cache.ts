@@ -13,7 +13,7 @@
 import { unstable_cache } from 'next/cache'
 import { chainConfig } from '@/lib/chain'
 import { swallow } from '@/lib/observability'
-import { withTimeout } from '@/lib/with-timeout'
+import { DB_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
 
 /**
  * Build the cache key for a page query.
@@ -34,31 +34,51 @@ export function buildCacheKey(
 }
 
 /**
- * In-flight inline recomputes, keyed like the cache entry itself (name, chain, serialized arguments).
- * An entry lives only while its promise does: `finally` drops it on success, failure and timeout.
+ * The query in flight for each key, keyed like the cache entry itself (name, chain, serialized arguments). The cold
+ * miss, Next's background refresh and the inline recompute of a too-old entry all share it: on a cold key every
+ * concurrent request used to run its own copy (Next's dedupe lives on the request), and an anonymous client controls
+ * how many keys are cold, since page renders evict entries from Next's shared in-memory LRU.
+ *
+ * The flight is the plain query, with no deadline of its own, so a cold miss still fills the cache however long the
+ * query takes (whales' arms run up to 15 s). Its map entry goes when it settles, or at the page deadline
+ * (`DB_TIMEOUT_MS`) if that comes first, so a hung query never pins the key: the next reader may start a new one, at
+ * most one new query per key per deadline. The web services' 15 s statement_timeout cancels a straggler on the server.
  */
 const inFlight = new Map<string, Promise<unknown>>()
 
 /**
- * Run `query` for a too-old entry, once per key however many readers are waiting. The wait is bounded
- * by the page deadline (`DB_TIMEOUT_MS`): a hung query (statement_timeout is opt-in and does not fire
- * on a dead socket) would otherwise pin every reader of the key, where serving the old entry used to
- * be instant. A timeout is just a rejection, so it takes the stale-on-error path below. Only this
- * inline path is bounded; a cold miss runs inside Next's cache write and waits as long as it takes.
- * The timeout abandons the wait, not the query, so the next flight may overlap a straggler: at most
- * one new query per key per deadline.
+ * Queries running at once. Past this a new key is refused, not queued on the web service's few connections.
+ *
+ * Counted apart from `inFlight`: a query whose key was forgotten at the deadline is still running, and freeing its slot
+ * then let eight more start every 8 s while the first eight held their connections. A query holds its slot until it
+ * settles, or for PAGE_CACHE_SLOT_MAX_MS at most, by when the statement_timeout has cancelled any query the server can
+ * still reach. Only one on a dead connection outlives that, and eight of those must not refuse every cold page for good.
  */
-function recomputeOnce<A extends unknown[], T>(
+export const PAGE_CACHE_MAX_IN_FLIGHT = 8
+export const PAGE_CACHE_SLOT_MAX_MS = 30_000
+let running = 0
+
+function flightFor<A extends unknown[], T>(
   name: string,
   args: A,
   query: (...args: A) => Promise<T>,
 ): Promise<T> {
   const key = JSON.stringify(buildCacheKey(name, [JSON.stringify(args)]))
-  let flight = inFlight.get(key) as Promise<T> | undefined
-  if (!flight) {
-    flight = withTimeout(query(...args)).finally(() => inFlight.delete(key))
-    inFlight.set(key, flight)
+  const existing = inFlight.get(key) as Promise<T> | undefined
+  if (existing) return existing
+  if (running >= PAGE_CACHE_MAX_IN_FLIGHT) {
+    return Promise.reject(new Error(`page-cache: ${running} queries already in flight, not starting ${name}`))
   }
+  const flight = query(...args)
+  inFlight.set(key, flight)
+  running++
+  let held = true
+  const release = () => { if (held) { held = false; running-- } }
+  const forget = () => { if (inFlight.get(key) === flight) inFlight.delete(key) }
+  const deadline = setTimeout(forget, DB_TIMEOUT_MS)
+  const slotCap = setTimeout(release, PAGE_CACHE_SLOT_MAX_MS)
+  const settled = () => { clearTimeout(deadline); clearTimeout(slotCap); forget(); release() }
+  flight.then(settled, settled)
   return flight
 }
 
@@ -109,9 +129,9 @@ function recomputeOnce<A extends unknown[], T>(
  * and during an outage the page still shows what it showed before the bound
  * existed, though no longer instantly: a failing recompute is answered as soon
  * as it fails, a hung one after the deadline, and concurrent readers share that
- * single wait. A cold miss has no old value, so it rejects exactly as it
- * always has (and is not subject to the deadline), and nothing is ever cached
- * from a failure. An entry with no usable stamp has no value to trust, so it
+ * single wait. A cold miss has no old value: it shares the same flight and
+ * waits for it to finish, so it fills the entry however long the query takes,
+ * and nothing is ever cached from a failure. An entry with no usable stamp has no value to trust, so it
  * rejects too.
  *
  * The callback Next sees is now the same wrapper for every cache, and Next
@@ -129,8 +149,9 @@ export function createPageCache<A extends unknown[], T>(
 ): (...args: A) => Promise<T> {
   const maxAgeMs = revalidateSeconds * 1000
   const cached = unstable_cache(
+    // The cold miss and Next's background refresh: the shared flight, to its end, so the entry fills.
     async (...args: A) => {
-      const value = await query(...args)
+      const value = await flightFor(name, args, query)
       return { at: Date.now(), value }
     },
     buildCacheKey(name, []),
@@ -145,7 +166,8 @@ export function createPageCache<A extends unknown[], T>(
     // NaN (no stamp) and negative (clock stepped back) both fail this test and fall through to a query.
     if (age >= 0 && age <= maxAgeMs) return hit.value
     try {
-      return await recomputeOnce(name, args, query)
+      // The reader's wait is bounded, not the flight: past the deadline it serves the old value.
+      return await withTimeout(flightFor(name, args, query))
     } catch (err) {
       // A finite `at` means an entry this module wrote, whose `value` is a real T (see the note above).
       if (!Number.isFinite(hit?.at)) throw err
