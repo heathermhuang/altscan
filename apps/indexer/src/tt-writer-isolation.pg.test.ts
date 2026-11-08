@@ -160,6 +160,16 @@ describe.skipIf(!PG_URL)('transfer writer isolates a failing block — real Post
     expect(await gaps(3001)).toEqual([{ f: 3001, t: 3001, reason: 'tt_rejected(22P02)' }])
   }, 60_000)
 
+  it('a healed gap row starting at the block is reopened, keeping its reason and range', async () => {
+    await conn.unsafe(`INSERT INTO index_gaps (from_block, to_block, reason, healed_at, heal_cursor) VALUES (2501, 2510, 'max_lag_skip(1000)', now(), 2510)`)
+    await boot(2500)
+    w.enqueueTransferWrite(2501, [row(2501, BAD_VALUE)])
+    w.enqueueTransferWrite(2502, [row(2502)])
+    await waitFor(() => expect(W()).toBe(2502))
+    expect(await conn.unsafe('SELECT to_block::int AS t, reason, healed_at, heal_cursor FROM index_gaps WHERE from_block = 2501'))
+      .toEqual([{ t: 2510, reason: 'max_lag_skip(1000)', healed_at: null, heal_cursor: null }])
+  }, 30_000)
+
   it('a restart before the fold replays the block, which fails again and finds its gap row there', async () => {
     // The previous process recorded the gap and died before W passed the block.
     await conn.unsafe(`INSERT INTO index_gaps (from_block, to_block, reason) VALUES (4001, 4001, 'tt_rejected(22P02)')`)
