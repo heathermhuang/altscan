@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq, gte, lte, type SQL } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { createMaintenanceConnection, schema } from '@altscan/db'
 import { selectByAddress, selectInTimeOrder } from './address-query'
+import { nftTransfersQuery, NFT_SIDE_SCAN } from './nft-transfers'
 
 // The mid-prune cases run the route itself on this suite's connection, and log the SQL it sends.
 const route = vi.hoisted(() => ({ db: undefined as unknown, sent: [] as { query: string; params: unknown[] }[] }))
@@ -37,6 +39,10 @@ const S = '0x' + '55'.repeat(20)   // a bot: sends to itself every other block, 
 const D = '0x' + '66'.repeat(20)   // transactions, mid-prune only: scattered, 3 blocks above the cutoff
 const T1 = '0x' + 'e1'.repeat(20)
 const T2 = '0x' + 'e2'.repeat(20)
+const N1 = '0x' + '77'.repeat(20)   // NFTs tab: only BEP-1155s, 3,000 a side, more than one walk reads
+const N2 = '0x' + '88'.repeat(20)   // NFTs tab: BEP-721s among 1155s, and one sent to itself
+const NFT721 = '0x' + 'f7'.repeat(20)
+const NFT1155 = '0x' + 'f1'.repeat(20)
 
 // 10,000 blocks of 0.75s, truncated to whole seconds as on BNB, so consecutive
 // blocks share a timestamp. token_transfers is 4 partitions of 2,500 blocks.
@@ -90,6 +96,32 @@ const FIXTURE = `
          CASE WHEN b % 2 = 0 THEN '${S}' ELSE ${other} END, '${S}', b, ${TS}
   FROM (SELECT generate_series(0, 9999, 2) AS b UNION ALL SELECT unnest(ARRAY[3, 5001, 9993, 9997])) s;
 
+  -- The NFTs tab (nft-transfers.ts). token_id is set only on NFT transfers, as the indexer writes it.
+  INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, token_id, block_number, timestamp)
+  SELECT '0x' || md5('n1' || b) || md5('n1x' || b), 96, '${NFT1155}',
+         CASE WHEN b % 2 = 0 THEN '${N1}' ELSE ${other} END, CASE WHEN b % 2 = 1 THEN '${N1}' ELSE ${other} END, b, b, ${TS}
+  FROM generate_series(4000, 9999) b;
+  INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, token_id, block_number, timestamp)
+  SELECT '0x' || md5('n2' || b) || md5('n2x' || b), 95, CASE WHEN b % 7 = 0 THEN '${NFT721}' ELSE '${NFT1155}' END,
+         CASE WHEN b % 2 = 0 OR b = 7000 THEN '${N2}' ELSE ${other} END, CASE WHEN b % 2 = 1 OR b = 7000 THEN '${N2}' ELSE ${other} END,
+         b, b, ${TS}
+  FROM generate_series(2000, 9999) b WHERE b % 7 = 0 OR b % 3 = 0;
+  -- Other wallets' NFT traffic over 50 BEP-721 contracts, so the NFT rows as a whole are not one wallet's.
+  INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, token_id, block_number, timestamp)
+  SELECT '0x' || md5('c' || b || ':' || i) || md5('cx' || b || ':' || i), 90 + i, '0x' || md5('nftc' || (b % 50)) || '00000000',
+         '0x' || md5('cf' || b || i) || '00000000', '0x' || md5('ct' || b || i) || '00000000', b * 2 + i, b, ${TS}
+  FROM generate_series(0, 9999) b, generate_series(0, 1) i;
+  CREATE TEMP TABLE tokens (address VARCHAR(42) PRIMARY KEY, name TEXT, symbol TEXT, type TEXT NOT NULL);
+  INSERT INTO tokens VALUES ('${NFT721}', 'Art', 'ART', 'BEP721'), ('${NFT1155}', 'Items', 'ITM', 'BEP1155'),
+    ('${T1}', 'One', 'ONE', 'BEP20'), ('${T2}', 'Two', 'TWO', 'BEP20');
+  INSERT INTO tokens SELECT '0x' || md5('nftc' || i) || '00000000', 'C' || i, 'C' || i, 'BEP721' FROM generate_series(0, 49) i;
+  -- Enough other tokens that the planner reads one by its primary key, as on a real table.
+  INSERT INTO tokens SELECT '0x' || md5('ft' || i) || '00000000', 'F' || i, 'F' || i, 'BEP20' FROM generate_series(1, 20000) i;
+  ANALYZE tokens;
+
+  -- TT_NFT_INDEXES in ensure-schema.ts.
+  CREATE INDEX tt_nft_to_blk_idx ON token_transfers (to_address, block_number DESC) WHERE token_id IS NOT NULL;
+  CREATE INDEX tt_nft_from_blk_idx ON token_transfers (from_address, block_number DESC) WHERE token_id IS NOT NULL;
   CREATE INDEX ON token_transfers (token_address);
   CREATE INDEX ON token_transfers (from_address, timestamp DESC);
   CREATE INDEX ON token_transfers (to_address, timestamp DESC);
@@ -419,6 +451,45 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
         }
       }
       expect(compared).toBe(cases.length * 18)
+    })
+  })
+
+  // The address page's NFTs tab (nft-transfers.ts). As `(to = a OR from = a) AND token_id IS NOT NULL ORDER BY
+  // block_number` it read a busy wallet's every transfer to find that it had no NFTs.
+  describe('NFTs tab', () => {
+    // Rows read from tables only: rowsRead would also count the CTEs' Subquery Scans, which read nothing.
+    const tableRows = (n: PlanNode & { 'Relation Name'?: string }): number =>
+      (n['Relation Name'] && n['Node Type'] !== 'Bitmap Index Scan'
+        ? (n['Actual Rows'] + (n['Rows Removed by Filter'] ?? 0)) * n['Actual Loops'] : 0)
+      + (n.Plans ?? []).reduce((s, c) => s + tableRows(c), 0)
+    const readOf = async (q: SQL) => {
+      const { sql: text, params } = new PgDialect().sqlToQuery(q)
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${text}`, params as never[])
+      return tableRows(explained.Plan)
+    }
+    const rowsOf = async (q: SQL) => Array.from(await db.execute(q)) as Record<string, unknown>[]
+
+    it.each([S, X, Z])('a busy wallet with no NFTs costs an empty index probe: %s', async (address) => {
+      expect(await rowsOf(nftTransfersQuery(address, 50))).toEqual([])
+      expect(await readOf(nftTransfersQuery(address, 50))).toBeLessThan(10)
+    })
+
+    it('a wallet with only BEP-1155s reads its NFT rows at most, never more, and shows none', async () => {
+      expect(await rowsOf(nftTransfersQuery(N1, 50))).toEqual([])
+      // 3,000 a side. With this few the planner reads each side through the NFT index and sorts it rather than
+      // walking it in order and stopping at NFT_SIDE_SCAN; either way the cost is the wallet's NFT rows.
+      expect(await readOf(nftTransfersQuery(N1, 50))).toBeLessThanOrEqual(2 * 3_000 + 10)
+    })
+
+    it('returns exactly what the OR query returns, newest BEP-721 first, a transfer to itself once', async () => {
+      const want = ((await conn.unsafe(
+        `SELECT tt.tx_hash FROM token_transfers tt JOIN tokens t ON t.address = tt.token_address AND t.type = 'BEP721'
+         WHERE (tt.to_address = $1 OR tt.from_address = $1) AND tt.token_id IS NOT NULL ORDER BY tt.block_number DESC LIMIT 500`, [N2],
+      )) as unknown as { tx_hash: string }[]).map(r => r.tx_hash)
+      const got = await rowsOf(nftTransfersQuery(N2, 500))
+      expect(want).toHaveLength(500)
+      expect(got.map(r => r.txHash)).toEqual(want)
+      expect(got.filter(r => Number(r.blockNumber) === 7000)).toHaveLength(1)
     })
   })
 

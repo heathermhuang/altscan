@@ -3,6 +3,8 @@ import {
   buildConcurrentIndexList,
   buildPartitionedTtWhaleIndexSql,
   buildPartitionedWhaleIndexSql,
+  buildPartitionedPartialIndexSql,
+  TT_NFT_INDEXES,
   TT_WHALE_COLUMNS,
   TT_WHALE_IDX,
   ttWhaleIndex,
@@ -556,5 +558,34 @@ describe('INVALID_INDEX_SWEEP_SQL leaves indexes under construction alone', () =
   it('only selects indexes in the schema it drops from', () => {
     expect(normalized).toMatch(/JOIN pg_namespace n ON n\.oid = c\.relnamespace/)
     expect(normalized).toMatch(/n\.nspname = current_schema\(\)/)
+  })
+})
+
+describe('TT_NFT_INDEXES — the NFTs tab', () => {
+  const MONO = [
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_nft_to_blk_idx ON token_transfers(to_address, block_number DESC) WHERE token_id IS NOT NULL',
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS tt_nft_from_blk_idx ON token_transfers(from_address, block_number DESC) WHERE token_id IS NOT NULL',
+  ]
+
+  // The predicate is a literal, as the tab's query repeats it: a partial index is used only when the planner can prove it.
+  it('builds both on the monolithic table, and leaves the partitioned one to the per-partition builder', () => {
+    const mono = buildConcurrentIndexList(false, '1')
+    for (const stmt of MONO) expect(mono).toContain(stmt)
+    expect(buildConcurrentIndexList(true, '1').filter(s => s.includes('tt_nft_'))).toEqual([])
+  })
+
+  it('renders the online per-partition recipe, with a child name unique per partition', () => {
+    expect(buildPartitionedPartialIndexSql(TT_NFT_INDEXES[0], 'token_transfers_p_96000')).toEqual({
+      parent: 'CREATE INDEX IF NOT EXISTS tt_nft_to_blk_idx ON ONLY token_transfers(to_address, block_number DESC) WHERE token_id IS NOT NULL',
+      child: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS token_transfers_p_96000_nft_to_blk_idx ON token_transfers_p_96000(to_address, block_number DESC) WHERE token_id IS NOT NULL',
+      childName: 'token_transfers_p_96000_nft_to_blk_idx',
+      attach: 'ALTER INDEX tt_nft_to_blk_idx ATTACH PARTITION token_transfers_p_96000_nft_to_blk_idx',
+    })
+    // Within Postgres's 63-byte identifier limit for the widest partition names, so no child is truncated into another.
+    for (const ix of TT_NFT_INDEXES) {
+      for (const part of ['token_transfers_p_9999999999', 'token_transfers_legacy']) {
+        expect(buildPartitionedPartialIndexSql(ix, part).childName.length).toBeLessThanOrEqual(63)
+      }
+    }
   })
 })

@@ -35,6 +35,7 @@ import { toLedgerRows } from '@/lib/ledger'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { selectByAddress } from '@/lib/address-query'
+import { nftTransfersQuery } from '@/lib/nft-transfers'
 import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
@@ -708,25 +709,8 @@ async function NftsTab({ addr, isBot }: { addr: string; isBot: boolean }) {
   let nftTransfers: NftTransfer[] = []
 
   try {
-    const result = await db.execute(sql`
-      SELECT
-        tt.tx_hash as "txHash",
-        tt.token_address as "tokenAddress",
-        tt.token_id::text as "tokenId",
-        tt.from_address as "fromAddress",
-        tt.to_address as "toAddress",
-        tt.block_number as "blockNumber",
-        t.name,
-        t.symbol
-      FROM token_transfers tt
-      LEFT JOIN tokens t ON t.address = tt.token_address
-      WHERE
-        (tt.to_address = ${addr} OR tt.from_address = ${addr})
-        AND t.type = 'BEP721'
-        AND tt.token_id IS NOT NULL
-      ORDER BY tt.block_number DESC
-      LIMIT 50
-    `)
+    // One bounded walk per side of the NFT-only indexes; nftTransfersQuery says why not the OR form.
+    const result = await db.execute(nftTransfersQuery(addr, 50))
     nftTransfers = Array.from(result).map(row => {
       const r = row as Record<string, unknown>
       return {

@@ -7,6 +7,8 @@ import {
   buildPartitionedTtWhaleIndexSql,
   ensureForwardPartitions,
   ensurePartitionedTtWhaleIndex,
+  ensurePartitionedPartialIndex,
+  TT_NFT_INDEXES,
   isPartitioned,
   sweepInvalidIndexes,
   ttWhaleIndex,
@@ -457,6 +459,23 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
       }
     }, 60_000)
   })
+
+    // The NFTs tab's two partial indexes go through the same builder as the whale index: every partition gets a
+    // child, the parent turns valid (the planner ignores it until then), and the next boot does nothing.
+    it('builds the NFTs tab indexes on every partition, and the parent turns valid', async () => {
+      for (const ix of TT_NFT_INDEXES) {
+        await ensurePartitionedPartialIndex(ix)
+        const parent = await parentState(ix.name)
+        expect(parent?.kind, `${ix.name} is a partitioned index`).toBe('I')
+        expect(parent?.valid, `${ix.name} valid after the last attach`).toBe(true)
+        expect(parent?.def).toContain(`(${ix.columns}) WHERE (token_id IS NOT NULL)`)
+        const children = await attached(ix.name)
+        for (const part of await partitionNames()) expect(children.get(part), `${ix.name} on ${part}`).toMatchObject({ valid: true })
+      }
+      const before = await attached(TT_NFT_INDEXES[0].name)
+      await ensurePartitionedPartialIndex(TT_NFT_INDEXES[0])
+      expect(await attached(TT_NFT_INDEXES[0].name)).toEqual(before)
+    }, 120_000)
 
   // ── ETH: a plain, non-partitioned token_transfers ──
   describe('monolithic token_transfers (ETH)', () => {
