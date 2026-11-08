@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { shortenAddress } from '@/lib/address-display'
+import { WELL_KNOWN } from '@/lib/lookalike'
 
 // /dex prints each swap's two legs as "amount SYMBOL". A symbol is typed by whoever deployed the token, and one that
 // reads as a URL or handle (lib/link-in-name) is an advert, so that leg names the token by its short address. The
 // real server component, with the swaps stubbed.
 const A = '0x' + 'a'.repeat(40)
 const B = '0x' + 'b'.repeat(40)
-const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, decimals: {} as Record<string, number>, fail: false, empty: false }))
+const h = vi.hoisted(() => ({ symbols: {} as Record<string, string>, names: {} as Record<string, string>, tokenOut: null as string | null, decimals: {} as Record<string, number>, fail: false, empty: false }))
 const trade = {
   id: 1, txHash: '0x' + 'e'.repeat(64), logIndex: 0, dex: 'PancakeSwap', pairAddress: '0x' + 'd'.repeat(40),
   tokenIn: A, tokenOut: B, amountIn: '1500000000000000000', amountOut: '2000000000000000000',
@@ -22,8 +23,8 @@ vi.mock('@/lib/dex-page', () => ({
   fetchDexPage: async () => {
     if (h.fail) throw new Error('query failed')
     return {
-      trades: h.empty ? [] : [trade], totalTrades: h.empty ? 0 : 1, topPairs: [], nativeUsd: null,
-      tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: h.decimals[address] ?? 18, symbol })),
+      trades: h.empty ? [] : [{ ...trade, tokenOut: h.tokenOut ?? trade.tokenOut }], totalTrades: h.empty ? 0 : 1, topPairs: [], nativeUsd: null,
+      tokens: Object.entries(h.symbols).map(([address, symbol]) => ({ address, decimals: h.decimals[address] ?? 18, symbol, name: h.names[address] ?? 'x' })),
     }
   },
 }))
@@ -34,9 +35,12 @@ const render = async () => {
   const { default: DexPage } = await import('./page')
   return renderToStaticMarkup(await DexPage({ searchParams: Promise.resolve({}) }))
 }
-const legs = (html: string) =>
-  [...html.matchAll(/<td>([\d.,]+[A-Za-z]*|—)(?:<span class="inline-block text-mut ml-1 text-xs">(.*?)<\/span>)?<\/td>/g)].map((m) => [m[1], m[2] ?? ''])
-beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.decimals = {}; h.fail = false; h.empty = false })
+// A leg's cell may end in the lookalike badge (components/ui/LookalikeBadge): [amount, symbol, the well-known symbol it
+// passes for, or null].
+const LEG = /<td>([\d.,]+[A-Za-z]*|—)(?:<span class="inline-block text-mut ml-1 text-xs">(.*?)<\/span>)?(?:<span class="badge badge-bad ml-1"[^>]*>lookalike<span class="sr-only"> of ([^<]*)<\/span><\/span>)?<\/td>/g
+const legs = (html: string) => [...html.matchAll(LEG)].map((m) => [m[1], m[2] ?? ''])
+const badges = (html: string) => [...html.matchAll(LEG)].map((m) => m[3] ?? null)
+beforeEach(() => { h.symbols = { [A]: 'CAKE', [B]: 'WBNB' }; h.names = {}; h.tokenOut = null; h.decimals = {}; h.fail = false; h.empty = false })
 
 describe('/dex swap legs', () => {
   it('an ordinary swap reads as before', async () => {
@@ -110,5 +114,27 @@ describe('/dex empty table', () => {
     const out = await render()
     expect(out).toContain('No DEX trades found')
     expect(out).not.toContain('temporarily unavailable')
+  })
+})
+
+// A leg's token that passes for a well-known one is badged, by its symbol or by its NAME: the cached token metadata
+// carries the name for that (lib/dex-page.ts, cache key 'dex-named'). The table prints the symbol, which can read as USDT.
+describe('/dex swap legs: lookalikes', () => {
+  it('badges a leg whose symbol passes for a well-known token on another contract', async () => {
+    h.symbols = { [A]: 'USDT', [B]: 'ZZZ' }
+    expect(badges(await render())).toEqual(['USDT', null])
+  })
+
+  it('badges a leg whose name passes for one, whatever its symbol', async () => {
+    h.symbols = { [A]: 'ZZZ', [B]: 'YYY' }
+    h.names = { [B]: 'Tether USD' }
+    expect(badges(await render())).toEqual([null, 'USDT'])
+  })
+
+  it('does not badge the real contract', async () => {
+    const wbnb = WELL_KNOWN.bnb.find((w) => w.symbol === 'WBNB')!.addresses[0].toLowerCase()
+    h.symbols = { [A]: 'ZZZ', [wbnb]: 'WBNB' }
+    h.tokenOut = wbnb   // the stubbed trade swaps into the real WBNB
+    expect(badges(await render())).toEqual([null, null])
   })
 })

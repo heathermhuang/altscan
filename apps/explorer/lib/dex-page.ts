@@ -27,7 +27,7 @@ export const TOP_PAIRS_WINDOW = 50_000
 export type TopPair = { pair_address: string; dex: string; trade_count: number }
 
 /** Token metadata as a plain array — a Map does not survive the cache. */
-export type TokenMeta = { address: string; decimals: number; symbol: string }
+export type TokenMeta = { address: string; decimals: number; symbol: string; name: string }
 
 export type CachedDexTrade =
   Omit<typeof schema.dexTrades.$inferSelect, 'timestamp'> & { timestamp: string }
@@ -59,10 +59,11 @@ function estimate(result: unknown, key: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
-// 'dex-priced', not 'dex': the cached value gained `nativeUsd`, and an entry written by the previous
-// build under the old name would hand this code the old shape (lib/page-cache.ts).
+// 'dex-named', not 'dex-priced' (nor 'dex' before it): the cached value's tokens gained `name`, for the lookalike
+// verdict on each leg, and an entry written by the previous build under the old name would hand this code the old
+// shape, with no names, so no leg would ever be flagged (lib/page-cache.ts).
 export const fetchDexPage = createPageCache(
-  'dex-priced',
+  'dex-named',
   DEX_REVALIDATE_SECONDS,
   async (page: number): Promise<DexPageData> => {
     // The price is network, not database: it runs beside the reads below without adding to their load.
@@ -106,6 +107,7 @@ export const fetchDexPage = createPageCache(
         address: schema.tokens.address,
         decimals: schema.tokens.decimals,
         symbol: schema.tokens.symbol,
+        name: schema.tokens.name,
       })
         .from(schema.tokens)
         .where(sql`${schema.tokens.address} IN (${sql.join([...tokenAddrs].map(a => sql`${a}`), sql`, `)})`)

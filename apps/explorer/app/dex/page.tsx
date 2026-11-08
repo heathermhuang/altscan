@@ -18,6 +18,9 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { shortHash, shortenAddress } from '@/lib/address-display'
 import { dexLegend, dexStripTiles, dexSummary, type DexSwap } from '@/lib/dex-size'
 import { TileStrip } from '@/components/tape/TileStrip'
+import { LookalikeBadge } from '@/components/ui/LookalikeBadge'
+import { lookalikeOf } from '@/lib/lookalike'
+import type { TokenMeta } from '@/lib/dex-page'
 
 export const metadata: Metadata = {
   title: `DEX Trades`,
@@ -49,6 +52,7 @@ export default async function DexPage({
   let nativeUsd: number | null = null
   const tokenDecimalsMap = new Map<string, number>()
   const tokenSymbolMap = new Map<string, string>()
+  const tokenMetaMap = new Map<string, TokenMeta>()
   let loadFailed = false
 
   try {
@@ -60,6 +64,7 @@ export default async function DexPage({
     for (const t of data.tokens) {
       tokenDecimalsMap.set(t.address, t.decimals)
       tokenSymbolMap.set(t.address, t.symbol)
+      tokenMetaMap.set(t.address, t)
     }
   } catch (err) {
     loadFailed = true
@@ -74,6 +79,12 @@ export default async function DexPage({
     const symbol = tokenSymbolMap.get(address?.toLowerCase() ?? '')
     if (symbol === undefined) return ''
     return tokenTextOr(tokenUnit(symbol, address ?? ''), UNKNOWN_TOKEN)
+  }
+
+  // A leg's token passing for a well-known one (lib/lookalike) is badged: its symbol can print as USDT.
+  const lookalikeFor = (address: string | null) => {
+    const meta = tokenMetaMap.get(address?.toLowerCase() ?? '')
+    return meta ? lookalikeOf(meta, chainConfig.key) : null
   }
 
   // The strip draws the same trades as the table below it, sized from the cached trades and the cached
@@ -193,6 +204,8 @@ export default async function DexPage({
               const outDecimals = tokenDecimalsMap.get(t.tokenOut?.toLowerCase() ?? '')
               const inSymbol = symbolText(t.tokenIn)
               const outSymbol = symbolText(t.tokenOut)
+              const inLookalike = lookalikeFor(t.tokenIn)
+              const outLookalike = lookalikeFor(t.tokenOut)
               return (
                 <tr key={t.id}>
                   <td className="whitespace-nowrap">
@@ -207,10 +220,12 @@ export default async function DexPage({
                   <td>
                     {legAmount(t.amountIn, inDecimals)}
                     {inSymbol && <span className="inline-block text-mut ml-1 text-xs">{inSymbol}</span>}
+                    {inLookalike && <LookalikeBadge lookalike={inLookalike} className="ml-1" />}
                   </td>
                   <td>
                     {legAmount(t.amountOut, outDecimals)}
                     {outSymbol && <span className="inline-block text-mut ml-1 text-xs">{outSymbol}</span>}
+                    {outLookalike && <LookalikeBadge lookalike={outLookalike} className="ml-1" />}
                   </td>
                   <td className="hidden sm:table-cell">
                     <AddressLink address={t.maker} />
