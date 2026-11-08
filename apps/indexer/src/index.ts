@@ -47,7 +47,7 @@ import { syncValidators } from './validator-syncer'
 import { startTokenMetadataHealer } from './token-metadata-healer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
 import { startBackfillWorker } from './backfill-worker'
-import { ensureSchema, ensureInternalTxPartitions } from './ensure-schema'
+import { ensureSchema, ensureInternalTxPartitions, skipPartitionRefusal } from './ensure-schema'
 import { sealPlaintextWebhookSecrets, webhookSecretKey } from './webhook-notifier'
 import { getDb, schema, dbErrorMessage, isConnectionError } from './db'
 import { desc, sql } from 'drizzle-orm'
@@ -578,17 +578,21 @@ async function main() {
       }
 
       const lagSkip = resumeGapBackfillUntil === null ? planMaxLagSkip(latest, lastIndexed, MAX_LAG) : null
-      // Corroborated before anything moves: one endpoint's inflated tip must not
-      // abandon real blocks or push the cursor and W past the chain. Refused, the
-      // loop keeps indexing normally; a real lag is skipped once another endpoint
-      // holds the landing block.
-      const skipRefusal = lagSkip
-        ? await corroborateTip(tipSource, lagSkip.abandonedTo, corroboratorsFor(tipSource, endpointUrls).providers, RPC_READ_TIMEOUT_MS)
-        : null
+      // Before anything moves, in this order: the tip is corroborated (one endpoint's
+      // inflated tip must not abandon real blocks or push the cursor and W past the
+      // chain), then token_transfers partitions cover every block up to the tip.
+      // Refused, the loop keeps indexing normally and asks again next pass.
+      let skipRefusal: string | null = null
+      if (lagSkip) {
+        const notCorroborated = await corroborateTip(tipSource, lagSkip.abandonedTo, corroboratorsFor(tipSource, endpointUrls).providers, RPC_READ_TIMEOUT_MS)
+        skipRefusal = notCorroborated !== null
+          ? `tip not corroborated (${notCorroborated})`
+          : await skipPartitionRefusal(lagSkip.abandonedTo + 1, latest)
+      }
       if (lagSkip && skipRefusal !== null) {
         if (Date.now() - skipRefusalLoggedAt >= 60_000) {
           skipRefusalLoggedAt = Date.now()
-          console.warn(`${TAG} ⚠ MAX_LAG skip refused: tip ${latest} not corroborated (${skipRefusal})`)
+          console.warn(`${TAG} ⚠ MAX_LAG skip refused at tip ${latest}: ${skipRefusal}`)
         }
       } else if (lagSkip) {
         const { abandonedFrom, abandonedTo } = lagSkip

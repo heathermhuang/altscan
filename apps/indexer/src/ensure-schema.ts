@@ -1134,8 +1134,7 @@ async function dropNotNullIfSet(table: string, column: string): Promise<void> {
  * A relname match is cluster-wide, so a same-named relation in another schema answered
  * for ours (and a DROP then acted on whichever one search_path found).
  */
-export async function isPartitioned(table: string): Promise<boolean> {
-  const db = getDb()
+export async function isPartitioned(table: string, db: ReturnType<typeof getDb> = getDb()): Promise<boolean> {
   const res = await db.execute(sql`
     SELECT 1 FROM pg_partitioned_table p
     WHERE p.partrelid = to_regclass(${table})
@@ -1386,36 +1385,59 @@ export async function ensurePartitionedPartialIndex(ix: PartitionedPartialIndex)
 /** How long ensureForwardPartitions waits for token_transfers' lock before leaving the partition to its next run. */
 export const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
 
+/** Pure. The exclusive upper end of the unbroken run of partitions from `from`; `from` itself means it is not covered. */
+export function coveredUpTo(parts: readonly { lo: number; hi: number }[], from: number): number {
+  let bound = from
+  for (;;) {
+    const hit = parts.find(p => p.lo <= bound && bound < p.hi)
+    if (!hit) return bound
+    bound = hit.hi
+  }
+}
+
 /**
  * Ensure token_transfers has empty partitions covering well past where data
- * currently ends, so the writer never hits a missing range. Extends contiguously
- * from the highest existing partition upper-bound in PARTITION_BLOCKS-wide chunks
- * until PARTITION_AHEAD widths beyond MAX(block_number). No-op unless partitioned.
- * Safe to call at boot and on the retention interval.
+ * continues, so the writer never hits a missing range: PARTITION_AHEAD widths past
+ * the highest of MAX(token_transfers.block_number), MAX(blocks.number) and `anchor`
+ * (the block a MAX_LAG skip is about to land on). Extends contiguously from the
+ * highest existing upper bound in PARTITION_BLOCKS-wide chunks. When retention has
+ * dropped every partition, the ladder is re-seeded at that position, never at
+ * genesis; with nothing to anchor on, nothing is made. Safe to call at boot and on
+ * the retention interval.
+ *
+ * Returns the covered bound READ BACK from the catalog after the DDL: coveredUpTo
+ * from `anchor`, or from the position when no anchor is given. A lock timeout stops
+ * the ladder early, and `CREATE TABLE IF NOT EXISTS` silently skips a name that is
+ * already taken, so the DDL succeeding proves nothing. Null when token_transfers is
+ * not partitioned, where any block can be written.
  *
  * `lockTimeout: null` waits for the lock instead of giving up: the partitioning
  * migration's call, which has no partition ahead to fall back on.
  */
 export async function ensureForwardPartitions(
-  { lockTimeout = FORWARD_PARTITION_LOCK_TIMEOUT }: { lockTimeout?: string | null } = {},
-): Promise<void> {
-  const db = getDb()
-  if (!(await isPartitioned('token_transfers'))) return
+  { lockTimeout = FORWARD_PARTITION_LOCK_TIMEOUT, anchor = 0, db = getDb() }:
+    { lockTimeout?: string | null; anchor?: number; db?: ReturnType<typeof getDb> } = {},
+): Promise<number | null> {
+  if (!(await isPartitioned('token_transfers', db))) return null
   const { blocks: width, ahead } = indexerConfig.partitions   // ~1 day BSC
 
-  const parts = await listTokenTransferPartitions()
-  if (parts.length === 0) return  // migration not run yet — nothing to extend
+  const maxOf = async (q: ReturnType<typeof sql>) => Number((Array.from(await db.execute(q))[0] as Record<string, unknown>).m) || 0
+  const position = Math.max(
+    await maxOf(sql`SELECT COALESCE(MAX(block_number), 0)::bigint AS m FROM token_transfers`),
+    await maxOf(sql`SELECT COALESCE(MAX(number), 0)::bigint AS m FROM blocks`),
+    anchor,
+  )
+  const from = anchor || position
+  const parts = await listTokenTransferPartitions(db)
+  if (parts.length === 0 && position === 0) return coveredUpTo([], from)
 
-  let upper = Math.max(...parts.map(p => p.hi))
-  const maxRow = await db.execute(sql`SELECT COALESCE(MAX(block_number), 0)::bigint AS m FROM token_transfers`)
-  const maxBlock = Number((Array.from(maxRow)[0] as Record<string, unknown>).m) || 0
-  const target = maxBlock + ahead * width
+  // Contiguous from the highest bound; with no partitions at all, width-aligned at the position.
+  const start = parts.length > 0 ? Math.max(...parts.map(p => p.hi)) : position
+  const ranges = partitionRangesToCreate(parts, width, start, position + ahead * width)
 
   let created = 0
-  // Bound the loop generously so a bad config can never spin forever.
-  for (let guard = 0; upper <= target && guard < 10_000; guard++) {
-    const lo = upper
-    const hi = upper + width
+  let upper = start
+  for (const { lo, hi } of ranges) {
     const name = `token_transfers_p_${lo}`
     try {
       // CREATE TABLE … PARTITION OF takes ACCESS EXCLUSIVE on token_transfers, and while it waits for that lock
@@ -1437,6 +1459,37 @@ export async function ensureForwardPartitions(
     upper = hi
   }
   if (created > 0) console.log(`[indexer] ensured ${created} forward token_transfers partition(s) up to block ${upper}`)
+  return coveredUpTo(await listTokenTransferPartitions(db), from)
+}
+
+let skipPartitionDdlAt = 0
+
+/**
+ * Before a MAX_LAG skip: null when token_transfers can take every block in
+ * [from, through], otherwise why not, starting "ALERT". A skip past the last bound
+ * otherwise stalls the writer on "no partition of relation … found for row".
+ *
+ * Partitions are made only when coverage is short, and at most once a minute: each
+ * attempt queues readers and writers behind its lock for up to the lock timeout, and
+ * a refused skip asks again on the next loop pass. Never throws.
+ */
+export async function skipPartitionRefusal(
+  from: number,
+  through: number,
+  db: ReturnType<typeof getDb> = getDb(),
+): Promise<string | null> {
+  try {
+    if (!(await isPartitioned('token_transfers', db))) return null
+    if (coveredUpTo(await listTokenTransferPartitions(db), from) > through) return null
+    if (Date.now() - skipPartitionDdlAt < 60_000) return `ALERT token_transfers partitions do not cover ${from}..${through} yet`
+    skipPartitionDdlAt = Date.now()
+    const covered = await ensureForwardPartitions({ anchor: from, db })
+    return covered === null || covered > through
+      ? null
+      : `ALERT no token_transfers partition for block ${covered} (the skip needs ${from}..${through})`
+  } catch (err) {
+    return `ALERT token_transfers partition check failed: ${dbErrorMessage(err)}`
+  }
 }
 
 /**
