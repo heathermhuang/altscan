@@ -36,3 +36,15 @@ describe('GET /api/v1/tokens/:contract lookalike', () => {
     expect((await (await get(FAKE)).json()).lookalike).toBeNull()
   })
 })
+
+// The fields come back as stored; the flag says they hold Unicode direction controls (lib/directional-controls).
+describe('GET /api/v1/tokens/:contract directionalControls', () => {
+  it('is true when the name or symbol holds one, false otherwise', async () => {
+    h.rows = [{ address: FAKE, name: 'Spoof', symbol: '\u202ETDSU\u202C', decimals: 6 }]
+    const flagged = await (await get(FAKE)).json()
+    expect(flagged.directionalControls).toBe(true)
+    expect(flagged.token.symbol).toBe('\u202ETDSU\u202C')
+    h.rows = [{ address: FAKE, name: 'Spoof', symbol: 'TDSU', decimals: 6 }]
+    expect((await (await get(FAKE)).json()).directionalControls).toBe(false)
+  })
+})

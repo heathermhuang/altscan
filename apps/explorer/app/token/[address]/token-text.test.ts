@@ -255,3 +255,26 @@ describe('token page: the Market panel names the pair', () => {
     expect(await render()).toContain('CAKE/WBNB pair on PancakeSwap ↗')
   })
 })
+
+// U+202E + "TDSU" + U+202C draws as "USDT". The lookalike check folds controls away and sees "TDSU", so it would not flag
+// this: the page strips the controls everywhere it prints the text, and says they were there.
+describe('token page: Unicode direction controls in the name or symbol', () => {
+  const ANY_CONTROL = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/
+  it('prints the h1 and the title in the stored order, and raises the signal', async () => {
+    h.row = tokenRow('\u202ETDSU\u202C', 'Spoof\u200F')
+    const out = await render()
+    const h1 = out.match(/<h1[^>]*>.*?<\/h1>/)?.[0] ?? ''
+    expect(text(h1)).toBe('Spoof TDSU')
+    expect(h1).toContain('<bdi>TDSU</bdi>')
+    expect(out).not.toMatch(ANY_CONTROL)   // the breadcrumb JSON-LD included
+    expect(text(out)).toContain('Direction controls')
+    const m = await meta()
+    expect(m).toContain('"title":"Spoof (TDSU)"')
+    expect(m).not.toMatch(ANY_CONTROL)
+  })
+
+  it('raises no signal for a name without them', async () => {
+    h.row = tokenRow('CAKE', 'PancakeSwap Token')
+    expect(text(await render())).not.toContain('Direction controls')
+  })
+})

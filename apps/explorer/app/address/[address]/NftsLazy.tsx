@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { ProviderNft } from '@/lib/providers'
 import { Icon } from '@/components/ui/Icon'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { stripDirectionalControls } from '@/lib/directional-controls'
 import { shortenAddress } from '@/lib/address-display'
 import { anyLinkLike } from '@/lib/link-in-name'
 
@@ -21,13 +22,13 @@ export function NftCard({ nft }: { nft: ProviderNft }) {
   return (
     <div className="bg-card rounded-xl border border-hair overflow-hidden">
       {nft.imageUrl ? (
-        <img src={nft.imageUrl} alt={linkLike ? shortenAddress(nft.tokenAddress) : nft.name} loading="lazy" className="w-full aspect-square object-cover" />
+        <img src={nft.imageUrl} alt={linkLike ? shortenAddress(nft.tokenAddress) : stripDirectionalControls(nft.name)} loading="lazy" className="w-full aspect-square object-cover" />
       ) : (
         <div className="w-full aspect-square bg-hair2 flex items-center justify-center text-mut"><Icon name="image" className="h-8 w-8" /></div>
       )}
       <div className="p-2">
-        <p className="text-xs font-semibold truncate">{nft.name} #{nft.tokenId}</p>
-        <p className="text-xs text-mut">{nft.symbol}{linkLike && <LinkInName className="ml-2" />}</p>
+        <p className="text-xs font-semibold truncate"><bdi>{stripDirectionalControls(nft.name)}</bdi> #{nft.tokenId}</p>
+        <p className="text-xs text-mut"><bdi>{stripDirectionalControls(nft.symbol)}</bdi>{linkLike && <LinkInName className="ml-2" />}</p>
       </div>
     </div>
   )

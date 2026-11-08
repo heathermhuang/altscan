@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { holdersChip } from '@/lib/holder-labels'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { stripDirectionalControls } from '@/lib/directional-controls'
 import {
   hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type Hint, type TokenSuggestion,
 } from '@/lib/search-suggest'
@@ -145,14 +146,14 @@ export function TokenOption({ token }: { token: TokenSuggestion }) {
   return (
     <>
       <span className="flex items-baseline gap-2">
-        <span className="font-mono font-semibold text-ink">{token.symbol}</span>
+        <span className="font-mono font-semibold text-ink"><bdi>{stripDirectionalControls(token.symbol)}</bdi></span>
         {token.lookalikeOf && (
           <span className="badge badge-bad">lookalike<span className="sr-only"> of {token.lookalikeOf}</span></span>
         )}
         {anyLinkLike(token.symbol, token.name) && <LinkInName />}
         <span className="ml-auto text-mut" title={holders.title}>{holders.text}</span>
       </span>
-      <span className="block truncate text-mut">{token.name}</span>
+      <span className="block truncate text-mut"><bdi>{stripDirectionalControls(token.name)}</bdi></span>
     </>
   )
 }

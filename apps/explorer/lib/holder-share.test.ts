@@ -164,3 +164,12 @@ describe('holdersSupply: which supply the shares divide by', () => {
     expect(holderShares(bal, holdersSupply('moralis', PROVIDER, ROW))!.bp).toEqual([500])    // 100 / 2,000
   })
 })
+
+describe('holderStripTiles: direction controls', () => {
+  it('strips them from the symbol it repeats', () => {
+    const shares = holderShares(['250000000000000000000'], '1000000000000000000000')!
+    const [t] = holderStripTiles([{ addr: '0x' + '1'.repeat(40), name: 'a', amount: '250' }], shares, '\u202ETDSU\u202C')
+    expect(t.read).toContain('250 TDSU')
+    expect(t.read).not.toMatch(/[\u202A-\u202E]/)
+  })
+})
