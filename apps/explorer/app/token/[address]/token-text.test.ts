@@ -42,7 +42,14 @@ vi.mock('@/lib/token-risk', () => ({ analyzeTokenRisk: async () => [] }))
 vi.mock('@/lib/rpc', async () => {
   const { AbiCoder } = await import('ethers')
   const enc = (s: string) => AbiCoder.defaultAbiCoder().encode(['string'], [s])
-  return { getWebProvider: () => ({ call: async ({ data }: { data: string }) => enc(data === '0x06fdde03' ? h.rpc.name : h.rpc.symbol) }) }
+  return {
+    getWebProvider: () => ({
+      call: async ({ data }: { data: string }) => {
+        const text = data === '0x06fdde03' ? h.rpc.name : h.rpc.symbol
+        return text === null ? '0x' : enc(text)   // null: the contract returns nothing, as a node answers '0x'
+      },
+    }),
+  }
 })
 // A token the index has not seen is read live from the node: name() and symbol() above, decimals() and totalSupply() here.
 vi.mock('ethers', async (orig) => {
