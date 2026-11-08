@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db'
-import { desc, eq, sql } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import Link from 'next/link'
 import { formatCompact, formatHolders, hasSupply, safeBigInt, tokenTextOr } from '@/lib/format'
 import { shortenAddress } from '@/lib/address-display'
@@ -12,6 +12,7 @@ import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
 import { HOLDER_LABELS } from '@/lib/holder-labels'
+import { tokenListSearch } from '@/lib/token-suggest'
 
 export const metadata: Metadata = {
   title: `${chainConfig.tokenStandard} Tokens`,
@@ -48,11 +49,8 @@ export default async function TokenListPage({
   let tokens: typeof schema.tokens.$inferSelect[] = []
   try {
     if (searchQuery && searchQuery.trim().length > 0) {
-      const q = `%${searchQuery.trim().toLowerCase()}%`
-      tokens = await db.select().from(schema.tokens)
-        .where(sql`${schema.tokens.type} = ${tokenType} AND (LOWER(${schema.tokens.name}) LIKE ${q} OR LOWER(${schema.tokens.symbol}) LIKE ${q} OR ${schema.tokens.address} LIKE ${q})`)
-        .orderBy(desc(schema.tokens.holderCount))
-        .limit(50)
+      // Bounded lookups only: a contains match over every token of the type read all of them for a q few rows match.
+      tokens = await tokenListSearch(db, searchQuery, tokenType, 50) as typeof tokens
     } else {
       tokens = await db.select().from(schema.tokens)
         .where(eq(schema.tokens.type, tokenType))

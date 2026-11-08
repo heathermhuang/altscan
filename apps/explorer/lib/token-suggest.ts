@@ -21,12 +21,14 @@
  * index order, or, when the planner expects only a few matches, fetches and sorts them all, which is bounded by
  * the one histogram bucket (~1% of the table) its estimate came from. Neither ever walks the table.
  */
-import { desc, ilike, or, sql } from 'drizzle-orm'
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 import type { ChainKey } from '@altscan/chain-config'
 import { lookalikeOf } from '@/lib/lookalike'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT } from '@/lib/token-search-rank'
 import { SUGGEST_MAX_CHARS, SUGGEST_MIN_CHARS, type TokenSuggestion } from '@/lib/search-suggest'
+
+type TokenType = typeof schema.tokens.$inferSelect['type']
 
 /** Suggestions shown. */
 export const SUGGEST_LIMIT = 5
@@ -125,15 +127,19 @@ export const SEARCH_EXACT_SCAN = 1_000
  * the SEARCH_POPULAR_ROWS most-held tokens, so for a ticker shared by more than `limit` rarer tokens these rows
  * are the only candidates, and an arbitrary ten could leave out the most-held.
  */
-export function exactMatchQuery(db: Db, q: string, limit: number) {
+export function exactMatchQuery(db: Db, q: string, limit: number, type?: TokenType, order: 'symbol-first' | 'holders' = 'symbol-first') {
   const t = schema.tokens
   const exact = db.select().from(t)
     .where(or(sql`lower(${t.symbol}) = ${q}`, sql`lower(${t.name}) = ${q}`))
     .limit(SEARCH_EXACT_SCAN)
     .as('exact')
-  // Exact symbol before exact name, then holders: rankTokenMatches' own tiers, so the cut keeps the ticker.
+  // /search: exact symbol before exact name, then holders (rankTokenMatches' own tiers), so the cut keeps the
+  // ticker. /token lists most-held first, so it cuts by holders alone: symbol-first would let 50 lesser-held
+  // symbol matches push out a better-held token that matches by name.
+  // A type is kept OUTSIDE the scan's limit, so it cannot lengthen the read.
   return db.select().from(exact)
-    .orderBy(sql`lower(${exact.symbol}) = ${q} DESC`, desc(exact.holderCount))
+    .where(type ? eq(exact.type, type) : undefined)
+    .orderBy(...(order === 'holders' ? [] : [sql`lower(${exact.symbol}) = ${q} DESC`]), desc(exact.holderCount))
     .limit(limit)
 }
 
@@ -151,14 +157,16 @@ export const SEARCH_POPULAR_ROWS = 20_000
  * flattened, so this reads the SEARCH_POPULAR_ROWS most-held tokens and stops. A rarer token is found by its exact
  * symbol or name (exactMatchQuery, which /search unions in) and by its prefix in the header typeahead.
  */
-export function searchCandidatesQuery(db: Db, query: string, limit: number) {
+export function searchCandidatesQuery(db: Db, query: string, limit: number, type?: TokenType) {
   const contains = `%${query.replace(/[%_\\]/g, '\\$&')}%`
   const popular = db.select().from(schema.tokens)
     .orderBy(desc(schema.tokens.holderCount))
     .limit(SEARCH_POPULAR_ROWS)
     .as('popular')
+  // A type is kept OUTSIDE the most-held cut for the same reason: inside, a rare type walked the holder index
+  // until it had SEARCH_POPULAR_ROWS of its own.
   return db.select().from(popular)
-    .where(or(ilike(popular.name, contains), ilike(popular.symbol, contains)))
+    .where(and(or(ilike(popular.name, contains), ilike(popular.symbol, contains)), type ? eq(popular.type, type) : undefined))
     .orderBy(desc(popular.holderCount))
     .limit(limit)
 }
@@ -177,4 +185,37 @@ export function shapeSuggestions(
     holders: t.holderCount,
     lookalikeOf: imitates(t),
   }))
+}
+
+/** /token's search box: what is longer than any symbol, name or address is dropped before it is matched. */
+export const TOKEN_LIST_QUERY_MAX = 64
+
+/**
+ * /token?q=: the tokens of one type that match `raw`, most-held first, at most `limit`, read by bounded lookups only.
+ * A full address is looked up by its primary key. Anything else is matched as /search matches it: an exact symbol or
+ * name (exactMatchQuery), or a substring among the SEARCH_POPULAR_ROWS most-held tokens (searchCandidatesQuery),
+ * with the visitor's % _ and \ taken literally.
+ *
+ * It used to be `'%q%'` against the name, symbol and address of every token of the type, ordered by holders. No
+ * index serves a contains match, so a q with fewer than `limit` matches (any random string) read every token of the
+ * type: the shape that hit the statement timeout on /search before #268, here on an anonymous page with no per-client
+ * limit. The trade is narrower matching: a substring of a token beyond the most-held rows, or part of an address, is
+ * no longer found; its exact symbol, name or address still is.
+ */
+export async function tokenListSearch(db: Db, raw: string, type: TokenType, limit: number) {
+  const q = raw.slice(0, TOKEN_LIST_QUERY_MAX).trim().toLowerCase()
+  if (!q) return []
+  const t = schema.tokens
+  if (/^0x[0-9a-f]{40}$/.test(q)) {
+    return db.select().from(t).where(and(eq(t.address, q), eq(t.type, type))).limit(1)
+  }
+  const [byHolders, exact] = await Promise.all([
+    searchCandidatesQuery(db, q, limit, type),
+    exactMatchQuery(db, q, limit, type, 'holders'),
+  ])
+  const seen = new Set<string>()
+  return [...byHolders, ...exact]
+    .filter((r) => !seen.has(r.address) && seen.add(r.address))
+    .sort((a, b) => b.holderCount - a.holderCount)
+    .slice(0, limit)
 }
