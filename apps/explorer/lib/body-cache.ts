@@ -10,7 +10,7 @@
  * the compact tx + a note. Already-local data is never affected.
  */
 import { getWebProvider } from './rpc'
-import { kvGet, kvSet } from '@altscan/explorer-core'
+import { getRedis, isRedisUnavailable, kvGet, kvSet } from '@altscan/explorer-core'
 import { bodyCacheKey, serializeTxBody, parseTxBody, type TxBody, type CachedLog } from './body-cache-serde'
 
 export type { TxBody, CachedLog } from './body-cache-serde'
@@ -60,6 +60,35 @@ export type { TxBody, CachedLog } from './body-cache-serde'
  * and raise the instance first if the product of the two exceeds ~100MB.
  */
 const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(2 * 60 * 60 * 1000), 10)
+
+/**
+ * The TTL bounds how LONG an entry lives, not how many bytes arrive: anyone can ask for pruned txs as fast as they
+ * like, and a transaction's sender chooses its calldata and logs. So two more bounds, both in UTF-8 bytes:
+ *
+ *   - an entry over BODY_CACHE_MAX_ENTRY_BYTES is served but not cached (a typical body is ~2.5 KB);
+ *   - at most BODY_CACHE_WINDOW_BYTES are admitted per window, one TTL long, counted in Redis (INCRBY + PEXPIRE on a
+ *     key per window, so the count resets as the entries it admitted expire; a plain counter would only rise until
+ *     caching stopped for good). An entry outlives its window by at most one TTL, so the cache holds under about 2x
+ *     the budget: 96 MB by default, on a 256 MB instance shared with the CU ledger and the response cache.
+ *
+ * A counter Redis cannot write is no admission: this cache never gets to fill a Redis the ledger needs. With no Redis
+ * at all, kvSet's in-memory fallback is 50 entries, so the entry cap bounds it.
+ */
+export const BODY_CACHE_MAX_ENTRY_BYTES = 64 * 1024
+const BODY_CACHE_WINDOW_BYTES = parseInt(process.env.BODY_CACHE_WINDOW_BYTES ?? String(48 * 1024 * 1024), 10)
+
+async function admitBody(bytes: number): Promise<boolean> {
+  const r = getRedis()
+  if (!r || isRedisUnavailable()) return true
+  const key = `body:admit:${Math.floor(Date.now() / BODY_CACHE_TTL_MS)}`
+  try {
+    const res = await r.multi().incrby(key, bytes).pexpire(key, 2 * BODY_CACHE_TTL_MS).exec()
+    const admitted = res?.[0]?.[1]   // [error, result] per command; a refused INCRBY (OOM) has no number
+    return typeof admitted === 'number' && admitted <= BODY_CACHE_WINDOW_BYTES
+  } catch {
+    return false
+  }
+}
 
 /** Fetch input calldata + receipt logs from the node. Null on any failure. */
 export async function fetchTxBodyFromRpc(hash: string): Promise<TxBody | null> {
@@ -114,6 +143,11 @@ export async function getTxBody(hash: string): Promise<TxBody | null> {
   const cached = parseTxBody(await kvGet(key).catch(() => null))
   if (cached) return cached
   const body = await fetchTxBodyFromRpc(hash)
-  if (body) await kvSet(key, serializeTxBody(body), BODY_CACHE_TTL_MS).catch(() => {})
+  if (!body) return null
+  const value = serializeTxBody(body)
+  const bytes = Buffer.byteLength(value, 'utf8')
+  if (bytes <= BODY_CACHE_MAX_ENTRY_BYTES && await admitBody(bytes)) {
+    await kvSet(key, value, BODY_CACHE_TTL_MS).catch(() => {})
+  }
   return body
 }

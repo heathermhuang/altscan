@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchTxBodyFromRpc, fetchTxInputFromRpc, getTxBody } from './body-cache'
 import { getWebProvider } from './rpc'
 import { kvGet, kvSet } from '@altscan/explorer-core'
@@ -8,6 +8,8 @@ vi.mock('./rpc', () => ({ getWebProvider: vi.fn() }))
 vi.mock('@altscan/explorer-core', () => ({
   kvGet: vi.fn(async () => null),
   kvSet: vi.fn(async () => {}),
+  getRedis: vi.fn(() => null),          // no Redis unless a test says so: kvSet's bounded in-memory fallback
+  isRedisUnavailable: vi.fn(() => false),
 }))
 
 const HASH = '0x' + 'ab'.repeat(32)
@@ -151,5 +153,106 @@ describe('fetchTxInputFromRpc', () => {
     expect(await fetchTxInputFromRpc(HASH)).toBeNull()
     mockProvider({ throws: true })
     expect(await fetchTxInputFromRpc(HASH)).toBeNull()
+  })
+})
+
+// The TTL bounds how long an entry lives, not how many bytes arrive: a sender chooses a transaction's calldata and
+// logs, and anyone can ask for pruned txs as fast as they like. All of it lands in the noeviction Redis the CU
+// ledger needs.
+describe('getTxBody byte bounds', () => {
+  const TTL = 2 * 60 * 60 * 1000
+  const T0 = Date.UTC(2026, 10, 8, 12, 0, 0)
+  /** A stand-in for ioredis' MULTI: INCRBY + PEXPIRE, run at exec. */
+  function fakeRedis(fail?: 'oom' | 'closed') {
+    const counts = new Map<string, number>()
+    const expiries = new Map<string, number>()
+    const client = {
+      multi: () => {
+        const ops: Array<() => [Error | null, unknown]> = []
+        const chain = {
+          incrby: (k: string, n: number) => {
+            ops.push(() => {
+              if (fail === 'oom') return [new Error("OOM command not allowed when used memory > 'maxmemory'."), null]
+              counts.set(k, (counts.get(k) ?? 0) + n)
+              return [null, counts.get(k)]
+            })
+            return chain
+          },
+          pexpire: (k: string, ms: number) => { ops.push(() => { expiries.set(k, ms); return [null, 1] }); return chain },
+          exec: async () => { if (fail === 'closed') throw new Error('Connection is closed.'); return ops.map((op) => op()) },
+        }
+        return chain
+      },
+    }
+    return { client, counts, expiries }
+  }
+  async function load(env: { windowBytes?: number } = {}) {
+    vi.resetModules()
+    delete process.env.BODY_CACHE_TTL_MS
+    if (env.windowBytes === undefined) delete process.env.BODY_CACHE_WINDOW_BYTES
+    else process.env.BODY_CACHE_WINDOW_BYTES = String(env.windowBytes)
+    const mod = await import('./body-cache')
+    const core = await import('@altscan/explorer-core')
+    const rpc = await import('./rpc')
+    vi.mocked(core.kvGet).mockResolvedValue(null)
+    const withInput = (input: string) => vi.mocked(rpc.getWebProvider).mockResolvedValue({
+      getTransaction: vi.fn(async () => ({ data: input })),
+      getTransactionReceipt: vi.fn(async () => ({ logs: [] })),
+    } as never)
+    return { mod, core, withInput }
+  }
+  const bytesOf = (input: string) => Buffer.byteLength(serializeTxBody({ input, logs: [] }), 'utf8')
+
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(T0) })
+  afterEach(() => { vi.useRealTimers(); delete process.env.BODY_CACHE_WINDOW_BYTES })
+
+  it('serves a body over the entry cap without caching or counting it', async () => {
+    const { mod, core, withInput } = await load()
+    const redis = fakeRedis()
+    vi.mocked(core.getRedis).mockReturnValue(redis.client as never)
+    const big = '0x' + 'ab'.repeat(mod.BODY_CACHE_MAX_ENTRY_BYTES / 2)
+    withInput(big)
+    expect((await mod.getTxBody(HASH))?.input).toBe(big)
+    expect(core.kvSet).not.toHaveBeenCalled()
+    expect(redis.counts.size).toBe(0)
+
+    const atCap = '0x' + 'ab'.repeat((mod.BODY_CACHE_MAX_ENTRY_BYTES - bytesOf('0x')) / 2)
+    expect(bytesOf(atCap)).toBe(mod.BODY_CACHE_MAX_ENTRY_BYTES)
+    withInput(atCap)
+    await mod.getTxBody(HASH)
+    expect(core.kvSet).toHaveBeenCalledTimes(1)
+  })
+
+  it("admits bytes up to the window's budget, then nothing until the next window", async () => {
+    const input = '0x' + 'cd'.repeat(500)
+    const { mod, core, withInput } = await load({ windowBytes: Math.floor(2.5 * bytesOf(input)) })
+    const redis = fakeRedis()
+    vi.mocked(core.getRedis).mockReturnValue(redis.client as never)
+    withInput(input)
+    for (let i = 0; i < 3; i++) await mod.getTxBody(HASH)
+    expect(core.kvSet).toHaveBeenCalledTimes(2)
+    const key = `body:admit:${Math.floor(T0 / TTL)}`
+    expect(redis.counts.get(key)).toBe(3 * bytesOf(input))
+    expect(redis.expiries.get(key)).toBe(2 * TTL)   // the count outlives every entry it admitted
+
+    vi.setSystemTime(T0 + TTL)
+    await mod.getTxBody(HASH)
+    expect(core.kvSet).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['oom', 'closed'] as const)('caches nothing when Redis cannot count it (%s)', async (fail) => {
+    const { mod, core, withInput } = await load()
+    vi.mocked(core.getRedis).mockReturnValue(fakeRedis(fail).client as never)
+    withInput('0x01')
+    expect((await mod.getTxBody(HASH))?.input).toBe('0x01')
+    expect(core.kvSet).not.toHaveBeenCalled()
+  })
+
+  it("with no Redis, caches through kvSet's bounded in-memory fallback", async () => {
+    const { mod, core, withInput } = await load()
+    vi.mocked(core.getRedis).mockReturnValue(null)
+    withInput('0x01')
+    await mod.getTxBody(HASH)
+    expect(core.kvSet).toHaveBeenCalledTimes(1)
   })
 })
