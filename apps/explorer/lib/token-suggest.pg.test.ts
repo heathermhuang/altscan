@@ -301,6 +301,13 @@ describe.skipIf(!PG_URL)('token suggestion + exact-match lookups — against a r
       expect(await tokenListSearch(db, RARE_NFT.slice(0, 20), 'BEP721', 50)).toEqual([])   // part of an address
     })
 
+    // /token lists most-held first, so its exact lookup cuts by holders too: 15 DUPE tickers (1-15 holders) must
+    // not push out the 12 better-held tokens NAMED Dupe (101-112). /search keeps ranking the ticker first.
+    it('cuts the exact matches by holders, not symbol first', async () => {
+      expect((await tokenListSearch(db, 'dupe', 'BEP20', 10)).map((r) => r.holderCount)).toEqual([112, 111, 110, 109, 108, 107, 106, 105, 104, 103])
+      expect((await exactMatchQuery(db, 'dupe', 10)).map((r) => r.symbol)).toEqual(Array(10).fill('DUPE'))
+    })
+
     it('returns the most-held first, at most limit, each token once', async () => {
       const rows = await tokenListSearch(db, 'usdt', 'BEP20', 50)
       expect(rows).toHaveLength(50)

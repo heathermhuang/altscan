@@ -127,17 +127,19 @@ export const SEARCH_EXACT_SCAN = 1_000
  * the SEARCH_POPULAR_ROWS most-held tokens, so for a ticker shared by more than `limit` rarer tokens these rows
  * are the only candidates, and an arbitrary ten could leave out the most-held.
  */
-export function exactMatchQuery(db: Db, q: string, limit: number, type?: TokenType) {
+export function exactMatchQuery(db: Db, q: string, limit: number, type?: TokenType, order: 'symbol-first' | 'holders' = 'symbol-first') {
   const t = schema.tokens
   const exact = db.select().from(t)
     .where(or(sql`lower(${t.symbol}) = ${q}`, sql`lower(${t.name}) = ${q}`))
     .limit(SEARCH_EXACT_SCAN)
     .as('exact')
-  // Exact symbol before exact name, then holders: rankTokenMatches' own tiers, so the cut keeps the ticker.
+  // /search: exact symbol before exact name, then holders (rankTokenMatches' own tiers), so the cut keeps the
+  // ticker. /token lists most-held first, so it cuts by holders alone: symbol-first would let 50 lesser-held
+  // symbol matches push out a better-held token that matches by name.
   // A type is kept OUTSIDE the scan's limit, so it cannot lengthen the read.
   return db.select().from(exact)
     .where(type ? eq(exact.type, type) : undefined)
-    .orderBy(sql`lower(${exact.symbol}) = ${q} DESC`, desc(exact.holderCount))
+    .orderBy(...(order === 'holders' ? [] : [sql`lower(${exact.symbol}) = ${q} DESC`]), desc(exact.holderCount))
     .limit(limit)
 }
 
@@ -209,7 +211,7 @@ export async function tokenListSearch(db: Db, raw: string, type: TokenType, limi
   }
   const [byHolders, exact] = await Promise.all([
     searchCandidatesQuery(db, q, limit, type),
-    exactMatchQuery(db, q, limit, type),
+    exactMatchQuery(db, q, limit, type, 'holders'),
   ])
   const seen = new Set<string>()
   return [...byHolders, ...exact]
