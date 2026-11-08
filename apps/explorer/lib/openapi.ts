@@ -293,6 +293,7 @@ export const OPERATIONS: Record<string, Operation> = {
       200: json('The token, and the well-known token its name or symbol imitates.', object({
         token: ref('Token'),
         lookalike: { ...orNull(ref('Lookalike')), description: 'null means no match against a short list of well-known tokens; it is not a safety verdict.' },
+        directionalControls: { type: 'boolean', description: 'true when the name or symbol contains Unicode direction controls (U+061C, U+200E/F, U+202A–202E, U+2066–2069), which can make it display in a different order than it is stored. The token fields are returned as stored.' },
       })),
       400: error('Not a 20-byte hex address.'), 404: error('Not in the token index.'), 429: RATE_LIMITED, 500: INTERNAL,
     },

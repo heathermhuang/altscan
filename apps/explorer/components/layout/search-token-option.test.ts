@@ -20,7 +20,7 @@ describe('typeahead token row', () => {
 
   it('still shows the symbol, the name and the lookalike badge', () => {
     const bad = renderToStaticMarkup(createElement(TokenOption, { token: { address: '0x' + '2'.repeat(40), symbol: 'USDT', name: 'Fake', holders: 3, lookalikeOf: 'USDT' } }))
-    expect(html).toContain('>USDT</span>')
+    expect(html).toContain('<bdi>USDT</bdi>')   // isolated: lib/directional-controls
     expect(html).toContain('Tether USD')
     expect(bad).toContain('lookalike')
   })

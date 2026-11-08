@@ -8,6 +8,7 @@
  */
 import { clipText } from '@/lib/clip-text'
 import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
+import { stripDirectionalControls } from '@/lib/directional-controls'
 import type { StripTile } from '@/lib/tape'
 
 export interface HolderShares {
@@ -75,7 +76,7 @@ export interface HolderRow {
 /** One tile per holder, in rank order, then an "others" tile for the rest of the supply. */
 export function holderStripTiles(rows: readonly HolderRow[], shares: HolderShares, symbol: string): StripTile[] {
   // A symbol that reads as a web address or a handle is an advert (lib/link-in-name.ts): the readout says "tokens".
-  const unit = looksLikeUrlOrHandle(symbol) ? 'tokens' : clipText(symbol, 8)
+  const unit = looksLikeUrlOrHandle(symbol) ? 'tokens' : clipText(stripDirectionalControls(symbol), 8)
   const tiles: StripTile[] = rows.map((r, i) => ({
     href: `/address/${r.addr.toLowerCase()}`,
     w: Math.max(1, shares.ppm[i] ?? 0),

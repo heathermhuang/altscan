@@ -59,7 +59,7 @@ describe('lookalike badge on the token lists', () => {
 
   it('/search gives an unflagged row the bare link, with nothing after it in the cell', async () => {
     const html = await searchHtml()
-    const cakeCell = html.match(new RegExp(`<td><a [^>]*href="/token/${CAKE_ADDR}"[^>]*>PancakeSwap Token</a></td>`))
+    const cakeCell = html.match(new RegExp(`<td><a [^>]*href="/token/${CAKE_ADDR}"[^>]*><bdi>PancakeSwap Token</bdi></a></td>`))
     expect(cakeCell).not.toBeNull()
   })
 

@@ -3,6 +3,7 @@ import { formatNumber } from '@/lib/format'
 import { shortenAddress, shortHash } from '@/lib/address-display'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { stripDirectionalControls } from '@/lib/directional-controls'
 
 export type NftTransfer = {
   txHash: string
@@ -23,9 +24,9 @@ export function NftRow({ t, addr }: { t: NftTransfer; addr: string }) {
     <tr className="hover:bg-canvas transition-colors">
       <td className="px-3 sm:px-4 py-2">
         <Link href={`/token/${t.tokenAddress}`} className={linkLike ? 'text-acc-ink hover:underline font-medium' : 'text-acc-ink hover:underline'}>
-          {t.name ?? shortenAddress(t.tokenAddress)}
+          <bdi>{t.name != null ? stripDirectionalControls(t.name) : shortenAddress(t.tokenAddress)}</bdi>
         </Link>
-        {t.symbol && <span className="ml-1 text-xs text-mut">({t.symbol})</span>}
+        {t.symbol && <span className="ml-1 text-xs text-mut">(<bdi>{stripDirectionalControls(t.symbol)}</bdi>)</span>}
         {linkLike && <LinkInName className="ml-2" />}
       </td>
       <td className="px-3 sm:px-4 py-2 font-mono text-[13px]">

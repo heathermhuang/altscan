@@ -1,6 +1,7 @@
 import { formatUnits } from 'ethers'
 import { shortenAddress } from './address-display'
 import { anyLinkLike } from './link-in-name'
+import { stripDirectionalControls } from './directional-controls'
 
 /** Safely convert a numeric string (possibly with decimals) to BigInt */
 export function safeBigInt(value: string | number | bigint | null | undefined): bigint {
@@ -233,9 +234,13 @@ export function formatUtcClock(date: Date | string | number): string {
 // token 'Unknown Token'. Those are "missing", not a real symbol.
 const PLACEHOLDER_TOKEN_TEXT: ReadonlySet<string> = new Set(['???', 'Unknown', 'Unknown Token'])
 
-/** `raw` unless it is empty or an indexer placeholder. Does NOT sanitise — for text already shown verbatim. */
+/**
+ * `raw` unless it is empty or an indexer placeholder. Does NOT sanitise — for text already shown verbatim — except that
+ * directional controls are stripped, so the text draws in the order it is stored (lib/directional-controls).
+ */
 export function tokenTextOr(raw: string | null | undefined, fallback: string): string {
-  return raw && !PLACEHOLDER_TOKEN_TEXT.has(raw) ? raw : fallback
+  const text = raw ? stripDirectionalControls(raw) : ''
+  return text && !PLACEHOLDER_TOKEN_TEXT.has(text) ? text : fallback
 }
 
 /**
@@ -277,10 +282,11 @@ export function tokenText(
 /**
  * A token's symbol as inline text where the page prints it exactly as it always did (the token page, its holders table, a
  * /dex leg): the symbol as given, except a symbol that reads as a URL or handle is the token's short address. Only the URL
- * rule is applied, unlike `tokenText().symbol`, which also sanitises. The symbol side of `tokenText`, without the label.
+ * rule is applied, unlike `tokenText().symbol`, which also sanitises, and directional controls are stripped as in
+ * `tokenTextOr`. The symbol side of `tokenText`, without the label.
  */
 export function tokenUnit(symbol: string, address: string): string {
-  return anyLinkLike(symbol, sanitizeSymbolOr(symbol, '')) ? shortenAddress(address) : symbol
+  return anyLinkLike(symbol, sanitizeSymbolOr(symbol, '')) ? shortenAddress(address) : stripDirectionalControls(symbol)
 }
 
 /**

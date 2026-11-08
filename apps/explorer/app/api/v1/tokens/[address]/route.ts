@@ -5,6 +5,7 @@ import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { chainConfig } from '@/lib/chain'
 import { lookalikeOf } from '@/lib/lookalike'
+import { hasDirectionalControls } from '@/lib/directional-controls'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +45,13 @@ export async function GET(
   }
 
   // Evidence, not a verdict: a name or symbol that reads as a well-known token on another contract.
-  // null means no match against that short list, never "safe".
-  return apiJson({ token: tokens[0], lookalike: lookalikeOf(tokens[0], chainConfig.key) })
+  // null means no match against that short list, never "safe". directionalControls: the name or symbol holds Unicode
+  // direction controls, which can make it display in another order than stored (lib/directional-controls). The token's
+  // fields are returned as stored.
+  const token = tokens[0]
+  return apiJson({
+    token,
+    lookalike: lookalikeOf(token, chainConfig.key),
+    directionalControls: hasDirectionalControls(token.name) || hasDirectionalControls(token.symbol),
+  })
 }

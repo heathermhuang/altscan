@@ -14,6 +14,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { analyzeTokenRisk, type RiskSignal } from '@/lib/token-risk'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
+import { hasDirectionalControls, stripDirectionalControls } from '@/lib/directional-controls'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
 import { tokenTypeLabel } from '@/lib/token-type-label'
@@ -111,9 +112,19 @@ async function healPlaceholderMeta(
 
 // "Name (SYMBOL)", the token as the metadata and the breadcrumb JSON-LD name it. Crawlers and link previews read those
 // without the badge a visitor sees beside the header, so a name or symbol that reads as a URL or handle (lib/link-in-name)
-// is an advert there: the token is named by its short address instead.
+// is an advert there: the token is named by its short address instead. Directional controls are stripped, as on the page:
+// a title has no <bdi>, and U+202E + "TDSU" would title the page "USDT".
 function tokenIdentity(token: { name: string; symbol: string }, address: string): string {
-  return tokenText(token.symbol, token.name, address).linkLike ? shortenAddress(address) : `${token.name} (${token.symbol})`
+  return tokenText(token.symbol, token.name, address).linkLike
+    ? shortenAddress(address)
+    : `${stripDirectionalControls(token.name)} (${stripDirectionalControls(token.symbol)})`
+}
+
+const DIRECTION_CONTROLS_SIGNAL: RiskSignal = {
+  label: 'Direction controls',
+  ok: false,
+  severity: 'warn',
+  description: 'The name or symbol contains Unicode direction controls, which can make text display in a different order than it is stored. They are removed here.',
 }
 
 // Missing tokens return noindex metadata instead of throwing notFound(): on
@@ -275,9 +286,13 @@ export default async function TokenDetailPage({
 
   // Pure string check, so it holds on the live (RPC-only) path too, where analyzeTokenRisk is skipped.
   const lookalike = lookalikeOf({ address: addr, symbol: token.symbol, name: token.name }, chainConfig.key)
-  const signals: RiskSignal[] = lookalike
-    ? [{ label: 'Lookalike', ok: false, severity: 'danger', description: lookalikeNote(lookalike) }, ...riskSignals]
-    : riskSignals
+  // The page strips them, so what it shows is the stored order; the signal says they were there. A pure string check too.
+  const directional = hasDirectionalControls(token.name) || hasDirectionalControls(token.symbol)
+  const signals: RiskSignal[] = [
+    ...(lookalike ? [{ label: 'Lookalike', ok: false, severity: 'danger', description: lookalikeNote(lookalike) } as const] : []),
+    ...(directional ? [DIRECTION_CONTROLS_SIGNAL] : []),
+    ...riskSignals,
+  ]
 
   // A flagged lookalike must not read as a stablecoin: that would put the stablecoin referral CTA on a scam token.
   const tokenReferralContext = !lookalike && isStablecoinToken(addr, chainConfig)
@@ -309,8 +324,8 @@ export default async function TokenDetailPage({
         <p className="k">{'// '}token</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="mr-1 min-w-0 [overflow-wrap:anywhere] text-[clamp(26px,3.4vw,40px)] font-bold leading-[1.05] tracking-[-0.03em] text-ink">
-            {nameText}
-            {symbolText !== '—' && <>{' '}<span className="font-mono font-semibold text-ink2">{symbolText}</span></>}
+            <bdi>{nameText}</bdi>
+            {symbolText !== '—' && <>{' '}<span className="font-mono font-semibold text-ink2"><bdi>{symbolText}</bdi></span></>}
           </h1>
           {/* Beside the h1, not in it: inside, "lookalike of USDT" would become part of the page's heading name. */}
           {lookalike && (

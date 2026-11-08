@@ -146,7 +146,7 @@ export default async function TokenListPage({
             {tokens.map((t, i) => {
               const nameLink = (
                 <Link href={`/token/${t.address}`} prefetch={false} className="text-acc-ink font-medium hover:underline">
-                  {tokenTextOr(t.name, shortenAddress(t.address))}
+                  <bdi>{tokenTextOr(t.name, shortenAddress(t.address))}</bdi>
                 </Link>
               )
               // Flagged rows only: an unflagged row's cell is the bare link, with no extra node in the HTML or the flight payload.
@@ -168,7 +168,7 @@ export default async function TokenListPage({
                       </>
                     ) : nameLink}
                   </td>
-                  <td className="text-mut">{tokenTextOr(t.symbol, '—')}</td>
+                  <td className="text-mut"><bdi>{tokenTextOr(t.symbol, '—')}</bdi></td>
                   <td>{formatHolders(t.holderCount)}</td>
                   <td className="text-mut">
                     {hasSupply(t.totalSupply) ? formatSupply(t.totalSupply, t.decimals) : '—'}

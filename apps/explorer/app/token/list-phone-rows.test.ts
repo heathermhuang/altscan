@@ -49,7 +49,7 @@ describe('/token list cell contract', () => {
     expect(first[0].inner).toBe('1')
     expect(first[1].inner).toContain('href="/token/0x55d398326f99059ff775485246999027b3197955"')
     expect(first[1].inner).toContain('Tether USD')
-    expect(first[2].inner).toBe('USDT')
+    expect(first[2].inner).toBe('<bdi>USDT</bdi>')   // isolated: lib/directional-controls
     expect(first[3].inner).toBe('835,871')
     expect(first[4].inner).toBe('4.76B')
     expect(clone[1].inner).toContain('lookalike')

@@ -5,6 +5,7 @@ import { chainConfig } from '@/lib/chain'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
+import { stripDirectionalControls } from '@/lib/directional-controls'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT, SEARCH_EXACT_LIMIT, SEARCH_RESULT_LIMIT } from '@/lib/token-search-rank'
 import { normaliseSearchQuery } from '@/lib/search-route'
 import { exactMatchQuery, searchCandidatesQuery } from '@/lib/token-suggest'
@@ -107,7 +108,7 @@ export default async function SearchPage({
                   {tokenMatches.map(token => {
                     const nameLink = (
                       <Link href={`/token/${token.address}`} prefetch={false} className="text-acc-ink font-medium hover:underline">
-                        {token.name}
+                        <bdi>{stripDirectionalControls(token.name)}</bdi>
                       </Link>
                     )
                     // Same badge as the /token list, on flagged rows only: an unflagged row's cell is the bare link.
@@ -128,7 +129,7 @@ export default async function SearchPage({
                             </>
                           ) : nameLink}
                         </td>
-                        <td className="text-ink">{token.symbol}</td>
+                        <td className="text-ink"><bdi>{stripDirectionalControls(token.symbol)}</bdi></td>
                         <td className="text-mut">{tokenTypeLabel(token.type, chainConfig.tokenStandard)}</td>
                         <td>
                           <Link href={`/token/${token.address}`} prefetch={false} className="text-acc-ink hover:underline">
