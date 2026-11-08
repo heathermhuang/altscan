@@ -252,6 +252,10 @@ export default async function AddressPage({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* No verdict is not a clean bill: say the check did not run, rather than show nothing. */}
+      {riskData === null && (
+        <p className="mb-4 text-xs text-mut">Security check unavailable: GoPlus did not return a verdict for this address.</p>
+      )}
       {/* GoPlus risk warning */}
       {riskData && (riskData.isMalicious || riskData.isPhishing || riskData.isBlacklist) && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-hair border-l-[3px] border-l-warn bg-card px-4 py-3">

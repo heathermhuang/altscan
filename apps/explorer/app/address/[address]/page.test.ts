@@ -13,7 +13,7 @@ const URLTOK = '0x' + '6'.repeat(40)
 const NFT = '0x' + '4'.repeat(40)
 const SHORT_URLTOK = shortenAddress(URLTOK)
 type Row = Record<string, unknown>
-const h = vi.hoisted(() => ({ tables: new Map<unknown, Row[]>(), exec: [] as Row[] }))
+const h = vi.hoisted(() => ({ tables: new Map<unknown, Row[]>(), exec: [] as Row[], risk: null as unknown }))
 
 vi.mock('@/lib/db', async () => {
   const { schema } = await import('@altscan/db')
@@ -33,7 +33,7 @@ vi.mock('next/headers', () => ({ headers: async () => new Headers({ 'user-agent'
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('notFound') } }))
 vi.mock('@/lib/rpc', () => ({ getWebProvider: async () => ({ getBalance: async () => 0n, getTransactionCount: async () => 0, getCode: async () => '0x' }) }))
 vi.mock('@/lib/name-resolver', () => ({ resolveName: async () => null }))
-vi.mock('@/lib/goplus', () => ({ getAddressRisk: async () => null }))
+vi.mock('@/lib/goplus', () => ({ getAddressRisk: async () => h.risk }))
 vi.mock('@/lib/native-price', () => ({ fetchNativeUsd: async () => null }))
 vi.mock('@/lib/providers', () => ({ isBotRequest: () => false }))
 vi.mock('@/lib/retention', () => ({ getRetentionFloor: async () => null, isLocalHistoryIncomplete: () => false }))
@@ -61,7 +61,7 @@ const rows = (html: string) =>
   [...html.matchAll(/<tr class="hover:bg-canvas transition-colors">(.*?)<\/tr>/g)]
     .map((m) => [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((c) => c[1].replace(/<[^>]+>/g, '')))
 
-beforeEach(() => { h.tables.clear(); h.exec = [] })
+beforeEach(() => { h.tables.clear(); h.exec = []; h.risk = null })
 
 describe('address page, Transfers tab', () => {
   it('prints each row\'s token from the token lookup: its label in the cell and its symbol after the amount', async () => {
@@ -88,5 +88,27 @@ describe('address page, NFTs tab', () => {
     const r = rows(html)
     expect(r.map((c) => c[0])).toEqual(['Visit claim-bnb.xyz(NFT)link in name', 'Cool Apes(APE)'])
     expect(r.map((c) => c[2])).toEqual(['Received', 'Sent'])
+  })
+})
+
+// GoPlus gives a verdict or nothing. Nothing used to render nothing, exactly as a clean address does.
+describe('address page, GoPlus security check', () => {
+  const UNAVAILABLE = 'Security check unavailable'
+  it('says the check is unavailable when there is no verdict', async () => {
+    h.risk = null
+    const html = await render('transfers')
+    expect(html).toContain(UNAVAILABLE)
+    expect(html).not.toContain('Security Risk Detected')
+  })
+
+  it('says nothing for a clean verdict, and warns for a flagged one', async () => {
+    h.risk = { isContract: false, isMalicious: false, isPhishing: false, isBlacklist: false, riskItems: [] }
+    const cleanHtml = await render('transfers')
+    expect(cleanHtml).not.toContain(UNAVAILABLE)
+    expect(cleanHtml).not.toContain('Security Risk Detected')
+    h.risk = { isContract: false, isMalicious: false, isPhishing: true, isBlacklist: false, riskItems: ['Known phishing activity'] }
+    const flaggedHtml = await render('transfers')
+    expect(flaggedHtml).toContain('Security Risk Detected')
+    expect(flaggedHtml).toContain('Known phishing activity')
   })
 })
