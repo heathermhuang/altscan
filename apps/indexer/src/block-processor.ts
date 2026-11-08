@@ -355,6 +355,126 @@ export async function traceWithinBudget(
   }
 }
 
+/** Decode a block's traces and report what the decoder refused. Null: nothing usable. */
+function decodeTraces(raw: readonly RawTraceTx[], blockNumber: number, timestamp: Date, txHashes: readonly string[]): InternalTxRow[] | null {
+  const prepared = prepareInternalTxRows(raw, blockNumber, timestamp, txHashes)
+  if (prepared.problem) {
+    reportInternalTxProblem('trace', blockNumber, prepared.problem)
+    return null
+  }
+  if (prepared.dropped > 0) {
+    reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.dropped} trace entr(ies) do not belong to the block, dropped`))
+  }
+  if (prepared.overlong > 0) {
+    reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.overlong} frame(s) nested too deep to store (trace address over ${MAX_TRACE_ADDRESS_LEN} characters), skipped`))
+  }
+  return prepared.rows
+}
+
+/** Natural key + ON CONFLICT DO NOTHING, so a replay or a re-trace never duplicates. Never throws. */
+async function insertInternalTxRows(db: ReturnType<typeof getDb>, rows: InternalTxRow[], blockNumber: number): Promise<boolean> {
+  for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
+    try {
+      await db.insert(schema.internalTransactions).values(rows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
+    } catch (err) {
+      reportInternalTxProblem('insert', blockNumber, err)
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * A block stored without internal transactions because its trace failed gets a few
+ * more tries, a few blocks later: a trace node a block or two behind the tip says
+ * "not found" for the newest block and has it moments later. The main loop drives it
+ * (retraceMissedBlocks) and never waits on it, so indexing stays decoupled from the
+ * trace service.
+ *
+ * Bounded three ways: at most RETRACE_BACKLOG_MAX blocks (the oldest goes first), at
+ * most RETRACE_MAX_ATTEMPTS re-traces each (RETRACE_AFTER_BLOCKS, then doubling), and
+ * only while the block is within INTERNAL_TX_MAX_LAG of the tip, the same window the
+ * first trace uses.
+ *
+ * In memory only: a restart drops it, and those blocks keep no internal transactions.
+ * The shutdown line counts them.
+ */
+export const RETRACE_AFTER_BLOCKS = 4
+export const RETRACE_MAX_ATTEMPTS = 4
+export const RETRACE_BACKLOG_MAX = 256
+/** Re-traces start only while this many trace calls or fewer are open: the spare half of the cap. */
+export const RETRACE_MAX_IN_FLIGHT = indexerConfig.indexing.concurrency
+
+type TraceMiss = { timestamp: Date; txHashes: string[]; attempts: number; dueAt: number; tracing: boolean }
+const traceMisses = new Map<number, TraceMiss>()
+const retraces = new Set<Promise<void>>()
+let retracesRecovered = 0
+let retracesDropped = 0
+
+function dropTraceMiss(blockNumber: number, why: string): void {
+  // Already gone means a reorg unwind forgot it mid-retrace: nothing to count.
+  if (!traceMisses.delete(blockNumber)) return
+  retracesDropped++
+  reportInternalTxProblem('trace', blockNumber, new Error(`re-trace abandoned (${why}); the block keeps no internal transactions`))
+}
+
+function noteTraceMiss(blockNumber: number, timestamp: Date, txHashes: string[]): void {
+  if (!traceMisses.has(blockNumber) && traceMisses.size >= RETRACE_BACKLOG_MAX) {
+    // Map order is insertion order, so the first key is the block that missed first.
+    dropTraceMiss(traceMisses.keys().next().value as number, `backlog full at ${RETRACE_BACKLOG_MAX}`)
+  }
+  traceMisses.set(blockNumber, { timestamp, txHashes, attempts: 0, dueAt: blockNumber + RETRACE_AFTER_BLOCKS, tracing: false })
+}
+
+async function retrace(provider: JsonRpcProvider, blockNumber: number, miss: TraceMiss): Promise<void> {
+  const raw = await traceWithinBudget(provider, blockNumber, { maxInFlight: RETRACE_MAX_IN_FLIGHT })
+  // A reorg unwind forgot this block while the trace was open: its rows are not wanted.
+  if (traceMisses.get(blockNumber) !== miss) return
+  if (raw) {
+    const rows = decodeTraces(raw, blockNumber, miss.timestamp, miss.txHashes)
+    if (rows === null) return dropTraceMiss(blockNumber, 'traces did not decode')
+    if (await insertInternalTxRows(getDb(), rows, blockNumber)) {
+      traceMisses.delete(blockNumber)
+      retracesRecovered++
+      return
+    }
+  }
+  miss.attempts++
+  if (miss.attempts >= RETRACE_MAX_ATTEMPTS) return dropTraceMiss(blockNumber, `${miss.attempts} re-traces failed`)
+  miss.dueAt = blockNumber + (RETRACE_AFTER_BLOCKS << miss.attempts)
+}
+
+/**
+ * Called once per main-loop batch with the tip just read. Starts the due re-traces in
+ * the background and returns at once; never throws.
+ */
+export function retraceMissedBlocks(provider: JsonRpcProvider, latest: number, maxLag: number): void {
+  for (const [blockNumber, miss] of traceMisses) {
+    if (miss.tracing) continue
+    if (latest - blockNumber > maxLag) { dropTraceMiss(blockNumber, `more than ${maxLag} blocks behind the tip`); continue }
+    if (latest < miss.dueAt || tracesInFlight() >= RETRACE_MAX_IN_FLIGHT) continue
+    // Held until the whole retrace ends, insert included: a slow insert must not let
+    // the next batch start the same block again, outside the cap and the attempt count.
+    miss.tracing = true
+    const task = retrace(provider, blockNumber, miss).finally(() => { miss.tracing = false; retraces.delete(task) })
+    retraces.add(task)
+  }
+}
+
+/**
+ * Before a reorg unwind: wait for open re-traces, so none inserts rows after the
+ * unwind's delete, and forget the blocks the unwind removes. The re-index traces
+ * them again.
+ */
+export async function forgetTraceMissesFrom(fromBlock: number): Promise<void> {
+  for (const blockNumber of [...traceMisses.keys()]) if (blockNumber >= fromBlock) traceMisses.delete(blockNumber)
+  await Promise.all([...retraces])
+}
+
+export function retraceBacklogStats(): { pending: number; recovered: number; dropped: number } {
+  return { pending: traceMisses.size, recovered: retracesRecovered, dropped: retracesDropped }
+}
+
 export async function processBlock(
   blockNumber: number,
   provider: JsonRpcProvider,
@@ -430,18 +550,9 @@ export async function processBlock(
   // malformed frame threw with the block half-persisted (pinning the cursor and
   // blocking quarantine). It is also where traces for transactions that are not
   // in this block are dropped. Never throws — see prepareInternalTxRows.
-  let itxRows: InternalTxRow[] = []
-  if (rawTraces) {
-    const prepared = prepareInternalTxRows(rawTraces, blockNumber, timestamp, block.prefetchedTransactions.map(tx => tx.hash))
-    itxRows = prepared.rows
-    if (prepared.problem) reportInternalTxProblem('trace', blockNumber, prepared.problem)
-    else if (prepared.dropped > 0) {
-      reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.dropped} trace entr(ies) do not belong to the block, dropped`))
-    }
-    if (prepared.overlong > 0) {
-      reportInternalTxProblem('trace', blockNumber, new Error(`${prepared.overlong} frame(s) nested too deep to store (trace address over ${MAX_TRACE_ADDRESS_LEN} characters), skipped`))
-    }
-  }
+  const itxRows = rawTraces
+    ? decodeTraces(rawTraces, blockNumber, timestamp, block.prefetchedTransactions.map(tx => tx.hash)) ?? []
+    : []
 
   // Map tx hash → receipt so we can populate tx.status / tx.gasUsed at INSERT
   // time instead of via a follow-up UPDATE pass.
@@ -520,13 +631,10 @@ export async function processBlock(
   // a replay is a no-op, never a duplicate. Degrades rather than throws — writes
   // have begun, and a throw here would hand a partially persisted block to the
   // poison path over a secondary table.
-  for (let i = 0; i < itxRows.length; i += SQL_BATCH_CHUNK) {
-    try {
-      await db.insert(schema.internalTransactions).values(itxRows.slice(i, i + SQL_BATCH_CHUNK)).onConflictDoNothing()
-    } catch (err) {
-      reportInternalTxProblem('insert', blockNumber, err)
-      break
-    }
+  await insertInternalTxRows(db, itxRows, blockNumber)
+  // A failed trace (not an empty one) gets a few more tries in the background.
+  if (traceProvider && rawTraces === null) {
+    noteTraceMiss(blockNumber, timestamp, block.prefetchedTransactions.map(tx => tx.hash))
   }
 
   // ── 3. Decode receipts (already awaited above) ─────────────────

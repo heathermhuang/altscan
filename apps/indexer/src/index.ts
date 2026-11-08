@@ -29,6 +29,9 @@ import {
   noteWorkerParked,
   noteWorkerActive,
   setProfileWorkerCount,
+  retraceMissedBlocks,
+  forgetTraceMissesFrom,
+  retraceBacklogStats,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
@@ -462,6 +465,8 @@ async function main() {
   const recoverFromReorg = async (forkPoint: number) => {
     console.warn(`${TAG} ⚠ REORG: rolling back to fork point ${forkPoint} (depth ${lastIndexed - forkPoint})`)
     if (ASYNC_TT_WRITER) await rollbackTransferWriterTo(forkPoint)
+    // Before the unwind, so no background re-trace inserts rows after its delete.
+    await forgetTraceMissesFrom(forkPoint + 1)
     await unwindFrom(forkPoint + 1)
     lastIndexed = forkPoint
     // Poison counts are keyed on HEIGHT and this line moves the cursor BACKWARDS,
@@ -856,6 +861,9 @@ async function main() {
       // acted on again, and without this the map grows for the process lifetime.
       poisonBlocks.prune(lastIndexed)
 
+      // Blocks whose trace failed get a few more tries, in the background.
+      if (traceProvider) retraceMissedBlocks(traceProvider, latest, itx.maxLag)
+
       if (lastIndexed >= latest) await sleep(POLL_MS)
     } catch (err) {
       console.error(`${TAG} Error:`, safeErr(err))
@@ -866,6 +874,12 @@ async function main() {
   // Drain the async transfer writer so in-flight transfers persist + the watermark
   // advances before exit. Best-effort: if SIGKILL beats us, the watermark guarantees
   // the next boot replays [W+1..] with no gap.
+  if (traceProvider) {
+    // Printed before the drain, which a SIGKILL can cut short. The pending blocks
+    // keep no internal transactions: the backlog lives in memory only.
+    const r = retraceBacklogStats()
+    console.log(`${TAG} re-trace backlog at exit: ${r.pending} block(s) still pending and lost; ${r.recovered} recovered, ${r.dropped} abandoned since boot`)
+  }
   if (ASYNC_TT_WRITER) {
     console.log(`${TAG} draining transfer writer before exit...`)
     await flushTransferWriter()
