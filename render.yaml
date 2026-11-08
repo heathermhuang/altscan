@@ -171,6 +171,11 @@ services:
         value: "8"          # Match INDEX_CONCURRENCY=8 so all 8 workers write concurrently.
                             # Was "3" → 5 of 8 workers starved on connection acquisition (profiled
                             # 2026-06-05: a 1-row INSERT took 600ms, ~99% pool-wait). Safe on basic-4gb.
+      - key: PARTITION_AHEAD
+        value: "14"         # Empty token_transfers partitions kept ahead of the data, in PARTITION_BLOCKS
+                            # widths. The default 7 was ~3.5 days at BNB's width; 14 is ~a week, so a
+                            # MAX_LAG skip or failed partition DDL has that long before the writer hits a
+                            # missing range. Declared here: the Blueprint re-applies declared fields.
       - key: NODE_ENV
         value: production
 
