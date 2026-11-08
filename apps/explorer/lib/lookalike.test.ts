@@ -615,3 +615,31 @@ describe('lookalikeNote', () => {
       .toBe("Its symbol or name reads as BNB, which is the chain's native coin and has no token contract. Likely impersonation.")
   })
 })
+
+// The sanitised form the pages print drops every non-ASCII character, so a dash in "BSC-USD" vanishes there (BSCUSD) and
+// stayed a non-ASCII character in the fold: neither read as BSC-USD. And a code point Unicode reserves as ignorable but has
+// not assigned is not a format character, so the fold kept it; beside a homoglyph only the fold's table maps (a
+// mathematical S), neither form read as USDT.
+describe('lookalikeOf: dashes and default-ignorable code points', () => {
+  it.each([
+    ['U+2010 hyphen', '\u2010'], ['U+2011 non-breaking hyphen', '\u2011'], ['U+2012 figure dash', '\u2012'],
+    ['U+2013 en dash', '\u2013'], ['U+2014 em dash', '\u2014'], ['U+2212 minus', '\u2212'],
+    ['U+FE58 small em dash', '\uFE58'], ['U+2E3A two-em dash', '\u2E3A'],
+  ])('reads BSC + %s + USD as BSC-USD (USDT)', (_label, dash) => {
+    expect(lookalikeOf({ address: SPAM, symbol: `BSC${dash}USD`, name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it('reads a dashed copy of a well-known NAME', () => {
+    expect(lookalikeOf({ address: SPAM, symbol: 'X', name: 'Binance\u2013Peg BSC\u2010USD' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it.each([['U+2065', '\u2065'], ['U+FFF0', '\uFFF0'], ['U+E0080', '\u{E0080}']])('drops the unassigned ignorable %s', (_label, ignorable) => {
+    const spam = `U\u{1D682}${ignorable}DT`   // U, MATHEMATICAL MONOSPACE CAPITAL S, the ignorable, DT
+    expect(lookalikeOf({ address: SPAM, symbol: spam, name: 'x' }, 'bnb')).toEqual({ symbol: 'USDT', canonical: BNB_USDT })
+  })
+
+  it('folds every dash to a hyphen, and keeps the braille blank invisible', () => {
+    expect(foldConfusables('A\u2014B\u2212C')).toBe('A-B-C')
+    expect(foldConfusables('US\u2800DT')).toBe('USDT')
+  })
+})

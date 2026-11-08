@@ -373,8 +373,14 @@ export const HOMOGLYPHS: Record<string, string> = {
 
 // Combining marks, format characters (zero-width joiners, bidi marks), control characters (NUL, BEL, ESC, DEL,
 // the C1 block), whitespace, and the blank "filler" letters that render as nothing: Hangul fillers U+115F U+1160
-// U+3164 U+FFA0, braille blank U+2800.
-const INVISIBLE = /[\p{M}\p{Cf}\p{Cc}\s\u115F\u1160\u3164\uFFA0\u2800]/gu
+// U+3164 U+FFA0, braille blank U+2800. And every Default_Ignorable_Code_Point, which renders as nothing too: most are
+// already format characters or marks, but not the code points Unicode reserves as ignorable before assigning them
+// (U+2065, U+FFF0..FFF8, the rest of the tag block), which a font draws as nothing as well.
+const INVISIBLE = /[\p{M}\p{Cf}\p{Cc}\p{Default_Ignorable_Code_Point}\s\u115F\u1160\u3164\uFFA0\u2800]/gu
+
+// Every dash, and the minus sign, reads as a hyphen: BSC-USD is a well-known BNB Chain symbol, and the sanitised form the
+// pages print drops a non-ASCII dash instead of reading it ("BSC" + U+2010 + "USD" prints as BSCUSD).
+const DASHES = /[\p{Pd}\u2212]/gu
 
 function mapGlyphs(s: string): string {
   let out = ''
@@ -394,7 +400,7 @@ function mapGlyphs(s: string): string {
  * otherwise slip through as a non-ASCII T.
  */
 export function foldConfusables(s: string): string {
-  const visible = mapGlyphs(mapGlyphs(s).normalize('NFKD').replace(INVISIBLE, ''))
+  const visible = mapGlyphs(mapGlyphs(s).normalize('NFKD').replace(INVISIBLE, '').replace(DASHES, '-'))
   return mapGlyphs(visible.replace(/[l|1]/g, 'I').replace(/0/g, 'O').replace(/5/g, 'S').toUpperCase())
 }
 
