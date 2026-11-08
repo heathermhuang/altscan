@@ -30,7 +30,11 @@ vi.mock('./db', async importOriginal => {
 })
 vi.mock('./webhook-notifier', () => ({ notifyWebhooks: vi.fn(async () => {}) }))
 
-import { processBlock, fetchBlockReceipts, traceWithinBudget, tracesInFlight, TRACE_DEADLINE_MS } from './block-processor'
+import {
+  processBlock, fetchBlockReceipts, traceWithinBudget, tracesInFlight, TRACE_DEADLINE_MS,
+  retraceMissedBlocks, forgetTraceMissesFrom, retraceBacklogStats,
+  RETRACE_AFTER_BLOCKS, RETRACE_MAX_ATTEMPTS, RETRACE_BACKLOG_MAX, RETRACE_MAX_IN_FLIGHT,
+} from './block-processor'
 import { schema } from './db'
 import { indexerConfig } from './config-instance'
 
@@ -153,6 +157,133 @@ describe('traces never hold up the block', () => {
     expect(await outcome).toBe('landed')
     expect(onWritesBegan).toHaveBeenCalledTimes(1)
     expect(inserts.map(i => i.table)).toEqual([schema.blocks])
+  })
+})
+
+describe('a block whose trace failed is re-traced a few blocks later', () => {
+  const MAX_LAG = 500
+  const ownTrace = {
+    txHash: TX_HASH,
+    result: { type: 'CALL', from: ADDR, to: ADDR, value: '0x1', calls: [{ type: 'CALL', from: ADDR, to: ADDR, value: '0x5' }] },
+  }
+  const hex = (n: number) => '0x' + n.toString(16)
+  const tracer = (send: (...a: any[]) => Promise<unknown>) => ({ send: vi.fn(send) }) as unknown as JsonRpcProvider & { send: ReturnType<typeof vi.fn> }
+  const notFound = async () => { throw new Error('block not found') }
+  // skipLogs, so the block needs no receipts.
+  const missBlock = (n: number, trace: JsonRpcProvider) =>
+    processBlock(n, providerFor(blockStub({ number: n }, [txStub()])), true, undefined, trace)
+  const settle = () => forgetTraceMissesFrom(Number.POSITIVE_INFINITY)
+  const itxRows = () => inserts.filter(i => i.table === schema.internalTransactions).flatMap(i => i.rows)
+  const held: Array<(v: unknown) => void> = []
+
+  afterEach(async () => {
+    held.splice(0).forEach(res => res(null))
+    await forgetTraceMissesFrom(0)
+    await vi.waitFor(() => expect(tracesInFlight()).toBe(0))
+  })
+
+  it('a trace that says not-found and later succeeds ends with the rows stored', async () => {
+    const t = tracer(notFound)
+    t.send.mockImplementationOnce(notFound).mockResolvedValue([ownTrace])
+    const before = retraceBacklogStats()
+    await missBlock(H, t)
+    expect(itxRows()).toEqual([])
+    expect(retraceBacklogStats().pending).toBe(1)
+
+    retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS - 1, MAX_LAG)
+    await settle()
+    expect(t.send).toHaveBeenCalledTimes(1)
+
+    retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+    await settle()
+    expect(t.send).toHaveBeenCalledTimes(2)
+    expect(itxRows()).toHaveLength(1)
+    expect(itxRows()[0]).toMatchObject({ txHash: TX_HASH, blockNumber: H, value: '5' })
+    expect(retraceBacklogStats()).toMatchObject({ pending: 0, recovered: before.recovered + 1, dropped: before.dropped })
+  })
+
+  it('a block that traced fine is not queued', async () => {
+    await missBlock(H, tracer(async () => [ownTrace]))
+    expect(retraceBacklogStats().pending).toBe(0)
+  })
+
+  it('drops a block once it is further behind the tip than the trace window', async () => {
+    const t = tracer(notFound)
+    const before = retraceBacklogStats()
+    await missBlock(H, t)
+    retraceMissedBlocks(t, H + MAX_LAG + 1, MAX_LAG)
+    await settle()
+    expect(t.send).toHaveBeenCalledTimes(1)
+    expect(retraceBacklogStats()).toMatchObject({ pending: 0, dropped: before.dropped + 1 })
+  })
+
+  it(`gives up after ${RETRACE_MAX_ATTEMPTS} re-traces, spaced further apart each time`, async () => {
+    const t = tracer(notFound)
+    const before = retraceBacklogStats()
+    await missBlock(H, t)
+    for (let k = 0; k < RETRACE_MAX_ATTEMPTS; k++) {
+      const due = H + (RETRACE_AFTER_BLOCKS << k)
+      retraceMissedBlocks(t, due - 1, MAX_LAG)
+      await settle()
+      expect(t.send).toHaveBeenCalledTimes(1 + k)
+      retraceMissedBlocks(t, due, MAX_LAG)
+      await settle()
+      expect(t.send).toHaveBeenCalledTimes(2 + k)
+    }
+    expect(retraceBacklogStats()).toMatchObject({ pending: 0, dropped: before.dropped + 1 })
+  })
+
+  it(`holds at most ${RETRACE_BACKLOG_MAX} blocks and drops the one that missed first`, async () => {
+    const t = tracer(notFound)
+    const before = retraceBacklogStats()
+    for (let n = H; n <= H + RETRACE_BACKLOG_MAX; n++) await missBlock(n, t)
+    expect(retraceBacklogStats()).toMatchObject({ pending: RETRACE_BACKLOG_MAX, dropped: before.dropped + 1 })
+
+    // At this tip only H and H+1 are due, and H is the one that was dropped.
+    t.send.mockClear()
+    retraceMissedBlocks(t, H + 1 + RETRACE_AFTER_BLOCKS, MAX_LAG)
+    await settle()
+    expect(t.send.mock.calls.map(c => c[1][0])).toEqual([hex(H + 1)])
+  })
+
+  it('starts no re-trace while the spare half of the cap is in use, and charges it no attempt', async () => {
+    const t = tracer(notFound)
+    t.send.mockImplementationOnce(notFound).mockResolvedValue([ownTrace])
+    await missBlock(H, t)
+    const hanging = { send: vi.fn(() => new Promise(res => { held.push(res) })) } as unknown as JsonRpcProvider
+    for (let i = 0; i < RETRACE_MAX_IN_FLIGHT; i++) await traceWithinBudget(hanging, H, { deadlineMs: 1, maxInFlight: 1_000 })
+    expect(tracesInFlight()).toBe(RETRACE_MAX_IN_FLIGHT)
+
+    retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+    await settle()
+    expect(t.send).toHaveBeenCalledTimes(1)
+
+    held.splice(0).forEach(res => res(null))
+    await vi.waitFor(() => expect(tracesInFlight()).toBe(0))
+    // Same tip: had the refusal counted as an attempt, the block would not be due again yet.
+    retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+    await settle()
+    expect(t.send).toHaveBeenCalledTimes(2)
+    expect(itxRows()).toHaveLength(1)
+  })
+
+  it('a reorg unwind waits for an open re-trace and keeps its rows out', async () => {
+    const t = tracer(notFound)
+    let answer!: (v: unknown) => void
+    t.send.mockImplementationOnce(notFound).mockImplementationOnce(() => new Promise(res => { answer = res }))
+    const before = retraceBacklogStats()
+    await missBlock(H, t)
+    retraceMissedBlocks(t, H + RETRACE_AFTER_BLOCKS, MAX_LAG)
+    expect(t.send).toHaveBeenCalledTimes(2)
+
+    let unwound = false
+    const forgetting = forgetTraceMissesFrom(H).then(() => { unwound = true })
+    await new Promise(res => setTimeout(res, 5))
+    expect(unwound).toBe(false)
+    answer([ownTrace])
+    await forgetting
+    expect(itxRows()).toEqual([])
+    expect(retraceBacklogStats()).toEqual({ pending: 0, recovered: before.recovered, dropped: before.dropped })
   })
 })
 
