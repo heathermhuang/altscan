@@ -286,7 +286,7 @@ curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
                 <tbody>
                   <tr>
                     <td className="text-ink">transactions</td>
-                    <td className="text-ink2">address, from, to, blockNumber, blockFrom, blockTo</td>
+                    <td className="text-ink2">one of address, from, to; blockNumber, blockFrom, blockTo</td>
                   </tr>
                   <tr>
                     <td className="text-ink">blocks</td>
@@ -298,11 +298,11 @@ curl -X DELETE "${BASE_URL}/api/v1/webhooks/42?ownerAddress=0xYourAddress" \\
                   </tr>
                   <tr>
                     <td className="text-ink">token_transfers</td>
-                    <td className="text-ink2">address, from, to, tokenAddress, blockFrom, blockTo</td>
+                    <td className="text-ink2">one of address, from, to, tokenAddress; blockFrom, blockTo</td>
                   </tr>
                   <tr>
                     <td className="text-ink">dex_trades</td>
-                    <td className="text-ink2">address (maker), dex, blockFrom, blockTo</td>
+                    <td className="text-ink2">blockFrom, blockTo</td>
                   </tr>
                 </tbody>
               </table>

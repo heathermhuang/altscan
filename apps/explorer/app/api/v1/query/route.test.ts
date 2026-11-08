@@ -41,3 +41,20 @@ describe('POST /api/v1/query offset bound', () => {
     expect(h.selects).toBe(1)
   })
 })
+
+describe('POST /api/v1/query validation', () => {
+  beforeEach(() => { h.selects = 0 })
+
+  it.each([
+    // A string block filter reached Postgres, whose error quoted it, line breaks and all, into the log.
+    { entity: 'blocks', filter: { blockFrom: 'x\n[audit-marker] forged\n' } },
+    { entity: 'dex_trades', filter: { dex: 'absent' } },
+    { entity: 'token_transfers', filter: { from: '0x' + '11'.repeat(20), to: '0x' + '22'.repeat(20) } },
+    { entity: 'blocks', filter: null },
+    null,
+  ])('refuses %j with a 400, before any query', async (body) => {
+    const res = await post(body)
+    expect(res.status).toBe(400)
+    expect(h.selects).toBe(0)
+  })
+})

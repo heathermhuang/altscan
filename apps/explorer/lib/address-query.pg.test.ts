@@ -436,6 +436,71 @@ describe.skipIf(!PG_URL)('POST /api/v1/query filter.address — against a real P
     })
   })
 
+  // POST /api/v1/query with one key filter and a block range. The route turns the range into a
+  // timestamp range from the blocks around it, so the (column, timestamp) index starts and stops on it.
+  // Without that, T1 (a busy token: ~1,700 rows below block 2000, ~1,600 above 8000) read every
+  // row on the far side of the range before the first match. The /developer page documents this shape.
+  describe('a key filter with a block range', () => {
+    const range = { blockFrom: 2000, blockTo: 8000 }
+    const post = async (body: unknown) => {
+      const { POST } = await import('@/app/api/v1/query/route')
+      route.sent.length = 0
+      const res = await POST(new Request('http://x/api/v1/query', { method: 'POST', body: JSON.stringify(body) }))
+      expect(res.status).toBe(200)
+      return { rows: (await res.json()).data as Record<string, unknown>[], sent: route.sent[route.sent.length - 1] }
+    }
+    const readOf = async (sent: { query: string; params: unknown[] }) => {
+      const [{ 'QUERY PLAN': [explained] }] = await conn.unsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sent.query}`, sent.params as never[])
+      return rowsRead(explained.Plan)
+    }
+    // Every page of the range, as a set: rows of one block share a timestamp and have no order between them.
+    const allPages = async (body: Record<string, unknown>) => {
+      const keys: string[] = []
+      for (let offset = 0; ; offset += 100) {
+        const { rows } = await post({ ...body, limit: 100, offset })
+        keys.push(...rows.map(r => `${r.txHash ?? r.hash}:${r.logIndex ?? ''}`))
+        if (rows.length < 100) return keys.sort()
+      }
+    }
+    const oracleT1 = async () => ((await conn.unsafe(
+      `SELECT tx_hash || ':' || log_index AS k FROM token_transfers WHERE token_address = $1 AND block_number BETWEEN 2000 AND 8000`, [T1],
+    )) as unknown as { k: string }[]).map(r => r.k).sort()
+
+    it.each(['asc', 'desc'])('token_transfers tokenAddress + range reads O(limit) rows in %s order', async (orderBy) => {
+      const { rows, sent } = await post({ entity: 'token_transfers', orderBy, limit: 25, filter: { tokenAddress: T1, ...range } })
+      expect(rows).toHaveLength(25)
+      expect(rows.every(r => r.tokenAddress === T1 && Number(r.blockNumber) >= 2000 && Number(r.blockNumber) <= 8000)).toBe(true)
+      expect(await readOf(sent)).toBeLessThan(250)
+    })
+
+    it('returns every row of the range, exactly', async () => {
+      const want = await oracleT1()
+      expect(want.length).toBeGreaterThan(1000)
+      expect(await allPages({ entity: 'token_transfers', orderBy: 'asc', filter: { tokenAddress: T1, ...range } })).toEqual(want)
+    }, 60_000)
+
+    it('a gap in blocks around either bound loses no row', async () => {
+      await conn.unsafe('BEGIN')
+      try {
+        await conn.unsafe('DELETE FROM blocks WHERE number BETWEEN 1990 AND 2010 OR number BETWEEN 7990 AND 8010')
+        expect(await allPages({ entity: 'token_transfers', orderBy: 'desc', filter: { tokenAddress: T1, ...range } })).toEqual(await oracleT1())
+      } finally {
+        await conn.unsafe('ROLLBACK')
+      }
+    }, 60_000)
+
+    it.each([
+      ['transactions', { from: S }],
+      ['token_transfers', { address: S }],
+      ['transactions', { address: S }],
+    ])('%s %j + range reads O(limit) rows in asc order', async (entity, key) => {
+      const { rows, sent } = await post({ entity, orderBy: 'asc', limit: 25, filter: { ...key, ...range } })
+      expect(rows).toHaveLength(25)
+      expect(rows.every(r => Number(r.blockNumber) >= 2000)).toBe(true)
+      expect(await readOf(sent)).toBeLessThan(250)
+    })
+  })
+
   // POST /api/v1/query mid-prune on BNB: retention has published a cutoff and DELETEd
   // the rows below it, and VACUUM has not yet removed their index entries. An
   // uncommitted DELETE leaves the same entries, and no scan can mark them dead, so a

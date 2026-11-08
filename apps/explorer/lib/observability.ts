@@ -48,7 +48,9 @@ export function swallow(tag: string, err: unknown): void {
     // endpoint as `requestUrl` in both its message and its `info`, and handing
     // console.error the object itself would print that too.
     const text = e instanceof Error ? e.stack ?? e.message : typeof e === 'string' ? e : inspect(e)
-    console.error(`[${tag}]`, redactSecrets(text))
+    // One line per entry. A database error quotes the value it rejected, so a caller's CR or
+    // LF could otherwise start a line of its own that imitates any other tagged entry.
+    console.error(`[${tag}]`, redactSecrets(text).replace(/\r/g, '\\r').replace(/\n/g, '\\n'))
   } catch {
     // Logging must never be able to break the page it is reporting on.
   }
