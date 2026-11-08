@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { isTrainingBot, HEAVY_PATH_PREFIXES } from '@/lib/bot-policy'
 import { allowedOrigins, corsHeaders } from '@/lib/cors'
+import { CLOUDFLARE_RANGES } from '@altscan/explorer-core/cloudflare-ranges'
 
 /**
  * Minimal middleware — request-level bot throttling + abuse-source IP block.
@@ -89,19 +90,32 @@ const BLOCKED_IPV6_CIDRS = [
   '2a13:dcc0::/29',
 ].map(parseCidr6)
 
-function getClientIp(request: NextRequest): string | null {
-  // Cloudflare sits in front of Render for bnbscan.com/ethscan.io. Prefer
-  // cf-connecting-ip when present; fall back to x-real-ip / first XFF hop.
-  const cf = request.headers.get('cf-connecting-ip')
-  if (cf) return cf.trim()
-  const real = request.headers.get('x-real-ip')
-  if (real) return real.trim()
-  const xff = request.headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0]?.trim()
-    if (first) return first
+// Cloudflare's edges, matched with the parsers above: this Edge-runtime file has no node:net.
+const CLOUDFLARE_IPV4_CIDRS = CLOUDFLARE_RANGES.filter(r => !r.includes(':')).map(parseCidr)
+const CLOUDFLARE_IPV6_CIDRS = CLOUDFLARE_RANGES.filter(r => r.includes(':')).map(parseCidr6)
+
+function isCloudflarePeer(ip: string): boolean {
+  if (ip.includes(':')) {
+    const n6 = ipv6ToBigInt(ip)
+    return n6 !== null && CLOUDFLARE_IPV6_CIDRS.some(({ network, mask }) => (n6 & mask) === network)
   }
-  return null
+  const n = ipToInt(ip)
+  return n !== 0 && CLOUDFLARE_IPV4_CIDRS.some(({ network, mask }) => (n & mask) === network)
+}
+
+/**
+ * The visitor's IP, by the rule explorer-core's clientIpFromHeaders applies to every API
+ * rate limit (it uses node:net, so this file cannot import it). The connecting peer is
+ * the LAST X-Forwarded-For hop, which Render's load balancer appends. cf-connecting-ip
+ * is believed only when that peer is a Cloudflare edge; otherwise the peer is the
+ * client. A request that skipped Cloudflare could otherwise set cf-connecting-ip,
+ * x-real-ip or a leading X-Forwarded-For entry to any unlisted address and walk past
+ * the denylist.
+ */
+function getClientIp(request: NextRequest): string | null {
+  const peer = request.headers.get('x-forwarded-for')?.split(',').pop()?.trim() || null
+  const cf = request.headers.get('cf-connecting-ip')?.trim()
+  return cf && peer && isCloudflarePeer(peer) ? cf : peer
 }
 
 function isBlockedIp(ip: string | null): boolean {
