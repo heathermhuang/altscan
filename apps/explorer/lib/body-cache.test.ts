@@ -225,19 +225,33 @@ describe('getTxBody byte bounds', () => {
 
   it("admits bytes up to the window's budget, then nothing until the next window", async () => {
     const input = '0x' + 'cd'.repeat(500)
-    const { mod, core, withInput } = await load({ windowBytes: Math.floor(2.5 * bytesOf(input)) })
+    const { mod: probe } = await load()
+    const cost = bytesOf(input) + probe.BODY_CACHE_ENTRY_OVERHEAD_BYTES
+    const { mod, core, withInput } = await load({ windowBytes: Math.floor(2.5 * cost) })
     const redis = fakeRedis()
     vi.mocked(core.getRedis).mockReturnValue(redis.client as never)
     withInput(input)
     for (let i = 0; i < 3; i++) await mod.getTxBody(HASH)
     expect(core.kvSet).toHaveBeenCalledTimes(2)
     const key = `body:admit:${Math.floor(T0 / TTL)}`
-    expect(redis.counts.get(key)).toBe(3 * bytesOf(input))
+    expect(redis.counts.get(key)).toBe(3 * cost)
     expect(redis.expiries.get(key)).toBe(2 * TTL)   // the count outlives every entry it admitted
 
     vi.setSystemTime(T0 + TTL)
     await mod.getTxBody(HASH)
     expect(core.kvSet).toHaveBeenCalledTimes(3)
+  })
+
+  // A plain transfer's body is 24 bytes; its key and Redis's per-key structures cost several times that.
+  it('charges each entry its per-key overhead, not just its value', async () => {
+    const { mod: probe } = await load()
+    const cost = bytesOf('0x') + probe.BODY_CACHE_ENTRY_OVERHEAD_BYTES
+    const { mod, core, withInput } = await load({ windowBytes: 10 * cost })
+    const redis = fakeRedis()
+    vi.mocked(core.getRedis).mockReturnValue(redis.client as never)
+    withInput('0x')
+    for (let i = 0; i < 12; i++) await mod.getTxBody(HASH)
+    expect(core.kvSet).toHaveBeenCalledTimes(10)
   })
 
   it.each(['oom', 'closed'] as const)('caches nothing when Redis cannot count it (%s)', async (fail) => {

@@ -70,11 +70,15 @@ const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(2 * 6
  *     key per window, so the count resets as the entries it admitted expire; a plain counter would only rise until
  *     caching stopped for good). An entry outlives its window by at most one TTL, so the cache holds under about 2x
  *     the budget: 96 MB by default, on a 256 MB instance shared with the CU ledger and the response cache.
+ *   - each admission is charged BODY_CACHE_ENTRY_OVERHEAD_BYTES on top of its value: a plain transfer's body is 24
+ *     bytes, and its key alone (`body:tx:` + the hash) is 74, before Redis's per-key and expiry structures. Charging
+ *     the value only let one window admit ~2M such keys, about 200 MB.
  *
  * A counter Redis cannot write is no admission: this cache never gets to fill a Redis the ledger needs. With no Redis
  * at all, kvSet's in-memory fallback is 50 entries, so the entry cap bounds it.
  */
 export const BODY_CACHE_MAX_ENTRY_BYTES = 64 * 1024
+export const BODY_CACHE_ENTRY_OVERHEAD_BYTES = 256
 const BODY_CACHE_WINDOW_BYTES = parseInt(process.env.BODY_CACHE_WINDOW_BYTES ?? String(48 * 1024 * 1024), 10)
 
 async function admitBody(bytes: number): Promise<boolean> {
@@ -146,7 +150,7 @@ export async function getTxBody(hash: string): Promise<TxBody | null> {
   if (!body) return null
   const value = serializeTxBody(body)
   const bytes = Buffer.byteLength(value, 'utf8')
-  if (bytes <= BODY_CACHE_MAX_ENTRY_BYTES && await admitBody(bytes)) {
+  if (bytes <= BODY_CACHE_MAX_ENTRY_BYTES && await admitBody(bytes + BODY_CACHE_ENTRY_OVERHEAD_BYTES)) {
     await kvSet(key, value, BODY_CACHE_TTL_MS).catch(() => {})
   }
   return body
