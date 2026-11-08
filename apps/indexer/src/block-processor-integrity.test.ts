@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 
 /**
@@ -30,8 +30,9 @@ vi.mock('./db', async importOriginal => {
 })
 vi.mock('./webhook-notifier', () => ({ notifyWebhooks: vi.fn(async () => {}) }))
 
-import { processBlock, fetchBlockReceipts } from './block-processor'
+import { processBlock, fetchBlockReceipts, traceWithinBudget, tracesInFlight, TRACE_DEADLINE_MS } from './block-processor'
 import { schema } from './db'
+import { indexerConfig } from './config-instance'
 
 const H = 1_000
 const HASH = '0x' + 'a1'.repeat(32)
@@ -86,6 +87,70 @@ describe('processBlock — wrong height', () => {
   it('accepts the requested height', async () => {
     const onWritesBegan = vi.fn()
     await processBlock(H, providerFor(blockStub()), true, onWritesBegan)
+    expect(onWritesBegan).toHaveBeenCalledTimes(1)
+    expect(inserts.map(i => i.table)).toEqual([schema.blocks])
+  })
+})
+
+describe('traces never hold up the block', () => {
+  // The trace used to share the block's acquisition timeout. The trace endpoint is
+  // not in the failover pool, so one that stopped answering failed every block on
+  // every block endpoint until the poison tracker quarantined them. Nothing cancels
+  // an abandoned trace call, so calls a deadline gave up on are capped as well.
+  const settlers: Array<(v: unknown) => void> = []
+  const hangingProvider = () =>
+    ({ send: vi.fn(() => new Promise(res => { settlers.push(res) })) }) as unknown as JsonRpcProvider
+  const settleAll = () => settlers.splice(0).forEach(res => res([]))
+  afterEach(async () => {
+    vi.useRealTimers()
+    settleAll()
+    await vi.waitFor(() => expect(tracesInFlight()).toBe(0))
+  })
+
+  it('the trace deadline sits inside the acquisition timeout', () => {
+    expect(TRACE_DEADLINE_MS).toBeGreaterThan(0)
+    expect(TRACE_DEADLINE_MS).toBeLessThan(indexerConfig.rpc.fetchTimeoutMs)
+  })
+
+  it('returns the traces when the endpoint answers in time', async () => {
+    const traces = [{ txHash: TX_HASH, result: {} }]
+    const provider = { send: vi.fn(async () => traces) } as unknown as JsonRpcProvider
+    await expect(traceWithinBudget(provider, H, { deadlineMs: 1_000, maxInFlight: 4 })).resolves.toBe(traces)
+  })
+
+  it('gives up on a trace that does not answer by the deadline', async () => {
+    await expect(traceWithinBudget(hangingProvider(), H, { deadlineMs: 10, maxInFlight: 4 })).resolves.toBeNull()
+  })
+
+  it('a trace that errors yields null', async () => {
+    const provider = { send: vi.fn(async () => { throw new Error('block not found') }) } as unknown as JsonRpcProvider
+    await expect(traceWithinBudget(provider, H, { deadlineMs: 1_000, maxInFlight: 4 })).resolves.toBeNull()
+  })
+
+  it('starts no trace while abandoned calls hold the cap, and frees a slot when one settles', async () => {
+    const provider = hangingProvider()
+    const opts = { deadlineMs: 10, maxInFlight: 2 }
+    await traceWithinBudget(provider, H, opts)
+    await traceWithinBudget(provider, H, opts)
+    expect(tracesInFlight()).toBe(2)
+    await expect(traceWithinBudget(provider, H, opts)).resolves.toBeNull()
+    expect(provider.send).toHaveBeenCalledTimes(2)
+
+    settleAll()
+    await vi.waitFor(() => expect(tracesInFlight()).toBe(0))
+    const next = traceWithinBudget(provider, H, opts)
+    expect(provider.send).toHaveBeenCalledTimes(3)
+    settleAll()
+    await next
+  })
+
+  it('processBlock lands the block when the trace endpoint never answers', async () => {
+    vi.useFakeTimers()
+    const onWritesBegan = vi.fn()
+    const outcome = processBlock(H, providerFor(blockStub()), true, onWritesBegan, hangingProvider())
+      .then(() => 'landed', (err: Error) => err.message)
+    await vi.advanceTimersByTimeAsync(indexerConfig.rpc.fetchTimeoutMs + 1)
+    expect(await outcome).toBe('landed')
     expect(onWritesBegan).toHaveBeenCalledTimes(1)
     expect(inserts.map(i => i.table)).toEqual([schema.blocks])
   })

@@ -313,6 +313,48 @@ function reportInternalTxProblem(phase: 'trace' | 'insert', blockNumber: number,
   itxLastReportAt = now
 }
 
+/**
+ * A trace gets its own deadline, inside the block's acquisition timeout. It used to
+ * share that timeout, and because the trace endpoint is not in the failover pool, one
+ * that stopped answering failed every block on every block endpoint until the poison
+ * tracker quarantined them. 60% leaves the block and receipt fetches the rest.
+ */
+export const TRACE_DEADLINE_MS = Math.floor(RPC_FETCH_TIMEOUT_MS * 0.6)
+
+/**
+ * Nothing cancels an abandoned trace call. withTimeout only stops waiting, and on Node
+ * ethers' own timeout neither destroys the socket nor aborts it, which is also why it
+ * is not used here: it would let a timed-out socket escape this count. So the count
+ * covers the whole call, including ethers' internal retries, until it settles.
+ * Two per worker allows the normal call plus one abandoned one.
+ */
+export const TRACE_MAX_IN_FLIGHT = 2 * indexerConfig.indexing.concurrency
+let traceCallsInFlight = 0
+export function tracesInFlight(): number { return traceCallsInFlight }
+
+/**
+ * Trace a block within the deadline and the in-flight cap. Never throws: null means
+ * the block is stored without internal transactions, and the reason is reported.
+ */
+export async function traceWithinBudget(
+  provider: JsonRpcProvider,
+  blockNumber: number,
+  { deadlineMs = TRACE_DEADLINE_MS, maxInFlight = TRACE_MAX_IN_FLIGHT } = {},
+): Promise<RawTraceTx[] | null> {
+  if (traceCallsInFlight >= maxInFlight) {
+    reportInternalTxProblem('trace', blockNumber, new Error(`not started: ${traceCallsInFlight} trace calls still in flight (cap ${maxInFlight})`))
+    return null
+  }
+  traceCallsInFlight++
+  const call = fetchBlockTraces(provider, blockNumber).finally(() => { traceCallsInFlight-- })
+  try {
+    return await withTimeout(call, deadlineMs, `block ${blockNumber} trace`)
+  } catch (err) {
+    reportInternalTxProblem('trace', blockNumber, err)
+    return null
+  }
+}
+
 export async function processBlock(
   blockNumber: number,
   provider: JsonRpcProvider,
@@ -346,10 +388,11 @@ export async function processBlock(
   // timeout can only ever abandon pure reads — rpc-failover then retries the
   // block on another endpoint with no risk of a half-written replay.
   // Traces ride in the same pure-read phase, in parallel (measured 0.6-0.8s median
-  // per block on both chains, inside the 8s ceiling). Soft: a failure yields null
-  // and is reported, so the block still lands — see reportInternalTxProblem.
+  // per block on both chains), under their own shorter deadline and an in-flight
+  // cap. Soft: a failure, a timeout or a full cap yields null and is reported, so
+  // the block still lands. See traceWithinBudget.
   const tracesPromise: Promise<RawTraceTx[] | null> = traceProvider
-    ? fetchBlockTraces(traceProvider, blockNumber).catch(err => { reportInternalTxProblem('trace', blockNumber, err); return null })
+    ? traceWithinBudget(traceProvider, blockNumber)
     : Promise.resolve(null)
   const [block, receipts, rawTraces] = await withTimeout(
     Promise.all([blockPromise, receiptsPromise, tracesPromise]),
