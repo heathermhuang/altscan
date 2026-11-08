@@ -1311,18 +1311,34 @@ export function initTransferWriter(seedDurableBlock: number): void {
 }
 
 /**
- * Jump the watermark forward when the indexer deliberately abandons a block range
- * (the MAX_LAG "skip to tip" path in index.ts). Without this, W would freeze at the
- * skip boundary because the skipped blocks are never enqueued. Accepts the same gap
- * the pre-existing skip already creates in `blocks`; the resume gap-scan heals
- * recent holes on restart.
+ * Ranges a MAX_LAG skip abandoned, in skip order: W may jump from `after` (the cursor
+ * before the skip) to `to` once the fold has reached `after`. See setDurableFloor.
  */
-export function setDurableFloor(block: number): void {
-  if (!transferWriterSeeded || block <= durableBlock) return
-  durableBlock = block
-  for (const n of transferWritten) if (n <= durableBlock) transferWritten.delete(n)
-  persistDurableBlock(durableBlock).catch(err =>
-    console.warn('[tt-writer] floor persist failed:', dbErrorMessage(err)))
+let pendingFloors: Array<{ after: number; to: number }> = []
+
+/** The next abandoned range is ready to be stepped over: everything below it is durable. */
+function floorReady(): boolean {
+  return pendingFloors.length > 0 && durableBlock >= pendingFloors[0].after
+}
+
+/**
+ * Let the watermark step over a range the indexer deliberately abandoned (the MAX_LAG
+ * "skip to tip" path in index.ts). Without this, W would freeze at the skip boundary
+ * because the skipped blocks are never enqueued. Accepts the same gap the skip creates
+ * in `blocks`; the resume gap-scan heals recent holes on restart.
+ *
+ * It does not move W itself. W used to jump to `to` at once, over (W, after] too, and
+ * those blocks are routinely processed but still queued: a crash then lost their rows
+ * for good, because crash-resume replays only from W upward (the same reason the
+ * quarantine path uses a quarantine batch). And W moved in memory before a fire-and-
+ * forget persist that swallowed failure. Now the writer's fold steps over the range once
+ * it reaches `after`, and persists before it advances, retrying a failed persist like
+ * any other.
+ */
+export function setDurableFloor(floor: { after: number; to: number }): void {
+  if (!transferWriterSeeded || floor.to <= floor.after) return
+  pendingFloors.push(floor)
+  runTransferWriter()
 }
 
 /**
@@ -1374,6 +1390,10 @@ export async function rollbackTransferWriterTo(forkPoint: number): Promise<void>
   try {
     while (transferWriterRunning) await new Promise(r => setTimeout(r, 25))
     purgeTransferQueueAbove(forkPoint)
+    // Heights above the fork are re-indexed, so an abandoned range ends at the fork.
+    pendingFloors = pendingFloors
+      .map(f => ({ after: f.after, to: Math.min(f.to, forkPoint) }))
+      .filter(f => f.to > f.after)
     if (transferWriterSeeded && durableBlock > forkPoint) {
       const prev = durableBlock
       durableBlock = forkPoint
@@ -1467,14 +1487,16 @@ function runTransferWriter(): void {
   if (!transferWriterSeeded) return        // never write/persist before the seed
   if (transferWriterPaused) return         // reorg rollback in progress — resumed by rollbackTransferWriterTo
   if (transferWriterRunning) return
-  if (transferPending.size === 0) return
+  if (transferPending.size === 0 && !floorReady()) return
   transferWriterRunning = true
   // Fire-and-forget single drainer — coalesces the entire current queue per pass.
   ;(async () => {
     try {
       // Checking paused per iteration lets an in-flight drain finish its current
       // batch (commit or requeue) and then yield to a waiting reorg rollback.
-      while (!transferWriterPaused && transferPending.size > 0) {
+      // A ready floor alone runs a pass with nothing to write, so W steps over the
+      // abandoned range even when no block is queued.
+      while (!transferWriterPaused && (transferPending.size > 0 || floorReady())) {
         const drained = transferPending
         transferPending = new Map()
         transferPendingRows = 0
@@ -1495,7 +1517,7 @@ function runTransferWriter(): void {
         rows.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
 
         try {
-          await writeTransferBlocks(deleteNums, rows)
+          if (blockNums.length > 0) await writeTransferBlocks(deleteNums, rows)
 
           // Fold written blocks into W through the contiguous prefix. Compute the new
           // watermark first and only advance durableBlock / clear transferWritten AFTER
@@ -1504,14 +1526,24 @@ function runTransferWriter(): void {
           // move) AND the in-memory watermark ran ahead of the durable one — masking a
           // sustained indexer_cursor outage. Holding state until the persist lands makes
           // the failure recur every cycle, so it both retries and feeds the failure ALERT.
+          // An abandoned range is stepped over only once the prefix has reached its
+          // `after`, and the floors are dropped only after the persist lands.
           for (const n of blockNums) if (n > durableBlock) transferWritten.add(n)
           let newDurable = durableBlock
-          while (transferWritten.has(newDurable + 1)) newDurable++
+          let floorsUsed = 0
+          for (;;) {
+            while (transferWritten.has(newDurable + 1)) newDurable++
+            const floor = pendingFloors[floorsUsed]
+            if (!floor || newDurable < floor.after) break
+            newDurable = Math.max(newDurable, floor.to)
+            floorsUsed++
+          }
           if (newDurable > durableBlock) {
             await persistDurableBlock(newDurable)
-            for (let n = durableBlock + 1; n <= newDurable; n++) transferWritten.delete(n)
+            for (const n of transferWritten) if (n <= newDurable) transferWritten.delete(n)
             durableBlock = newDurable
           }
+          pendingFloors.splice(0, floorsUsed)
 
           // Rows are durable now — let holder-balance tracking see them.
           // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
