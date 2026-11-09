@@ -4,9 +4,9 @@
  *
  * SECURITY: key on clientIpFromHeaders() — see the note in explorer-core's rate-limit.ts.
  */
-import { checkRateLimit, clientIpBucket, clientIpFromHeaders } from '@altscan/explorer-core'
+import { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit } from '@altscan/explorer-core'
 
-export { checkRateLimit, clientIpBucket, clientIpFromHeaders }
+export { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit }
 
 /**
  * altscan.io's MCP Worker calls this API from Cloudflare's cross-zone Worker address, which every

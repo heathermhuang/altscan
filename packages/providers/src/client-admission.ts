@@ -7,7 +7,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
  * stored `admit` right before it spends: false refuses that call as 'rate_limited', which every caller already
  * degrades to the local-index view. Outside a `withClientAdmission` (the indexer, server renders) nothing changes.
  */
-export type ClientAdmission = () => Promise<boolean>
+export type ClientAdmission = {
+  /** Charge the client for one billed call; false refuses it. */
+  admit: () => Promise<boolean>
+  /** Give the charge back: the fleet-wide admission refused the call after the client paid for it. */
+  release: () => Promise<void>
+}
 
 const store = new AsyncLocalStorage<ClientAdmission>()
 

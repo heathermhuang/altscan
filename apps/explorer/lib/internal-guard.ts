@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket, refundRateLimit } from '@/lib/api-rate-limit'
 import { withClientAdmission } from '@altscan/providers'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
@@ -46,5 +46,8 @@ export const PROVIDER_CALLS_PER_CLIENT_PER_HOUR = (() => {
 /** Run a provider call charged to this request's client, only if it is billed. */
 export function asClient<T>(req: Request, fn: () => Promise<T>): Promise<T> {
   const bucket = `prov:${clientIpBucket(req.headers)}`
-  return withClientAdmission(() => checkRateLimit(bucket, PROVIDER_CALLS_PER_CLIENT_PER_HOUR, 60 * 60 * 1000), fn)
+  return withClientAdmission({
+    admit: () => checkRateLimit(bucket, PROVIDER_CALLS_PER_CLIENT_PER_HOUR, 60 * 60 * 1000),
+    release: () => refundRateLimit(bucket),
+  }, fn)
 }

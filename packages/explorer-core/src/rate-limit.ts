@@ -185,6 +185,30 @@ export function clientIpBucket(headers: { get(name: string): string | null }): s
   return ipBucketKey(clientIpFromHeaders(headers))
 }
 
+// DECR only an existing counter, never below zero: a bare DECR on a key that expired meanwhile would create -1 with
+// no TTL, a counter that never expires and starts every window one request ahead.
+const DECR_IF_POSITIVE = `
+local n = tonumber(redis.call('GET', KEYS[1]) or '0')
+if n > 0 then return redis.call('DECR', KEYS[1]) end
+return 0
+`
+
+/**
+ * Give back one count from `key`'s current window: for a check whose request then did not go ahead (a later gate
+ * refused it), so the client is charged only for what it actually got. Best effort; a failure leaves the charge.
+ */
+export async function refundRateLimit(key: string): Promise<void> {
+  const r = getRedis()
+  if (r && !isRedisUnavailable()) {
+    try {
+      await r.eval(DECR_IF_POSITIVE, 1, `rl:${key}`)
+      return
+    } catch { /* fall through to the in-memory map, as checkRateLimit does */ }
+  }
+  const entry = rateLimitMap.get(key)
+  if (entry && entry.count > 0) entry.count--
+}
+
 /**
  * Async rate limit check — uses Redis when available, in-memory otherwise.
  * Returns true if allowed, false if rate-limited.

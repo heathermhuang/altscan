@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { currentClientAdmission } from '@altscan/providers'
 
 // The internal address routes run their provider calls charged to the client's IP bucket, per hour.
-const h = vi.hoisted(() => ({ calls: [] as Array<[string, number | undefined, number | undefined]> }))
+const h = vi.hoisted(() => ({ calls: [] as Array<[string, number | undefined, number | undefined]>, refunds: [] as string[] }))
 vi.mock('@/lib/api-rate-limit', () => ({
   checkRateLimit: async (key: string, max?: number, windowMs?: number) => { h.calls.push([key, max, windowMs]); return true },
   clientIpBucket: () => '2001:db8:1:2::/64',
+  refundRateLimit: async (key: string) => { h.refunds.push(key) },
 }))
 
 describe('asClient', () => {
@@ -15,8 +16,10 @@ describe('asClient', () => {
     const req = new Request('http://x/api/internal/address/0x1/history')
     await asClient(req, async () => 'cached: the adapter never asks')
     expect(h.calls).toEqual([])
-    await asClient(req, async () => currentClientAdmission()!())
+    await asClient(req, async () => currentClientAdmission()!.admit())
     expect(h.calls).toEqual([['prov:2001:db8:1:2::/64', 60, 60 * 60 * 1000]])
+    await asClient(req, async () => currentClientAdmission()!.release())
+    expect(h.refunds, 'a fleet refusal refunds the same bucket').toEqual(['prov:2001:db8:1:2::/64'])
   })
 })
 
