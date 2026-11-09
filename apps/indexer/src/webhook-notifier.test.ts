@@ -6,12 +6,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const h = vi.hoisted(() => ({ selects: 0, fetches: 0, release: [] as Array<() => void> }))
+const h = vi.hoisted(() => ({ selects: 0, fetches: 0, release: [] as Array<() => void>, rows: null as unknown[] | null }))
 
 vi.mock('./db', async (orig) => {
   const where = async () => {
     h.selects++
-    return [{ id: 1, url: 'https://hooks.example.com/x', secret: 'k', watchAddress: null, eventTypes: ['tx'] }]
+    return h.rows ?? [{ id: 1, url: 'https://hooks.example.com/x', secret: 'k', watchAddress: null, eventTypes: ['tx'] }]
   }
   const db = {
     select: () => ({ from: () => ({ where }) }),
@@ -81,5 +81,59 @@ describe('notifyWebhooks payload', () => {
     const body = await deliveredBody()
     expect(Object.keys(body).sort()).toEqual(['blockNumber', 'chainId', 'count', 'data', 'event', 'timestamp'])
     expect(body).toMatchObject({ event: 'tx', blockNumber: 42, count: 1 })
+  })
+})
+
+// A run POSTs one webhook at a time, up to 10 s each, so a block matching many held its run (and the runs behind it)
+// for minutes. Past the cap a block delivers that many, from a start that moves with the block number.
+describe('pickDeliveries', () => {
+  const due = (n: number) => Array.from({ length: n }, (_, i) => ({ id: 100 + i }))
+
+  it('keeps everything up to the cap', async () => {
+    const { pickDeliveries } = await import('./webhook-notifier')
+    expect(pickDeliveries(due(3), 7, 16).map((d) => d.id)).toEqual([100, 101, 102])
+  })
+
+  it('past the cap, takes the cap from the cursor, wrapping around', async () => {
+    const { pickDeliveries } = await import('./webhook-notifier')
+    expect(pickDeliveries(due(5), 4, 3).map((d) => d.id)).toEqual([104, 100, 101])
+    expect(pickDeliveries(due(5), 7, 3).map((d) => d.id)).toEqual([102, 103, 104])   // 7 % 5 = 2
+  })
+
+  it('gives every due webhook a turn within ceil(due / cap) capped runs as the cursor advances by the cap', async () => {
+    const { pickDeliveries } = await import('./webhook-notifier')
+    const seen = new Set<number>()
+    for (let run = 0; run < 3; run++) for (const d of pickDeliveries(due(40), run * 16, 16)) seen.add(d.id)
+    expect(seen.size).toBe(40)
+  })
+})
+
+describe('notifyWebhooks per-block delivery cap', () => {
+  afterEach(() => { h.rows = null })
+
+  // Codex round one: a start derived from block height starves a subset when the webhooks are only due at some heights.
+  // With 32 due only on even blocks, (block x 16) % 32 was always 0, so ids 17-32 never fired.
+  it('reaches every webhook when they are due only on even blocks', async () => {
+    h.rows = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, url: `https://e${i}.example.com/x`, secret: 'k', watchAddress: null, eventTypes: ['tx'] }))
+    const urls = new Set<string>()
+    vi.stubGlobal('fetch', async (url: string) => { urls.add(String(url)); return new Response(null, { status: 200 }) })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { notifyWebhooks } = await import('./webhook-notifier')
+    for (const b of [3000, 3002]) await notifyWebhooks(tx, b, new Date(), `0x${b}`)
+    expect(urls.size).toBe(32)
+    warn.mockRestore()
+  })
+
+  it('POSTs at most WEBHOOK_DELIVERIES_PER_BLOCK webhooks for one block, and says so', async () => {
+    h.rows = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, url: `https://h${i}.example.com/x`, secret: 'k', watchAddress: null, eventTypes: ['tx'] }))
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => { urls.push(String(url)); return new Response(null, { status: 200 }) })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { notifyWebhooks, WEBHOOK_DELIVERIES_PER_BLOCK } = await import('./webhook-notifier')
+    await notifyWebhooks(tx, 2000, new Date(), '0x2000')
+    expect(urls).toHaveLength(WEBHOOK_DELIVERIES_PER_BLOCK)
+    expect(new Set(urls).size).toBe(WEBHOOK_DELIVERIES_PER_BLOCK)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('40 webhooks due, delivered 16'))).toBe(true)
+    warn.mockRestore()
   })
 })
