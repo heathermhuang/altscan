@@ -21,7 +21,14 @@ export { checkRateLimit, clientIpBucket, clientIpFromHeaders }
  */
 export const SERVICE_TOKEN_HEADER = 'x-altscan-service-token'
 export const SERVICE_CLIENT_HEADER = 'x-altscan-service-client'
+/**
+ * The MCP client behind a service-token call: an HMAC of its key, set by altscan.io's Worker (lib/ip-bucket.ts there).
+ * It counts only alongside a valid token, and gives each MCP client a sub-bucket, checked before the shared one, so one
+ * client cannot draw the whole 600/min every other MCP client shares.
+ */
+export const SERVICE_CLIENT_ID_HEADER = 'x-altscan-service-client-id'
 const SERVICE_MAX_PER_MINUTE = 600
+const SERVICE_CLIENT_MAX_PER_MINUTE = 120
 const MIN_TOKEN_LENGTH = 32
 
 function constantTimeEqual(a: string, b: string): boolean {
@@ -42,8 +49,12 @@ export async function checkIpRateLimit(
   maxRequests?: number,
 ): Promise<boolean> {
   if (isAltscanService(headers)) {
-    const bucket = headers.get(SERVICE_CLIENT_HEADER) === 'status-feed' ? 'service:altscan-status-feed' : 'service:altscan-mcp'
-    return checkRateLimit(bucket, SERVICE_MAX_PER_MINUTE)
+    const feed = headers.get(SERVICE_CLIENT_HEADER) === 'status-feed'
+    const id = headers.get(SERVICE_CLIENT_ID_HEADER) ?? ''
+    if (!feed && /^[0-9a-f]{32}$/.test(id) && !(await checkRateLimit(`service:altscan-mcp:client:${id}`, SERVICE_CLIENT_MAX_PER_MINUTE))) {
+      return false
+    }
+    return checkRateLimit(feed ? 'service:altscan-status-feed' : 'service:altscan-mcp', SERVICE_MAX_PER_MINUTE)
   }
   return checkRateLimit(clientIpBucket(headers), maxRequests)
 }

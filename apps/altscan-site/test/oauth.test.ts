@@ -69,11 +69,11 @@ await t('mcpWithinLimits: a token caller is limited per address AND, more loosel
       return { success: n <= cap };
     } };
   };
-  // Anonymous: the IP is the caller, and only the per-caller limiter is consulted.
+  // Anonymous: the IP bucket is the caller, and it is charged the shared per-IP ceiling too.
   let perCaller = limiter(60), perIp = limiter(120);
   assert.equal(await mcpWithinLimits('1.2.3.4', '1.2.3.4', { perCaller, perIp }), true);
   assert.deepEqual(perCaller.seen, ['1.2.3.4']);
-  assert.deepEqual(perIp.seen, []);
+  assert.deepEqual(perIp.seen, ['1.2.3.4']);
   // Token callers: one IP opening many addresses gets each its own 60, but 120 in all.
   perCaller = limiter(60); perIp = limiter(120);
   let allowed = 0;

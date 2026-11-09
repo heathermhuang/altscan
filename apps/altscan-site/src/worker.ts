@@ -6,6 +6,7 @@ import type { CodeGrant } from '@altscan/oauth';
 import { homeResponse } from './lib/home';
 import { clientHash, handleMcp, usagePoint, type UsagePoint } from './lib/mcp';
 import { isOAuthPath, mcpCaller, mcpWithinLimits, oauthConfig, oauthResponse } from './lib/oauth';
+import { ipBucket, serviceClientId } from './lib/ip-bucket';
 
 export { OAuthCodes } from './oauth-codes';
 
@@ -44,7 +45,7 @@ function oauthFor(request: Request, env: Env) {
 async function oauth(request: Request, env: Env, fallback: () => Promise<Response>): Promise<Response> {
   const cfg = oauthFor(request, env);
   if (!cfg) return fallback();
-  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  const ip = ipBucket(request.headers.get('cf-connecting-ip') ?? 'unknown');
   return oauthResponse(request, cfg, async () => !env.OAUTH_RATE_LIMITER || (await env.OAUTH_RATE_LIMITER.limit({ key: ip })).success);
 }
 
@@ -57,19 +58,24 @@ async function mcp(request: Request, env: Env): Promise<Response> {
       headers: { 'content-type': 'application/json', 'retry-after': '3600' },
     });
   }
-  // The explorers see every Worker request as one client, so the per-client limit lives here: per IP,
-  // or per address for a caller with a valid OAuth token, which is also capped per IP (mcpWithinLimits).
+  // Per-client limits live here: per IP bucket (an IPv6 client is its /64), or per address for a caller with a valid
+  // OAuth token; every call, token or not, is also capped per IP bucket (mcpWithinLimits). The explorers get the
+  // caller's id, HMAC'd, so they can bucket MCP clients apart under the service cap (lib/ip-bucket.ts).
   const client = request.headers.get('cf-connecting-ip') ?? 'unknown';
-  const caller = await mcpCaller(request, oauthFor(request, env), client);
+  const bucket = ipBucket(client);
+  const caller = await mcpCaller(request, oauthFor(request, env), bucket);
   if ('reject' in caller) return caller.reject;
-  if (!(await mcpWithinLimits(caller.key, client, { perCaller: env.MCP_RATE_LIMITER, perIp: env.MCP_IP_RATE_LIMITER }))) {
+  if (!(await mcpWithinLimits(caller.key, bucket, { perCaller: env.MCP_RATE_LIMITER, perIp: env.MCP_IP_RATE_LIMITER }))) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
       status: 429,
       headers: { 'content-type': 'application/json', 'retry-after': '60' },
     });
   }
   const headers: Record<string, string> = { accept: 'application/json', 'user-agent': 'altscan-mcp/0.1 (+https://altscan.io)' };
-  if (env.ALTSCAN_SERVICE_TOKEN) headers['x-altscan-service-token'] = env.ALTSCAN_SERVICE_TOKEN;
+  if (env.ALTSCAN_SERVICE_TOKEN) {
+    headers['x-altscan-service-token'] = env.ALTSCAN_SERVICE_TOKEN;
+    headers['x-altscan-service-client-id'] = await serviceClientId(env.ALTSCAN_SERVICE_TOKEN, caller.key);
+  }
   const upstream = (url: string) => fetch(url, { headers, signal: AbortSignal.timeout(MCP_UPSTREAM_DEADLINE_MS) });
   // One line per tool call: tool, chain, outcome, upstream status, latency. No hashes or addresses.
   // The usage row adds the client, hashed, so distinct clients can be counted over the whole pilot.
