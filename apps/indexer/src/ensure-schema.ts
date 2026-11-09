@@ -1329,6 +1329,13 @@ export async function ensurePartitionedTtWhaleIndex(
   return ensurePartitionedPartialIndex(ttWhalePartial(w))
 }
 
+async function indexIsValid(name: string): Promise<boolean> {
+  const [row] = Array.from(await getDb().execute(sql`
+    SELECT i.indisvalid FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid WHERE c.oid = to_regclass(${name})
+  `)) as Array<{ indisvalid: boolean }>
+  return row?.indisvalid === true
+}
+
 /** The same build for any PartitionedPartialIndex (the whale index, the NFTs tab's). Never throws. */
 export async function ensurePartitionedPartialIndex(ix: PartitionedPartialIndex): Promise<void> {
   try {
@@ -1349,7 +1356,22 @@ export async function ensurePartitionedPartialIndex(ix: PartitionedPartialIndex)
     const covered = await listPartitionsWithAttachedIndex(ix.name)
     let done = 0
     for (const part of parts) {
-      if (covered.has(part.name)) { done++; continue }
+      const attachedChild = covered.get(part.name)
+      if (attachedChild) {
+        if (await indexIsValid(attachedChild)) { done++; continue }
+        // Attached but INVALID: a CONCURRENTLY build was interrupted (overlapping deploy generations deadlock), and a
+        // later boot found the half-built index ("already exists, skipping") and attached it. The boot sweep cannot
+        // drop an attached child (the parent requires it), and counting it as covered left that partition without the
+        // index for good: BNB token_transfers_p_132090552, 2026-11-09. REINDEX CONCURRENTLY rebuilds it in place and
+        // keeps it attached (measured on PG 16.13).
+        try {
+          await db.execute(sql.raw(`REINDEX INDEX CONCURRENTLY ${attachedChild}`))
+          done++
+        } catch (err) {
+          console.warn(`[indexer] ${ix.name}: rebuilding invalid ${attachedChild} failed:`, dbErrorMessage(err))
+        }
+        continue
+      }
       const { child, attach } = buildPartitionedPartialIndexSql(ix, part.name)
       try {
         await db.execute(sql.raw(child))
