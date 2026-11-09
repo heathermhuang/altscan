@@ -142,6 +142,49 @@ export function clientIpFromHeaders(headers: { get(name: string): string | null 
   return cf && isCloudflareIp(peer) ? cf : peer
 }
 
+/** The 8 groups of an IPv6 address as numbers, or null. Handles "::" and a dotted IPv4 tail. */
+function ipv6Groups(ip: string): number[] | null {
+  let s = ip
+  const dotted = s.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/)
+  if (dotted) {
+    if (isIP(dotted[2]) !== 4) return null
+    const [a, b, c, d] = dotted[2].split('.').map(Number)
+    s = dotted[1] + ((a << 8) | b).toString(16) + ':' + ((c << 8) | d).toString(16)
+  }
+  const halves = s.split('::')
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(':') : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null
+  const parts = [...head, ...Array(fill).fill('0'), ...tail]
+  if (parts.length !== 8 || parts.some((p) => !/^[0-9a-f]{1,4}$/.test(p))) return null
+  return parts.map((p) => parseInt(p, 16))
+}
+
+/**
+ * The rate-limit bucket for a client address. One subscriber is routinely handed a whole IPv6 /64 and can rotate
+ * through it for free: on 2026-10-19 ETH web saw ~4k rotating IPv6 addresses in one burst. So an IPv6 address buckets
+ * by its /64. An IPv4-mapped IPv6 address (::ffff:1.2.3.4) is that IPv4 address, and every spelling of one address
+ * (case, leading zeros, "::" placement, brackets, a zone id) is one key. Anything else is returned as given.
+ */
+export function ipBucketKey(ip: string): string {
+  const raw = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '')
+  if (isIP(raw) === 4) return raw
+  if (isIP(raw) !== 6) return ip
+  const g = ipv6Groups(raw)
+  if (!g) return ip
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) {
+    return [g[6] >> 8, g[6] & 0xff, g[7] >> 8, g[7] & 0xff].join('.')
+  }
+  return `${g.slice(0, 4).map((x) => x.toString(16)).join(':')}::/64`
+}
+
+/** `clientIpFromHeaders`, as a rate-limit bucket (ipBucketKey). Every per-IP limit keys on this. */
+export function clientIpBucket(headers: { get(name: string): string | null }): string {
+  return ipBucketKey(clientIpFromHeaders(headers))
+}
+
 /**
  * Async rate limit check — uses Redis when available, in-memory otherwise.
  * Returns true if allowed, false if rate-limited.
@@ -157,7 +200,7 @@ export async function checkIpRateLimit(
   headers: { get(name: string): string | null },
   maxRequests = DEFAULT_MAX_REQUESTS,
 ): Promise<boolean> {
-  return checkRateLimit(clientIpFromHeaders(headers), maxRequests)
+  return checkRateLimit(clientIpBucket(headers), maxRequests)
 }
 
 /** Expose in-memory rate limit map size for monitoring */

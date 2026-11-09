@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/
 
@@ -25,7 +25,7 @@ export async function guardInternalAddress(
     return NextResponse.json({ error: 'Invalid address' }, { status: 400, headers })
   }
   // Namespaced bucket so it doesn't collide with the /api/v1 IP limiter.
-  if (!(await checkRateLimit(`internal:${clientIpFromHeaders(req.headers)}`, maxPerMin))) {
+  if (!(await checkRateLimit(`internal:${clientIpBucket(req.headers)}`, maxPerMin))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers })
   }
   return null

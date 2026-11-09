@@ -9,7 +9,7 @@ import crypto from 'crypto'
 import { and, eq } from 'drizzle-orm'
 import { MIN_SECRET_LENGTH, type CodeGrant, type CodeStore, type OAuthConfig } from '@altscan/oauth'
 import { getRedis, isRedisUnavailable } from '@altscan/explorer-core'
-import { checkRateLimit, clientIpFromHeaders } from './api-rate-limit'
+import { checkRateLimit, clientIpBucket } from './api-rate-limit'
 import { chainConfig } from './chain'
 import { db, schema } from './db'
 
@@ -107,7 +107,7 @@ export function oauthRoute(
   return async (request) => {
     const cfg = oauthConfig()
     if (!cfg) return new Response('Not found', { status: 404 })
-    if (opts.limited && !(await checkRateLimit(`oauth:${clientIpFromHeaders(request.headers)}`, OAUTH_REQUESTS_PER_MINUTE))) {
+    if (opts.limited && !(await checkRateLimit(`oauth:${clientIpBucket(request.headers)}`, OAUTH_REQUESTS_PER_MINUTE))) {
       return Response.json(
         { error: 'slow_down', error_description: 'Too many requests; retry in a minute.' },
         { status: 429, headers: { 'retry-after': '60', 'access-control-allow-origin': '*' } },
