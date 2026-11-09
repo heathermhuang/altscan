@@ -10,6 +10,7 @@ import { recordIndexGapIfAbsent } from './index-gaps'
 import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
+import { createFanoutStats } from './fanout-stats'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
@@ -214,6 +215,8 @@ const TOKEN_CACHE_MAX = 50_000
 
 // null: not a listed factory's pair (dex-swap.ts V2_FACTORIES), remembered so it is not re-read every block.
 const pairCache = new Map<string, V2Pair | null>()
+// Measures the post-write fan-out per block, to size its budgets (lib: fanout-stats.ts). Counts only.
+const fanoutStats = createFanoutStats()
 const PAIR_CACHE_MAX = 10_000
 
 // ── Main entry ──────────────────────────────────────────────────────
@@ -696,6 +699,7 @@ async function processReceiptsBatch(
   // Decoded transfer rows for this block. In async mode these are returned to the
   // caller to enqueue on the writer instead of being INSERTed inline here.
   let decodedTransfers: TokenTransferRow[] = []
+  const fanout = { tokens: 0, pairs: 0, pairDrops: 0 }
 
   // Note: tx.status / tx.gasUsed are now populated at INSERT time in processBlock
   // (receipts awaited up-front and merged into txValues). No second UPDATE pass.
@@ -776,7 +780,7 @@ async function processReceiptsBatch(
     // Ensure unknown tokens exist (batched RPC lookups)
     if (tokensToEnsure.size > 0) {
       const sT = PROFILE_ENABLED ? performance.now() : 0
-      await ensureTokensBatch(tokensToEnsure, provider)
+      fanout.tokens = await ensureTokensBatch(tokensToEnsure, provider)
       if (t) t.rpcEnsureTokens = performance.now() - sT
     }
 
@@ -841,6 +845,7 @@ async function processReceiptsBatch(
       const pairAddress = log.address.toLowerCase()
       if (!pairCache.has(pairAddress)) unknownPairs.add(pairAddress)
     }
+    fanout.pairs = unknownPairs.size
     if (unknownPairs.size > 0) {
       const sP = PROFILE_ENABLED ? performance.now() : 0
       await Promise.all(Array.from(unknownPairs).map(pair => fetchPairTokens(pair, provider)))
@@ -853,7 +858,11 @@ async function processReceiptsBatch(
         if (!isUsableLogIndex(log.index)) continue
         const pairAddress = log.address.toLowerCase()
         const pair = pairCache.get(pairAddress)
-        if (!pair) continue
+        if (!pair) {
+          // Not in the cache at all: its read failed, so this trade is dropped. A cached null is "not a pair".
+          if (!pairCache.has(pairAddress)) fanout.pairDrops++
+          continue
+        }
 
         const swap = decodeV2Swap(log, pair.tokens)
         if (!swap) continue
@@ -882,6 +891,7 @@ async function processReceiptsBatch(
     }
   }
 
+  fanoutStats.record(fanout)
   return decodedTransfers
 }
 
@@ -2058,13 +2068,14 @@ export function orderByAddress<T extends { address: string }>(rows: readonly T[]
   return [...rows].sort((a, b) => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
 }
 
+/** Returns how many tokens it read metadata for (fanout-stats.ts). */
 async function ensureTokensBatch(
   tokensToEnsure: Map<string, 'BEP20' | 'BEP721' | 'BEP1155'>,
   provider: JsonRpcProvider,
-): Promise<void> {
+): Promise<number> {
   const db = getDb()
   const addresses = Array.from(tokensToEnsure.keys())
-  if (addresses.length === 0) return
+  if (addresses.length === 0) return 0
 
   // Check which already exist in DB — chunked to avoid stack overflow.
   // Uses IN (literal list) instead of ANY(arr) because Drizzle serializes JS arrays
@@ -2089,7 +2100,7 @@ async function ensureTokensBatch(
     if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()
   }
 
-  if (toFetch.length === 0) return
+  if (toFetch.length === 0) return 0
 
   // Fetch metadata in parallel
   const results = await Promise.all(
@@ -2157,6 +2168,7 @@ async function ensureTokensBatch(
       if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear()
     }
   }
+  return toFetch.length
 }
 
 // ── DEX pair token lookup ───────────────────────────────────────────
