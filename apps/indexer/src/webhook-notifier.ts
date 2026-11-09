@@ -189,18 +189,19 @@ let skippedRuns = 0
 /**
  * Deliveries per block. A run POSTs one webhook at a time, up to 10 s each, so a block matching many webhooks held its
  * run, and the runs behind it, for minutes; and registrations are cheap (69 at once on 2026-10-22, one target host).
- * Past this many, a block delivers this many, starting where the previous block stopped (the start advances by the cap
- * per block): every due webhook gets its turn within ceil(due / cap) blocks, instead of the lowest ids always winning.
+ * Past this many, a block delivers this many, starting at a cursor that advances by the cap each time a block is capped.
+ * The cursor moves with actual selections, not block height: webhooks due only on even blocks would otherwise always see
+ * the same start, and the same subset would always win. Every due webhook gets a turn within ceil(due / cap) capped runs.
  */
 export const WEBHOOK_DELIVERIES_PER_BLOCK = 16
 let skippedDeliveries = 0
+let deliveryCursor = 0
 
-/** `due` in id order, capped at `cap` from a start that rotates with the block number. */
-export function pickDeliveries<T extends { id: number }>(due: readonly T[], blockNumber: number, cap: number): T[] {
+/** `due` in id order, capped at `cap`, starting at `cursor` (mod the count) and wrapping around. */
+export function pickDeliveries<T extends { id: number }>(due: readonly T[], cursor: number, cap: number): T[] {
   if (due.length <= cap) return [...due]
   const sorted = [...due].sort((a, b) => a.id - b.id)
-  // Advance by the cap each block, so every due webhook gets a turn within ceil(due / cap) consecutive blocks.
-  const start = (blockNumber * cap) % sorted.length
+  const start = cursor % sorted.length
   return Array.from({ length: cap }, (_, i) => sorted[(start + i) % sorted.length])
 }
 
@@ -282,8 +283,9 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
         : txs,
     }))
     .filter((d) => d.signingKey && d.relevantTxs.length > 0)
-  const picked = pickDeliveries(due, blockNumber, WEBHOOK_DELIVERIES_PER_BLOCK)
+  const picked = pickDeliveries(due, deliveryCursor, WEBHOOK_DELIVERIES_PER_BLOCK)
   if (picked.length < due.length) {
+    deliveryCursor += WEBHOOK_DELIVERIES_PER_BLOCK
     skippedDeliveries += due.length - picked.length
     console.warn(`[webhook-notifier] block ${blockNumber}: ${due.length} webhooks due, delivered ${picked.length} (${skippedDeliveries} skipped so far)`)
   }
