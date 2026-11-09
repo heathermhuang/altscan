@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createLimiter, warmPairs, withinBudget } from './post-write-budget'
+import { boundedRead, createLimiter, warmPairs, withinBudget } from './post-write-budget'
 
 describe('createLimiter', () => {
   it('never runs more than max at once, and runs every one', async () => {
@@ -44,5 +44,43 @@ describe('warmPairs', () => {
       { pair_address: '0xp', token0: '0xa', token1: '0xa', dex: 'x' },
       { pair_address: '0xq', token0: '0xa', token1: '', dex: 'x' },
     ])).toEqual([])
+  })
+})
+
+// Codex round one: a timeout inside the limiter freed the slot while the read stayed in flight on the node, so a slow
+// endpoint piled reads past the limit (24 in flight under a limit of 8). The slot now stays with the read.
+describe('boundedRead', () => {
+  it('times the caller out, but keeps the slot until the read settles', async () => {
+    const limit = createLimiter(8)
+    let inFlight = 0
+    let peak = 0
+    const slow = () => new Promise<string>((resolve) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      setTimeout(() => { inFlight--; resolve('late') }, 40)
+    })
+    const results = await Promise.allSettled(Array.from({ length: 24 }, (_, i) => boundedRead(limit, slow, 5, `read ${i}`)))
+    expect(results.every((r) => r.status === 'rejected')).toBe(true)   // every caller stopped waiting
+    await new Promise((r) => setTimeout(r, 200))                          // let the reads drain
+    expect(peak, 'never more than the limit in flight').toBe(8)
+    expect(inFlight).toBe(0)
+  })
+
+  it('returns the value when the read is in time', async () => {
+    expect(await boundedRead(createLimiter(1), async () => 'ok', 1000, 'fast')).toBe('ok')
+  })
+
+  it('a read that fails after its caller gave up does not surface as an unhandled rejection', async () => {
+    const seen: unknown[] = []
+    const onUnhandled = (e: unknown) => { seen.push(e) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const failsLate = () => new Promise<never>((_, reject) => setTimeout(() => reject(new Error('late failure')), 20))
+      await expect(boundedRead(createLimiter(1), failsLate, 5, 'late')).rejects.toThrow(/timed out/)
+      await new Promise((r) => setTimeout(r, 60))
+      expect(seen).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })

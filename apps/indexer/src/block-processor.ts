@@ -11,7 +11,7 @@ import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { createFanoutStats } from './fanout-stats'
-import { createLimiter, PAIR_RESOLVE_PER_BLOCK, POST_WRITE_CONCURRENCY, TOKEN_FETCH_PER_BLOCK, WARM_PAIR_BLOCKS, WARM_PAIR_MAX, warmPairs, withinBudget, type WarmPairRow } from './post-write-budget'
+import { boundedRead, createLimiter, PAIR_RESOLVE_PER_BLOCK, POST_WRITE_CONCURRENCY, TOKEN_FETCH_PER_BLOCK, WARM_PAIR_BLOCKS, WARM_PAIR_MAX, warmPairs, withinBudget, type WarmPairRow } from './post-write-budget'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
@@ -858,7 +858,7 @@ async function processReceiptsBatch(
       if (over.length > 0) console.warn(`[dex] pair budget exceeded in block ${blockNumber}: ${over.length} of ${unknownPairs.size} unknown pairs not read`)
       // A read that times out is a failed read: nothing is cached, and the pair is read again when it next swaps.
       await Promise.all(resolveNow.map(pair =>
-        pairReads(() => withTimeout(fetchPairTokens(pair, provider), readTimeoutMs(), `pair ${pair}`)).catch(() => {})))
+        boundedRead(pairReads, () => fetchPairTokens(pair, provider), readTimeoutMs(), `pair ${pair}`).catch(() => {})))
       if (t) t.rpcPairTokens = performance.now() - sP
     }
 
@@ -2129,7 +2129,7 @@ async function ensureTokensBatch(
   const results = [
     ...await Promise.all(readNow.map(async (addr) => {
       try {
-        const meta = await tokenReads(() => withTimeout(fetchTokenMetadata(provider, addr), readTimeoutMs(), `token ${addr}`))
+        const meta = await boundedRead(tokenReads, () => fetchTokenMetadata(provider, addr), readTimeoutMs(), `token ${addr}`)
         return {
           ...placeholder(addr),
           name: meta.name ?? UNKNOWN_NAME,

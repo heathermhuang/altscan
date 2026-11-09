@@ -13,8 +13,10 @@ export const PAIR_RESOLVE_PER_BLOCK = 64
 /** Reads in flight at once, across every block, for each of the two kinds. */
 export const POST_WRITE_CONCURRENCY = 8
 
+export type Limiter = <T>(fn: () => Promise<T>) => Promise<T>
+
 /** A FIFO semaphore: at most `max` of the functions it runs are in flight at once. */
-export function createLimiter(max: number) {
+export function createLimiter(max: number): Limiter {
   let active = 0
   const waiting: Array<() => void> = []
   return async function run<T>(fn: () => Promise<T>): Promise<T> {
@@ -27,6 +29,22 @@ export function createLimiter(max: number) {
       waiting.shift()?.()
     }
   }
+}
+
+/**
+ * Run `fn` under `limit`, and stop WAITING for it after `timeoutMs`. The slot stays with `fn` until it settles: a
+ * timeout only frees the block, not the read, which is still in flight on the node. Releasing the slot at the timeout
+ * would let a slow endpoint pile up reads past the limit (Codex, round one: 24 in flight under a limit of 8). A read
+ * that fails after its caller gave up is handled here, so it cannot surface as an unhandled rejection.
+ */
+export function boundedRead<T>(limit: Limiter, fn: () => Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  const read = limit(fn)
+  read.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+  })
+  return Promise.race([read, deadline]).finally(() => clearTimeout(timer))
 }
 
 /** The first `budget` items to read now, and the rest. */
