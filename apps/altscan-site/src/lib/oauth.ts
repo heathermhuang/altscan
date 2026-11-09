@@ -73,8 +73,8 @@ type RateLimiter = { limit(o: { key: string }): Promise<{ success: boolean }> };
  * /mcp's per-client limits. A token caller gets a bucket per address, so agents sharing
  * one IP don't throttle each other. But an address costs only a wallet signature, so one
  * IP could open hundreds and, between them, drain the single bucket the explorers give
- * all of altscan.io. Token callers are therefore also limited per IP, more loosely
- * (`perIp`), which bounds what one IP can draw however many addresses it opens.
+ * all of altscan.io. So EVERY call, keyless or token, is also limited per IP bucket, more
+ * loosely (`perIp`): one ceiling bounds what one client can draw however it calls.
  * An unbound limiter (local dev) allows.
  */
 export async function mcpWithinLimits(
@@ -83,6 +83,6 @@ export async function mcpWithinLimits(
   limiters: { perCaller?: RateLimiter; perIp?: RateLimiter },
 ): Promise<boolean> {
   if (limiters.perCaller && !(await limiters.perCaller.limit({ key: callerKey })).success) return false;
-  if (callerKey.startsWith('sub:') && limiters.perIp && !(await limiters.perIp.limit({ key: ip })).success) return false;
+  if (limiters.perIp && !(await limiters.perIp.limit({ key: ip })).success) return false;
   return true;
 }
