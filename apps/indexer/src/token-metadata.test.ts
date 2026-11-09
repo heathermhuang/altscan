@@ -794,3 +794,21 @@ describe('decideHeal transport strikes', () => {
     expect((await scanHealCandidates(fetchPage, null, tried, 2, { batchSize: 40, pageSize: 80 })).taken).toEqual([])
   })
 })
+
+// The contract chooses how much name() returns, and the decoder read all of it before trimming to the column. Past
+// TEXT_MAX_RETURN_BYTES it is no text; the Uniswap V1 answer (bytes32 + a 4,096-byte zeroed buffer) is still read.
+describe('fetchTokenMetadata return-size bound', () => {
+  it('reads an oversized name as no name, without decoding it', async () => {
+    const { TEXT_MAX_RETURN_BYTES } = await import('./token-metadata')
+    const { runner } = mockRunner({
+      name: encode('name', 'N'.repeat(TEXT_MAX_RETURN_BYTES * 2)),
+      symbol: encode('symbol', 'OK'),
+      decimals: encode('decimals', 18),
+      totalSupply: encode('totalSupply', 1n),
+    })
+    const meta = await fetchTokenMetadata(runner, TOKEN)
+    expect(meta.name).toBeNull()
+    expect(meta.symbol).toBe('OK')
+    expect(meta.transportFailed).toBe(false)
+  })
+})

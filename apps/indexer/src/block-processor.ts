@@ -11,6 +11,7 @@ import { notifyWebhooks } from './webhook-notifier'
 import { getProvider, safeRpcError } from './provider'
 import { fetchTokenMetadata, isTransportError, UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
 import { createFanoutStats } from './fanout-stats'
+import { boundedRead, createLimiter, PAIR_RESOLVE_PER_BLOCK, POST_WRITE_CONCURRENCY, TOKEN_FETCH_PER_BLOCK, WARM_PAIR_BLOCKS, WARM_PAIR_MAX, warmPairs, withinBudget, type WarmPairRow } from './post-write-budget'
 import { fetchBlockTraces, MAX_TRACE_ADDRESS_LEN, prepareInternalTxRows, type InternalTxRow, type RawTraceTx } from './internal-tx'
 
 // ── Topic signatures ────────────────────────────────────────────────
@@ -218,13 +219,17 @@ const pairCache = new Map<string, V2Pair | null>()
 // Measures the post-write fan-out per block, to size its budgets (lib: fanout-stats.ts). Counts only.
 const fanoutStats = createFanoutStats()
 const PAIR_CACHE_MAX = 10_000
+// Post-write metadata reads in flight, across every block (post-write-budget.ts).
+const tokenReads = createLimiter(POST_WRITE_CONCURRENCY)
+const pairReads = createLimiter(POST_WRITE_CONCURRENCY)
+const readTimeoutMs = () => indexerConfig.rpc.readTimeoutMs
 
 // ── Main entry ──────────────────────────────────────────────────────
 /**
  * `onWritesBegan` is invoked exactly once, immediately before the first durable
  * write. Everything above that call is pure RPC acquisition and is safe to retry
- * on another endpoint; everything below it persists incrementally and is NOT
- * (dex_trades has no unique constraint, so a replay duplicates rows). RPC
+ * on another endpoint; everything below it persists incrementally, so another endpoint is not tried once writes
+ * began (a replay of the block repairs its missing rows instead: dex_trades dedupes on block_number, log_index). RPC
  * failover uses this boundary — see rpc-failover.ts. Optional: callers that
  * never retry (backfill.ts) can ignore it.
  */
@@ -848,7 +853,12 @@ async function processReceiptsBatch(
     fanout.pairs = unknownPairs.size
     if (unknownPairs.size > 0) {
       const sP = PROFILE_ENABLED ? performance.now() : 0
-      await Promise.all(Array.from(unknownPairs).map(pair => fetchPairTokens(pair, provider)))
+      // Past the budget a pair is not read, and its swaps are dropped below and counted (fanout-stats.ts): a stated loss.
+      const { now: resolveNow, over } = withinBudget(Array.from(unknownPairs), PAIR_RESOLVE_PER_BLOCK)
+      if (over.length > 0) console.warn(`[dex] pair budget exceeded in block ${blockNumber}: ${over.length} of ${unknownPairs.size} unknown pairs not read`)
+      // A read that times out is a failed read: nothing is cached, and the pair is read again when it next swaps.
+      await Promise.all(resolveNow.map(pair =>
+        boundedRead(pairReads, () => fetchPairTokens(pair, provider), readTimeoutMs(), `pair ${pair}`).catch(() => {})))
       if (t) t.rpcPairTokens = performance.now() - sP
     }
 
@@ -2102,27 +2112,39 @@ async function ensureTokensBatch(
 
   if (toFetch.length === 0) return 0
 
-  // Fetch metadata in parallel
-  const results = await Promise.all(
-    toFetch.map(async (addr) => {
+  // Read metadata for at most TOKEN_FETCH_PER_BLOCK, POST_WRITE_CONCURRENCY at a time across every block. The rest, and
+  // any read that times out, get the placeholder row a failed read always got (Unknown / ??? / 18 / '0'), which the
+  // metadata healer selects and repairs, decimals included (token-metadata-healer.ts).
+  const placeholder = (addr: string) => ({
+    address: addr,
+    name: UNKNOWN_NAME,
+    symbol: UNKNOWN_SYMBOL,
+    decimals: 18,
+    type: tokensToEnsure.get(addr)!,
+    totalSupply: '0',
+    holderCount: 0,
+  })
+  const { now: readNow, over } = withinBudget(toFetch, TOKEN_FETCH_PER_BLOCK)
+  if (over.length > 0) console.warn(`[tokens] metadata budget exceeded: ${over.length} of ${toFetch.length} new tokens left to the healer`)
+  const results = [
+    ...await Promise.all(readNow.map(async (addr) => {
       try {
-        const meta = await fetchTokenMetadata(provider, addr)
+        const meta = await boundedRead(tokenReads, () => fetchTokenMetadata(provider, addr), readTimeoutMs(), `token ${addr}`)
         return {
-          address: addr,
+          ...placeholder(addr),
           name: meta.name ?? UNKNOWN_NAME,
           symbol: meta.symbol ?? UNKNOWN_SYMBOL,
           decimals: meta.decimals ?? 18,
-          type: tokensToEnsure.get(addr)!,
           totalSupply: meta.totalSupply ?? '0',
-          holderCount: 0,
         }
       } catch {
-        return null
+        return placeholder(addr)
       }
-    })
-  )
+    })),
+    ...over.map(placeholder),
+  ]
 
-  const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
+  const valid = results
   if (valid.length > 0) {
     // Sort by address → consistent lock order, same discipline as flushAddresses.
     //
@@ -2204,6 +2226,35 @@ function v2PairReader(provider: JsonRpcProvider): V2PairReader {
     async getPair(factory, tokenA, tokenB) {
       return String(await new Contract(factory, FACTORY_ABI, provider).getPair(tokenA, tokenB))
     },
+  }
+}
+
+/**
+ * Seed the pair cache from recent dex_trades (post-write-budget.ts warmPairs). Runs once at boot, in the background;
+ * a failure only means the cache starts cold, as it always did.
+ */
+export async function warmPairCache(): Promise<number> {
+  try {
+    const rows = Array.from(await getDb().execute(sql`
+      SELECT pair_address, min(LEAST(token_in, token_out)) AS token0, max(GREATEST(token_in, token_out)) AS token1, min(dex) AS dex
+      FROM dex_trades
+      WHERE block_number > (SELECT max(block_number) FROM dex_trades) - ${WARM_PAIR_BLOCKS}
+        AND pair_address IS NOT NULL AND token_in IS NOT NULL AND token_out IS NOT NULL
+      GROUP BY pair_address
+      LIMIT ${WARM_PAIR_MAX}
+    `)) as WarmPairRow[]
+    let added = 0
+    for (const [address, pair] of warmPairs(rows)) {
+      if (pairCache.has(address)) continue
+      if (pairCache.size >= PAIR_CACHE_MAX) break
+      pairCache.set(address, pair)
+      added++
+    }
+    console.log(`[dex] warmed the pair cache with ${added} pairs from recent dex_trades`)
+    return added
+  } catch (err) {
+    console.warn('[dex] pair cache warm-up failed, starting cold:', dbErrorMessage(err))
+    return 0
   }
 }
 
