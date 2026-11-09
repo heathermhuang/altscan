@@ -186,6 +186,24 @@ export const MAX_INFLIGHT_NOTIFY_RUNS = 32
 let inflightRuns = 0
 let skippedRuns = 0
 
+/**
+ * Deliveries per block. A run POSTs one webhook at a time, up to 10 s each, so a block matching many webhooks held its
+ * run, and the runs behind it, for minutes; and registrations are cheap (69 at once on 2026-10-22, one target host).
+ * Past this many, a block delivers this many, starting where the previous block stopped (the start advances by the cap
+ * per block): every due webhook gets its turn within ceil(due / cap) blocks, instead of the lowest ids always winning.
+ */
+export const WEBHOOK_DELIVERIES_PER_BLOCK = 16
+let skippedDeliveries = 0
+
+/** `due` in id order, capped at `cap` from a start that rotates with the block number. */
+export function pickDeliveries<T extends { id: number }>(due: readonly T[], blockNumber: number, cap: number): T[] {
+  if (due.length <= cap) return [...due]
+  const sorted = [...due].sort((a, b) => a.id - b.id)
+  // Advance by the cap each block, so every due webhook gets a turn within ceil(due / cap) consecutive blocks.
+  const start = (blockNumber * cap) % sorted.length
+  return Array.from({ length: cap }, (_, i) => sorted[(start + i) % sorted.length])
+}
+
 type NotifyTx = { hash: string; fromAddress: string; toAddress: string | null; value: string }
 
 /**
@@ -251,17 +269,27 @@ async function notifyBlock(txs: NotifyTx[], blockNumber: number, timestamp: Date
   const succeededIds = new Set<number>()
   const failedIds = new Set<number>()
 
-  for (const webhook of webhooks) {
-    const signingKey = signingKeyFor(webhook)
+  // The webhooks this block owes a POST, then at most WEBHOOK_DELIVERIES_PER_BLOCK of them, rotating.
+  const due = webhooks
+    .filter((w) => w.eventTypes.includes('tx'))
+    .map((w) => ({
+      id: w.id,
+      webhook: w,
+      signingKey: signingKeyFor(w),
+      // Filter: if watchAddress set, only deliver txs involving that address
+      relevantTxs: w.watchAddress
+        ? txs.filter(tx => tx.fromAddress === w.watchAddress || tx.toAddress === w.watchAddress)
+        : txs,
+    }))
+    .filter((d) => d.signingKey && d.relevantTxs.length > 0)
+  const picked = pickDeliveries(due, blockNumber, WEBHOOK_DELIVERIES_PER_BLOCK)
+  if (picked.length < due.length) {
+    skippedDeliveries += due.length - picked.length
+    console.warn(`[webhook-notifier] block ${blockNumber}: ${due.length} webhooks due, delivered ${picked.length} (${skippedDeliveries} skipped so far)`)
+  }
+
+  for (const { webhook, relevantTxs, signingKey } of picked) {
     if (!signingKey) continue
-    if (!webhook.eventTypes.includes('tx')) continue
-
-    // Filter: if watchAddress set, only deliver txs involving that address
-    const relevantTxs = webhook.watchAddress
-      ? txs.filter(tx => tx.fromAddress === webhook.watchAddress || tx.toAddress === webhook.watchAddress)
-      : txs
-
-    if (relevantTxs.length === 0) continue
 
     // ONE POST per webhook per block — batch all relevant txs into a single
     // payload. Previously this sent one POST per tx, so a global webhook (no

@@ -9,6 +9,25 @@ import { chainConfig } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
+const positiveInt = (raw: string | undefined, fallback: number) => {
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : fallback
+}
+
+/**
+ * Caps across owners. The per-owner caps below bound one wallet, and a wallet is free: on 2026-10-22 69 fresh wallets
+ * each minted a key and registered one webhook, within one hour, on both chains, every one aimed at the same host.
+ * So the active webhooks are capped in total, and per URL hostname. Registrations already past either cap stay
+ * active; only new ones are refused.
+ */
+const WEBHOOK_GLOBAL_MAX = positiveInt(process.env.WEBHOOK_GLOBAL_MAX, 100)
+const WEBHOOK_MAX_PER_HOST = positiveInt(process.env.WEBHOOK_MAX_PER_HOST, 5)
+
+/** The URL's hostname as the registration check reads it, or null when it does not parse. */
+function hostOf(url: string): string | null {
+  try { return new URL(url).hostname.toLowerCase() } catch { return null }
+}
+
 // GET: list webhooks for an owner — requires X-API-Key matching ownerAddress
 export async function GET(request: Request) {
   const auth = await authRequest(request)
@@ -119,6 +138,9 @@ export async function POST(request: Request) {
   let capError: string | null = null
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${owner}))`)
+    // Then the one lock every registration takes, always in this order (owner, then global), so the total and per-host
+    // counts are read and acted on by one registration at a time and cannot deadlock.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('webhooks:global'))`)
 
     const existing = await tx.select({ watchAddress: schema.webhooks.watchAddress })
       .from(schema.webhooks)
@@ -133,6 +155,19 @@ export async function POST(request: Request) {
         capError = 'Maximum 2 global (address-less) webhooks per address'
         return
       }
+    }
+
+    // Read with the same URL parser as the request's, so the comparison cannot drift from a SQL pattern.
+    const active = await tx.select({ url: schema.webhooks.url })
+      .from(schema.webhooks)
+      .where(eq(schema.webhooks.active, true))
+    if (active.length >= WEBHOOK_GLOBAL_MAX) {
+      capError = 'Webhook registrations are full on this explorer; try again later'
+      return
+    }
+    if (active.filter((w) => hostOf(w.url) === hostname).length >= WEBHOOK_MAX_PER_HOST) {
+      capError = `Maximum ${WEBHOOK_MAX_PER_HOST} active webhooks per URL host`
+      return
     }
 
     // Not tx.insert(schema.webhooks): see insertWebhookSql.
