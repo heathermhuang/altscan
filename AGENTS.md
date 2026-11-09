@@ -145,6 +145,8 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
   deliberately** — this repo is public and the job holds an unscopable Render API key;
   `push`, `pull_request` and even `workflow_dispatch` would let branch content choose the
   code that runs beside the secret. Re-run failures via "Re-run jobs" on the run itself.
+  Triggers don't scope secrets, so its two secrets live only in the `render-disk-sync`
+  environment (deployment branches: `main`), **never as repository secrets**.
 - **`[retention] Done` prints unconditionally** — a phase completing is not the cleanup
   completing.
 - A BNB retention run takes ~25–70 min since #143 (compact DELETE 11–53 min + VACUUM 13–19 min;
