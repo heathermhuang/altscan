@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider, isBotRequest } from '@/lib/providers'
-import { guardInternalAddress } from '@/lib/internal-guard'
+import { asClient, guardInternalAddress } from '@/lib/internal-guard'
 import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/backfill-trigger'
 import {
   cacheUsable,
@@ -38,7 +38,7 @@ export async function GET(
   // decodeCursor, which turns an opaque provider cursor into `{source:'head'}`
   // and silently restarts pagination at page 1.
   if (!backfillEnabled()) {
-    const result = provider ? await provider.getAddressHistory(address, cursor || undefined) : null
+    const result = provider ? await asClient(_req, () => provider.getAddressHistory(address, cursor || undefined)) : null
     if (!result || !result.ok) {
       return NextResponse.json(
         { result: [], cursor: null, limited: true, reason: result ? result.reason : 'not_configured' },
@@ -104,7 +104,7 @@ export async function GET(
 
   // Steps 1 & 4 — the live head, or an explicit provider tail page.
   const provCursor = cur.source === 'provider' ? cur.providerCursor : undefined
-  const result = provider ? await provider.getAddressHistory(address, provCursor) : null
+  const result = provider ? await asClient(_req, () => provider.getAddressHistory(address, provCursor)) : null
 
   if (!result || !result.ok) {
     // Outage fallback: serve the cached head rather than an error banner.

@@ -30,7 +30,7 @@ async function transfersRoute(o: { enabled: boolean; served?: ReturnType<typeof 
     }),
     isBotRequest: () => false,
   }))
-  vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+  vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null, asClient: (_req: Request, fn: () => Promise<unknown>) => fn() }))
   vi.doMock('@/lib/backfill-trigger', () => ({
     backfillEnabled: () => o.enabled,
     enqueueBackfill: async () => {},
@@ -83,7 +83,7 @@ describe('GET /api/internal/address/:address/holdings', () => {
     vi.resetModules()
     const tokens = [balance(SPAM, 'US€DT', 'Some Token'), balance(BNB_USDT, 'USDT', 'Tether USD'), balance(SPAM, 'CAKE', 'PancakeSwap Token')]
     vi.doMock('@/lib/providers', () => ({ getDataProvider: () => ({ getAddressTokenBalances: async () => ({ ok: true, data: tokens }) }) }))
-    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null, asClient: (_req: Request, fn: () => Promise<unknown>) => fn() }))
     const { GET } = await import('./holdings/route')
     const body = await (await GET(new Request(`https://x.test/api/internal/address/${ADDR}/holdings`), { params })).json()
     expect(body.limited).toBe(false)

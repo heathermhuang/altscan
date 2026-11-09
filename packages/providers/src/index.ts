@@ -40,6 +40,7 @@ export async function getDataProviderHealth(): Promise<Record<string, unknown>> 
 }
 
 export { TOKEN_HOLDERS_PAGE_SIZE } from './types'
+export { currentClientAdmission, withClientAdmission, type ClientAdmission } from './client-admission'
 export type {
   AddressHistoryPage,
   ProviderAdapter,

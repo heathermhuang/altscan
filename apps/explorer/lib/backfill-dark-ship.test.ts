@@ -51,7 +51,7 @@ async function loadRoute(enabled: boolean, provider: ReturnType<typeof makeProvi
     getDataProvider: () => provider.adapter,
     isBotRequest: () => false,
   }))
-  vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+  vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null, asClient: (_req: Request, fn: () => Promise<unknown>) => fn() }))
   vi.doMock('@/lib/backfill-trigger', () => ({
     backfillEnabled: () => enabled,
     enqueueBackfill: async () => {},
@@ -123,7 +123,7 @@ describe('A4b-1 enabled — the cursor contract changes deliberately', () => {
       getDataProvider: () => p.adapter,
       isBotRequest: () => false,
     }))
-    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null, asClient: (_req: Request, fn: () => Promise<unknown>) => fn() }))
     vi.doMock('@/lib/backfill-trigger', () => ({
       backfillEnabled: () => true,
       enqueueBackfill: async () => {},
@@ -166,7 +166,7 @@ describe('A4b-1 head→cache handoff requires contiguity', () => {
     vi.doMock('@/lib/providers', () => ({
       getDataProvider: () => p.adapter, isBotRequest: () => false,
     }))
-    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null }))
+    vi.doMock('@/lib/internal-guard', () => ({ guardInternalAddress: async () => null, asClient: (_req: Request, fn: () => Promise<unknown>) => fn() }))
     vi.doMock('@/lib/backfill-trigger', () => ({
       backfillEnabled: () => true, enqueueBackfill: async () => {}, shouldEnqueueBackfill: () => false,
     }))
