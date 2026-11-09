@@ -169,3 +169,19 @@ describe('checkRateLimit window', () => {
     }
   })
 })
+
+// A check whose request then did not go ahead (a later gate refused it) gives its count back.
+describe('refundRateLimit', () => {
+  it('gives back one count, never below zero, and frees the slot', async () => {
+    const { checkRateLimit, refundRateLimit } = await import('./rate-limit')
+    const key = `refund-test-${Math.random()}`
+    expect(await checkRateLimit(key, 1)).toBe(true)
+    expect(await checkRateLimit(key, 1)).toBe(false)
+    await refundRateLimit(key)
+    await refundRateLimit(key)
+    await refundRateLimit(key)
+    expect(await checkRateLimit(key, 1), 'one refund frees one slot').toBe(true)
+    expect(await checkRateLimit(key, 1), 'and only one: extra refunds did not bank credit').toBe(false)
+    await refundRateLimit(`never-seen-${Math.random()}`)   // nothing to give back: no error
+  })
+})

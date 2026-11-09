@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider } from '@/lib/providers'
-import { guardInternalAddress } from '@/lib/internal-guard'
+import { asClient, guardInternalAddress } from '@/lib/internal-guard'
 import { chainConfig } from '@/lib/chain'
 import { withLookalikes } from '@/lib/lookalike'
 
@@ -15,7 +15,7 @@ export async function GET(
   if (guard) return guard
 
   const provider = getDataProvider()
-  const result = provider ? await provider.getAddressTokenBalances(address) : null
+  const result = provider ? await asClient(_req, () => provider.getAddressTokenBalances(address)) : null
 
   if (!result || !result.ok) {
     return NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider, isBotRequest } from '@/lib/providers'
-import { guardInternalAddress } from '@/lib/internal-guard'
+import { asClient, guardInternalAddress } from '@/lib/internal-guard'
 import { chainConfig } from '@/lib/chain'
 import { withLookalikes } from '@/lib/lookalike'
 import { backfillEnabled, enqueueBackfill, shouldEnqueueBackfill } from '@/lib/backfill-trigger'
@@ -42,7 +42,7 @@ export async function GET(
 
   // ── Gated OFF: byte-identical A4a behavior (see history/route.ts) ─────────
   if (!backfillEnabled()) {
-    const result = provider ? await provider.getAddressTokenTransfers(address, cursor || undefined) : null
+    const result = provider ? await asClient(_req, () => provider.getAddressTokenTransfers(address, cursor || undefined)) : null
     if (!result || !result.ok) {
       return NextResponse.json(
         { transfers: [], cursor: null, limited: true, reason: result ? result.reason : 'not_configured' },
@@ -103,7 +103,7 @@ export async function GET(
 
   // Live head, or an explicit provider tail page.
   const provCursor = cur.source === 'provider' ? cur.providerCursor : undefined
-  const result = provider ? await provider.getAddressTokenTransfers(address, provCursor) : null
+  const result = provider ? await asClient(_req, () => provider.getAddressTokenTransfers(address, provCursor)) : null
 
   if (!result || !result.ok) {
     const outage = !!result && !result.ok && result.reason !== 'not_configured'

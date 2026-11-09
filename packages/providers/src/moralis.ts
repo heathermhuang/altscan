@@ -33,6 +33,7 @@
  *   - Bot detection (explorer shim) skips the provider entirely for crawlers
  */
 import { kvGet, kvSet, getRedis, isRedisUnavailable, sanitizeSymbol } from '@altscan/explorer-core'
+import { currentClientAdmission } from './client-admission'
 import type { DataProviderConfig } from '@altscan/chain-config'
 import type {
   AddressHistoryPage,
@@ -814,7 +815,15 @@ async function acquire(bucket: MoralisBucket, cuCost: number): Promise<Acquired>
   // already degrades that to the local-index view, which is exactly the right
   // behavior when the budget is gone. A new reason would need an exhaustive
   // sweep of four Lazy components for no user-visible difference.
-  if (await isRateLimited(bucket, cuCost)) return { ok: false, reason: 'rate_limited' }
+  // The calling client's own budget (client-admission.ts), charged only here, where a call is billed: before the
+  // fleet-wide admission, so a client over its budget does not take a fleet slot either. When the fleet then refuses,
+  // the client's charge is given back, so it pays only for calls that reach the provider (Codex, round one).
+  const client = currentClientAdmission()
+  if (client && !(await client.admit())) return { ok: false, reason: 'rate_limited' }
+  if (await isRateLimited(bucket, cuCost)) {
+    await client?.release().catch(() => {})
+    return { ok: false, reason: 'rate_limited' }
+  }
   return { ok: true, headers: { 'X-API-Key': key, 'Accept': 'application/json' } }
 }
 

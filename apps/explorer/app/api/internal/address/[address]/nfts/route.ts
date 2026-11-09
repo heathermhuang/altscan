@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDataProvider } from '@/lib/providers'
-import { guardInternalAddress } from '@/lib/internal-guard'
+import { asClient, guardInternalAddress } from '@/lib/internal-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +13,7 @@ export async function GET(
   if (guard) return guard
 
   const provider = getDataProvider()
-  const result = provider ? await provider.getAddressNfts(address) : null
+  const result = provider ? await asClient(_req, () => provider.getAddressNfts(address)) : null
 
   if (!result || !result.ok) {
     return NextResponse.json(
