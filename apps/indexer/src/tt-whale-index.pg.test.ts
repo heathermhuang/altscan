@@ -481,6 +481,28 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
       expect(await attached(TT_NFT_INDEXES[0].name)).toEqual(before)
     }, 120_000)
 
+    // An interrupted CONCURRENTLY build leaves its child invalid, and a later boot attached it ("already exists,
+    // skipping"). The sweep cannot drop an attached child, and the builder used to count it as covered: that
+    // partition went without the index for good (BNB, 2026-11-09). Marking the child invalid in the catalog stands in
+    // for the interrupted build. The parent's own flag follows the repeated-ATTACH rule above.
+    it('rebuilds an attached child that is invalid, in place, still attached', async () => {
+      const ix = TT_NFT_INDEXES[0]
+      await ensurePartitionedPartialIndex(ix)
+      const [part] = await partitionNames()
+      const child = (await attached(ix.name)).get(part)!.name
+      // Both, as in production: an invalid attached child keeps its parent invalid.
+      await conn.unsafe(`UPDATE pg_index SET indisvalid = false WHERE indexrelid IN ('${child}'::regclass, '${ix.name}'::regclass)`)
+      expect((await attached(ix.name)).get(part)).toEqual({ name: child, valid: false })
+      await expect(conn.unsafe(`DROP INDEX CONCURRENTLY ${child}`), 'the sweep cannot drop it').rejects.toThrow(/requires it/)
+
+      await ensurePartitionedPartialIndex(ix)   // must never throw
+      expect((await attached(ix.name)).get(part), 'rebuilt valid, and still the attached child').toEqual({ name: child, valid: true })
+      const [{ v }] = await rows(`SELECT current_setting('server_version_num')::int AS v`)
+      if (Number(v) >= 160014 && !(Number(v) >= 180000 && Number(v) < 180004)) {
+        expect((await parentState(ix.name))?.valid, 'the repeated ATTACH re-validates the parent').toBe(true)
+      }
+    }, 120_000)
+
   // ── ETH: a plain, non-partitioned token_transfers ──
   describe('monolithic token_transfers (ETH)', () => {
     const tokens = [ETH.wrapped, ...ETH.stablecoins]
