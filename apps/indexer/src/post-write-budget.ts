@@ -35,11 +35,11 @@ export function createLimiter(max: number): Limiter {
  * Run `fn` under `limit`, and stop WAITING for it after `timeoutMs`. The slot stays with `fn` until it settles: a
  * timeout only frees the block, not the read, which is still in flight on the node. Releasing the slot at the timeout
  * would let a slow endpoint pile up reads past the limit (Codex, round one: 24 in flight under a limit of 8). A read
- * that fails after its caller gave up is handled here, so it cannot surface as an unhandled rejection.
+ * that fails after its caller gave up is still handled: Promise.race subscribes to it, so it is not an unhandled
+ * rejection (pinned by a test).
  */
 export function boundedRead<T>(limit: Limiter, fn: () => Promise<T>, timeoutMs: number, label: string): Promise<T> {
   const read = limit(fn)
-  read.catch(() => {})
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
