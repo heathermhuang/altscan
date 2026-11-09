@@ -4,9 +4,9 @@
  *
  * SECURITY: key on clientIpFromHeaders() — see the note in explorer-core's rate-limit.ts.
  */
-import { checkRateLimit, clientIpFromHeaders } from '@altscan/explorer-core'
+import { checkRateLimit, clientIpBucket, clientIpFromHeaders } from '@altscan/explorer-core'
 
-export { checkRateLimit, clientIpFromHeaders }
+export { checkRateLimit, clientIpBucket, clientIpFromHeaders }
 
 /**
  * altscan.io's MCP Worker calls this API from Cloudflare's cross-zone Worker address, which every
@@ -45,5 +45,5 @@ export async function checkIpRateLimit(
     const bucket = headers.get(SERVICE_CLIENT_HEADER) === 'status-feed' ? 'service:altscan-status-feed' : 'service:altscan-mcp'
     return checkRateLimit(bucket, SERVICE_MAX_PER_MINUTE)
   }
-  return checkRateLimit(clientIpFromHeaders(headers), maxRequests)
+  return checkRateLimit(clientIpBucket(headers), maxRequests)
 }

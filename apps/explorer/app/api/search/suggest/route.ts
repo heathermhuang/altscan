@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
-import { checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
 import { shapeSuggestions, suggestPrefix, suggestRows, SUGGEST_TIMEOUT_MS } from '@/lib/token-suggest'
 import { withTimeout } from '@/lib/with-timeout'
 import { swallow } from '@/lib/observability'
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (!prefix) return NextResponse.json({ tokens: [] }, { headers: { 'cache-control': 'public, max-age=30' } })
 
   // Its own bucket: a visitor typing must not use up the /api/v1 budget (rl:<ip>), like /api/internal's.
-  if (!(await checkRateLimit(`suggest:${clientIpFromHeaders(request.headers)}`))) {
+  if (!(await checkRateLimit(`suggest:${clientIpBucket(request.headers)}`))) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'cache-control': 'no-store' } })
   }
 
