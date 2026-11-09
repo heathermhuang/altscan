@@ -13,12 +13,24 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, sql } from 'drizzle-orm'
 import { verifyBearer, wwwAuthenticate } from '@altscan/oauth'
-import { checkIpRateLimit, checkRateLimit, clientIpFromHeaders } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, checkRateLimit, clientIpBucket, clientIpFromHeaders, isAltscanService } from '@/lib/api-rate-limit'
 import { oauthConfig } from '@/lib/oauth'
 import crypto from 'crypto'
 
 /** An OAuth token's budget: the same as an API key's, shared by every token for one address. */
 const TOKEN_REQUESTS_PER_MINUTE = 100
+
+/**
+ * Every request from one client (its IP bucket: an IPv6 /64) shares this ceiling per minute, whatever credential it
+ * carries or none, and it is checked BEFORE any credential is looked up. Otherwise a flood of made-up keys cost one
+ * DB lookup each, and one client holding several keys (a wallet mints one for free) had a full budget per key. The
+ * ceiling sits above any single budget (100/min), so it only binds a client spreading across credentials. The
+ * altscan.io service token is exempt: it calls from Cloudflare's shared Worker address and has its own capped buckets.
+ */
+const API_IP_CEILING_PER_MINUTE = (() => {
+  const n = Number(process.env.API_IP_CEILING_PER_MINUTE)
+  return Number.isInteger(n) && n > 0 ? n : 300
+})()
 
 export type OwnerAuthResult =
   | { ok: true }
@@ -76,6 +88,10 @@ export function authFailure(auth: Extract<AuthResult, { ok: false }>): NextRespo
  * Pass request.headers for both IP extraction and API key lookup.
  */
 export async function authRequest(request: Request): Promise<AuthResult> {
+  if (!isAltscanService(request.headers)
+      && !(await checkRateLimit(`ceiling:${clientIpBucket(request.headers)}`, API_IP_CEILING_PER_MINUTE))) {
+    return { ok: false, limited: true, reason: 'rate_limit' }
+  }
   const apiKey = request.headers.get('x-api-key')
 
   if (apiKey) {

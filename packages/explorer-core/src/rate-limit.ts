@@ -34,17 +34,17 @@ end
 return n
 `
 
-async function checkRateLimitRedis(key: string, maxRequests: number): Promise<boolean> {
+async function checkRateLimitRedis(key: string, maxRequests: number, windowMs: number): Promise<boolean> {
   const r = getRedis()
-  if (!r || isRedisUnavailable()) return checkRateLimitMemory(key, maxRequests)
+  if (!r || isRedisUnavailable()) return checkRateLimitMemory(key, maxRequests, windowMs)
 
   const redisKey = `rl:${key}`
   try {
-    const count = Number(await r.eval(INCR_WITH_EXPIRY, 1, redisKey, WINDOW_MS))
+    const count = Number(await r.eval(INCR_WITH_EXPIRY, 1, redisKey, windowMs))
     return count <= maxRequests
   } catch {
     // Redis blip — fall through to in-memory
-    return checkRateLimitMemory(key, maxRequests)
+    return checkRateLimitMemory(key, maxRequests, windowMs)
   }
 }
 
@@ -90,14 +90,14 @@ function makeRoom(now: number) {
   }
 }
 
-function checkRateLimitMemory(key: string, maxRequests: number): boolean {
+function checkRateLimitMemory(key: string, maxRequests: number, windowMs: number): boolean {
   startCleanupTimer()
   const now = Date.now()
   const entry = rateLimitMap.get(key)
   if (!entry || now > entry.resetAt) {
     rateLimitMap.delete(key)
     if (rateLimitMap.size >= MAX_MAP_SIZE) makeRoom(now)
-    rateLimitMap.set(key, { count: 1, resetAt: now + WINDOW_MS })
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs })
     return true
   }
   if (entry.count >= maxRequests) return false
@@ -189,8 +189,8 @@ export function clientIpBucket(headers: { get(name: string): string | null }): s
  * Async rate limit check — uses Redis when available, in-memory otherwise.
  * Returns true if allowed, false if rate-limited.
  */
-export async function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQUESTS): Promise<boolean> {
-  return checkRateLimitRedis(key, maxRequests)
+export async function checkRateLimit(key: string, maxRequests = DEFAULT_MAX_REQUESTS, windowMs = WINDOW_MS): Promise<boolean> {
+  return checkRateLimitRedis(key, maxRequests, windowMs)
 }
 
 /**

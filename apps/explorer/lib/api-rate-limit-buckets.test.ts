@@ -154,17 +154,18 @@ describe.each(['redis', 'memory'] as const)('a bogus X-API-Key does not skip the
 })
 
 describe('Redis key format (what live counters depend on)', () => {
-  it('a bogus X-API-Key increments rl:<ip> (and nothing else)', async () => {
+  // Every authRequest also counts into the per-IP ceiling, checked before any credential lookup (lib/api-auth.ts).
+  it('a bogus X-API-Key increments rl:<ip> (and the ceiling, nothing else)', async () => {
     const api = await load('redis')
     expect((await api.listWebhooks({ 'x-api-key': 'bnbs_not_a_real_key' })).status).toBe(401)
-    expect([...h.counters]).toEqual([[`rl:${IP}`, 1]])
+    expect([...h.counters]).toEqual([[`rl:ceiling:${IP}`, 1], [`rl:${IP}`, 1]])
   })
 
   it('webhooks GET/DELETE count into the shared per-IP key, exactly like POST', async () => {
     const api = await load('redis')
     await api.listWebhooks()
     await api.deleteWebhook()
-    expect([...h.counters]).toEqual([[`rl:${IP}`, 2]])
+    expect([...h.counters]).toEqual([[`rl:ceiling:${IP}`, 2], [`rl:${IP}`, 2]])
   })
 
   it('ordinary routes keep rl:<ip>; verify uses rl:verify:<ip> and touches nothing else', async () => {
@@ -231,10 +232,10 @@ describe.each(['redis', 'memory'] as const)('a valid X-API-Key is limited by its
 })
 
 describe('Redis key format for a valid X-API-Key', () => {
-  it.each(['listWebhooksAsKey', 'deleteWebhookAsKey'] as const)('%s counts into rl:key:<hash16> and NOT rl:<ip>', async (call) => {
+  it.each(['listWebhooksAsKey', 'deleteWebhookAsKey'] as const)('%s counts into rl:key:<hash16> (and the ceiling) and NOT rl:<ip>', async (call) => {
     const api = await load('redis', { keyRequestsPerMinute: 100 })
     expect((await api[call]()).status).toBe(200)
     expect((await api[call]()).status).toBe(200)
-    expect([...h.counters]).toEqual([[VALID_KEY_BUCKET, 2]])
+    expect([...h.counters]).toEqual([[`rl:ceiling:${IP}`, 2], [VALID_KEY_BUCKET, 2]])
   })
 })
