@@ -80,6 +80,13 @@ export function isTransportError(err: unknown): boolean {
   return TRANSPORT_TEXT.test(text)
 }
 
+/**
+ * Return data a name() or symbol() may have before it is decoded. Not the web's 1,024: Uniswap V1 exchanges answer with a
+ * bytes32 followed by a zeroed 4,096-byte buffer (4,128 bytes), which decodeBytes32Text reads. 8 KiB is cheap to decode
+ * and still refuses the megabytes a contract may choose to return.
+ */
+export const TEXT_MAX_RETURN_BYTES = 8 * 1024
+
 /** Collects, across the calls of one fetch, whether any failed for a transport reason. */
 type Probe = { transportFailed: boolean }
 
@@ -125,6 +132,9 @@ async function readText(
 ): Promise<string | null> {
   const raw = await callRaw(runner, to, fn, probe)
   if (raw === null) return null
+  // The contract chooses how much it returns, and the decoder reads all of it before the trim below, so past
+  // TEXT_MAX_RETURN_BYTES it is no text (the web's rule, token-text-call.ts, sized for the Uniswap V1 answer).
+  if (raw.length > 2 + 2 * TEXT_MAX_RETURN_BYTES) return null
   let text: string | null
   try {
     text = STRING_ABI.decodeFunctionResult(fn, raw)[0] as string

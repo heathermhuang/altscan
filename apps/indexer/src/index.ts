@@ -32,6 +32,7 @@ import {
   retraceMissedBlocks,
   forgetTraceMissesFrom,
   retraceBacklogStats,
+  warmPairCache,
 } from './block-processor'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
@@ -287,6 +288,10 @@ async function main() {
   // Repairs 'Unknown'/'???' token rows the one-shot first-sight fetch left behind.
   // Same RPC pool as block fetches; never throws and never touches block processing.
   startTokenMetadataHealer(providers)
+
+  // Seed the in-memory pair cache from recent dex_trades, so a deploy does not start every active pair as unknown
+  // (post-write-budget.ts). Background: block processing does not wait for it, and a failure starts cold as before.
+  void warmPairCache()
 
   // Webhook signing keys at rest (webhook-secret.ts). New webhooks arrive in
   // plaintext from the explorer and are sealed within a minute. The first pass
