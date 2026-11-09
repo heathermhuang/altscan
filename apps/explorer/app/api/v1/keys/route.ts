@@ -2,12 +2,24 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { checkIpRateLimit, checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
 import { keyRequestTimestampError } from '@/lib/key-request'
 import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Key mints per client (IP bucket) per hour. A key needs only a fresh wallet's signature: on 2026-10-22, 69 wallets
+ * minted 69 keys within one hour on each chain. The per-minute limits could not see that, so minting has an hourly
+ * bucket of its own.
+ */
+const API_KEY_MINTS_PER_HOUR = (() => {
+  const n = Number(process.env.API_KEY_MINTS_PER_HOUR)
+  return Number.isInteger(n) && n > 0 ? n : 5
+})()
+const HOUR_MS = 60 * 60 * 1000
 
 /** Message the client must sign: deterministic and timestamped; reusable only inside the skew window. */
 function expectedMessage(ownerAddress: string, timestamp: number): string {
@@ -43,10 +55,13 @@ export async function GET(request: Request) {
   return NextResponse.json({ keys })
 }
 
-// POST: generate a new API key (requires API key ownership)
+// POST: generate a new API key. Proven by a wallet signature, not a key, so it is admitted by IP alone: running
+// authRequest here charged whatever X-API-Key the caller sent, someone else's included.
 export async function POST(request: Request) {
-  const auth = await authRequest(request)
-  if (!auth.ok) return authFailure(auth)
+  if (!(await checkIpRateLimit(request.headers))
+      || !(await checkRateLimit(`mint:${clientIpBucket(request.headers)}`, API_KEY_MINTS_PER_HOUR, HOUR_MS))) {
+    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  }
 
   const body = await request.json() as { ownerAddress: string; label?: string; signature?: string; timestamp?: number }
   const { ownerAddress, label, signature, timestamp } = body

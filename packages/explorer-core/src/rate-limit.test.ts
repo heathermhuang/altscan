@@ -149,3 +149,23 @@ describe('checkRateLimit in-memory fallback cap', () => {
     expect(getRateLimitMapSize()).toBe(1)
   })
 })
+
+// Minting keys counts per hour, not per minute (apps/explorer/app/api/v1/keys/route.ts): the window is a parameter.
+describe('checkRateLimit window', () => {
+  it('holds the limit for the window it is given, then resets', async () => {
+    const { vi } = await import('vitest')
+    vi.useFakeTimers()
+    try {
+      const { checkRateLimit } = await import('./rate-limit')
+      const key = `window-test-${Math.random()}`
+      expect(await checkRateLimit(key, 1, 60 * 60 * 1000)).toBe(true)
+      expect(await checkRateLimit(key, 1, 60 * 60 * 1000)).toBe(false)
+      vi.advanceTimersByTime(61 * 1000)   // past the default minute: still inside the hour
+      expect(await checkRateLimit(key, 1, 60 * 60 * 1000)).toBe(false)
+      vi.advanceTimersByTime(60 * 60 * 1000)
+      expect(await checkRateLimit(key, 1, 60 * 60 * 1000)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
