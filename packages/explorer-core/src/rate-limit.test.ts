@@ -181,6 +181,7 @@ describe('refundRateLimit', () => {
     await refundRateLimit(key)
     await refundRateLimit(key)
     expect(await checkRateLimit(key, 1), 'one refund frees one slot').toBe(true)
+    expect(await checkRateLimit(key, 1), 'and only one: extra refunds did not bank credit').toBe(false)
     await refundRateLimit(`never-seen-${Math.random()}`)   // nothing to give back: no error
   })
 })
