@@ -11,7 +11,7 @@ import { getSetting } from './settings'
 // asking the next one.
 vi.mock('./settings', () => ({ getSetting: vi.fn(async () => null) }))
 
-type Mode = 'ok' | 'http408' | 'rpcError' | 'hang' | 'redirect'
+type Mode = 'ok' | 'http408' | 'http429' | 'rpcError' | 'hang' | 'redirect'
 type Endpoint = { url: string; requests: string[] }
 
 const servers: http.Server[] = []
@@ -35,6 +35,11 @@ async function endpoint(mode: Mode, result = '0x1', location = ''): Promise<Endp
       if (!probe && mode === 'redirect') {
         res.writeHead(302, { location })
         return res.end()
+      }
+      if (!probe && mode === 'http429') {
+        // drpc's free-plan reply when rate-limited (2026-11-12)
+        res.writeHead(429, { 'content-type': 'application/json' })
+        return res.end(JSON.stringify({ id: 0, jsonrpc: '2.0', error: { code: 429, message: 'Too many requests' } }))
       }
       if (!probe && mode === 'http408') {
         res.writeHead(408)
@@ -102,6 +107,26 @@ describe('getWebProvider against real endpoints', () => {
     useEndpoints(redirecting, fallback)
     expect(await (await getWebProvider()).getBalance(ADDRS[0])).toBe(2n)
     expect(target.requests).toEqual([])
+  })
+
+  // ethers retries a 429 up to 12 times with backoff by default. Under a scraper
+  // flood that held every render ~8.5s against a rate-limited free RPC, and the
+  // pile-up of in-flight renders ran the web service out of memory (2026-11-12).
+  it('fails over on HTTP 429 after one request, without retrying the rate-limited endpoint', async () => {
+    const a = await endpoint('http429')
+    const b = await endpoint('ok', '0x2')
+    useEndpoints(a, b)
+    expect(await (await getWebProvider()).getBalance(ADDRS[0])).toBe(2n)
+    expect(a.requests).toEqual(['eth_getBalance'])
+  })
+
+  it('fails a call fast when the only endpoint answers HTTP 429', async () => {
+    const a = await endpoint('http429')
+    useEndpoints(a)
+    const started = Date.now()
+    await expect((await getWebProvider()).getBalance(ADDRS[0])).rejects.toMatchObject({ code: 'SERVER_ERROR' })
+    expect(a.requests).toEqual(['eth_getBalance'])
+    expect(Date.now() - started).toBeLessThan(500)
   })
 
   it('fails over when the first endpoint hangs past the timeout', async () => {

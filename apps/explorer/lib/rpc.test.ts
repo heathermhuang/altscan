@@ -12,6 +12,7 @@ const fakes = vi.hoisted(() => {
   class FakeFetchRequest {
     timeout = 0
     constructor(public url: string) {}
+    setThrottleParams() {}
   }
   class FakeJsonRpcProvider {
     handlers: Array<() => void> = []
