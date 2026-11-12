@@ -94,6 +94,11 @@ function buildProvider({ urls, timeoutMs }: { urls: string[]; timeoutMs: number 
     const req = new FetchRequest(url)
     req.timeout = timeoutMs
     req.getUrlFunc = refuseRedirects(req.getUrlFunc)
+    // One attempt: ethers retries a 429 up to 12 times with backoff, so a
+    // rate-limited endpoint held every render until the timeout. Under a scraper
+    // flood those renders piled up and ran the web service out of memory
+    // (2026-11-12). Failing at once lets FailoverProvider try the next endpoint.
+    req.setThrottleParams({ maxAttempts: 1 })
     // batchMaxCount 1: every call goes out as its own request. ethers' default
     // (100) coalesces concurrent calls into one JSON-RPC batch, and because this
     // provider is a process-wide singleton, calls from concurrent page renders
