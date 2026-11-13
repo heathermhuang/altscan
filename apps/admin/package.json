@@ -14,19 +14,19 @@
   "dependencies": {
     "@altscan/chain-config": "workspace:*",
     "@altscan/settings-schema": "workspace:*",
-    "@astrojs/cloudflare": "^14.4.4",
-    "@astrojs/react": "^7.1.2",
-    "astro": "^7.4.5",
+    "@astrojs/cloudflare": "^14.4.6",
+    "@astrojs/react": "^7.1.5",
+    "astro": "^7.4.8",
     "drizzle-orm": "^0.45.4",
     "jose": "^5.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261103.1",
+    "@cloudflare/workers-types": "^5.20261110.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "typescript": "^5.4.0",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.160.0"
   }
 }
