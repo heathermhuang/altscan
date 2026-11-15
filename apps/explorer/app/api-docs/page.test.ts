@@ -64,4 +64,21 @@ describe('/api-docs', () => {
     }
     for (const hook of example.webhooks) expect(hook.eventTypes).toEqual(['tx'])
   })
+
+  it('documents the wallet-watch routes, and the feed states its window and the 410', () => {
+    const watch = docs.filter((e) => e.path.startsWith('/api/v1/watch/'))
+    expect(watch.map((e) => `${e.method} ${e.path}`)).toEqual([
+      'POST /api/v1/watch/addresses',
+      'GET /api/v1/watch/addresses',
+      'DELETE /api/v1/watch/addresses/{address}',
+      'GET /api/v1/watch/events',
+    ])
+    const feed = watch[3]
+    expect(feed.description).toMatch(/at least the last 24 hours/)
+    expect(feed.description).not.toMatch(/about (the last )?24 hours/)
+    expect(feed.description).toMatch(/oldestAvailableBlock/)
+    expect(feed.description).toMatch(/1,200 blocks/)
+    expect(feed.description).toMatch(/503 with Retry-After/)
+    expect(feed.description).toMatch(/410/)
+  })
 })

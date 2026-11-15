@@ -314,7 +314,7 @@ export const OPENAPI_MEDIA_TYPE = 'application/vnd.oai.openapi+json;version=3.1'
 /** '/api/v1/tokens/:contract' -> '/api/v1/tokens/{contract}' */
 export const openApiPath = (path: string) => path.replace(/:(\w+)/g, '{$1}')
 
-export function buildOpenApi(c: Pick<ChainConfig, 'brandDomain' | 'domain' | 'name' | 'chainId'>) {
+export function buildOpenApi(c: Pick<ChainConfig, 'key' | 'brandDomain' | 'domain' | 'name' | 'chainId'>) {
   const base = `https://${c.domain}`
   return {
     openapi: '3.1.0',
@@ -324,8 +324,8 @@ export function buildOpenApi(c: Pick<ChainConfig, 'brandDomain' | 'domain' | 'na
       description:
         `Public, keyless read API for ${c.name} (chainId ${c.chainId}) data indexed by ${c.brandDomain}. ` +
         'Rate limits are per client IP. The index keeps recent history only: older transactions are read from the chain. ' +
-        'This spec covers the keyless GET endpoints; contract verification, contract calls, webhooks, API keys and the ' +
-        `query endpoint are documented at ${base}/api-docs.`,
+        `This spec covers the keyless GET endpoints; contract verification, contract calls, webhooks, ${c.key === 'bnb' ? 'wallet watch, ' : ''}` +
+        `API keys and the query endpoint are documented at ${base}/api-docs.`,
     },
     servers: [{ url: base }],
     externalDocs: { description: 'Human-readable API docs', url: `${base}/api-docs` },
