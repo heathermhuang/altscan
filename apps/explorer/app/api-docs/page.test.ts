@@ -74,7 +74,11 @@ describe('/api-docs', () => {
       'GET /api/v1/watch/events',
     ])
     const feed = watch[3]
-    expect(feed.description).toMatch(/24 hours/)
+    expect(feed.description).toMatch(/at least the last 24 hours/)
+    expect(feed.description).not.toMatch(/about (the last )?24 hours/)
+    expect(feed.description).toMatch(/oldestAvailableBlock/)
+    expect(feed.description).toMatch(/1,200 blocks/)
+    expect(feed.description).toMatch(/503 with Retry-After/)
     expect(feed.description).toMatch(/410/)
   })
 })

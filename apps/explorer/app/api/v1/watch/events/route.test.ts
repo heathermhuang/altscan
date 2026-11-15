@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { encodeCursor } from '@/lib/watch-cursor'
 
-const h = vi.hoisted(() => ({ read: vi.fn() }))
+const h = vi.hoisted(() => ({ read: vi.fn(), chain: 'bnb', auth: 0 }))
 
+vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain } } }))
 vi.mock('@/lib/api-auth', () => ({
-  authRequest: async () => ({ ok: true, limited: false }),
+  authRequest: async () => { h.auth++; return { ok: true, limited: false } },
   authFailure: () => new Response(null, { status: 429 }),
   requireApiKeyOwner: async () => ({ ok: true }),
 }))
@@ -19,7 +20,11 @@ const get = async (qs: string) => {
 }
 const BODY = { events: [], cursor: CURSOR, tip: 10, oldestAvailableBlock: 1, rewound: false }
 
-beforeEach(() => { h.read.mockReset().mockResolvedValue({ status: 'ok', body: BODY }) })
+beforeEach(() => {
+  h.chain = 'bnb'
+  h.auth = 0
+  h.read.mockReset().mockResolvedValue({ status: 'ok', body: BODY })
+})
 
 describe('GET /api/v1/watch/events', () => {
   it('returns the page and passes the decoded cursor and limit', async () => {
@@ -52,6 +57,44 @@ describe('GET /api/v1/watch/events', () => {
   ])('answers 503 when there is %s', async (_, arrange) => {
     arrange()
     expect((await get(`owner=${OWNER}`)).status).toBe(503)
+  })
+
+  it('answers 404 on a non-BNB chain before any auth', async () => {
+    h.chain = 'eth'
+    const res = await get(`owner=${OWNER}`)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Wallet watch is available on BNBScan only' })
+    expect(h.auth).toBe(0)
+    expect(h.read).not.toHaveBeenCalled()
+  })
+
+  it('answers 503 + Retry-After for a statement timeout (57014), also on a cause', async () => {
+    for (const err of [{ code: '57014' }, { message: 'Failed query', cause: { code: '57014' } }]) {
+      h.read.mockRejectedValueOnce(err)
+      const res = await get(`owner=${OWNER}`)
+      expect(res.status).toBe(503)
+      expect(res.headers.get('Retry-After')).toBe('2')
+    }
+  })
+
+  it('answers 503 + Retry-After at once past the concurrency cap, and frees the slot after', async () => {
+    let release!: (v: unknown) => void
+    h.read.mockReturnValueOnce(new Promise((r) => { release = r }))
+    const first = get(`owner=${OWNER}`)
+    await vi.waitFor(() => expect(h.read).toHaveBeenCalledTimes(1))
+    const second = await get(`owner=${OWNER}`)
+    expect(second.status).toBe(503)
+    expect(second.headers.get('Retry-After')).toBe('2')
+    expect(h.read).toHaveBeenCalledTimes(1)
+    release({ status: 'ok', body: BODY })
+    expect((await first).status).toBe(200)
+    expect((await get(`owner=${OWNER}`)).status).toBe(200)
+  })
+
+  it('frees the slot when the read throws', async () => {
+    h.read.mockRejectedValueOnce(new Error('boom'))
+    await expect(get(`owner=${OWNER}`)).rejects.toThrow('boom')
+    expect((await get(`owner=${OWNER}`)).status).toBe(200)
   })
 
   it('logs a hashed owner, never the address', async () => {

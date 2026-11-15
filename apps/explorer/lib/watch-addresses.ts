@@ -69,9 +69,14 @@ export async function removeWatchAddress(db: Db, owner: string, address: string)
  * drizzle ≥0.44 wraps driver errors, so SQLSTATE sits on `.code` of the error or of a `.cause`.
  */
 export function isUndefinedTable(e: unknown): boolean {
+  return hasSqlState(e, '42P01')
+}
+
+/** Whether the error, or a `.cause` within five levels, carries this SQLSTATE. */
+export function hasSqlState(e: unknown, code: string): boolean {
   let c = e as { code?: unknown; cause?: unknown } | null | undefined
   for (let depth = 0; c && depth < 5; depth++) {
-    if (c.code === '42P01') return true
+    if (c.code === code) return true
     c = c.cause as typeof c
   }
   return false

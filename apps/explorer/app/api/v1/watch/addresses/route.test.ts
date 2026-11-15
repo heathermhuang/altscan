@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({
+  chain: 'bnb',
+  auth: 0,
   ownerOk: true,
   add: vi.fn(),
   list: vi.fn(),
 }))
 
+vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain } } }))
 vi.mock('@/lib/api-auth', () => ({
-  authRequest: async () => ({ ok: true, limited: false }),
+  authRequest: async () => { h.auth++; return { ok: true, limited: false } },
   authFailure: () => new Response(null, { status: 429 }),
   requireApiKeyOwner: async () => (h.ownerOk ? { ok: true } : { ok: false, status: 403, error: 'API key does not belong to this owner address' }),
 }))
@@ -25,12 +28,23 @@ const post = async (body: unknown) => {
 }
 
 beforeEach(() => {
+  h.chain = 'bnb'
+  h.auth = 0
   h.ownerOk = true
   h.add.mockReset().mockResolvedValue({ ok: true, added: 1, total: 1 })
   h.list.mockReset().mockResolvedValue([])
 })
 
 describe('POST /api/v1/watch/addresses', () => {
+  it('answers 404 on a non-BNB chain before any auth or body handling', async () => {
+    h.chain = 'eth'
+    const res = await post({ owner: OWNER, addresses: ['0x' + 'b'.repeat(40)] })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Wallet watch is available on BNBScan only' })
+    expect(h.auth).toBe(0)
+    expect(h.add).not.toHaveBeenCalled()
+  })
+
   it.each(['null', '[]', '5', '"x"'])('refuses the JSON body %s with 400', async (raw) => {
     const { POST } = await import('./route')
     const res = await POST(new Request('http://x/api/v1/watch/addresses', { method: 'POST', body: raw }))
@@ -75,6 +89,14 @@ describe('POST /api/v1/watch/addresses', () => {
 })
 
 describe('GET /api/v1/watch/addresses', () => {
+  it('answers 404 on a non-BNB chain before any auth', async () => {
+    h.chain = 'eth'
+    const { GET } = await import('./route')
+    expect((await GET(new Request(`http://x/api/v1/watch/addresses?owner=${OWNER}`))).status).toBe(404)
+    expect(h.auth).toBe(0)
+    expect(h.list).not.toHaveBeenCalled()
+  })
+
   it('lists the owner\'s addresses', async () => {
     h.list.mockResolvedValue([{ address: '0x' + 'b'.repeat(40), label: null, createdAt: new Date(0) }])
     const { GET } = await import('./route')

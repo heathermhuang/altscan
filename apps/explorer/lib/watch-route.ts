@@ -1,10 +1,25 @@
 import { NextResponse } from 'next/server'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { chainConfig } from '@/lib/chain'
 
 const OWNER = /^0x[0-9a-f]{40}$/
 
-/** Rate limiting (per-IP ceiling, then the key's own budget). null = admitted. */
+/**
+ * Phase 1 is BNB-only: the feed serves only up to the async token-transfer writer's durable watermark
+ * (indexer_cursor.transfers_durable_block), and the ETH indexer runs the inline writer, which publishes
+ * none, so the feed's tip would never advance there. Enabling ETH needs ASYNC_TT_WRITER on eth-indexer
+ * or a watermark on the inline path. null = this chain serves wallet watch.
+ */
+export function watchChainGate(): Response | null {
+  return chainConfig.key === 'bnb'
+    ? null
+    : NextResponse.json({ error: 'Wallet watch is available on BNBScan only' }, { status: 404 })
+}
+
+/** The chain gate first (before any rate limiting), then rate limiting (per-IP ceiling, then the key's own budget). null = admitted. */
 export async function admitWatchRequest(request: Request): Promise<Response | null> {
+  const wrongChain = watchChainGate()
+  if (wrongChain) return wrongChain
   const auth = await authRequest(request)
   return auth.ok ? null : authFailure(auth)
 }

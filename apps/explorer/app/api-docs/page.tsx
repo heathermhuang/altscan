@@ -267,6 +267,8 @@ const endpoints: Endpoint[] = [
       2
     ),
   },
+  // Wallet watch is BNB-only in phase 1 (see watchChainGate in lib/watch-route.ts).
+  ...(chainConfig.key === 'bnb' ? ([
   {
     method: 'POST',
     path: '/api/v1/watch/addresses',
@@ -295,7 +297,7 @@ const endpoints: Endpoint[] = [
   {
     method: 'GET',
     path: '/api/v1/watch/events',
-    description: `Live wallet events: every native ${chainConfig.currency} and token transfer sent or received by your watched addresses since your last call, up to the start of the retained window (about the last 24 hours). Call without a cursor to start at the newest block, then pass back the cursor from each response; polling every 3 seconds is plenty. A cursor older than the window answers 410 with oldestAvailableBlock, so you know events were missed. If a reorg replaced the cursor's block, the feed restarts a few blocks earlier and sets rewound: true; deduplicate on (txHash, logIndex or txIndex, watched). Native value moved by contract calls (internal transactions) is not included.`,
+    description: `Live wallet events: every native ${chainConfig.currency} and token transfer sent or received by your watched addresses since your last call, up to the start of the retained window (at least the last 24 hours; each response's oldestAvailableBlock gives the exact start). Call without a cursor to start at the newest block, then pass back the cursor from each response; polling every 3 seconds is plenty. A cursor older than the window answers 410 with oldestAvailableBlock, so you know events were missed. If a reorg replaced the cursor's block, the feed restarts a few blocks earlier and sets rewound: true; deduplicate on (txHash, logIndex or txIndex, watched). Native value moved by contract calls (internal transactions) is not included. One call scans at most about 1,200 blocks, so a client that has fallen behind catches up over several calls. The feed answers 503 with Retry-After when it is busy or not yet available.`,
     params: [
       { name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
       { name: 'cursor', type: 'string', required: false, description: 'The cursor from the previous response' },
@@ -310,6 +312,7 @@ const endpoints: Endpoint[] = [
       cursor: 'eyJ...', tip: 12345690, oldestAvailableBlock: 12150000, rewound: false,
     }, null, 2),
   },
+  ] satisfies Endpoint[]) : []),
   {
     method: 'GET',
     path: '/api/v1/keys',
