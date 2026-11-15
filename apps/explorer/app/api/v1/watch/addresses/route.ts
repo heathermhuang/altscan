@@ -26,7 +26,9 @@ export async function POST(request: Request) {
 
   let body: { owner?: unknown; addresses?: unknown; label?: unknown }
   try {
-    body = await request.json()
+    const parsed: unknown = await request.json()
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    body = parsed as typeof body
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }

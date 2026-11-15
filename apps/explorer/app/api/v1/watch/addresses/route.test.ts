@@ -31,6 +31,13 @@ beforeEach(() => {
 })
 
 describe('POST /api/v1/watch/addresses', () => {
+  it.each(['null', '[]', '5', '"x"'])('refuses the JSON body %s with 400', async (raw) => {
+    const { POST } = await import('./route')
+    const res = await POST(new Request('http://x/api/v1/watch/addresses', { method: 'POST', body: raw }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid JSON body' })
+  })
+
   it('adds and reports the totals', async () => {
     const res = await post({ owner: OWNER, addresses: ['0x' + 'b'.repeat(40)] })
     expect(res.status).toBe(200)
