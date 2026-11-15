@@ -122,8 +122,10 @@ async function windowEnd(tx: Tx, from: number, tip: number): Promise<BlockRef | 
 }
 
 /**
- * The feed query: four arms (native and token, sender and receiver side), each an early-stopping walk of an
- * existing (address, timestamp) index bounded to the window, cut at `take`; the page is cut from their union.
+ * The feed query: four arms (native and token, sender and receiver side). Each arm reads every row of the
+ * watched addresses in the window (bounded by block range and timestamp, via an existing (address, timestamp)
+ * index) and sorts them before its LIMIT; it is not an early-stopping walk, so per-call cost scales with the
+ * watched addresses' activity in the window. The page is cut from the arms' union.
  * The receiver arms drop self-transfers, which the sender arm already serves with direction "self".
  */
 function feedSql(watched: string[], from: Position, end: number, bounds: { lo: Date | null; hi: Date | null }, take: number): SQL {
@@ -163,7 +165,11 @@ function feedSql(watched: string[], from: Position, end: number, bounds: { lo: D
      ORDER BY p.block_number, p.kind, p.idx, p.watched`
 }
 
-/** One page of an owner's wallet-watch feed. Read-only; one transaction with its own statement timeout. */
+/**
+ * One page of an owner's wallet-watch feed. One read-only REPEATABLE READ transaction, so every statement
+ * sees one snapshot (the tip, the window and the events agree even while the indexer commits), with its own
+ * statement timeout.
+ */
 export async function readWatchEvents(db: Db, owner: string, cursor: WatchCursor | null, limit: number): Promise<WatchPage> {
   return db.transaction(async (tx): Promise<WatchPage> => {
     await tx.execute(sql.raw(`SET LOCAL statement_timeout = '5s'`))
@@ -205,5 +211,5 @@ export async function readWatchEvents(db: Db, owner: string, cursor: WatchCursor
     return page(events, {
       b: Number(last.block_number), h: last.block_hash, k: Number(last.kind) as 0 | 1, i: Number(last.idx), w: last.watched,
     }, rewound)
-  })
+  }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
 }
