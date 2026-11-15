@@ -14,6 +14,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { getDb, type Db } from '@altscan/db'
+import { END_OF_BLOCK, decodeCursor, encodeCursor } from './watch-cursor'
+import { WATCH_REWIND_BLOCKS, readWatchEvents, type WatchFeed } from './watch-events'
 import { WATCH_MAX_ADDRESSES, addWatchAddresses, listWatchAddresses, removeWatchAddress } from './watch-addresses'
 
 const ENV = 'WATCH_EVENTS_TEST_PG_URL'
@@ -94,6 +96,119 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       expect(await removeWatchAddress(db, OWNER, addr(1))).toBe(true)
       expect(await removeWatchAddress(db, OWNER, addr(1))).toBe(false)
       expect(await listWatchAddresses(db, addr(0xbbbb))).toHaveLength(1)
+    })
+  })
+
+  describe('feed', () => {
+    const T0 = Date.parse('2026-11-15T00:00:00Z')
+    const hashOf = (n: number, salt = 0) => '0x' + (n + salt * 1_000_000).toString(16).padStart(64, '0')
+    const txh = (n: number) => '0x' + (0xf000000 + n).toString(16).padStart(64, '0')
+    const A = addr(0xa1), B = addr(0xb1), X = addr(0xc1), USDT = addr(0x55)
+    const at = (b: number) => encodeCursor({ b, h: hashOf(b), k: END_OF_BLOCK, i: 0, w: '' })
+
+    const seedBlocks = (from: number, to: number) => db.execute(sql`
+      INSERT INTO blocks (number, hash, timestamp)
+      SELECT n, '0x' || lpad(to_hex(n), 64, '0'), to_timestamp(${T0 / 1000} + n)
+        FROM generate_series(${from}::bigint, ${to}::bigint) n`)
+    const durable = (b: number) => db.execute(sql`UPDATE indexer_cursor SET transfers_durable_block = ${b}`)
+    const nativeTx = (n: number, block: number, idx: number, from: string, to: string | null, value: string, status = true) =>
+      db.execute(sql`INSERT INTO transactions (hash, block_number, from_address, to_address, value, status, tx_index, timestamp)
+        VALUES (${txh(n)}, ${block}, ${from}, ${to}, ${value}, ${status}, ${idx}, to_timestamp(${T0 / 1000 + block}))`)
+    const tokenTx = (n: number, block: number, log: number, from: string, to: string, value: string) =>
+      db.execute(sql`INSERT INTO token_transfers (tx_hash, log_index, token_address, from_address, to_address, value, block_number, timestamp)
+        VALUES (${txh(n)}, ${log}, ${USDT}, ${from}, ${to}, ${value}, ${block}, to_timestamp(${T0 / 1000 + block}))`)
+    const ok = (p: Awaited<ReturnType<typeof readWatchEvents>>): WatchFeed => {
+      if (p.status !== 'ok') throw new Error(`expected ok, got ${p.status}`)
+      return p.body
+    }
+    const drain = async (start: string, limit: number) => {
+      const seen: string[] = []
+      let cursor = start
+      for (let guard = 0; guard < 50; guard++) {
+        const page = ok(await readWatchEvents(db, OWNER, decodeCursor(cursor), limit))
+        seen.push(...page.events.map((e) => `${e.blockNumber}:${e.type}:${e.direction}:${e.watched === A ? 'A' : 'B'}`))
+        if (page.cursor === cursor) break
+        cursor = page.cursor
+        if (page.events.length === 0 && decodeCursor(cursor)!.b >= page.tip) break
+      }
+      return seen
+    }
+
+    beforeEach(async () => {
+      await addWatchAddresses(db, OWNER, [A, B], null)
+      await db.execute(sql`INSERT INTO tokens (address, symbol, decimals) VALUES (${USDT}, 'USDT', 18)`)
+    })
+
+    it('is not ready until a durable block exists', async () => {
+      expect((await readWatchEvents(db, OWNER, null, 100)).status).toBe('not_ready')
+    })
+
+    it('starts at the durable tip with no backlog, never past it', async () => {
+      await seedBlocks(1, 30)
+      await durable(20)
+      await nativeTx(1, 10, 0, A, X, '5.000000000000000000')
+      const first = ok(await readWatchEvents(db, OWNER, null, 100))
+      expect(first.events).toEqual([])
+      expect(first.tip).toBe(20)
+      expect(decodeCursor(first.cursor)).toMatchObject({ b: 20, k: END_OF_BLOCK })
+    })
+
+    it('pages through every matching transfer exactly once, in chain order', async () => {
+      await seedBlocks(1, 30)
+      await durable(30)
+      await nativeTx(1, 5, 0, A, X, '1000000000000000000.000000000000000000')        // A out
+      await nativeTx(2, 5, 1, A, X, '0.000000000000000000')                         // zero value: excluded
+      await nativeTx(3, 6, 0, A, X, '7.000000000000000000', false)                  // failed: excluded
+      await tokenTx(4, 6, 2, X, B, '42')                                            // B in
+      await tokenTx(5, 7, 0, A, B, '9')                                             // A out AND B in
+      await tokenTx(6, 8, 1, B, B, '3')                                             // B self, once
+      await tokenTx(7, 9, 0, X, addr(0xd1), '1')                                    // unwatched: excluded
+      await nativeTx(8, 25, 4, X, A, '2.000000000000000000')                        // A in
+      const expected = ['5:native:out:A', '6:token:in:B', '7:token:out:A', '7:token:in:B', '8:token:self:B', '25:native:in:A']
+      for (const limit of [1, 2, 100]) expect(await drain(at(1), limit)).toEqual(expected)
+    })
+
+    it('serves a block only once the transfer writer has made it durable', async () => {
+      await seedBlocks(1, 30)
+      await durable(20)
+      await tokenTx(1, 25, 0, X, A, '1')
+      const before = ok(await readWatchEvents(db, OWNER, decodeCursor(at(1)), 100))
+      expect(before.events).toEqual([])
+      expect(decodeCursor(before.cursor)!.b).toBe(20)
+      await durable(30)
+      const after = ok(await readWatchEvents(db, OWNER, decodeCursor(before.cursor), 100))
+      expect(after.events.map((e) => e.blockNumber)).toEqual([25])
+    })
+
+    it('scans at most WATCH_WINDOW_BLOCKS blocks per call', async () => {
+      await seedBlocks(1, 3000)
+      await durable(3000)
+      await tokenTx(1, 2500, 0, X, A, '1')
+      const p1 = ok(await readWatchEvents(db, OWNER, decodeCursor(at(1)), 100))
+      expect(p1.events).toEqual([])
+      expect(decodeCursor(p1.cursor)!.b).toBe(1200)
+      const p2 = ok(await readWatchEvents(db, OWNER, decodeCursor(p1.cursor), 100))
+      expect(decodeCursor(p2.cursor)!.b).toBe(2399)
+      const p3 = ok(await readWatchEvents(db, OWNER, decodeCursor(p2.cursor), 100))
+      expect(p3.events.map((e) => e.blockNumber)).toEqual([2500])
+    })
+
+    it('answers gone for a cursor older than the retained window', async () => {
+      await seedBlocks(10, 30)
+      await durable(30)
+      await db.execute(sql`UPDATE indexer_cursor SET compact_cutoff_block = 10`)
+      expect(await readWatchEvents(db, OWNER, decodeCursor(at(5)), 100)).toEqual({ status: 'gone', oldestAvailableBlock: 10 })
+    })
+
+    it('rewinds when the cursor\'s block was replaced by a reorg', async () => {
+      await seedBlocks(1, 30)
+      await durable(30)
+      const cursor = at(20)
+      await db.execute(sql`UPDATE blocks SET hash = ${hashOf(20, 1)} WHERE number = 20`)
+      await tokenTx(1, 20 - WATCH_REWIND_BLOCKS + 3, 0, X, A, '1')
+      const page = ok(await readWatchEvents(db, OWNER, decodeCursor(cursor), 100))
+      expect(page.rewound).toBe(true)
+      expect(page.events.map((e) => e.blockNumber)).toEqual([20 - WATCH_REWIND_BLOCKS + 3])
     })
   })
 })
