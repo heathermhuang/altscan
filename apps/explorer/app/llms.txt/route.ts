@@ -27,6 +27,7 @@ has older activity outside the index, so empty lists do not mean no activity.
 - [Markdown mirrors](${BASE}/md): send \`Accept: text/markdown\` to /, /about,
   /developer, /api-docs, /tx/{hash}, /blocks/{number} to get markdown instead of HTML
 - [REST API docs](${BASE}/api-docs): free public JSON API
+- Wallet watch (${BASE}/api-docs): a watchlist of up to 50 addresses and GET /api/v1/watch/events, a cursor feed of every native and token transfer they send or receive, live, within the retained window (about 24 hours)
 - [API catalog (RFC 9727)](${BASE}/.well-known/api-catalog)
 - [Agent skills index](${BASE}/.well-known/agent-skills/index.json)
 - [Sitemap](${BASE}/sitemap.xml)

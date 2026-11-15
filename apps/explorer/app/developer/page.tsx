@@ -28,7 +28,7 @@ export default function DeveloperPage() {
       </div>
 
       {/* Quick Links */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
         <a href="/api-docs" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
           <div className="font-semibold text-ink">API Reference</div>
           <div className="mt-1 text-sm text-ink2">Full endpoint documentation</div>
@@ -40,6 +40,10 @@ export default function DeveloperPage() {
         <a href="#webhooks" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
           <div className="font-semibold text-ink">Webhooks</div>
           <div className="mt-1 text-sm text-ink2">Real-time event notifications</div>
+        </a>
+        <a href="/api-docs" className="rounded-xl border border-hair bg-card p-4 transition-colors hover:border-hair3">
+          <div className="font-semibold text-ink">Watch addresses</div>
+          <div className="mt-1 text-sm text-ink2">Every transfer your wallets make, live</div>
         </a>
       </div>
 

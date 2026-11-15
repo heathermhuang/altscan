@@ -268,6 +268,49 @@ const endpoints: Endpoint[] = [
     ),
   },
   {
+    method: 'POST',
+    path: '/api/v1/watch/addresses',
+    description: 'Add addresses to your watchlist (requires X-API-Key belonging to owner). At most 50 per owner; adding an address you already watch does nothing.',
+    params: [
+      { name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed); your API key must belong to it' },
+      { name: 'addresses', type: 'string[]', required: true, description: 'Addresses to watch (0x-prefixed)' },
+      { name: 'label', type: 'string', required: false, description: 'Up to 64 characters, stored with each new address' },
+    ],
+    exampleResponse: JSON.stringify({ added: 2, total: 5 }, null, 2),
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/watch/addresses',
+    description: 'List your watched addresses (requires X-API-Key belonging to owner).',
+    params: [{ name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed)' }],
+    exampleResponse: JSON.stringify({ addresses: [{ address: '0xabc...', label: 'hot wallet', createdAt: '2026-11-15T00:00:00Z' }] }, null, 2),
+  },
+  {
+    method: 'DELETE',
+    path: '/api/v1/watch/addresses/{address}',
+    description: 'Stop watching one address (requires X-API-Key belonging to owner). 404 if it was not watched.',
+    params: [{ name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed), as a query parameter' }],
+    exampleResponse: JSON.stringify({ removed: '0xabc...' }, null, 2),
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/watch/events',
+    description: `Live wallet events: every native ${chainConfig.currency} and token transfer sent or received by your watched addresses since your last call, up to the start of the retained window (about the last 24 hours). Call without a cursor to start at the newest block, then pass back the cursor from each response; polling every 3 seconds is plenty. A cursor older than the window answers 410 with oldestAvailableBlock, so you know events were missed. If a reorg replaced the cursor's block, the feed restarts a few blocks earlier and sets rewound: true; deduplicate on (txHash, logIndex or txIndex, watched). Native value moved by contract calls (internal transactions) is not included.`,
+    params: [
+      { name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed)' },
+      { name: 'cursor', type: 'string', required: false, description: 'The cursor from the previous response' },
+      { name: 'limit', type: 'number', required: false, description: 'Events per page (default 100, max 500)' },
+    ],
+    exampleResponse: JSON.stringify({
+      events: [{
+        type: 'token', direction: 'in', watched: '0xabc...', blockNumber: 12345678, blockHash: '0x...',
+        timestamp: '2026-11-15T03:00:00.000Z', txHash: '0x...', logIndex: 4, from: '0x...', to: '0xabc...',
+        value: '1500000000000000000', token: { address: '0x55d3...', symbol: 'USDT', decimals: 18 },
+      }],
+      cursor: 'eyJ...', tip: 12345690, oldestAvailableBlock: 12150000, rewound: false,
+    }, null, 2),
+  },
+  {
     method: 'GET',
     path: '/api/v1/keys',
     description: 'List API keys for an owner address. Key hashes are never returned — only the prefix for identification.',
