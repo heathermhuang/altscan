@@ -307,6 +307,22 @@ export async function ensureSchema(): Promise<void> {
     )
   `))
 
+  // Wallet watch: each owner's watched addresses (apps/explorer/lib/watch-addresses.ts caps them per
+  // owner under an advisory lock). The address index serves matching a block's addresses against
+  // every watchlist (Phase 2 webhooks); the primary key serves the per-owner reads.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS watch_addresses (
+      owner_address VARCHAR(42) NOT NULL,
+      address       VARCHAR(42) NOT NULL,
+      label         VARCHAR(64),
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_address, address)
+    )
+  `))
+  await db.execute(sql.raw(
+    `CREATE INDEX IF NOT EXISTS watch_addresses_address_idx ON watch_addresses (address)`,
+  ))
+
   // Single-row durable cursor for the async token_transfers writer.
   // transfers_durable_block = W: every block ≤ W has all its transfers committed.
   // It is the crash-safe resume point (see index.ts getResumeCursor + block-processor

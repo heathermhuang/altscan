@@ -294,6 +294,18 @@ export const apiKeys = pgTable('api_keys', {
   ownerIdx: index('api_keys_owner_idx').on(t.ownerAddress),
 }))
 
+// Wallet watch (apps/explorer/lib/watch-addresses.ts): each owner's watched addresses, at most
+// WATCH_MAX_ADDRESSES per owner. ensure-schema.ts creates it; keep the two in step.
+export const watchAddresses = pgTable('watch_addresses', {
+  ownerAddress: varchar('owner_address', { length: 42 }).notNull(),
+  address:      varchar('address', { length: 42 }).notNull(),
+  label:        varchar('label', { length: 64 }),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  pk:         primaryKey({ columns: [t.ownerAddress, t.address] }),
+  addressIdx: index('watch_addresses_address_idx').on(t.address),
+}))
+
 // Runtime-editable explorer settings (admin console) — one JSONB doc per
 // namespace ('links' | 'footer' | 'ads'), validated by @altscan/settings-schema.
 export const explorerSettings = pgTable('explorer_settings', {
