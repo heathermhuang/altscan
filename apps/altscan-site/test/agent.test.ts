@@ -124,6 +124,16 @@ await t('_headers: catalogs get their media type and CORS', () => {
   assert.match(h, /\/\.well-known\/ai-catalog\.json\n {2}Content-Type: application\/ai-catalog\+json\n {2}Access-Control-Allow-Origin: \*/);
 });
 
+// Poppy discovery: website-only, and organization.domain must be the host that serves it.
+await t('poppy.json: website-only declaration for altscan.io, served with CORS', () => {
+  assert.deepEqual(JSON.parse(pub('.well-known/poppy.json')), {
+    protocol_version: '0.1',
+    organization: { name: 'Altscan', domain: 'altscan.io' },
+    web: {},
+  });
+  assert.match(pub('_headers'), /\/\.well-known\/poppy\.json\n {2}Access-Control-Allow-Origin: \*/);
+});
+
 // Official MCP registry: server.json is what gets published, mcp-registry-auth proves altscan.io for io.altscan/*
 await t('server.json: the registry entry is the MCP server card, with a description the registry accepts', () => {
   const card = JSON.parse(pub('.well-known/mcp/server-card.json'));
