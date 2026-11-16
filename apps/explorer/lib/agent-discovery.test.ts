@@ -6,6 +6,7 @@ import { GET as skillMd } from '@/app/.well-known/agent-skills/api-usage/SKILL.m
 import { GET as aiCatalog } from '@/app/.well-known/ai-catalog.json/route'
 import { GET as authMd } from '@/app/auth.md/route'
 import { GET as serverCard } from '@/app/.well-known/mcp/server-card.json/route'
+import { GET as poppy } from '@/app/.well-known/poppy.json/route'
 import { chainConfig } from '@/lib/chain'
 
 // The Agent Skills Discovery RFC v0.2.0
@@ -110,5 +111,20 @@ describe('MCP server card', () => {
       readFileSync(new URL('../../altscan-site/public/.well-known/mcp/server-card.json', import.meta.url), 'utf8'),
     )
     expect(await res.json()).toEqual(altscan)
+  })
+})
+
+// Poppy discovery: a document copied to another host must not speak for it, so
+// organization.domain has to be the serving host. Website-only on purpose — an agent or
+// API declaration needs an issuer that implements Poppy sign-in, which this site lacks.
+describe('poppy.json', () => {
+  it('declares the website only, for the domain that serves it', async () => {
+    const res = await poppy()
+    expect(res.headers.get('content-type')).toMatch(/^application\/json/)
+    expect(await res.json()).toEqual({
+      protocol_version: '0.1',
+      organization: { name: chainConfig.brandName, domain: chainConfig.domain },
+      web: {},
+    })
   })
 })
