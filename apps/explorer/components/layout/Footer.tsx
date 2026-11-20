@@ -4,6 +4,10 @@ import { chainConfig } from '@/lib/chain'
 import { AdReserve } from '@/components/ads/AdReserve'
 import { getSetting } from '@/lib/settings'
 import { resolveFooterText, resolveLinks } from '@/lib/settings-defaults'
+import { CHAINS } from '@altscan/chain-config'
+
+// The chain whose site peerUrl points at, so the link text and href cannot disagree.
+const peer = Object.values(CHAINS).find(c => `https://${c.domain}` === chainConfig.peerUrl)
 
 function FooterLogo() {
   return (
@@ -74,6 +78,18 @@ export async function Footer() {
             >
               Powered by Altscan ↗
             </a>
+            {/* Server-rendered, so crawlers see it on every page. The NetworkSwitcher's link to the
+                other site renders only after a click, and otherwise only the homepage links there. */}
+            {peer && (
+              <a
+                href={chainConfig.peerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ft-a2"
+              >
+                Sister explorer: {peer.brandDomain} ({peer.name}) ↗
+              </a>
+            )}
           </div>
         </div>
       </div>
