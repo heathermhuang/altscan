@@ -233,7 +233,7 @@ services:
   # ── Redis (shared API rate limiting + CU ledger) ─────────────────────────
   - type: redis
     name: bnbscan-redis
-    plan: starter           # 25 MB — sufficient for rate-limit counters — $10/mo
+    plan: starter           # 256 MB — rate-limit counters, CU ledger, response cache — $10/mo
     ipAllowList: []         # private networking only
     # MUST be noeviction. This instance holds the monthly Moralis CU ledger
     # (moralis:cu:v1:<YYYY-MM>), which is the only thing bounding a metered
@@ -247,7 +247,7 @@ services:
     # The trade-off is deliberate: with noeviction a full Redis fails WRITES
     # rather than dropping the ledger. That is also what the rest of the code
     # already assumes — the response cache is capped at a 2h TTL specifically
-    # so this 25 MB instance stays under its ceiling.
+    # so this 256 MB instance stays under its ceiling.
     maxmemoryPolicy: noeviction
 
 databases:
