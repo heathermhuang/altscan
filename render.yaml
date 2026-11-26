@@ -229,7 +229,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=768"  # GC before 1GB OOM kill
+        value: "--max-old-space-size=768"  # GC well under the 2 GB plan limit
 
   # ── Redis (shared API rate limiting + CU ledger) ─────────────────────────
   - type: redis
@@ -254,7 +254,7 @@ services:
 databases:
 
   # ── BNB Chain PostgreSQL ──────────────────────────────────────────────────
-  # BNB grows ~12-15 GB/month — pro-1gb holds ~2 months before upgrade
+  # Storage autoscales; sync-db-disk-size.yml keeps DB_DISK_GB in step
   - name: bnbscan-db
     databaseName: bnbscan
     user: bnbscan
@@ -269,9 +269,9 @@ databases:
                             # next merge that touched this file (#236, #242).
 
   # ── Ethereum PostgreSQL ──────────────────────────────────────────────────
-  # ETH grows ~6-8 GB/month — basic-1gb holds for 3-4 months
+  # Storage autoscales (see bnbscan-db)
   - name: ethscan-db
     databaseName: ethscan
     user: ethscan
     ipAllowList: []         # private network only (see bnbscan-db)
-    plan: basic-1gb        # 1 GB RAM, 25 GB storage — $20/mo
+    plan: basic-1gb        # 1 GB RAM

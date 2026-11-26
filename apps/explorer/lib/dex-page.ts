@@ -69,7 +69,7 @@ export const fetchDexPage = createPageCache(
     // The price is network, not database: it runs beside the reads below without adding to their load.
     const nativeUsd = readNativeUsd()
     // Sequential on purpose — these were concurrent full-table scans and OOMed
-    // the 2GB web service.
+    // the web service.
     const trades = await db.select().from(schema.dexTrades)
     .orderBy(desc(schema.dexTrades.blockNumber))
     .limit(DEX_PAGE_SIZE)

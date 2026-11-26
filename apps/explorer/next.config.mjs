@@ -1,13 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Standalone output — produces a minimal self-contained server (~80MB vs ~500MB).
-  // Dramatically reduces base memory footprint on Render's 2GB pro plan.
+  // Dramatically reduces base memory footprint on the web service (Render pro, 4 GB; 1280 MB Node heap).
   output: 'standalone',
   // Build-time SSG queries hit the same DB that the indexer is writing. BNB's
   // 36GB transactions table under heavy indexer load can exceed the default
   // 60s timeout. Raise to 180s so builds don't fail during DB contention.
   staticPageGenerationTimeout: 180,
-  // Limit build workers to prevent OOM on Render Standard (2GB RAM)
+  // Limit build workers to prevent OOM during the Render build
   experimental: {
     workerThreads: false,
     cpus: 1,

@@ -178,7 +178,7 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
   `completeness: ok`. In the comment's own words: *"strictly worse than having no healer."*
   It also heals at ~1.7 blocks/min. Fix the completion marker first, then revisit.
 - **Do not add `force-dynamic` to an explorer page.** Pages use ISR (`export const
-  revalidate`, 45s–3600s per page). Per-request rendering OOMs the 2GB web service; even
+  revalidate`, 45s–3600s per page). Per-request rendering OOMs the web service (1280 MB Node heap); even
   raising the homepage's `revalidate = 60` causes concurrent renders that OOM. API routes
   under `app/api/` legitimately set `force-dynamic` — that is not the same thing.
 - Gaps below the compact retention cutoff are **unhealable by design** and age out on their
