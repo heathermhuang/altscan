@@ -33,6 +33,8 @@ const TRAINING_UAS = [
   'meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
   'Mozilla/5.0 (compatible; FacebookBot/1.0; +https://developers.facebook.com/docs/sharing/webmasters/facebookbot)',
   'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)',
+  'Mozilla/5.0 (compatible; SemrushBot/7~bl; +http://www.semrush.com/bot.html)',
+  'Mozilla/5.0 (compatible; MJ12bot/v1.4.8; http://mj12bot.com/)',
 ]
 
 describe('bot-policy', () => {
