@@ -53,9 +53,12 @@ export const TRAINING_BLOCKED = [
   'ImagesiftBot',
   'omgilibot',
   'YouBot',
-  // SEO backlink crawler, not a search engine: ~half of all requests on both
-  // sites in Sept 2026 and most of the traffic growth, with no ranking benefit.
+  // SEO backlink crawlers, not search engines: no ranking benefit. AhrefsBot was
+  // ~half of all requests on both sites in Sept 2026; SemrushBot and MJ12bot were
+  // ~8% of ethscan's and ~2% of bnbscan's origin egress in Nov 2026.
   'AhrefsBot',
+  'SemrushBot',
+  'MJ12bot',
 ] as const
 
 /** DB-heavy paths (big-table queries) where TRAINING_BLOCKED UAs get 429.

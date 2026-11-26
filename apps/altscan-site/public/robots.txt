@@ -8,7 +8,8 @@ Content-Signal: ai-train=no, search=yes, ai-input=yes
 Allow: /
 
 # AI training / bulk-corpus crawlers — apps/explorer/lib/bot-policy.ts TRAINING_BLOCKED,
-# minus AhrefsBot, which the explorers block for load, not training (test/agent.test.ts):
+# minus AhrefsBot, SemrushBot and MJ12bot, which the explorers block for load, not training
+# (test/agent.test.ts):
 User-agent: GPTBot
 User-agent: ClaudeBot
 User-agent: Claude-Web
