@@ -120,7 +120,7 @@ describe('checkRateLimit', () => {
 
 // The in-memory fallback runs when Redis is absent or down. Its size cap used to be checked but
 // never enforced: past it, every request swept the whole map and the new key went in anyway, so a
-// flood of distinct keys (rotating IPv6 clients) grew it without bound on a 2GB web service.
+// flood of distinct keys (rotating IPv6 clients) grew it without bound on the web service.
 describe('checkRateLimit in-memory fallback cap', () => {
   const CAP = 10_000
   afterEach(() => { vi.useRealTimers() })

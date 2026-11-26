@@ -4,7 +4,7 @@
  * hashes, so the work is bounded here rather than per request:
  *
  * - at most MAX_CONCURRENT lookups per process; past that, answer `unavailable` (the route sends
- *   503) instead of queueing, which would hold requests open on a 2GB instance
+ *   503) instead of queueing, which would hold requests open against a 1280 MB heap
  * - one in-flight lookup per hash, shared by every caller until it settles (even after a
  *   caller's deadline), each caller with its own deadline
  * - a deadline per lookup; the RPC call cannot be cancelled, so its slot is freed only when it

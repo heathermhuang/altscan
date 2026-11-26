@@ -15,7 +15,7 @@ import { encodeTape, gasPct, TAPE_LATEST, type TapeTuple } from '@/lib/tape'
 
 // Shared ISR cache: one server render per 30s, served to all users from cache in between.
 // This replaces force-dynamic (which rendered fresh for every request) — the primary cause
-// Revalidate every 60s. Higher frequency causes concurrent renders that OOM on 2GB.
+// Revalidate every 60s. Higher frequency causes concurrent renders that OOM the 1280 MB heap.
 export const revalidate = 60
 
 const jsonLd = {
