@@ -73,9 +73,11 @@ await t('robots.txt: Content-Signal sits in the catch-all group, once', () => {
   assert.ok(group('*').includes('Content-Signal: ai-train=no, search=yes, ai-input=yes'));
   assert.equal(robots.filter((l) => l.startsWith('Content-Signal:')).length, 1);
 });
-await t('robots.txt: blocks the explorers\' training crawlers (except AhrefsBot, a load block)', () => {
+// SEO crawlers the explorers block for load, not training; altscan.io is static.
+const LOAD_BLOCKS: readonly string[] = ['AhrefsBot', 'SemrushBot', 'MJ12bot'];
+await t('robots.txt: blocks the explorers\' training crawlers (except the SEO load blocks)', () => {
   const blocked = group('GPTBot').filter((l) => l.startsWith('User-agent: ')).map((l) => l.slice(12));
-  assert.deepEqual(blocked, TRAINING_BLOCKED.filter((b) => b !== 'AhrefsBot'));
+  assert.deepEqual(blocked, TRAINING_BLOCKED.filter((b) => !LOAD_BLOCKS.includes(b)));
   assert.ok(group('GPTBot').includes('Disallow: /'));
 });
 
