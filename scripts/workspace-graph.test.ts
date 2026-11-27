@@ -31,7 +31,8 @@ const APPROVED: Record<string, string[]> = {
   '@altscan/explorer': ['@altscan/chain-config', '@altscan/db', '@altscan/explorer-core', '@altscan/oauth', '@altscan/providers', '@altscan/settings-schema'],
   '@altscan/indexer': ['@altscan/chain-config', '@altscan/db', '@altscan/providers'],
   '@altscan/admin': ['@altscan/chain-config', '@altscan/settings-schema'],
-  '@altscan/site': ['@altscan/oauth'],
+  // Chain names and domains for the product cards, from the one place that owns them.
+  '@altscan/site': ['@altscan/chain-config', '@altscan/oauth'],
   '@altscan/status': [],
 }
 

@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.dom.json"
   },
   "dependencies": {
+    "@altscan/chain-config": "workspace:*",
     "@altscan/oauth": "workspace:*",
     "@astrojs/cloudflare": "^14.4.8",
     "@astrojs/sitemap": "^3.7.5",

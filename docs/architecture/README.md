@@ -14,7 +14,7 @@ canonical modules. Anything marked **enforced** fails CI when broken.
 apps/explorer   ──▶ providers, db, chain-config, explorer-core, oauth, settings-schema
 apps/indexer    ──▶ providers, db, chain-config
 apps/admin      ──▶ chain-config, settings-schema
-apps/altscan-site ▶ oauth
+apps/altscan-site ▶ chain-config, oauth
 apps/status     ──▶ (none)
 
 packages/providers ──▶ chain-config, explorer-core
