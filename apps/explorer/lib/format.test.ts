@@ -3,8 +3,6 @@ import { formatUnits } from 'ethers'
 import { holdingFromProvider } from '@/lib/holdings'
 import {
   formatNativeToken,
-  formatBNB,
-  formatETH,
   formatGwei,
   formatUsdPrice,
   formatCompact,
@@ -72,11 +70,6 @@ describe('formatNativeToken', () => {
 
   it('accepts string wei input', () => {
     expect(formatNativeToken('1500000000000000000')).toBe('1.5')
-  })
-
-  it('keeps the formatBNB/formatETH aliases pointing at formatNativeToken', () => {
-    expect(formatBNB).toBe(formatNativeToken)
-    expect(formatETH).toBe(formatNativeToken)
   })
 })
 

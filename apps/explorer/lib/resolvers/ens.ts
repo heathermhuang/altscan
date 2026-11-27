@@ -51,11 +51,3 @@ export async function resolveEns(address: string): Promise<string | null> {
   }
 }
 
-export async function resolveEnsToAddress(name: string): Promise<string | null> {
-  try {
-    const provider = await getWebProvider()
-    return await provider.resolveName(name)
-  } catch {
-    return null
-  }
-}

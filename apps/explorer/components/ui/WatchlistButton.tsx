@@ -40,13 +40,3 @@ export function WatchlistButton({ address }: { address: string }) {
   )
 }
 
-export function useWatchlist() {
-  const [list, setList] = useState<string[]>([])
-  useEffect(() => {
-    setList(getWatchlist())
-    const handler = () => setList(getWatchlist())
-    window.addEventListener('storage', handler)
-    return () => window.removeEventListener('storage', handler)
-  }, [])
-  return list
-}

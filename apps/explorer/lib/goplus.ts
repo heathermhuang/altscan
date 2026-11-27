@@ -18,21 +18,6 @@ export type AddressRisk = {
   riskItems: string[]   // human-readable risk flags
 }
 
-export type TokenSecurity = {
-  isOpenSource: boolean
-  isProxy: boolean
-  isMintable: boolean
-  isHoneypot: boolean
-  sellTax: string       // e.g. "0.05" = 5%
-  buyTax: string
-  canTakeBackOwnership: boolean
-  hiddenOwner: boolean
-  isBlacklisted: boolean
-  holderCount: number | null
-  lpHolderCount: number | null
-  riskLevel: 'safe' | 'warning' | 'danger'
-}
-
 const RISK_TTL_MS = 10 * 60 * 1000
 const RISK_MAX_ENTRIES = 5_000
 const riskCache = new Map<string, { risk: AddressRisk; expires: number }>()
@@ -83,61 +68,6 @@ export async function getAddressRisk(address: string): Promise<AddressRisk | nul
       riskCache.set(key, { risk, expires: Date.now() + RISK_TTL_MS })
     }
     return risk
-  } catch {
-    return null
-  }
-}
-
-export async function getTokenSecurity(contractAddress: string): Promise<TokenSecurity | null> {
-  try {
-    const res = await fetch(
-      `${BASE}/token_security/${CHAIN_ID}?contract_addresses=${contractAddress}`,
-      { signal: AbortSignal.timeout(5000), next: { revalidate: 300 } },
-    )
-    if (!res.ok) return null
-    const data = (await res.json()) as {
-      code: number
-      result: Record<string, {
-        is_open_source?: string
-        is_proxy?: string
-        is_mintable?: string
-        is_honeypot?: string
-        sell_tax?: string
-        buy_tax?: string
-        can_take_back_ownership?: string
-        hidden_owner?: string
-        is_blacklisted?: string
-        holder_count?: string
-        lp_holder_count?: string
-      }>
-    }
-    if (data.code !== 1) return null
-    const r = data.result[contractAddress.toLowerCase()] ?? data.result[contractAddress]
-    if (!r) return null
-
-    const isHoneypot = r.is_honeypot === '1'
-    const sellTaxNum = parseFloat(r.sell_tax ?? '0')
-    const buyTaxNum  = parseFloat(r.buy_tax ?? '0')
-    const hiddenOwner = r.hidden_owner === '1'
-
-    let riskLevel: TokenSecurity['riskLevel'] = 'safe'
-    if (isHoneypot || hiddenOwner || r.can_take_back_ownership === '1') riskLevel = 'danger'
-    else if (sellTaxNum > 0.1 || buyTaxNum > 0.1 || r.is_mintable === '1') riskLevel = 'warning'
-
-    return {
-      isOpenSource: r.is_open_source === '1',
-      isProxy: r.is_proxy === '1',
-      isMintable: r.is_mintable === '1',
-      isHoneypot,
-      sellTax: r.sell_tax ?? '0',
-      buyTax: r.buy_tax ?? '0',
-      canTakeBackOwnership: r.can_take_back_ownership === '1',
-      hiddenOwner,
-      isBlacklisted: r.is_blacklisted === '1',
-      holderCount: r.holder_count ? parseInt(r.holder_count) : null,
-      lpHolderCount: r.lp_holder_count ? parseInt(r.lp_holder_count) : null,
-      riskLevel,
-    }
   } catch {
     return null
   }

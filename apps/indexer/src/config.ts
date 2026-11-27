@@ -407,10 +407,6 @@ export function readIndexerConfig(
     diskStopPct: r.int('BACKFILL_DISK_STOP_PCT', 70, { min: 1 }),
   }
 
-  const verifier = {
-    sourcifyApi: r.string('SOURCIFY_API', 'https://sourcify.dev/server'),
-  }
-
   const webhooks = {
     /** 64 hex chars; seals webhook signing keys at rest (webhook-secret.ts). Unset = plaintext, as before. */
     secretKey: r.credential('WEBHOOK_SECRET_KEY'),
@@ -424,7 +420,7 @@ export function readIndexerConfig(
 
   const config = {
     indexing, rpc, reorg, gapHeal, transferWriter, holders, tokenHeal,
-    retention, partitions, internalTx, backfill, verifier, webhooks, runtime,
+    retention, partitions, internalTx, backfill, webhooks, runtime,
 
     /**
      * Per-block holder-balance tracking.

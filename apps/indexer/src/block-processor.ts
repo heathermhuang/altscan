@@ -1072,10 +1072,6 @@ function runHolderWorker(): void {
   })()
 }
 
-export function getHolderQueueDepth(): number {
-  return holderQueue.length
-}
-
 async function batchUpdateHolderBalances(rows: TokenTransferRow[]): Promise<void> {
   const db = getDb()
 

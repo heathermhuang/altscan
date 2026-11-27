@@ -82,7 +82,3 @@ export function getLabelForChain(chain: ChainKey, address: string): AddressLabel
 export function getAddressLabel(address: string): string | null {
   return getLabelForChain(chainConfig.key as ChainKey, address)?.label ?? null
 }
-
-export function getAddressCategory(address: string): string | null {
-  return getLabelForChain(chainConfig.key as ChainKey, address)?.category ?? null
-}

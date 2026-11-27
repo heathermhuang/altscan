@@ -133,9 +133,6 @@ importers:
       '@altscan/settings-schema':
         specifier: workspace:*
         version: link:../../packages/settings-schema
-      '@altscan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       axios:
         specifier: ^1.21.1
         version: 1.21.1
@@ -206,9 +203,6 @@ importers:
       '@altscan/providers':
         specifier: workspace:*
         version: link:../../packages/providers
-      '@altscan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       axios:
         specifier: ^1.21.1
         version: 1.21.1
@@ -315,8 +309,6 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
-
-  packages/types: {}
 
 packages:
 
