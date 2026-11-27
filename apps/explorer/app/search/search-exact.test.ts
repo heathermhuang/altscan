@@ -7,6 +7,7 @@
  * The real server component, with the database stubbed: the by-holders query is the one with an ORDER BY.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { bestOfMs } from '@/test-support/timing'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PgDialect } from 'drizzle-orm/pg-core'
 
@@ -147,13 +148,10 @@ describe('/search normalises the query before routing', () => {
   // event loop ~150 ms per request on this dynamic, unlimited page.
   it('answers a 16,000-character adversarial q fast, capped to 200 characters like the old page', async () => {
     await searchHtml('warm up')
-    const t = performance.now()
-    const to = await redirectOf('1'.repeat(16_000) + '1')
-    expect(performance.now() - t).toBeLessThan(50)
-    expect(to).toBe(`/blocks/${'1'.repeat(200)}`)
-    const t2 = performance.now()
-    await searchHtml('1'.repeat(100) + 'x' + '1'.repeat(16_000)) // a token search, with a long tail to drop
-    expect(performance.now() - t2).toBeLessThan(50)
+    expect(await bestOfMs(() => redirectOf('1'.repeat(16_000) + '1'))).toBeLessThan(50)
+    expect(await redirectOf('1'.repeat(16_000) + '1')).toBe(`/blocks/${'1'.repeat(200)}`)
+    // a token search, with a long tail to drop
+    expect(await bestOfMs(() => searchHtml('1'.repeat(100) + 'x' + '1'.repeat(16_000)))).toBeLessThan(50)
   })
 
   it('searches tokens for the text after a leading # (and says so on the page)', async () => {

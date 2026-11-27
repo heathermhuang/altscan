@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { bestOfMs } from '@/test-support/timing'
 import { classifyQuery, normaliseSearchQuery, routeForQuery, SEARCH_QUERY_MAX } from '@/lib/search-route'
 
 const TX = 'aB'.repeat(32) // 64 hex, mixed case
@@ -122,16 +123,14 @@ describe('classifyQuery', () => {
 // end: 16,000 digits and an 'x' held the event loop ~150 ms (node 24), per request, on /search (dynamic, not rate
 // limited) and per keystroke in the box. It is now linear, and the input is capped before any regex sees it.
 describe('adversarial input', () => {
-  // Best of five: a single wall-clock sample measures the scheduler as much as the code, and failed at 28 ms under a
-  // loaded full-suite run. The minimum is what the code costs. 25 ms is still 6x under the ~150 ms regression.
-  const ms = (fn: () => unknown) => Math.min(...Array.from({ length: 5 }, () => { const t = performance.now(); fn(); return performance.now() - t }))
+  // Best of five (test-support/timing.ts); 25 ms is still 6x under the ~150 ms regression.
   const EVIL = ['1'.repeat(16_000) + 'x', '1,'.repeat(8_000) + 'x', '1 '.repeat(8_000) + '_x', ',' .repeat(16_000) + 'x']
 
-  it.each(EVIL.map((q) => [q.slice(0, 12) + '…', q]))('normalises a 16,000-character input (%s) in well under the regression', (_label, q) => {
+  it.each(EVIL.map((q) => [q.slice(0, 12) + '…', q]))('normalises a 16,000-character input (%s) in well under the regression', async (_label, q) => {
     normaliseSearchQuery(q) // warm up the regex
-    expect(ms(() => normaliseSearchQuery(q))).toBeLessThan(25)
-    expect(ms(() => classifyQuery(q))).toBeLessThan(25)
-    expect(ms(() => routeForQuery(q))).toBeLessThan(25)
+    expect(await bestOfMs(() => normaliseSearchQuery(q))).toBeLessThan(25)
+    expect(await bestOfMs(() => classifyQuery(q))).toBeLessThan(25)
+    expect(await bestOfMs(() => routeForQuery(q))).toBeLessThan(25)
   })
 
   it('caps the query at 200 characters before it is processed', () => {
