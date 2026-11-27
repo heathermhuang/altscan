@@ -54,8 +54,8 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
 
-Empty. Every remaining item is either declined below (with the reason) or waits on an
-owner decision at the end of this file.
+Empty. Every remaining item is done or declined below, with the reason. No owner decisions
+are pending (see the end of this file).
 
 ## Convergence
 
