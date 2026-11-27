@@ -30,10 +30,16 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 17 | altscan-site typechecks in CI: Worker code (`tsconfig.worker.json`, workers-types) and browser scripts + test harness (`tsconfig.dom.json`) get their own configs, since their lib types conflict. 10 errors on main → 0; `noUnusedLocals` on there too | CI `Typecheck altscan-site` (checked to fail) |
 | 18 | `COMPACT_RETENTION_DAYS` read in `config.ts` (`EnvReader.daysOrImmortal`, parseInt semantics kept on purpose: it guards a destructive path) and printed at boot; retention-policy functions take the resolved number. The last `env-boundary` exemption is gone. Both hand-run retention PG suites + `retention-sizes` ran on a local Postgres before (8/8) and after (8/8) | `env-boundary.test.ts`, retention guardrail tests via the real parser |
 | 19 | One owning file per explorer env variable, enforced (inventory found no shared reads, so no registry: see declined items) | `lib/env.test.ts` |
+| 20 | Split the async transfer writer out of `block-processor.ts` (2,386 → 1,291 lines) into `transfer-writer.ts`, and the disabled holder-balance queue into `holder-balances.ts`. Coupling was measured first: the writer shared only `enqueueTransferWrite` with the rest. Moved verbatim; `SQL_BATCH_CHUNK` and `isDeadlock` (used by all three) moved to the indexer `db.ts`; no re-export layer, all 11 importers repointed. Verified: tsc, 782 indexer unit tests, all 9 indexer PG suites on local Postgres (one pre-existing order-dependent failure, also on main), the compiled modules load under Node with no cycle | workspace graph, cycle scan |
 
 ## Task pool
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
+
+- **Order-dependent PG test**: `partition-coverage.pg.test.ts` › "re-validates a parent left
+  invalid…" passes alone and in CI (each suite is its own step), but fails when all nine
+  indexer PG suites run in one vitest invocation, on main too. Some earlier suite leaves
+  server-level state it depends on. Find it, or make the suite set up what it assumes.
 
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
@@ -79,21 +85,14 @@ CI step order. It found no breakage. It confirmed these deliberate differences:
 ## Pending owner decisions
 
 - **Delete per-block holder tracking?** `holderBalanceTrackingEnabled` is a hardcoded
-  `false` (not env-tunable). Behind it sit ~200 lines that cannot run: the holder queue and
-  `batchUpdateHolderBalances` in `block-processor.ts`, `recomputeHolderCounts` in
-  `retention-cleanup.ts`, and five `HOLDER_*` env vars in `config.ts`. Deleting them is
-  behavior-preserving, but it retires a capability AGENTS.md lists as an accepted known
-  issue, so it is a product call. Recommendation: delete, and note in AGENTS.md that
-  re-enabling means rebuilding it against the partitioned `token_transfers`.
-- **Split `block-processor.ts` (2,386 lines)?** It mixes block fetch, receipt-derived
-  writes, the async transfer writer, DEX swaps and holder tracking. It is also the
-  replay-safety core (AGENTS.md), so a split is a reviewed design change, not a
-  clean-up batch. Proposal: extract the transfer writer (queue, coalescing, durable
-  watermark) into `transfer-writer.ts` first; it has its own isolation PG suite.
-
-- **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
-  if it is set to anything but a plain whole number, it now falls back to the chain
-  default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
-- **Same check for `BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** on both web services:
-  a non-integer value now falls back to the default instead of being parsed by
-  `parseInt`.
+  `false` (not env-tunable). What it gates is now isolated: `holder-balances.ts` (whole
+  module), `recomputeHolderCounts` in `retention-cleanup.ts`, the five `HOLDER_*` vars in
+  `config.ts`, and two one-line call sites. Deleting them is behavior-preserving but retires a
+  capability AGENTS.md lists as an accepted known issue, so it is a product call.
+  Recommendation: delete, and note in AGENTS.md that reviving it means rebuilding it against
+  the partitioned `token_transfers`.
+- **Split `block-processor.ts` further?** After #20 it is 1,291 lines: block fetch, receipt
+  parsing, the inline transfer path, DEX swaps, token/pair metadata and internal txs. The
+  next seam would be DEX swaps + pair lookup. It is the replay-safety core (AGENTS.md), so
+  each further cut should be its own reviewed change with the coupling measured first, as
+  #20 was. Not needed for any open task.

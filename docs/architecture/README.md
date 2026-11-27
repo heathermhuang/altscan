@@ -65,6 +65,7 @@ One implementation per concern. "Guard" names the test that fails on a second co
 | Number, amount and time formatting | explorer `lib/format.ts`; address display `lib/address-display.ts` | — |
 | Token symbol sanitizing | `@altscan/explorer-core/format` `sanitizeSymbol` | — |
 | RPC for the web tier | explorer `lib/rpc.ts` (`getWebProvider`, sequential failover) | — |
+| Async token_transfers writer and durable watermark | indexer `src/transfer-writer.ts` | — |
 | RPC for the indexer | indexer `src/rpc-failover.ts`, `src/provider.ts` | — |
 
 ## State ownership
