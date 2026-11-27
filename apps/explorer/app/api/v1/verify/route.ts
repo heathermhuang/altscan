@@ -4,12 +4,13 @@ import { checkRateLimit, clientIpBucket, rateLimitResponse } from '@/lib/api-rat
 import { triggerSourcifyVerification } from '@/lib/verifier'
 import { chainConfig } from '@/lib/chain'
 import { isHexAddress } from '@/lib/hex'
+import { VERIFY_REQUESTS_PER_MINUTE } from '@/lib/api-limits'
 
 export async function POST(request: Request) {
   // Tighter rate limit for write operations — 10 per minute per IP. Own `verify:`
   // bucket (Redis `rl:verify:<ip>`): the bare `<ip>` bucket is the 100/min budget
   // every other route increments, so sharing it let 11 ordinary calls 429 a verify.
-  if (!(await checkRateLimit(`verify:${clientIpBucket(request.headers)}`, 10))) {
+  if (!(await checkRateLimit(`verify:${clientIpBucket(request.headers)}`, VERIFY_REQUESTS_PER_MINUTE))) {
     return rateLimitResponse()
   }
 

@@ -1,12 +1,10 @@
 import { isHexAddress } from './hex'
+import { QUERY_DEFAULT_LIMIT, QUERY_MAX_LIMIT, QUERY_MAX_OFFSET } from './api-limits'
 /**
  * POST /api/v1/query's body, checked before any database call: the filters each entity takes
  * and the combinations an index serves. Kept out of the route file, which Next.js allows to
  * export only its handlers.
  */
-// Deeper pages walk the index row by row up to the statement timeout, for any
-// anonymous caller; narrow with blockFrom/blockTo instead.
-const MAX_OFFSET = 10_000
 
 const ENTITIES = ['transactions', 'blocks', 'tokens', 'token_transfers', 'dex_trades'] as const
 type Entity = typeof ENTITIES[number]
@@ -91,10 +89,10 @@ export function parseQuery(body: unknown): { ok: true; query: Query } | { ok: fa
 
   const orderBy = body.orderBy ?? 'desc'
   if (orderBy !== 'asc' && orderBy !== 'desc') return { ok: false, error: "orderBy must be 'asc' or 'desc'" }
-  const limit = Math.min(Math.max(1, Number(body.limit) || 25), 100)
+  const limit = Math.min(Math.max(1, Number(body.limit) || QUERY_DEFAULT_LIMIT), QUERY_MAX_LIMIT)
   const offset = Math.max(0, Number(body.offset) || 0)
-  if (offset > MAX_OFFSET) {
-    return { ok: false, error: `offset must be at most ${MAX_OFFSET}; narrow the range with filter.blockFrom/blockTo` }
+  if (offset > QUERY_MAX_OFFSET) {
+    return { ok: false, error: `offset must be at most ${QUERY_MAX_OFFSET}; narrow the range with filter.blockFrom/blockTo` }
   }
   return { ok: true, query: { entity: entity as Entity, filter, orderBy, limit, offset } }
 }

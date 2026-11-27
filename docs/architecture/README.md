@@ -61,6 +61,7 @@ One implementation per concern. "Guard" names the test that fails on a second co
 | List-page data cache | explorer `lib/page-cache.ts` | its own tests |
 | Ad-slot layout | `components/ads/AdFrame.tsx` (creatives supply content) | — |
 | Swallowed-error logging | explorer `lib/observability.ts` (`swallow`, `swallowed`) | — |
+| Published API limits (rates, page sizes, offsets) | explorer `lib/api-limits.ts`, quoted by every docs page | `lib/api-limits.test.ts` |
 | Per-IP rate limiting and the 429 body | `@altscan/explorer-core` `checkRateLimit` keyed by `clientIpBucket`; explorer `lib/api-rate-limit.ts` (`checkIpRateLimit`, `rateLimitResponse`) | `lib/ip-bucket-callers.test.ts`, `lib/rate-limit-response.test.ts` |
 | Number, amount and time formatting | explorer `lib/format.ts`; address display `lib/address-display.ts` | — |
 | Token symbol sanitizing | `@altscan/explorer-core/format` `sanitizeSymbol` | — |

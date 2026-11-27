@@ -16,6 +16,7 @@
 import type { ChainConfig } from '@altscan/chain-config'
 import { API_SURFACE } from '@/lib/api-surface'
 import { ADDRESS_PATTERN, HASH_PATTERN } from './hex'
+import { LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT } from './api-limits'
 
 type Schema = Record<string, unknown>
 
@@ -179,7 +180,7 @@ const INTERNAL = error('Database error.')
 
 const pathParam = (name: string, schema: Schema, description: string): Schema => ({ name, in: 'path', required: true, description, schema })
 const PAGE = { name: 'page', in: 'query', description: '1-based page number. Lists reach the newest 10,000 records: a page that starts beyond them answers 400.', schema: { type: 'integer', minimum: 1, default: 1 } }
-const LIMIT = { name: 'limit', in: 'query', description: 'Page size. Values outside 1–50 are clamped.', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }
+const LIMIT = { name: 'limit', in: 'query', description: `Page size. Values outside 1–${LIST_MAX_LIMIT} are clamped.`, schema: { type: 'integer', minimum: 1, maximum: LIST_MAX_LIMIT, default: LIST_DEFAULT_LIMIT } }
 const PAGE_BAD = error('page or limit is not a number, or the page starts beyond the newest 10,000 records.')
 const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: ADDRESS_PATTERN }, `${description} Any letter case.`)
 

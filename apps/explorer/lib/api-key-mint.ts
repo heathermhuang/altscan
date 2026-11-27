@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
+import { KEY_REQUESTS_PER_MINUTE } from './api-limits'
 
 export const MAX_KEYS_PER_ADDRESS = 10
 
@@ -41,7 +42,7 @@ export async function mintApiKey(
     const [created] = await tx.insert(schema.apiKeys).values({
       ...key,
       ownerAddress: owner,
-      requestsPerMinute: 100,
+      requestsPerMinute: KEY_REQUESTS_PER_MINUTE,
       totalRequests: 0,
       active: true,
     }).returning({ id: schema.apiKeys.id })

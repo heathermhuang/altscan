@@ -6,6 +6,7 @@
  */
 import { NextResponse } from 'next/server'
 import { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit } from '@altscan/explorer-core'
+import { IP_REQUESTS_PER_MINUTE } from './api-limits'
 
 export { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit }
 
@@ -57,7 +58,7 @@ export async function checkIpRateLimit(
     }
     return checkRateLimit(feed ? 'service:altscan-status-feed' : 'service:altscan-mcp', SERVICE_MAX_PER_MINUTE)
   }
-  return checkRateLimit(clientIpBucket(headers), maxRequests)
+  return checkRateLimit(clientIpBucket(headers), maxRequests ?? IP_REQUESTS_PER_MINUTE)
 }
 
 /**

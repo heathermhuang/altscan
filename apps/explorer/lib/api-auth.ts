@@ -17,9 +17,9 @@ import { checkIpRateLimit, checkRateLimit, clientIpBucket, clientIpFromHeaders, 
 import { oauthConfig } from '@/lib/oauth'
 import crypto from 'crypto'
 import { positiveIntEnv } from './env'
+import { TOKEN_REQUESTS_PER_MINUTE } from './api-limits'
 
 /** An OAuth token's budget: the same as an API key's, shared by every token for one address. */
-const TOKEN_REQUESTS_PER_MINUTE = 100
 
 /**
  * Every request from one client (its IP bucket: an IPv6 /64) shares this ceiling per minute, whatever credential it
