@@ -29,7 +29,6 @@ vi.mock('@/lib/db', () => {
   return { db: { select: () => query }, schema: { tokens: {}, tokenTransfers: {} } }
 })
 vi.mock('@/lib/token-transfers-query', () => ({
-  TOKEN_TRANSFERS_MAX_ROWS: 10_000,
   selectTokenTransfers: async () => {
     if (h.transfers === 'hang') return new Promise<Row[]>(() => {})
     if (h.transfers === 'fail') throw new Error('canceling statement due to statement timeout')

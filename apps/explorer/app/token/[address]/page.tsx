@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db'
-import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from '@/lib/token-transfers-query'
+import { countTokenTransfers, selectTokenTransfers } from '@/lib/token-transfers-query'
+import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
@@ -180,8 +181,8 @@ export default async function TokenDetailPage({
   if (!isHexAddress(address)) notFound()
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
-  // The list stops at TOKEN_TRANSFERS_MAX_ROWS, so a deeper ?page= gets its last page.
-  const page = Math.min(TOKEN_TRANSFERS_MAX_ROWS / PAGE_SIZE, Math.max(1, parseInt(pageStr ?? '1', 10) || 1))
+  // The list stops at MAX_LIST_ROWS, so a deeper ?page= gets its last page.
+  const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
   const offset = (page - 1) * PAGE_SIZE
 
   let token: typeof schema.tokens.$inferSelect | null = null
@@ -240,14 +241,14 @@ export default async function TokenDetailPage({
   const countKnown = totalTransfersRaw >= 0
   const totalTransfers = countKnown ? totalTransfersRaw : 0
   // More than the list serves reads as "10,000+".
-  const totalLabel = totalTransfers > TOKEN_TRANSFERS_MAX_ROWS
-    ? `${formatNumber(TOKEN_TRANSFERS_MAX_ROWS)}+`
+  const totalLabel = totalTransfers > MAX_LIST_ROWS
+    ? `${formatNumber(MAX_LIST_ROWS)}+`
     : formatNumber(totalTransfers)
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
   const pageRows = transfers ?? []
   const transfersState = transfersEmptyState({ rows: transfers, count: totalTransfersRaw, offset })
-  const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
+  const paginationTotal = Math.min(MAX_LIST_ROWS, countKnown
     ? totalTransfers
     : offset + pageRows.length + (pageRows.length === PAGE_SIZE ? PAGE_SIZE : 0))
 

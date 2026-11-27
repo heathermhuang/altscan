@@ -19,7 +19,6 @@ vi.mock('@/lib/db', () => {
   return { db: { select: () => query }, schema: { tokens: {}, tokenTransfers: {} } }
 })
 vi.mock('@/lib/token-transfers-query', () => ({
-  TOKEN_TRANSFERS_MAX_ROWS: 10_000,
   selectTokenTransfers: async () => [],
   countTokenTransfers: async () => [{ value: 0 }],
 }))

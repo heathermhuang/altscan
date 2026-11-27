@@ -3,7 +3,8 @@ import { desc, eq } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { createMaintenanceConnection, schema } from '@altscan/db'
-import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from './token-transfers-query'
+import { countTokenTransfers, selectTokenTransfers } from './token-transfers-query'
+import { MAX_LIST_ROWS } from './list-depth'
 import { buildLocalNetFlowQuery, LOCAL_HOLDERS_LIMIT, LOCAL_HOLDERS_WINDOW } from './holders'
 
 /**
@@ -155,7 +156,7 @@ describe.skipIf(!PG_URL)('token page transfers — against a real Postgres', () 
       ['a token that has gone quiet', 25, QUIET],
       ['a token busy in every block', 0, MEGA],
       ['a token busy in every block', 25, MEGA],
-      ['a token busy in every block', TOKEN_TRANSFERS_MAX_ROWS - 25, MEGA],
+      ['a token busy in every block', MAX_LIST_ROWS - 25, MEGA],
     ])('reads O(offset + limit) rows for %s at offset %i, not the table', async (_, offset, token) => {
       const q = selectTokenTransfers(db, token, { limit: 25, offset })
       expect(await q).toHaveLength(25)
@@ -224,14 +225,14 @@ describe.skipIf(!PG_URL)('token page transfers — against a real Postgres', () 
     })
 
     it.each([
-      ['more transfers than the list serves', MEGA, TOKEN_TRANSFERS_MAX_ROWS + 1],
+      ['more transfers than the list serves', MEGA, MAX_LIST_ROWS + 1],
       ['fewer', QUIET, 5000],
       ['none', NONE, 0],
     ])('counts a token with %s up to one row past the list, not every row', async (_, token, expected) => {
       const q = countTokenTransfers(db, token)
       expect((await q)[0].value).toBe(expected)
       // Merge Append reads a row ahead in each partition, hence the list's slack.
-      expect(await rowsReadBy(q)).toBeLessThan(TOKEN_TRANSFERS_MAX_ROWS + 1 + 50)
+      expect(await rowsReadBy(q)).toBeLessThan(MAX_LIST_ROWS + 1 + 50)
     })
   })
 })
