@@ -109,3 +109,16 @@ describe('isConnectionError (boot-time ensureSchema retry)', () => {
     expect(isConnectionError(wrap(notFound))).toBe(false)
   })
 })
+
+// Compile-time pin, checked by the indexer's `tsc --noEmit` in CI (never run): the pool
+// getters take the env var with no default. A bare getDb() used to read DATABASE_URL,
+// which is unset on every ETH service, so features failed silently there while BNB
+// worked by luck. If a default comes back, these directives become unused and tsc fails.
+export function __pinRequiredEnvVar(db: typeof import('@altscan/db')): void {
+  // @ts-expect-error the chain's dbEnvVar is required
+  db.getDb()
+  // @ts-expect-error the chain's dbEnvVar is required
+  db.getMaintenanceDb()
+  // @ts-expect-error the chain's dbEnvVar is required
+  db.getWriterDb()
+}

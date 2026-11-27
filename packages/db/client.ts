@@ -18,10 +18,13 @@ const g = globalThis as typeof globalThis & {
 
 /**
  * Returns a singleton Drizzle DB client for the given env var.
- * Defaults to DATABASE_URL for backwards compatibility.
  * Each unique env var name gets its own connection pool.
+ *
+ * The env var is required, never defaulted: each chain reads a different one
+ * (chain-config's `dbEnvVar`), and a DATABASE_URL default made whole features
+ * silently inert on ETH, where that var is unset.
  */
-export function getDb(envVarName = 'DATABASE_URL') {
+export function getDb(envVarName: string) {
   if (!g.__db_instances) g.__db_instances = new Map()
   if (!g.__db_sql) g.__db_sql = new Map()
 
@@ -99,7 +102,7 @@ export function createMaintenanceConnection(url: string) {
  * pool recycles idle/old connections so it stays healthy for the process lifetime.
  * Pool size via MAINTENANCE_POOL_SIZE (default 2).
  */
-export function getMaintenanceDb(envVarName = 'DATABASE_URL') {
+export function getMaintenanceDb(envVarName: string) {
   if (!g.__maint_instances) g.__maint_instances = new Map()
   if (!g.__maint_sql) g.__maint_sql = new Map()
 
@@ -153,7 +156,7 @@ export function getMaintenanceDb(envVarName = 'DATABASE_URL') {
  * maintenance + writer). Render's plan caps max_connections, so raising
  * TT_WRITER_POOL_SIZE is not free.
  */
-export function getWriterDb(envVarName = 'DATABASE_URL') {
+export function getWriterDb(envVarName: string) {
   if (process.env.TT_WRITER_DEDICATED_POOL !== '1') return getDb(envVarName)
   if (!g.__writer_instances) g.__writer_instances = new Map()
   if (!g.__writer_sql) g.__writer_sql = new Map()
