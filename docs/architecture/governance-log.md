@@ -38,10 +38,6 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
 
-- **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
-  using `--filter @altscan/indexer... build`. The reason is now stale. Changing
-  `render.yaml` triggers a Blueprint sync, so fold the fix into the next intended
-  `render.yaml` change rather than a comment-only merge.
 - **`kv-cache` fallback in `explorer-core`** is another bounded TTL map. It cannot use the
   explorer's `ttl-cache.ts` (packages do not import apps). Leave unless a third package
   needs one.
@@ -49,6 +45,14 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 ## Considered and declined
 
 Recorded so the next pass does not redo the analysis.
+
+- **Splitting `block-processor.ts` past #22** (now 1,070 lines). Every seam was measured.
+  The transfer writer, receipts and the addresses coalescer had zero shared state and are
+  out. What remains is processBlock with the code it shares module-level mutable state
+  with: the token/pair enrichment reads and writes `tokenCache` and `pairCache`, which
+  processBlock also reads directly. Moving it means exporting shared mutable state or
+  changing processBlock's logic, which is neither verbatim nor behavior-neutral in the
+  replay-safety core. Stop here unless processBlock itself is redesigned.
 
 - **Duplicate keccak topic constants** (`Transfer`, `Approval` in `erc20-transfers.ts`,
   `event-decoder.ts`, `tx-decoder.ts`, the indexer). Each is the hash of a fixed
@@ -92,6 +96,11 @@ once at boot instead of per run (env cannot change without a redeploy).
 
 ## Pending owner decisions
 
+- **Fold the stale `render.yaml` comment into the next real `render.yaml` change.** Two
+  comments there cite the deleted `@altscan/types` as the reason the indexer build avoids
+  `--filter @altscan/indexer... build`. A merge that touches `render.yaml` re-applies the
+  Blueprint and can revert dashboard-only changes (AGENTS.local.md), so a comment-only edit
+  is not worth a sync. It does not affect any build.
 - **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
   if it is set to anything but a plain whole number, it now falls back to the chain
   default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
@@ -105,8 +114,3 @@ once at boot instead of per run (env cannot change without a redeploy).
   capability AGENTS.md lists as an accepted known issue, so it is a product call.
   Recommendation: delete, and note in AGENTS.md that reviving it means rebuilding it against
   the partitioned `token_transfers`.
-- **Split `block-processor.ts` further?** After #20 it is 1,291 lines: block fetch, receipt
-  parsing, the inline transfer path, DEX swaps, token/pair metadata and internal txs. The
-  next seam would be DEX swaps + pair lookup. It is the replay-safety core (AGENTS.md), so
-  each further cut should be its own reviewed change with the coupling measured first, as
-  #20 was. Not needed for any open task.
