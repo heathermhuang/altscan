@@ -30,16 +30,12 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 17 | altscan-site typechecks in CI: Worker code (`tsconfig.worker.json`, workers-types) and browser scripts + test harness (`tsconfig.dom.json`) get their own configs, since their lib types conflict. 10 errors on main → 0; `noUnusedLocals` on there too | CI `Typecheck altscan-site` (checked to fail) |
 | 18 | `COMPACT_RETENTION_DAYS` read in `config.ts` (`EnvReader.daysOrImmortal`, parseInt semantics kept on purpose: it guards a destructive path) and printed at boot; retention-policy functions take the resolved number. The last `env-boundary` exemption is gone. Both hand-run retention PG suites + `retention-sizes` ran on a local Postgres before (8/8) and after (8/8) | `env-boundary.test.ts`, retention guardrail tests via the real parser |
 | 19 | One owning file per explorer env variable, enforced (inventory found no shared reads, so no registry: see declined items) | `lib/env.test.ts` |
-| 20 | Split the async transfer writer out of `block-processor.ts` (2,386 → 1,291 lines) into `transfer-writer.ts`, and the disabled holder-balance queue into `holder-balances.ts`. Coupling was measured first: the writer shared only `enqueueTransferWrite` with the rest. Moved verbatim; `SQL_BATCH_CHUNK` and `isDeadlock` (used by all three) moved to the indexer `db.ts`; no re-export layer, all 11 importers repointed. Verified: tsc, 782 indexer unit tests, all 9 indexer PG suites on local Postgres (one pre-existing order-dependent failure, also on main), the compiled modules load under Node with no cycle | workspace graph, cycle scan |
+| 20 | Split the async transfer writer out of `block-processor.ts` (2,386 → 1,291 lines) into `transfer-writer.ts`, and the disabled holder-balance queue into `holder-balances.ts`. Coupling was measured first: the writer shared only `enqueueTransferWrite` with the rest. Moved verbatim; `SQL_BATCH_CHUNK` and `isDeadlock` (used by all three) moved to the indexer `db.ts`; no re-export layer, all 11 importers repointed. Verified: tsc, 782 indexer unit tests, all 9 indexer PG suites on local Postgres 16.13 (one failure, also on main: a version predicate, fixed in #21), the compiled modules load under Node with no cycle | workspace graph, cycle scan |
+| 21 | `tt-whale-index.pg.test.ts`: the "repeated ATTACH re-validates" version predicate excluded only PG 18.0–18.3; 16.13 (measured here) does not re-validate either, so the suite failed on any PG 16 older than 16.14. CI's `postgres:16` is newer, so it never showed there | the test itself |
 
 ## Task pool
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
-
-- **Order-dependent PG test**: `partition-coverage.pg.test.ts` › "re-validates a parent left
-  invalid…" passes alone and in CI (each suite is its own step), but fails when all nine
-  indexer PG suites run in one vitest invocation, on main too. Some earlier suite leaves
-  server-level state it depends on. Find it, or make the suite set up what it assumes.
 
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
