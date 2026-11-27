@@ -38,14 +38,17 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
 
-- **`kv-cache` fallback in `explorer-core`** is another bounded TTL map. It cannot use the
-  explorer's `ttl-cache.ts` (packages do not import apps). Leave unless a third package
-  needs one.
+Empty. Every remaining item is either declined below (with the reason) or waits on an
+owner decision at the end of this file.
 
 ## Considered and declined
 
 Recorded so the next pass does not redo the analysis.
 
+- **The `kv-cache` fallback in `explorer-core`** is a second bounded TTL map. It cannot use
+  the explorer's `ttl-cache.ts` (packages do not import apps), and moving the TTL cache into
+  a package for one more caller would add an edge for 20 lines. Revisit only if a third
+  package needs one.
 - **Splitting `block-processor.ts` past #22** (now 1,070 lines). Every seam was measured.
   The transfer writer, receipts and the addresses coalescer had zero shared state and are
   out. What remains is processBlock with the code it shares module-level mutable state
