@@ -3,6 +3,7 @@
 // with two tools needs initialize, ping, tools/list and tools/call, and nothing the SDK's server
 // dependencies (express, hono, ajv) would add inside a Worker. Protocol versions are pinned below.
 import { products, type Product } from '../data/products';
+import { ADDRESS_PATTERN, HASH_PATTERN, isHexAddress, isHexHash } from './hex';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'] as const; // newest first
 const SERVER_INFO = { name: 'altscan', title: 'Altscan explorers', version: '0.1.0' };
@@ -62,7 +63,7 @@ const TOOLS = [
       'report are null. Logs and decoded calls are not included.',
     inputSchema: {
       type: 'object',
-      properties: { chain: chainArg, hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
+      properties: { chain: chainArg, hash: { type: 'string', pattern: HASH_PATTERN } },
       required: ['chain', 'hash'],
       additionalProperties: false,
     },
@@ -78,7 +79,7 @@ const TOOLS = [
       'of well-known tokens; it is not a safety verdict.',
     inputSchema: {
       type: 'object',
-      properties: { chain: chainArg, address: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' } },
+      properties: { chain: chainArg, address: { type: 'string', pattern: ADDRESS_PATTERN } },
       required: ['chain', 'address'],
       additionalProperties: false,
     },
@@ -171,10 +172,10 @@ async function callTool(params: unknown, upstream: Upstream, log: Record<string,
   if (!p) return { invalid: `chain must be one of: ${products.map((x) => x.id).join(', ')}` };
   log.chain = p.id;
   if (tool.name === 'get_transaction') {
-    if (typeof args?.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(args.hash)) return { invalid: 'hash must be 0x followed by 64 hex characters' };
+    if (!isHexHash(args?.hash)) return { invalid: 'hash must be 0x followed by 64 hex characters' };
     return getTransaction(p, args.hash, upstream, log);
   }
-  if (typeof args?.address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(args.address)) return { invalid: 'address must be 0x followed by 40 hex characters' };
+  if (!isHexAddress(args?.address)) return { invalid: 'address must be 0x followed by 40 hex characters' };
   return getToken(p, args.address, upstream, log);
 }
 
