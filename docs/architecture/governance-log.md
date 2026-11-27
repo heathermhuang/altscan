@@ -32,6 +32,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 19 | One owning file per explorer env variable, enforced (inventory found no shared reads, so no registry: see declined items) | `lib/env.test.ts` |
 | 20 | Split the async transfer writer out of `block-processor.ts` (2,386 → 1,291 lines) into `transfer-writer.ts`, and the disabled holder-balance queue into `holder-balances.ts`. Coupling was measured first: the writer shared only `enqueueTransferWrite` with the rest. Moved verbatim; `SQL_BATCH_CHUNK` and `isDeadlock` (used by all three) moved to the indexer `db.ts`; no re-export layer, all 11 importers repointed. Verified: tsc, 782 indexer unit tests, all 9 indexer PG suites on local Postgres 16.13 (one failure, also on main: a version predicate, fixed in #21), the compiled modules load under Node with no cycle | workspace graph, cycle scan |
 | 21 | `tt-whale-index.pg.test.ts`: the "repeated ATTACH re-validates" version predicate excluded only PG 18.0–18.3; 16.13 (measured here) does not re-validate either, so the suite failed on any PG 16 older than 16.14. CI's `postgres:16` is newer, so it never showed there | the test itself |
+| 22 | Two more zero-coupling seams out of `block-processor.ts` (1,291 → 1,070): `receipts.ts` (eth_getBlockReceipts and its pre-write field checks; it was filed under the DEX-pair header) and `address-activity.ts` (the addresses coalescer, which used nothing else in the file). Verbatim moves; all 9 indexer PG suites 95/95, compiled modules load | cycle scan, workspace graph |
 
 ## Task pool
 

@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 import { DrizzleQueryError } from 'drizzle-orm'
 import {
-  fetchBlockReceipts, orderByAddress,
+  orderByAddress,
 } from './block-processor'
+import { fetchBlockReceipts } from './receipts'
 import { enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth } from './transfer-writer'
 import { isDeadlock } from './db'
 

@@ -39,8 +39,9 @@ vi.mock('./db', async importOriginal => {
 vi.mock('./webhook-notifier', () => ({ notifyWebhooks: vi.fn(async () => {}) }))
 
 import {
-  processBlock, fetchBlockReceipts, traceWithinBudget, tracesInFlight, TRACE_DEADLINE_MS, retraceMissedBlocks, forgetTraceMissesFrom, retraceBacklogStats, RETRACE_AFTER_BLOCKS, RETRACE_MAX_ATTEMPTS, RETRACE_BACKLOG_MAX, RETRACE_MAX_IN_FLIGHT,
+  processBlock, traceWithinBudget, tracesInFlight, TRACE_DEADLINE_MS, retraceMissedBlocks, forgetTraceMissesFrom, retraceBacklogStats, RETRACE_AFTER_BLOCKS, RETRACE_MAX_ATTEMPTS, RETRACE_BACKLOG_MAX, RETRACE_MAX_IN_FLIGHT,
 } from './block-processor'
+import { fetchBlockReceipts } from './receipts'
 import { schema } from './db'
 import { indexerConfig } from './config-instance'
 
