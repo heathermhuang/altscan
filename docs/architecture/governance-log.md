@@ -17,19 +17,16 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 4 | One explorer `withTimeout`; the token page's fallback copy leaked its timer | `lib/with-timeout.test.ts` |
 | 5 | One in-process cache (`lib/ttl-cache.ts`); six copies migrated, code-cache rebuilt on it, two caches newly visible to `/api/health` | `lib/ttl-cache.test.ts` |
 | 6 | The workspace dependency graph is declared and checked; architecture map and ADRs 0001–0002 written | `scripts/workspace-graph.test.ts` (checked to fail) |
+| 7 | Indexer env boundary: `REORG_DEPTH` moved into `config.ts` (now in the boot log); `backfill.ts` reuses `provider.ts` instead of re-parsing the RPC list | `apps/indexer/src/env-boundary.test.ts` |
 
 ## Task pool
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
 
-- **Indexer env stragglers.** `config.ts` says it is the one place env is read, but
-  `provider.ts` and `backfill.ts` each parse the chain RPC list, `provider.ts` reads
-  `TRACE_RPC_URL`, `reorg-handler.ts` reads `REORG_DEPTH`, and `retention-policy.ts` reads
-  `COMPACT_RETENTION_DAYS`. None of these appear in the boot log's resolved config.
-  Move the RPC lists and `REORG_DEPTH` first. `COMPACT_RETENTION_DAYS` is in the retention
-  path, so run the two hand-run retention PG suites (AGENTS.md) before touching it.
-  Then add a guard: no `process.env` in `apps/indexer/src` outside `config.ts`,
-  `config-instance.ts` and the chain DB URL read.
+- **`COMPACT_RETENTION_DAYS` into `config.ts`.** The last pending exemption in
+  `env-boundary.test.ts`. It is the retention path: run the two hand-run retention PG suites
+  (AGENTS.md) before and after. Its parser returns `Infinity` for unset/invalid, which
+  `EnvReader.int` cannot express, so it needs a reader method of its own.
 - **Explorer env reads.** 25 `process.env` names across ~20 explorer files, no registry.
   Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
   `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.

@@ -51,7 +51,7 @@ One implementation per concern. "Guard" names the test that fails on a second co
 |---|---|---|
 | Workspace dependencies | `scripts/workspace-graph.test.ts` (the approved graph) | itself |
 | DB pool for the running chain | indexer `src/db.ts`, explorer `lib/db.ts`; `@altscan/db` getters require the env var | `apps/indexer/src/db.test.ts` (compile-time) |
-| Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | partial: see governance log |
+| Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | `src/env-boundary.test.ts` (listed exceptions) |
 | Chain differences | `@altscan/chain-config`; explorer reads it via `lib/chain.ts` (server) and `lib/chain-client.ts` (client components, `NEXT_PUBLIC_CHAIN`) | `lib/client-chain-config.test.ts` |
 | Address / hash shape | explorer `lib/hex.ts` | `lib/hex.test.ts` |
 | Bounding a wait | explorer `lib/with-timeout.ts`; indexer `src/rpc-failover.ts` `withTimeout` (ADR 0002) | `lib/with-timeout.test.ts` |

@@ -224,6 +224,8 @@ export type ConfigDefaults = {
   concurrency: number
   /** internal_transactions partition width; a fraction of the retention window on each chain. */
   internalTxPartitionBlocks: number
+  /** chain-config's `reorgDepth`: how far back a reorg check walks (K). */
+  reorgDepth: number
 }
 
 /** @param env process.env, or a fixture. Pure with respect to it. */
@@ -280,6 +282,8 @@ export function readIndexerConfig(
   const reorg = {
     /** ON unless explicitly '0'. */
     checkEnabled: r.enabledUnlessZero('REORG_CHECK'),
+    /** K, the deepest reorg the tail check walks. index.ts asserts it stays below RESUME_GAP_SCAN_BLOCKS. */
+    depth: r.int('REORG_DEPTH', defaults.reorgDepth, { min: 1 }),
     idleCheckMs: r.int('IDLE_REORG_CHECK_MS', 30_000, { min: 1 }),
     quarantineEnabled: r.enabledUnlessZero('POISON_BLOCK_QUARANTINE'),
     quarantineAfter: r.int('POISON_BLOCK_QUARANTINE_AFTER', DEFAULT_QUARANTINE_AFTER, { min: 1 }),

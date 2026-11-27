@@ -60,12 +60,6 @@ export type ReorgDeps = {
 
 export type ReorgCheck = { isReorg: false } | { isReorg: true; forkPoint: number }
 
-/** REORG_DEPTH env override (>0) wins over the chain default. */
-export function resolveReorgDepth(chainDefault: number, env: NodeJS.ProcessEnv = process.env): number {
-  const n = parseInt(env.REORG_DEPTH ?? '', 10)
-  return Number.isFinite(n) && n > 0 ? n : chainDefault
-}
-
 /**
  * Detect a reorg relative to `lastIndexed` (our highest indexed block).
  * Boundary mode when the RPC has lastIndexed+1, tip mode otherwise.

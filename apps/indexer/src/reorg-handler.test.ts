@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  detectReorg, detectReorgPinned, resolveReorgDepth, UnresolvedForkError, UNWIND_ORDER, type ReorgDeps,
+  detectReorg, detectReorgPinned, UnresolvedForkError, UNWIND_ORDER, type ReorgDeps,
 } from './reorg-handler'
 import { schema } from '@altscan/db'
 import { getTableColumns, is } from 'drizzle-orm'
@@ -60,14 +60,6 @@ describe('detectReorg', () => {
       { 7: { hash: 'b7', parentHash: 'b6' }, 8: { hash: 'b8', parentHash: 'b7' }, 9: { hash: 'b9', parentHash: 'b8' }, 10: { hash: 'b10', parentHash: 'b9' }, 11: { hash: 'b11', parentHash: 'b10' } },
     )
     expect(await detectReorg(d, 10, K)).toEqual({ isReorg: true, forkPoint: 7 })
-  })
-})
-
-describe('resolveReorgDepth', () => {
-  it('uses the env override when valid, else the chain default', () => {
-    expect(resolveReorgDepth(15, { REORG_DEPTH: '25' })).toBe(25)
-    expect(resolveReorgDepth(15, {})).toBe(15)
-    for (const v of ['0', '-3', 'abc', '']) expect(resolveReorgDepth(15, { REORG_DEPTH: v })).toBe(15)
   })
 })
 

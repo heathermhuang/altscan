@@ -25,6 +25,7 @@ const resolved = readIndexerConfig(process.env, {
   // the retention window, so every partition would straddle the cutoff and
   // retention would never drop one.
   internalTxPartitionBlocks: chain.key === 'bnb' ? 96_000 : 7_200,
+  reorgDepth: chain.reorgDepth,
 })
 
 export const indexerConfig = resolved.config

@@ -6,6 +6,7 @@ const DEFAULTS: ConfigDefaults = {
   startBlock: 38_000_000,
   concurrency: 8,
   internalTxPartitionBlocks: 96_000,
+  reorgDepth: 15,
 }
 
 const read = (env: NodeJS.ProcessEnv = {}) => readIndexerConfig(env, DEFAULTS)
@@ -313,3 +314,14 @@ describe('WEBHOOK_SECRET_KEY', () => {
     expect(formatResolvedConfig(resolutions).join('\n')).not.toContain('WEBHOOK_SECRET_KEY')
   })
 })
+
+describe('REORG_DEPTH', () => {
+  it('overrides the chain default with a positive whole number, and only that', () => {
+    expect(read({ REORG_DEPTH: '25' }).config.reorg.depth).toBe(25)
+    expect(read({}).config.reorg.depth).toBe(15)
+    // '25x' was read as 25 by the parseInt this replaced; a typo now falls back, and the boot log says so.
+    for (const v of ['0', '-3', 'abc', '', '25x']) expect(read({ REORG_DEPTH: v }).config.reorg.depth).toBe(15)
+    expect(read({ REORG_DEPTH: 'abc' }).resolutions.find((x) => x.name === 'REORG_DEPTH')?.ignored).toBe('abc')
+  })
+})
+

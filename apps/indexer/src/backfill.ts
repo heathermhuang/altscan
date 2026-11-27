@@ -1,8 +1,7 @@
 import 'dotenv/config'
 import { dbErrorMessage, unwrapDbError } from './db'
-import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
-import { indexerConfig } from './config-instance'
+import { getProvider } from './provider'
 import {
   processBlock,
   initTransferWriter,
@@ -21,18 +20,9 @@ const END = Number(process.argv[3] ?? String(chain.defaultStartBlock + 1000))
 const SKIP_LOGS = process.argv.includes('--skip-logs')
 const CONCURRENCY = 3
 
-// BNB_RPC_URL / ETH_RPC_URL may be comma-separated — backfill only needs one
-// endpoint so we pick the first. staticNetwork: pin chain ID so ethers skips
-// eth_chainId auto-detection.
-const rpcUrl = (process.env[chain.rpcEnvVar] ?? chain.defaultRpcUrl)
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)[0] ?? chain.defaultRpcUrl
-const network = Network.from(chain.chainId)
-const provider = new JsonRpcProvider(rpcUrl, network, {
-  staticNetwork: network,
-  batchMaxCount: indexerConfig.rpc.batchMaxCount,
-})
+// The shared single-endpoint provider: the first of BNB_RPC_URL / ETH_RPC_URL,
+// chain ID pinned, RPC_BATCH_MAX_COUNT applied (provider.ts).
+const provider = getProvider()
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
