@@ -44,6 +44,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 31 | altscan.io's address/hash shapes defined once (`src/lib/hex.ts`): /mcp and the WebMCP tools spelled them six times, one as a template-literal regex. ADR 0001 within the app; the explorers' copy stays separate per ADR 0002 | site harness `test/hex.test.ts` |
 | 32 | Third independent review (batches 21–31) found one unnamed change: the canonical `parsePageParam` used `Number()`, so #27 also made `?page=1e2` page 100 and `?page=0x10` page 16 on the address and token pages. The canonical rule is now plain decimal digits (fraction floored), everything else page 1, on every list page. Valid pages unchanged | `lib/page-cache.test.ts` (junk spellings added) |
 | 33 | `render.yaml`'s two comments no longer cite the deleted `@altscan/types` as a current fact. Checked with Render's `POST /v1/blueprints/validate` against the live account: valid, `totalActions: 0`, so the merge's Blueprint sync changes no deployed field | `scripts/render-install-frozen.test.ts` still passes |
+| 34 | Deleted the hard-disabled per-block holder tracking: `holder-balances.ts`, its two call sites and profile phase, `recomputeHolderCounts` and its schedule, the five `HOLDER_*` config entries and the constant `holderBalanceTrackingEnabled`. The product state is unchanged (counts were already a frozen snapshot); AGENTS.md's known issue now says the code is in history and a revival is a rebuild. All 10 indexer PG suites 98/98; compiled modules load. `HOLDER_*` vars still set on Render are now ignored | config/reorg tests; gate |
 
 ## Task pool
 
@@ -158,16 +159,12 @@ spellings. Noted: altscan.io's browser WebMCP script now bundles the chain-confi
 
 ## Pending owner decisions
 
+Only one item needs the owner, because it needs production access this session was not
+granted (the permission classifier refused reading Render env vars):
+
 - **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
   if it is set to anything but a plain whole number, it now falls back to the chain
   default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
 - **Same check for `BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** on both web services:
   a non-integer value now falls back to the default instead of being parsed by
   `parseInt`.
-- **Delete per-block holder tracking?** `holderBalanceTrackingEnabled` is a hardcoded
-  `false` (not env-tunable). What it gates is now isolated: `holder-balances.ts` (whole
-  module), `recomputeHolderCounts` in `retention-cleanup.ts`, the five `HOLDER_*` vars in
-  `config.ts`, and two one-line call sites. Deleting them is behavior-preserving but retires a
-  capability AGENTS.md lists as an accepted known issue, so it is a product call.
-  Recommendation: delete, and note in AGENTS.md that reviving it means rebuilding it against
-  the partitioned `token_transfers`.

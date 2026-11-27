@@ -13,7 +13,6 @@ import { indexerConfig } from './config-instance'
 import { getDb, getWriterDb, schema, dbErrorMessage, unwrapDbError, SQL_BATCH_CHUNK } from './db'
 import { ensureForwardPartitions } from './ensure-schema'
 import { recordIndexGapIfAbsent } from './index-gaps'
-import { enqueueHolderBalanceUpdate } from './holder-balances'
 
 // ── Async token_transfers writer flag ────────────────────────────────
 // When ON, token_transfers INSERTs move off the per-block hot path into a single
@@ -810,11 +809,6 @@ function runTransferWriter(): void {
             durableBlock = newDurable
           }
           pendingFloors.splice(0, floorsUsed)
-
-          // Rows are durable now — let holder-balance tracking see them.
-          // (no-op while SKIP_HOLDER_BALANCES is true, but keeps the path correct).
-          const rows = written.flatMap(n => drained.get(n)!.rows)
-          if (rows.length > 0) enqueueHolderBalanceUpdate(rows)
 
           // Only clear the failure streak after the FULL cycle succeeded (write AND
           // watermark persist). Resetting right after writeTransferBlocks would mask a

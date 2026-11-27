@@ -191,9 +191,10 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
 
 ## Known issues (accepted)
 
-- `tokens.holder_count` and `token_balances` are a **frozen snapshot**: per-block holder tracking is
-  hard-disabled (`holderBalanceTrackingEnabled: false`, `apps/indexer/src/config.ts`), so
-  `recomputeHolderCounts()` skips and nothing updates either. Measured on prod BNB: no USDT row for
+- `tokens.holder_count` and `token_balances` are a **frozen snapshot**: per-block holder tracking
+  and the holder-count recompute were hard-disabled, then deleted (the code is in git history),
+  so nothing updates either. Reviving them means rebuilding against the partitioned
+  `token_transfers`, not restoring the old code. Measured on prod BNB: no USDT row for
   the real #1 USDT holder; `holder_count` == `COUNT(token_balances)` (835,871 vs Moralis's 79.8M).
   So the UI labels the count "indexed holders" (`lib/holder-labels.ts`), and never reads a live
   balance from `token_balances` — the address page reads the tracked tokens (stablecoins +

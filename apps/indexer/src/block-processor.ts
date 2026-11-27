@@ -5,7 +5,6 @@ import { JsonRpcProvider, AbiCoder, Contract, id as keccak256id, isError } from 
 import { sql } from 'drizzle-orm'
 import { getDb, schema, dbErrorMessage, unwrapDbError, isDeadlock, SQL_BATCH_CHUNK } from './db'
 import { ASYNC_TT_WRITER, enqueueTransferWrite, type TokenTransferRow } from './transfer-writer'
-import { enqueueHolderBalanceUpdate } from './holder-balances'
 import { enqueueAddressActivity } from './address-activity'
 import { fetchBlockReceipts, type NormalizedLog, type NormalizedReceipt } from './receipts'
 import { withTimeout } from './rpc-failover'
@@ -51,7 +50,6 @@ type PhaseTimings = {
   dbUpdateTxStatus: number
   dbInsertTokenTransfers: number
   rpcEnsureTokens: number
-  dbUpdateHolderBalances: number
   rpcPairTokens: number
   dbInsertDexTrades: number
   txCount: number
@@ -63,7 +61,7 @@ type PhaseTimings = {
 const PROFILE_PHASES = [
   'rpcBlockWait', 'rpcReceiptsWait', 'dbInsertBlock', 'dbInsertTxs',
   'dbUpsertAddresses', 'dbUpdateTxStatus', 'dbInsertTokenTransfers',
-  'rpcEnsureTokens', 'dbUpdateHolderBalances', 'rpcPairTokens', 'dbInsertDexTrades',
+  'rpcEnsureTokens', 'rpcPairTokens', 'dbInsertDexTrades',
 ] as const
 
 type PhaseKey = typeof PROFILE_PHASES[number]
@@ -89,7 +87,7 @@ function newTimings(): PhaseTimings {
   return {
     rpcBlockWait: 0, rpcReceiptsWait: 0, dbInsertBlock: 0, dbInsertTxs: 0,
     dbUpsertAddresses: 0, dbUpdateTxStatus: 0, dbInsertTokenTransfers: 0,
-    rpcEnsureTokens: 0, dbUpdateHolderBalances: 0, rpcPairTokens: 0, dbInsertDexTrades: 0,
+    rpcEnsureTokens: 0, rpcPairTokens: 0, dbInsertDexTrades: 0,
     txCount: 0, transferCount: 0, dexCount: 0, totalMs: 0,
   }
 }
@@ -108,7 +106,6 @@ function recordTimings(t: PhaseTimings) {
   }
   profileAgg.dbInsertTxs.rows += t.txCount
   profileAgg.dbInsertTokenTransfers.rows += t.transferCount
-  profileAgg.dbUpdateHolderBalances.rows += t.transferCount
   profileAgg.dbInsertDexTrades.rows += t.dexCount
 
   profileBlocksSinceReport += 1
@@ -779,18 +776,6 @@ async function processReceiptsBatch(
           totalInserted += inserted.length
         }
         if (t) t.dbInsertTokenTransfers = performance.now() - sI
-
-        // Holder balance updates are queued for a single dedicated worker.
-        // Profiling showed inline UPSERTs took ~38% of in-block time (~2.5s/block)
-        // due to row-lock contention across 8 workers hammering the same hot tokens.
-        // Serializing through one worker eliminates cross-worker contention and
-        // unblocks block processing. Eventually consistent — queue drains during
-        // low-activity windows. Order doesn't matter (addition is commutative).
-        if (totalInserted > 0) {
-          const sH = PROFILE_ENABLED ? performance.now() : 0
-          enqueueHolderBalanceUpdate(rows)
-          if (t) t.dbUpdateHolderBalances = performance.now() - sH
-        }
       }
     }
   }

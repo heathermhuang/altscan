@@ -42,11 +42,6 @@ describe('defaults match the values they replaced', () => {
     ['transferWriter.failureAlertThreshold', config.transferWriter.failureAlertThreshold, 5],
     ['transferWriter.profileWindowMs', config.transferWriter.profileWindowMs, 30_000],
     ['transferWriter.poolSize', config.transferWriter.poolSize, 2],
-    ['holders.queueWarnDepth', config.holders.queueWarnDepth, 500],
-    ['holders.countIntervalMin', config.holders.countIntervalMin, 15],
-    ['holders.countLagThreshold', config.holders.countLagThreshold, 1000],
-    ['holders.recomputeChunk', config.holders.recomputeChunk, 2000],
-    ['holders.recomputeSleepMs', config.holders.recomputeSleepMs, 100],
     ['tokenHeal.intervalMin', config.tokenHeal.intervalMin, 10],
     ['tokenHeal.batch', config.tokenHeal.batch, 40],
     ['retention.days', config.retention.days, 7],
@@ -243,9 +238,6 @@ describe('one declaration per variable', () => {
     expect(read({ DB_DISK_GB: '221' }).config.retention.dbDiskGb).toBe(221)
   })
 
-  it('holder-balance tracking is off and not env-tunable', () => {
-    expect(read({ HOLDER_BALANCE_TRACKING: '1' }).config.holderBalanceTrackingEnabled).toBe(false)
-  })
 })
 
 describe('the boot log', () => {

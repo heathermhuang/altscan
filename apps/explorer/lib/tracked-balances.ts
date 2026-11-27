@@ -2,9 +2,8 @@
  * Live balances of the tracked tokens (the chain's stablecoins and wrapped native token) for one
  * address, read from the chain in a single eth_call to Multicall3.
  *
- * WHY THE CHAIN, NOT token_balances: the indexer's per-block holder-balance writes are hard-disabled
- * (apps/indexer config `holderBalanceTrackingEnabled: false`), so `token_balances` is a frozen
- * snapshot. Measured on production BNB 2026-10-10: it holds no USDT or USDC row for the #1 USDT
+ * WHY THE CHAIN, NOT token_balances: the indexer has no per-block holder-balance writes (they were
+ * hard-disabled, then deleted), so `token_balances` is a frozen snapshot. Measured on production BNB 2026-10-10: it holds no USDT or USDC row for the #1 USDT
  * holder (0x8894E0…, ~605M USDT on chain), and its own "top" USDT holder has 32M. A lead sentence
  * priced from it would be a confident wrong number. The chain is exact, free (the web RPC, no
  * Moralis), and one more request on a page that already makes three.

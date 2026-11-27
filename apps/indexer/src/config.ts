@@ -344,14 +344,6 @@ export function readIndexerConfig(
     poolSize: r.int('TT_WRITER_POOL_SIZE', 2, { min: 1 }),
   }
 
-  const holders = {
-    queueWarnDepth: r.int('HOLDER_QUEUE_WARN_DEPTH', 500, { min: 1 }),
-    countIntervalMin: r.int('HOLDER_COUNT_INTERVAL_MIN', 15, { min: 1 }),
-    countLagThreshold: r.int('HOLDER_COUNT_LAG_THRESHOLD', 1000, { min: 0 }),
-    recomputeChunk: r.int('HOLDER_RECOMPUTE_CHUNK', 2000, { min: 1 }),
-    recomputeSleepMs: r.int('HOLDER_RECOMPUTE_SLEEP_MS', 100, { min: 0 }),
-  }
-
   const tokenHeal = {
     /** ON unless '0'. Re-fetches token metadata a one-shot first-sight fetch left as a placeholder. */
     enabled: r.enabledUnlessZero('TOKEN_HEAL_ENABLED'),
@@ -446,23 +438,8 @@ export function readIndexerConfig(
   }
 
   const config = {
-    indexing, rpc, reorg, gapHeal, transferWriter, holders, tokenHeal,
+    indexing, rpc, reorg, gapHeal, transferWriter, tokenHeal,
     retention, partitions, internalTx, backfill, webhooks, runtime,
-
-    /**
-     * Per-block holder-balance tracking.
-     *
-     * Hardcoded off, and NOT env-tunable — it lives here rather than in
-     * block-processor.ts so retention-cleanup.ts can read it without importing
-     * a 1,833-line module (and executing its module side effects, including a
-     * console.warn) for one boolean.
-     *
-     * While OFF, token_balances receives no per-block writes, so the periodic
-     * holder_count recompute has no new input and is skipped — it would
-     * otherwise full-scan a frozen token_balances for minutes and stall block
-     * ingestion via disk-I/O contention while updating zero rows.
-     */
-    holderBalanceTrackingEnabled: false,
 
     /**
      * Floored AT the backpressure bound, so a misconfigured override can never
