@@ -5,7 +5,7 @@
  * Docs: https://docs.gopluslabs.io/reference/api-overview
  */
 
-import { registerCache } from './cache-registry'
+import { createTtlCache } from './ttl-cache'
 
 const BASE = 'https://api.gopluslabs.io/api/v1'
 const CHAIN_ID = '56' // BSC
@@ -18,10 +18,7 @@ export type AddressRisk = {
   riskItems: string[]   // human-readable risk flags
 }
 
-const RISK_TTL_MS = 10 * 60 * 1000
-const RISK_MAX_ENTRIES = 5_000
-const riskCache = new Map<string, { risk: AddressRisk; expires: number }>()
-registerCache('goplus-address-risk', () => riskCache.size)
+const riskCache = createTtlCache<AddressRisk>({ name: 'goplus-address-risk', max: 5_000, ttlMs: 10 * 60 * 1000 })
 
 const RISK_FLAGS = ['malicious_address', 'phishing_activities', 'blacklist_doubt'] as const
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -51,21 +48,19 @@ export function parseAddressSecurity(data: unknown): AddressRisk | null {
 
 /**
  * The address's GoPlus verdict, or null when there is none to give (GoPlus failed, refused, or answered something
- * that is not a verdict). Only verdicts are cached, in memory, for RISK_TTL_MS and at most RISK_MAX_ENTRIES: Next's
+ * that is not a verdict). Only verdicts are cached, in memory, for 10 minutes and at most 5,000: Next's
  * fetch cache, used before, kept any 200 answer for 5 minutes, an error code or a partial result included.
  */
 export async function getAddressRisk(address: string): Promise<AddressRisk | null> {
   const key = address.toLowerCase()
   const hit = riskCache.get(key)
-  if (hit && hit.expires > Date.now()) return hit.risk
-  if (hit) riskCache.delete(key)
+  if (hit) return hit
   try {
     const res = await fetch(`${BASE}/address_security/${key}`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
     if (!res.ok) return null
     const risk = parseAddressSecurity(await res.json())
     if (risk) {
-      if (riskCache.size >= RISK_MAX_ENTRIES) riskCache.delete(riskCache.keys().next().value!)
-      riskCache.set(key, { risk, expires: Date.now() + RISK_TTL_MS })
+      riskCache.set(key, risk)
     }
     return risk
   } catch {

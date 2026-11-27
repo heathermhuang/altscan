@@ -2,12 +2,12 @@
  * RPC fallback utilities for BNBScan.
  * Used when a tx hash or block number is not in the local DB — fetches live from chain.
  *
- * Negative cache: null results are cached for NULL_TTL_MS to prevent repeated
+ * Negative cache: null results are cached for 2 minutes to prevent repeated
  * RPC calls for the same missing entity within a short window.
  */
 import { swallow } from './observability'
 import { getWebProvider } from './rpc'
-import { registerCache } from './cache-registry'
+import { createTtlCache } from './ttl-cache'
 
 // Shapes that satisfy what the tx and block detail pages render
 export type RpcTx = {
@@ -71,34 +71,8 @@ export type RpcBlockTx = {
 }
 
 // Negative cache — prevents hammering RPC for entities that don't exist
-const NULL_TTL_MS = 2 * 60 * 1000  // 2 minutes (reduced from 5)
-const NULL_CACHE_MAX = 5_000       // reduced from 10K to limit memory
-const nullCache = new Map<string, number>()  // key → expiry timestamp
-
-// Background cleanup — evict expired entries every 30s
-const _rpcNullCleanup = setInterval(() => {
-  const now = Date.now()
-  for (const [k, v] of nullCache) {
-    if (now > v) nullCache.delete(k)
-  }
-}, 30_000)
-if (_rpcNullCleanup.unref) _rpcNullCleanup.unref()
-registerCache('rpc-null', () => nullCache.size)
-
-function isNullCached(key: string): boolean {
-  const expiry = nullCache.get(key)
-  if (!expiry) return false
-  if (Date.now() > expiry) { nullCache.delete(key); return false }
-  return true
-}
-
-function setNullCache(key: string): void {
-  if (nullCache.size >= NULL_CACHE_MAX) {
-    // Evict the oldest entry
-    nullCache.delete(nullCache.keys().next().value!)
-  }
-  nullCache.set(key, Date.now() + NULL_TTL_MS)
-}
+// 2 min (cut from 5), 5,000 keys (cut from 10K) to limit memory. The value is only presence.
+const nullCache = createTtlCache<true>({ name: 'rpc-null', max: 5_000, ttlMs: 2 * 60 * 1000 })
 
 /**
  * What the node actually said about a transaction. Unknown fields are null, never filled in: the
@@ -132,7 +106,7 @@ export type RpcTxFacts = {
 /** Null means the node answered that it does not know the hash (negative-cached). Throws on failure. */
 export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | null> {
   const cacheKey = `tx:${hash.toLowerCase()}`
-  if (isNullCached(cacheKey)) return null
+  if (nullCache.get(cacheKey)) return null
 
   try {
     const provider = await getWebProvider()
@@ -140,7 +114,7 @@ export async function fetchTxFactsFromRpc(hash: string): Promise<RpcTxFacts | nu
       provider.getTransaction(hash),
       provider.getTransactionReceipt(hash),
     ])
-    if (!tx) { setNullCache(cacheKey); return null }
+    if (!tx) { nullCache.set(cacheKey, true); return null }
     // A node (or a proxy in front of one) can answer for a different transaction than the one asked,
     // and the page would print that one's sender, value and fee under this hash. Not found, and not
     // negative-cached: the node was wrong, which says nothing about whether this hash exists.
@@ -213,13 +187,13 @@ export async function fetchTxFromRpc(hash: string): Promise<RpcTx | null> {
 
 export async function fetchBlockFromRpc(blockNumber: number): Promise<RpcBlock | null> {
   const cacheKey = `block:${blockNumber}`
-  if (isNullCached(cacheKey)) return null
+  if (nullCache.get(cacheKey)) return null
 
   try {
     const provider = await getWebProvider()
     // prefetch=true: same RPC round trip, but the transaction bodies come back.
     const block = await provider.getBlock(blockNumber, true)
-    if (!block) { setNullCache(cacheKey); return null }
+    if (!block) { nullCache.set(cacheKey, true); return null }
     // As for a transaction: another block's answer is not this block's, and is not negative-cached.
     if (block.number !== blockNumber) {
       swallow('rpc/block-number-mismatch', new Error(`asked block ${blockNumber}, node returned ${block.number}`))
