@@ -24,6 +24,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 11 | Narrowed module interfaces: ~100 exports that no file imports (tests included) are now module-private; three fully dead declarations deleted (`format.ts` `formatAddress`, `IndexerConfig`, `CompactTable`). Found with an import-resolving scan; the first name-based scan missed `formatAddress` because a private function elsewhere shared its name | tsc in every workspace |
 | 12 | Wallet watch's chain gate is `chainConfig.features.hasWalletWatch` (with the watermark reason next to it) instead of `key === 'bnb'` in five files; removed the `CHAIN_ID` batch 1 orphaned in `goplus.ts` | the flag is the single source; tsc |
 | 13 | `noUnusedLocals` on in every workspace tsconfig except altscan-site (pre-existing errors). Fixed the 7 hits, incl. retention-cleanup's stale `BATCH_SIZE`, a second definition of the delete batch that config already owns | tsc everywhere (lint had missed an orphan from batch 1) |
+| 14 | One ad-slot layout (`components/ads/AdFrame.tsx`): the Binance creative (moved verbatim out of the stateful `AdSlot` into `BinanceAd.tsx`) and `HouseAd` each repeated all five variant layouts. Proven with a throwaway harness: all 15 variant/creative renders byte-identical to the pre-change static HTML, and the harness failed on a one-space change | — |
 
 ## Task pool
 
@@ -62,6 +63,19 @@ CI step order. It found no breakage. It confirmed these deliberate differences:
   sweep timers. Caps and TTLs are unchanged.
 
 ## Pending owner decisions
+
+- **Delete per-block holder tracking?** `holderBalanceTrackingEnabled` is a hardcoded
+  `false` (not env-tunable). Behind it sit ~200 lines that cannot run: the holder queue and
+  `batchUpdateHolderBalances` in `block-processor.ts`, `recomputeHolderCounts` in
+  `retention-cleanup.ts`, and five `HOLDER_*` env vars in `config.ts`. Deleting them is
+  behavior-preserving, but it retires a capability AGENTS.md lists as an accepted known
+  issue, so it is a product call. Recommendation: delete, and note in AGENTS.md that
+  re-enabling means rebuilding it against the partitioned `token_transfers`.
+- **Split `block-processor.ts` (2,386 lines)?** It mixes block fetch, receipt-derived
+  writes, the async transfer writer, DEX swaps and holder tracking. It is also the
+  replay-safety core (AGENTS.md), so a split is a reviewed design change, not a
+  clean-up batch. Proposal: extract the transfer writer (queue, coalescing, durable
+  watermark) into `transfer-writer.ts` first; it has its own isolation PG suite.
 
 - **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
   if it is set to anything but a plain whole number, it now falls back to the chain
