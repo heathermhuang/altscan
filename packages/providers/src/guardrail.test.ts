@@ -1,10 +1,9 @@
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // repo root, from packages/providers/src/
-const REPO = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..')
+const REPO = join(__dirname, '..', '..', '..')
 // A4b-0 widened the scan from apps/explorer to BOTH consumers: the indexer now
 // imports the adapter too, so the vendor must stay behind it there as well.
 const SCAN = [join(REPO, 'apps', 'explorer'), join(REPO, 'apps', 'indexer')].filter(existsSync)

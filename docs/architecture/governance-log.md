@@ -18,6 +18,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 5 | One in-process cache (`lib/ttl-cache.ts`); six copies migrated, code-cache rebuilt on it, two caches newly visible to `/api/health` | `lib/ttl-cache.test.ts` |
 | 6 | The workspace dependency graph is declared and checked; architecture map and ADRs 0001–0002 written | `scripts/workspace-graph.test.ts` (checked to fail) |
 | 7 | Indexer env boundary: `REORG_DEPTH` moved into `config.ts` (now in the boot log); `backfill.ts` reuses `provider.ts` instead of re-parsing the RPC list | `apps/indexer/src/env-boundary.test.ts` |
+| 8 | Every package `typecheck` script runs in CI (one step replaces the oauth-only one); the providers script, broken unnoticed, fixed | CI `Typecheck packages` |
 
 ## Task pool
 
@@ -30,9 +31,6 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 - **Explorer env reads.** 25 `process.env` names across ~20 explorer files, no registry.
   Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
   `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.
-- **`packages/providers` typecheck script is broken** (`tsc -p tsconfig.typecheck.json`
-  fails on `import.meta` in `guardrail.test.ts`). CI does not run it, so nothing noticed.
-  Either fix the tsconfig and run it in CI, or delete the script.
 - **Exported-for-tests internals.** ~350 exports are referenced only by their own file
   and its test. Mostly a deliberate test seam; review the indexer's
   `ensure-schema.ts` (25), `block-processor.ts` (20) and `token-metadata.ts` (16) for

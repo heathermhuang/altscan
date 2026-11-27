@@ -70,9 +70,8 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      # The indexer's deploy build deliberately swallows tsc failures
-      # ("tsc || true") and workspace packages ship TS source, so type errors
-      # in the indexer program surface nowhere else. strictNullChecks (A4b-2)
+      # The indexer's deploy build runs tsc, but this is the one place its type
+      # errors fail a PR before merge. strictNullChecks (A4b-2)
       # is load-bearing for ProviderResult narrowing — enforce it here.
       # @altscan/db, @altscan/chain-config, @altscan/explorer-core and
       # @altscan/providers are the BUILT workspace packages (main -> dist/,
@@ -91,10 +90,13 @@ jobs:
       - name: Typecheck admin
         run: pnpm --filter @altscan/admin exec tsc --noEmit -p .
 
-      # The OAuth server package ships as TS source. altscan.io's deploy never
-      # typechecks it, so this is the only gate on the altscan.io side.
-      - name: Typecheck oauth
-        run: pnpm --filter @altscan/oauth exec tsc --noEmit -p .
+      # Every package's own `typecheck` script, tests included (the build
+      # configs exclude tests). The providers script had been failing unnoticed
+      # because nothing ran it. Covers oauth, which ships as TS source and which
+      # altscan.io's deploy never typechecks. Runs after the indexer step, which
+      # builds the dist/ types providers resolves its dependencies from.
+      - name: Typecheck packages
+        run: pnpm -r --filter './packages/*' run typecheck
 
       - name: Create seam-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
