@@ -84,6 +84,12 @@ CI step order. It found no breakage. It confirmed these deliberate differences:
 
 ## Pending owner decisions
 
+- **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
+  if it is set to anything but a plain whole number, it now falls back to the chain
+  default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
+- **Same check for `BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** on both web services:
+  a non-integer value now falls back to the default instead of being parsed by
+  `parseInt`.
 - **Delete per-block holder tracking?** `holderBalanceTrackingEnabled` is a hardcoded
   `false` (not env-tunable). What it gates is now isolated: `holder-balances.ts` (whole
   module), `recomputeHolderCounts` in `retention-cleanup.ts`, the five `HOLDER_*` vars in
