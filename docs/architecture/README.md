@@ -50,6 +50,7 @@ One implementation per concern. "Guard" names the test that fails on a second co
 | Concern | Canonical module | Guard |
 |---|---|---|
 | Workspace dependencies | `scripts/workspace-graph.test.ts` (the approved graph) | itself |
+| One module per exported name | `scripts/unique-exports.test.ts` (listed exceptions with reasons) | itself |
 | DB pool for the running chain | indexer `src/db.ts`, explorer `lib/db.ts`; `@altscan/db` getters require the env var | `apps/indexer/src/db.test.ts` (compile-time) |
 | Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | `src/env-boundary.test.ts` (provider.ts endpoint lists and one CLI excepted) |
 | Chain differences (incl. per-chain features such as wallet watch) | `@altscan/chain-config` (`features`); explorer reads it via `lib/chain.ts` (server) and `lib/chain-client.ts` (client components, `NEXT_PUBLIC_CHAIN`) | `lib/client-chain-config.test.ts` |
