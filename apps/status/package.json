@@ -9,8 +9,8 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "hono": "^4.13.19",
-    "@hono/node-server": "^2.1.9"
+    "hono": "^4.13.21",
+    "@hono/node-server": "^2.1.11"
   },
   "devDependencies": {
     "tsx": "^4.23.15",
