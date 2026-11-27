@@ -11,7 +11,7 @@ import { looksLikeUrlOrHandle } from '@/lib/link-in-name'
 import { stripDirectionalControls } from '@/lib/directional-controls'
 import type { StripTile } from '@/lib/tape'
 
-export interface HolderShares {
+interface HolderShares {
   /** Per holder: share of supply in basis points (1/100 of a percent), floored; null for an unreadable balance. */
   bp: (number | null)[]
   /** Per holder: share in parts per million, floored (the tile's width). 0 for an unreadable balance. */
@@ -46,7 +46,7 @@ export function bpText(bp: number | null): string {
   return bp === null ? '—' : `${(bp / 100).toFixed(2)}%`
 }
 
-export type HoldersSource = 'moralis' | 'local'
+type HoldersSource = 'moralis' | 'local'
 
 const isSupply = (v: string | null | undefined): v is string => v != null && /^\d+$/.test(v) && BigInt(v) > 0n
 
@@ -65,7 +65,7 @@ export function holdersSupply(
   return isSupply(rowSupply) ? rowSupply : null
 }
 
-export interface HolderRow {
+interface HolderRow {
   addr: string
   /** What the row calls the address (its label or the short form). */
   name: string

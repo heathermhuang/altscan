@@ -1,9 +1,10 @@
 import type { CodeClass } from './contract-status'
+import { createTtlCache } from './ttl-cache'
 
 /** Only settled verdicts are cacheable. 'malformed' is a failure, not an answer. */
-export type CacheableClass = Extract<CodeClass, 'none' | 'code'>
+type CacheableClass = Extract<CodeClass, 'none' | 'code'>
 
-export interface CodeClassCache {
+interface CodeClassCache {
   get(address: string): CacheableClass | undefined
   set(address: string, cls: CacheableClass): void
   size(): number
@@ -40,39 +41,19 @@ export function makeCodeClassCache(opts: {
   codeTtlMs: number
   noneTtlMs: number
   clock?: () => number
+  name?: string
 }): CodeClassCache {
-  const { max, codeTtlMs, noneTtlMs } = opts
-  const clock = opts.clock ?? Date.now
-  // Map iterates in insertion order, which is what makes the LRU a delete+set.
-  const store = new Map<string, { cls: CacheableClass; expiresAt: number }>()
+  const { codeTtlMs, noneTtlMs } = opts
+  // LRU, not FIFO (createTtlCache), so a popular address survives a sweep past it; an
+  // expired entry is purged on read rather than merely hidden, so it cannot hold a slot.
+  const store = createTtlCache<CacheableClass>({ max: opts.max, ttlMs: codeTtlMs, clock: opts.clock, name: opts.name })
   const key = (a: string) => a.trim().toLowerCase()
 
   return {
-    get(address) {
-      const k = key(address)
-      const hit = store.get(k)
-      if (!hit) return undefined
-      if (clock() >= hit.expiresAt) {
-        // Purge rather than merely hide it, so dead entries cannot hold slots
-        // against live ones under a sweep.
-        store.delete(k)
-        return undefined
-      }
-      store.delete(k)          // re-insert at the tail: this is LRU, not FIFO,
-      store.set(k, hit)        // so a popular address survives a sweep past it.
-      return hit.cls
-    },
+    get: (address) => store.get(key(address)),
     set(address, cls) {
       if (cls !== 'none' && cls !== 'code') return
-      const k = key(address)
-      store.delete(k)
-      store.set(k, { cls, expiresAt: clock() + (cls === 'code' ? codeTtlMs : noneTtlMs) })
-      // `while`, not `if`: max can be lowered between calls.
-      while (store.size > max) {
-        const oldest = store.keys().next()
-        if (oldest.done) break
-        store.delete(oldest.value)
-      }
+      store.set(key(address), cls, cls === 'code' ? codeTtlMs : noneTtlMs)
     },
     size: () => store.size,
   }
@@ -81,6 +62,7 @@ export function makeCodeClassCache(opts: {
 // Process-wide instance. ~5k entries of a short string is well under a megabyte,
 // and Render runs a long-lived Node server so this survives between requests.
 export const codeClassCache = makeCodeClassCache({
+  name: 'code-class',
   max: 5000,
   // 1h, not a day. A reorg that orphans a deployment would otherwise leave a
   // wrong 'code' verdict pinned for 24h, and the extra hit rate beyond an hour is

@@ -10,9 +10,9 @@
  * 'token_transfer'], and rejecting that would break them for no gain. Only 'tx' is stored; everything
  * else is reported back in `ignoredEventTypes` so the caller sees what it is not getting.
  */
-export const DELIVERED_EVENT_TYPES: readonly string[] = ['tx']
+const DELIVERED_EVENT_TYPES: readonly string[] = ['tx']
 
-export type EventTypeResolution =
+type EventTypeResolution =
   | { ok: true; eventTypes: string[]; ignoredEventTypes: string[] }
   | { ok: false; error: string }
 

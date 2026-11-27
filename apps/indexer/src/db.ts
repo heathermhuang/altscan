@@ -27,6 +27,12 @@ export function getMaintenanceDb() {
 
 export { schema, dbErrorMessage, unwrapDbError }
 
+// Drizzle's sql.join() builds a recursive SQL tree — one level per row.
+// Dense blocks (ETH DeFi) can have 3000+ token transfer deltas, which
+// blows V8's ~10K call stack limit in buildQueryFromSourceParams().
+// Cap all sql.join/insert batches to stay well within the limit.
+export const SQL_BATCH_CHUNK = 500
+
 // postgres.js's own synthetic errors for a socket that closed, ended, was
 // destroyed, or timed out connecting mid-flight (postgres@3.4.8 src/errors.js,
 // Errors.connection()) — plain Errors whose message is "write <CODE> host:port",
@@ -57,4 +63,13 @@ export function isConnectionError(err: unknown): boolean {
   if (code !== undefined && POSTGRES_JS_SOCKET_CODES.has(code)) return true
   const msg = dbErrorMessage(err)
   return msg.includes('connection') || msg.includes('ECONNREFUSED')
+}
+
+/**
+ * Postgres aborted this statement to break a deadlock. The batched upserts retry it: lock
+ * ordering removes same-statement cycles, but a concurrent writer on another path can
+ * still collide.
+ */
+export function isDeadlock(err: unknown): boolean {
+  return dbErrorMessage(err).includes('deadlock')
 }

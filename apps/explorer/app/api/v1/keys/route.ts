@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
-import { checkIpRateLimit, checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, checkRateLimit, clientIpBucket, rateLimitResponse } from '@/lib/api-rate-limit'
 import { keyRequestTimestampError } from '@/lib/key-request'
 import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
+import { isHexAddress, isLowerHexAddress } from '@/lib/hex'
+import { positiveIntEnv } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,10 +17,7 @@ export const dynamic = 'force-dynamic'
  * minted 69 keys within one hour on each chain. The per-minute limits could not see that, so minting has an hourly
  * bucket of its own.
  */
-const API_KEY_MINTS_PER_HOUR = (() => {
-  const n = Number(process.env.API_KEY_MINTS_PER_HOUR)
-  return Number.isInteger(n) && n > 0 ? n : 5
-})()
+const API_KEY_MINTS_PER_HOUR = positiveIntEnv('API_KEY_MINTS_PER_HOUR', 5)
 const HOUR_MS = 60 * 60 * 1000
 
 /** Message the client must sign: deterministic and timestamped; reusable only inside the skew window. */
@@ -33,7 +32,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
-  if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
+  if (!owner || !isLowerHexAddress(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
 
@@ -60,13 +59,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!(await checkIpRateLimit(request.headers))
       || !(await checkRateLimit(`mint:${clientIpBucket(request.headers)}`, API_KEY_MINTS_PER_HOUR, HOUR_MS))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   const body = await request.json() as { ownerAddress: string; label?: string; signature?: string; timestamp?: number }
   const { ownerAddress, label, signature, timestamp } = body
 
-  if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
+  if (!ownerAddress || !isHexAddress(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 

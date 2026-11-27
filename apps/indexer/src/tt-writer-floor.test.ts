@@ -43,7 +43,7 @@ vi.mock('./db', async importOriginal => {
   return { ...actual, getDb: () => db, getWriterDb: () => db }
 })
 
-type Writer = typeof import('./block-processor')
+type Writer = typeof import('./transfer-writer')
 let w: Writer
 const W = () => w.getTransferQueueDepth().durableBlock
 const enqueue = (...ns: number[]) => { for (const n of ns) w.enqueueTransferWrite(n, []) }
@@ -51,7 +51,7 @@ const enqueue = (...ns: number[]) => { for (const n of ns) w.enqueueTransferWrit
 beforeEach(async () => {
   Object.assign(fake, { persisted: [], persistAttempts: 0, transactions: 0, failPersist: false, gate: null })
   vi.resetModules()
-  w = await import('./block-processor')
+  w = await import('./transfer-writer')
   w.initTransferWriter(1000)
 })
 

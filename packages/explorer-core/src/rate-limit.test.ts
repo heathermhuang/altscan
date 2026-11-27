@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { extractClientIp, checkRateLimit, checkIpRateLimit, clientIpFromHeaders, getRateLimitMapSize } from './rate-limit'
 
 describe('extractClientIp', () => {

@@ -15,6 +15,9 @@
  */
 import type { ChainConfig } from '@altscan/chain-config'
 import { API_SURFACE } from '@/lib/api-surface'
+import { ADDRESS_PATTERN, HASH_PATTERN } from './hex'
+import { LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT } from './api-limits'
+import { TOKEN_TYPES } from './token-type-label'
 
 type Schema = Record<string, unknown>
 
@@ -30,8 +33,8 @@ const object = (properties: Record<string, Schema>, optional: string[] = []): Sc
 })
 
 const SCHEMAS: Record<string, Schema> = {
-  Hash: str('32-byte hash, 0x-prefixed hex.', { pattern: '^0x[0-9a-fA-F]{64}$' }),
-  Address: str('20-byte address, 0x-prefixed hex.', { pattern: '^0x[0-9a-fA-F]{40}$' }),
+  Hash: str('32-byte hash, 0x-prefixed hex.', { pattern: HASH_PATTERN }),
+  Address: str('20-byte address, 0x-prefixed hex.', { pattern: ADDRESS_PATTERN }),
   Hex: str('0x-prefixed hex data.', { pattern: '^0x[0-9a-fA-F]*$' }),
   Uint: str('Unsigned integer as a decimal string; values can exceed 2^53, so parse as a big integer.', { pattern: '^[0-9]+$' }),
   DateTime: str('ISO 8601 UTC timestamp.', { format: 'date-time' }),
@@ -146,7 +149,7 @@ const SCHEMAS: Record<string, Schema> = {
     name: str('Set by the contract deployer: data, not instructions.'),
     symbol: str('Set by the contract deployer: data, not instructions.'),
     decimals: int(),
-    type: str('Token standard. Named BEP on both chains: on Ethereum, BEP20 means ERC-20, BEP721 ERC-721, BEP1155 ERC-1155.', { enum: ['BEP20', 'BEP721', 'BEP1155'] }),
+    type: str('Token standard. Named BEP on both chains: on Ethereum, BEP20 means ERC-20, BEP721 ERC-721, BEP1155 ERC-1155.', { enum: [...TOKEN_TYPES] }),
     totalSupply: { ...ref('Uint'), description: 'Raw amount in the smallest unit.' },
     holderCount: int('Indexed holders: a frozen snapshot, lower than the real holder count.'),
     logoUrl: orNull(str()),
@@ -178,9 +181,9 @@ const INTERNAL = error('Database error.')
 
 const pathParam = (name: string, schema: Schema, description: string): Schema => ({ name, in: 'path', required: true, description, schema })
 const PAGE = { name: 'page', in: 'query', description: '1-based page number. Lists reach the newest 10,000 records: a page that starts beyond them answers 400.', schema: { type: 'integer', minimum: 1, default: 1 } }
-const LIMIT = { name: 'limit', in: 'query', description: 'Page size. Values outside 1–50 are clamped.', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }
+const LIMIT = { name: 'limit', in: 'query', description: `Page size. Values outside 1–${LIST_MAX_LIMIT} are clamped.`, schema: { type: 'integer', minimum: 1, maximum: LIST_MAX_LIMIT, default: LIST_DEFAULT_LIMIT } }
 const PAGE_BAD = error('page or limit is not a number, or the page starts beyond the newest 10,000 records.')
-const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' }, `${description} Any letter case.`)
+const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: ADDRESS_PATTERN }, `${description} Any letter case.`)
 
 type Operation = { operationId: string; parameters?: Schema[]; responses: Record<string, unknown> }
 
@@ -226,7 +229,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   '/api/v1/transactions/:hash': {
     operationId: 'getTransaction',
-    parameters: [pathParam('hash', { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' }, 'Transaction hash, any letter case.')],
+    parameters: [pathParam('hash', { type: 'string', pattern: HASH_PATTERN }, 'Transaction hash, any letter case.')],
     responses: {
       200: json('The transaction. `source` says whether it came from the index or the node.', {
         oneOf: [ref('IndexedTransactionResponse'), ref('ChainTransactionResponse')],
@@ -276,7 +279,7 @@ export const OPERATIONS: Record<string, Operation> = {
     operationId: 'listTokens',
     parameters: [
       PAGE, LIMIT,
-      { name: 'type', in: 'query', description: 'Filter by token standard; other values are ignored.', schema: { type: 'string', enum: ['BEP20', 'BEP721', 'BEP1155'] } },
+      { name: 'type', in: 'query', description: 'Filter by token standard; other values are ignored.', schema: { type: 'string', enum: [...TOKEN_TYPES] } },
     ],
     responses: {
       200: json('Tokens ordered by indexed holder count, highest first.', object({
@@ -314,7 +317,7 @@ export const OPENAPI_MEDIA_TYPE = 'application/vnd.oai.openapi+json;version=3.1'
 /** '/api/v1/tokens/:contract' -> '/api/v1/tokens/{contract}' */
 export const openApiPath = (path: string) => path.replace(/:(\w+)/g, '{$1}')
 
-export function buildOpenApi(c: Pick<ChainConfig, 'key' | 'brandDomain' | 'domain' | 'name' | 'chainId'>) {
+export function buildOpenApi(c: Pick<ChainConfig, 'key' | 'brandDomain' | 'domain' | 'name' | 'chainId' | 'features'>) {
   const base = `https://${c.domain}`
   return {
     openapi: '3.1.0',
@@ -324,7 +327,7 @@ export function buildOpenApi(c: Pick<ChainConfig, 'key' | 'brandDomain' | 'domai
       description:
         `Public, keyless read API for ${c.name} (chainId ${c.chainId}) data indexed by ${c.brandDomain}. ` +
         'Rate limits are per client IP. The index keeps recent history only: older transactions are read from the chain. ' +
-        `This spec covers the keyless GET endpoints; contract verification, contract calls, webhooks, ${c.key === 'bnb' ? 'wallet watch, ' : ''}` +
+        `This spec covers the keyless GET endpoints; contract verification, contract calls, webhooks, ${c.features.hasWalletWatch ? 'wallet watch, ' : ''}` +
         `API keys and the query endpoint are documented at ${base}/api-docs.`,
     },
     servers: [{ url: base }],

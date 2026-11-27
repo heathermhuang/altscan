@@ -1,6 +1,6 @@
 import { desc } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
-import { swallow } from '@/lib/observability'
+import { swallowed } from '@/lib/observability'
 import { encodeTape, TAPE_LATEST, toTapeTuple } from '@/lib/tape'
 import { withTimeout } from '@/lib/with-timeout'
 
@@ -26,11 +26,6 @@ export async function queryRecentTape(): Promise<string | null> {
 }
 
 /** `queryRecentTape` for a caller with no cache of its own: a failure is logged and reads as "no tape". */
-export async function fetchRecentTape(): Promise<string | null> {
-  try {
-    return await queryRecentTape()
-  } catch (e) {
-    swallow('recent-tape', e)
-    return null
-  }
+export function fetchRecentTape(): Promise<string | null> {
+  return queryRecentTape().catch(swallowed('recent-tape', null))
 }

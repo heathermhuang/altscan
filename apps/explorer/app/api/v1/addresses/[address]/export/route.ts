@@ -3,6 +3,7 @@ import { selectByAddress } from '@/lib/address-query'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { chainConfig } from '@/lib/chain'
 import { readCoverage } from '@/lib/address-coverage'
+import { isHexAddress } from '@/lib/hex'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,7 @@ export async function GET(
   const { address } = await params
   const addr = address.toLowerCase()
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+  if (!isHexAddress(addr)) {
     return new Response('Invalid address', { status: 400 })
   }
 

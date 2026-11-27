@@ -12,7 +12,7 @@ export const SWAP_V2_TOPIC = keccak256id('Swap(address,uint256,uint256,uint256,u
 
 const abi = AbiCoder.defaultAbiCoder()
 
-export type V2Swap = {
+type V2Swap = {
   tokenIn: string
   tokenOut: string
   amountIn: string

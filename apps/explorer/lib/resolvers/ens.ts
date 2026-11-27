@@ -2,37 +2,18 @@
  * ENS name resolution for EthScan.
  * Resolves Ethereum addresses to ENS names (.eth) and vice-versa.
  * Uses the ETH RPC provider — no separate API key needed.
- * Results are cached for 10 minutes to avoid hammering the provider.
+ * Results are cached for 5 minutes to avoid hammering the provider.
  */
 import { getWebProvider } from '../rpc'
-import { registerCache } from '../cache-registry'
+import { createTtlCache } from '../ttl-cache'
 
-const cache = new Map<string, { name: string | null; ts: number }>()
-const TTL_MS = 5 * 60 * 1000     // reduced from 10 min to 5 min
-const MAX_CACHE = 1000            // reduced from 5000 to limit memory
-
-// Background cleanup — evict expired entries every 30s
-const _ensCleanup = setInterval(() => {
-  const now = Date.now()
-  for (const [k, v] of cache) {
-    if (now - v.ts > TTL_MS) cache.delete(k)
-  }
-}, 30_000)
-if (_ensCleanup.unref) _ensCleanup.unref()
-registerCache('ens', () => cache.size)
-
-function setCacheEntry(key: string, name: string | null): void {
-  if (cache.size >= MAX_CACHE) {
-    const oldest = cache.keys().next().value
-    if (oldest) cache.delete(oldest)
-  }
-  cache.set(key, { name, ts: Date.now() })
-}
+// 5 min, 1,000 names: both were cut (from 10 min, 5,000) to limit memory.
+const cache = createTtlCache<string | null>({ name: 'ens', max: 1000, ttlMs: 5 * 60 * 1000 })
 
 export async function resolveEns(address: string): Promise<string | null> {
   const key = address.toLowerCase()
   const cached = cache.get(key)
-  if (cached && Date.now() - cached.ts < TTL_MS) return cached.name
+  if (cached !== undefined) return cached
 
   try {
     // Acquisition inside the race — it awaits a (bounded) settings lookup, and
@@ -43,19 +24,11 @@ export async function resolveEns(address: string): Promise<string | null> {
       (async () => (await getWebProvider()).lookupAddress(address))(),
       timeout,
     ])
-    setCacheEntry(key, name)
+    cache.set(key, name)
     return name
   } catch {
-    setCacheEntry(key, null)
+    cache.set(key, null)
     return null
   }
 }
 
-export async function resolveEnsToAddress(name: string): Promise<string | null> {
-  try {
-    const provider = await getWebProvider()
-    return await provider.resolveName(name)
-  } catch {
-    return null
-  }
-}

@@ -12,6 +12,7 @@ import { getRedis, isRedisUnavailable } from '@altscan/explorer-core'
 import { checkRateLimit, clientIpBucket } from './api-rate-limit'
 import { chainConfig } from './chain'
 import { db, schema } from './db'
+import { OAUTH_MINT_REQUESTS_PER_MINUTE } from './api-limits'
 
 // Read and delete in one step, so a code is exchanged once even if two requests race.
 const TAKE = "local v = redis.call('GET', KEYS[1]) if v then redis.call('DEL', KEYS[1]) end return v"
@@ -83,7 +84,6 @@ export function oauthConfig(): OAuthConfig | null {
 }
 
 /** Per IP, on the endpoints that mint a client id, a code or a token. */
-const OAUTH_REQUESTS_PER_MINUTE = 20
 
 /**
  * The URL as the client sent it. NextRequest.url passes through NextURL, which rewrites the first
@@ -107,7 +107,7 @@ export function oauthRoute(
   return async (request) => {
     const cfg = oauthConfig()
     if (!cfg) return new Response('Not found', { status: 404 })
-    if (opts.limited && !(await checkRateLimit(`oauth:${clientIpBucket(request.headers)}`, OAUTH_REQUESTS_PER_MINUTE))) {
+    if (opts.limited && !(await checkRateLimit(`oauth:${clientIpBucket(request.headers)}`, OAUTH_MINT_REQUESTS_PER_MINUTE))) {
       return Response.json(
         { error: 'slow_down', error_description: 'Too many requests; retry in a minute.' },
         { status: 429, headers: { 'retry-after': '60', 'access-control-allow-origin': '*' } },

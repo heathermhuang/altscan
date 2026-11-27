@@ -7,7 +7,7 @@ export type ExplorerProbe = {
   deploys: { web?: DeploySummary; indexer?: DeploySummary }
 }
 
-export type FleetExplorer = {
+type FleetExplorer = {
   id: string
   brand: string
   publicUrl: string

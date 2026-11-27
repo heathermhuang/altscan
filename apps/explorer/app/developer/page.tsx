@@ -4,6 +4,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import { Badge } from '@/components/ui/Badge'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import type { Metadata } from 'next'
+import { IP_REQUESTS_PER_MINUTE, KEY_REQUESTS_PER_MINUTE } from '@/lib/api-limits'
 
 export const revalidate = false
 
@@ -16,8 +17,7 @@ export const metadata: Metadata = {
 const BASE_URL = `https://${chainConfig.domain}`
 
 export default function DeveloperPage() {
-  // Wallet watch is BNB-only in phase 1 (watchChainGate in lib/watch-route.ts).
-  const watch = chainConfig.key === 'bnb'
+  const watch = chainConfig.features.hasWalletWatch
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 *:max-w-5xl">
       <BreadcrumbJsonLd items={[{ name: 'Developer Platform' }]} />
@@ -122,11 +122,11 @@ curl "${BASE_URL}/api/v1/keys?owner=0xYourAddress" \\
             <dl className="ledger [--cols:2]">
               <div>
                 <dt className="k">Anonymous</dt>
-                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute per IP</dd>
+                <dd className="mt-1 font-mono text-[15px] text-ink">{IP_REQUESTS_PER_MINUTE} requests/minute per IP</dd>
               </div>
               <div>
                 <dt className="k">With API Key</dt>
-                <dd className="mt-1 font-mono text-[15px] text-ink">100 requests/minute per key</dd>
+                <dd className="mt-1 font-mono text-[15px] text-ink">{KEY_REQUESTS_PER_MINUTE} requests/minute per key</dd>
               </div>
             </dl>
           </div>

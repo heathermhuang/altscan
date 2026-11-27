@@ -3,7 +3,7 @@
  * Uses ENS for Ethereum, Space ID for BNB Chain.
  */
 import { chainConfig } from './chain'
-import { resolveEns, resolveEnsToAddress } from './resolvers/ens'
+import { resolveEns } from './resolvers/ens'
 import { resolveSpaceId } from './resolvers/spaceid'
 
 export async function resolveName(address: string): Promise<string | null> {
@@ -13,9 +13,3 @@ export async function resolveName(address: string): Promise<string | null> {
   return resolveSpaceId(address)
 }
 
-export async function resolveNameToAddress(name: string): Promise<string | null> {
-  if (chainConfig.features.hasEns) {
-    return resolveEnsToAddress(name)
-  }
-  return null
-}

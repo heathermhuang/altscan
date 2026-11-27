@@ -1,17 +1,11 @@
 import { NextResponse } from 'next/server'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import { chainConfig } from '@/lib/chain'
+import { isLowerHexAddress } from './hex'
 
-const OWNER = /^0x[0-9a-f]{40}$/
-
-/**
- * Phase 1 is BNB-only: the feed serves only up to the async token-transfer writer's durable watermark
- * (indexer_cursor.transfers_durable_block), and the ETH indexer runs the inline writer, which publishes
- * none, so the feed's tip would never advance there. Enabling ETH needs ASYNC_TT_WRITER on eth-indexer
- * or a watermark on the inline path. null = this chain serves wallet watch.
- */
-export function watchChainGate(): Response | null {
-  return chainConfig.key === 'bnb'
+/** null = this chain serves wallet watch (chain-config `features.hasWalletWatch` says why ETH does not). */
+function watchChainGate(): Response | null {
+  return chainConfig.features.hasWalletWatch
     ? null
     : NextResponse.json({ error: 'Wallet watch is available on BNBScan only' }, { status: 404 })
 }
@@ -24,12 +18,12 @@ export async function admitWatchRequest(request: Request): Promise<Response | nu
   return auth.ok ? null : authFailure(auth)
 }
 
-export type WatchOwner = { ok: true; owner: string } | { ok: false; response: Response }
+type WatchOwner = { ok: true; owner: string } | { ok: false; response: Response }
 
 /** The owner must be an address and the request's X-API-Key must belong to it — as /api/v1/webhooks. */
 export async function requireWatchOwner(request: Request, rawOwner: unknown): Promise<WatchOwner> {
   const owner = typeof rawOwner === 'string' ? rawOwner.toLowerCase() : ''
-  if (!OWNER.test(owner)) {
+  if (!isLowerHexAddress(owner)) {
     return { ok: false, response: NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 }) }
   }
   const ownerAuth = await requireApiKeyOwner(request, owner)

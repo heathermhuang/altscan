@@ -1,4 +1,5 @@
 import { defineConfig } from 'astro/config';
+import { fileURLToPath } from 'node:url';
 import cloudflare from '@astrojs/cloudflare';
 import sitemap from '@astrojs/sitemap';
 
@@ -21,6 +22,14 @@ export default defineConfig({
     }),
   ],
   vite: {
+    resolve: {
+      alias: {
+        // chain-config ships built (main -> ./dist), dist/ is gitignored, and `astro build`
+        // never builds workspace deps: compile it from source, as apps/admin does. Vite
+        // matches string aliases by PREFIX; nothing imports a subpath, so this key is safe.
+        '@altscan/chain-config': fileURLToPath(new URL('../../packages/chain-config/src/index.ts', import.meta.url)),
+      },
+    },
     build: {
       // Never inline bundled component scripts into the HTML. The _headers CSP
       // is `script-src 'self' https://static.cloudflareinsights.com` (no

@@ -1,5 +1,12 @@
 {
   "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "noUnusedLocals": true,
+    // Mirrors the vite alias in astro.config.mjs: chain-config from source, never dist.
+    "paths": {
+      "@altscan/chain-config": ["../../packages/chain-config/src/index.ts"]
+    }
+  },
   "include": [".astro/types.d.ts", "**/*"],
   "exclude": ["dist"]
 }

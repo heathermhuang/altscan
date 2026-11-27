@@ -53,8 +53,19 @@ describe('parsePageParam', () => {
     ['abc', 1],
     ['2.9', 2],
     ['', 1],
+    // Not decimal digits: page 1, so junk spellings do not each become a page of their own.
+    ['1e2', 1],
+    ['0x10', 1],
+    ['3abc', 1],
+    [' 7', 1],
+    [['2', '3'], 1],
   ])('maps %j to page %i', (raw, expected) => {
-    expect(parsePageParam(raw as string | undefined)).toBe(expected)
+    expect(parsePageParam(raw as string | string[] | undefined)).toBe(expected)
+  })
+
+  it('a digit run too long for a float is the last page, not Infinity', () => {
+    // 400 digits: Number() is Infinity, which must never reach (page - 1) * 25 as an OFFSET.
+    expect(parsePageParam('9'.repeat(400))).toBe(400)
   })
 
   it('does not return Infinity for a huge param', () => {

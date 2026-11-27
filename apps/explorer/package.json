@@ -15,7 +15,6 @@
     "@altscan/providers": "workspace:*",
     "@altscan/oauth": "workspace:*",
     "@altscan/settings-schema": "workspace:*",
-    "@altscan/types": "workspace:*",
     "axios": "^1.21.1",
     "drizzle-orm": "^0.45.4",
     "ethers": "^6.17.0",

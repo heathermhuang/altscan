@@ -14,7 +14,7 @@ export const FANOUT_SUMMARY_MS = 10 * 60 * 1000
 /** Flush early past this many blocks, so a long catch-up cannot grow the sample without bound. */
 export const FANOUT_MAX_SAMPLES = 20_000
 
-export type FanoutSample = { tokens: number; pairs: number; pairDrops: number }
+type FanoutSample = { tokens: number; pairs: number; pairDrops: number }
 
 function quantile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0

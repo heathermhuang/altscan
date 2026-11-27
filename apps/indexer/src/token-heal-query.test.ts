@@ -6,7 +6,7 @@ import {
   ETH_ZERO_SUPPLY_MIN_HOLDERS, HEAD_LIMIT, HEAD_MIN_HOLDERS,
   healCandidateOrder, healCandidatePredicate, healCandidateWhere, healHeadWhere, sqlLiteral,
 } from './token-heal-query'
-import { UNKNOWN_NAME, UNKNOWN_SYMBOL } from './token-metadata'
+import { UNKNOWN_SYMBOL } from './token-metadata'
 
 const dialect = new PgDialect()
 const render = (q: SQL) => {

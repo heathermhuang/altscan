@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, clientIpBucket, refundRateLimit } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket, rateLimitResponse, refundRateLimit } from '@/lib/api-rate-limit'
 import { withClientAdmission } from '@altscan/providers'
-
-const ADDR = /^0x[0-9a-fA-F]{40}$/
+import { isHexAddress } from './hex'
+import { positiveIntEnv } from './env'
 
 /**
  * Guard for the unauthenticated /api/internal/* Moralis-proxy routes.
@@ -22,12 +22,12 @@ export async function guardInternalAddress(
   maxPerMin = 30,
 ): Promise<NextResponse | null> {
   const headers = { 'cache-control': 'private, no-store' }
-  if (!ADDR.test(address)) {
+  if (!isHexAddress(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400, headers })
   }
   // Namespaced bucket so it doesn't collide with the /api/v1 IP limiter.
   if (!(await checkRateLimit(`internal:${clientIpBucket(req.headers)}`, maxPerMin))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers })
+    return rateLimitResponse(headers)
   }
   return null
 }
@@ -38,10 +38,7 @@ export async function guardInternalAddress(
  * spending the fleet's shared allowance (BNB's whole month is 250k CU). This counts only the calls that reach the
  * provider (packages/providers client-admission.ts); past it, that client's tabs show the local index.
  */
-export const PROVIDER_CALLS_PER_CLIENT_PER_HOUR = (() => {
-  const n = Number(process.env.PROVIDER_CALLS_PER_CLIENT_PER_HOUR)
-  return Number.isInteger(n) && n > 0 ? n : 60
-})()
+export const PROVIDER_CALLS_PER_CLIENT_PER_HOUR = positiveIntEnv('PROVIDER_CALLS_PER_CLIENT_PER_HOUR', 60)
 
 /** Run a provider call charged to this request's client, only if it is billed. */
 export function asClient<T>(req: Request, fn: () => Promise<T>): Promise<T> {

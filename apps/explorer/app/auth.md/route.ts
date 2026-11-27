@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { chainConfig } from '@/lib/chain'
 import { oauthConfig } from '@/lib/oauth'
+import { IP_REQUESTS_PER_MINUTE, KEY_REQUESTS_PER_MINUTE, OAUTH_MINT_REQUESTS_PER_MINUTE, TOKEN_REQUESTS_PER_MINUTE } from '@/lib/api-limits'
 
 // auth.md (https://workos.com/auth-md): how an agent gets and uses a credential here:
 // audience, the provisioning endpoints, the methods, and how to send the credential.
@@ -14,7 +15,7 @@ function oauthSection(host: string): string {
   return `
 ## OAuth 2.1: the same access as a key, as a bearer token
 
-This explorer also runs an OAuth 2.1 authorization server. Its access tokens work wherever an API key does, sent as \`Authorization: Bearer <access_token>\`, and count per address: 100 requests a minute, shared by every token for that address. They do not manage keys or webhooks; those still need \`X-API-Key\`. A token lasts one hour and works only on ${host}.
+This explorer also runs an OAuth 2.1 authorization server. Its access tokens work wherever an API key does, sent as \`Authorization: Bearer <access_token>\`, and count per address: ${TOKEN_REQUESTS_PER_MINUTE} requests a minute, shared by every token for that address. They do not manage keys or webhooks; those still need \`X-API-Key\`. A token lasts one hour and works only on ${host}.
 
 Discovery: the protected resource metadata at \`https://${host}/.well-known/oauth-protected-resource\` names the authorization server, whose metadata is at \`https://${host}/.well-known/oauth-authorization-server\`.
 
@@ -68,7 +69,7 @@ Content-Type: application/x-www-form-urlencoded
 grant_type=authorization_code&code=…&client_id=ac1.…&redirect_uri=…&code_verifier=…
 \`\`\`
 
-There are no refresh tokens. A request with an altered or expired token answers 401 with \`WWW-Authenticate: Bearer resource_metadata="…", error="invalid_token"\`. The OAuth endpoints that mint something allow 20 requests a minute per IP.
+There are no refresh tokens. A request with an altered or expired token answers 401 with \`WWW-Authenticate: Bearer resource_metadata="…", error="invalid_token"\`. The OAuth endpoints that mint something allow ${OAUTH_MINT_REQUESTS_PER_MINUTE} requests a minute per IP.
 `
 }
 
@@ -81,11 +82,11 @@ You are an agent. This document tells you how to get and use a credential for th
 
 ## Do you need a credential?
 
-Usually not. The chain-data endpoints under \`/api/v1\` (blocks, transactions, addresses, tokens, contracts, stats, query) are public and keyless, limited to 100 requests per minute per IP. The OpenAPI description is at https://${host}/openapi.json.
+Usually not. The chain-data endpoints under \`/api/v1\` (blocks, transactions, addresses, tokens, contracts, stats, query) are public and keyless, limited to ${IP_REQUESTS_PER_MINUTE} requests per minute per IP. The OpenAPI description is at https://${host}/openapi.json.
 
 An API key does two things:
 
-- On the endpoints that take one (\`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\`), a request with a valid key counts against that key's own budget of 100 requests per minute instead of your IP's.
+- On the endpoints that take one (\`/api/v1/query\`, \`/api/v1/keys\`, \`/api/v1/webhooks\` and \`/api/v1/contracts/{address}/call\`), a request with a valid key counts against that key's own budget of ${KEY_REQUESTS_PER_MINUTE} requests per minute instead of your IP's.
 - Webhooks, key listing and key revocation require it: every \`/api/v1/webhooks\` call, \`GET /api/v1/keys\` and \`DELETE /api/v1/keys/{id}\` answer 401 without one. Only registering an address's first key needs none.
 
 A key works only on ${host}. Each Altscan explorer keeps its own keys.

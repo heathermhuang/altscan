@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { admitWatchRequest, requireWatchOwner, watchUnavailable } from '@/lib/watch-route'
-import { decodeCursor } from '@/lib/watch-cursor'
+import { decodeWatchCursor } from '@/lib/watch-cursor'
 import { readWatchEvents } from '@/lib/watch-events'
 import { hasSqlState, isUndefinedTable } from '@/lib/watch-addresses'
+import { positiveIntEnv } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,10 +13,7 @@ export const dynamic = 'force-dynamic'
  * Feed reads in flight per process. The web pool is 3 connections and each read holds one for up to its 5 s
  * statement timeout, so past the cap the route answers 503 at once instead of queueing (cf. api-tx-lookup.ts).
  */
-const MAX_CONCURRENT = (() => {
-  const n = Number(process.env.WATCH_FEED_MAX_CONCURRENT)
-  return Number.isInteger(n) && n > 0 ? n : 1
-})()
+const MAX_CONCURRENT = positiveIntEnv('WATCH_FEED_MAX_CONCURRENT', 1)
 let running = 0
 
 const busy = () => NextResponse.json({ error: 'Wallet watch is busy; retry shortly' }, { status: 503, headers: { 'Retry-After': '2' } })
@@ -40,7 +38,7 @@ export async function GET(request: Request) {
   const limit = parseLimit(params.get('limit'))
   if (limit === null) return NextResponse.json({ error: `limit must be an integer from 1 to ${MAX_LIMIT}` }, { status: 400 })
   const rawCursor = params.get('cursor')
-  const cursor = rawCursor === null ? null : decodeCursor(rawCursor)
+  const cursor = rawCursor === null ? null : decodeWatchCursor(rawCursor)
   if (rawCursor !== null && cursor === null) return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 })
 
   // Adoption measurement: distinct owners per week, without logging their addresses.

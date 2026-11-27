@@ -1,10 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 import {
-  fetchBlockReceipts,
-  assertReceiptCoverage,
-  isUsableLogIndex,
+  assertReceiptCoverage, isUsableLogIndex,
 } from './block-processor'
+import { fetchBlockReceipts } from './receipts'
 
 /**
  * Replay safety.

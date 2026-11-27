@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { encodeCursor } from '@/lib/watch-cursor'
+import { encodeWatchCursor } from '@/lib/watch-cursor'
 
 const h = vi.hoisted(() => ({ read: vi.fn(), chain: 'bnb', auth: 0 }))
 
-vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain } } }))
+vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain }, get features() { return { hasWalletWatch: h.chain === 'bnb' } } } }))
 vi.mock('@/lib/api-auth', () => ({
   authRequest: async () => { h.auth++; return { ok: true, limited: false } },
   authFailure: () => new Response(null, { status: 429 }),
@@ -13,7 +13,7 @@ vi.mock('@/lib/db', () => ({ db: {}, schema: {} }))
 vi.mock('@/lib/watch-events', () => ({ readWatchEvents: h.read }))
 
 const OWNER = '0x' + 'a'.repeat(40)
-const CURSOR = encodeCursor({ b: 10, h: '0x' + 'ab'.repeat(32), k: 2, i: 0, w: '' })
+const CURSOR = encodeWatchCursor({ b: 10, h: '0x' + 'ab'.repeat(32), k: 2, i: 0, w: '' })
 const get = async (qs: string) => {
   const { GET } = await import('./route')
   return GET(new Request(`http://x/api/v1/watch/events?${qs}`))

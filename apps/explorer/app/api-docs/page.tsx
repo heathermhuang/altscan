@@ -4,6 +4,8 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import { Badge } from '@/components/ui/Badge'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import type { Metadata } from 'next'
+import { IP_REQUESTS_PER_MINUTE, KEY_REQUESTS_PER_MINUTE, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, QUERY_DEFAULT_LIMIT, QUERY_MAX_LIMIT, QUERY_MAX_OFFSET, VERIFY_REQUESTS_PER_MINUTE } from '@/lib/api-limits'
+import { WATCH_MAX_ADDRESSES } from '@/lib/watch-addresses'
 
 export const revalidate = false
 
@@ -51,7 +53,7 @@ const endpoints: Endpoint[] = [
     description: 'Returns a paginated list of blocks ordered by block number descending.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
+      { name: 'limit', type: 'number', description: `Number of results per page (default: ${LIST_DEFAULT_LIMIT}, max: ${LIST_MAX_LIMIT})` },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -78,7 +80,7 @@ const endpoints: Endpoint[] = [
     description: 'Returns a paginated list of recent transactions, ordered by block number and transaction index, descending.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
+      { name: 'limit', type: 'number', description: `Number of results per page (default: ${LIST_DEFAULT_LIMIT}, max: ${LIST_MAX_LIMIT})` },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -110,7 +112,7 @@ const endpoints: Endpoint[] = [
       'total is a planner estimate of all indexed token rows and ignores the type filter.',
     params: [
       { name: 'page', type: 'number', description: 'Page number, starting from 1 (default: 1). Lists reach the newest 10,000 records; a page that starts beyond them answers 400.' },
-      { name: 'limit', type: 'number', description: 'Number of results per page (default: 20, max: 50)' },
+      { name: 'limit', type: 'number', description: `Number of results per page (default: ${LIST_DEFAULT_LIMIT}, max: ${LIST_MAX_LIMIT})` },
       { name: 'type', type: 'string', description: 'Filter by token standard: BEP20, BEP721 or BEP1155. Other values are ignored.' },
     ],
     exampleResponse: JSON.stringify(
@@ -181,7 +183,7 @@ const endpoints: Endpoint[] = [
       'This endpoint does not accept source code: verify the contract on sourcify.dev first, then call this with its address. ' +
       'The compiler version recorded is the one Sourcify reports. ' +
       `It is meant for the verification form on ${chainConfig.domain}: the request must carry an Origin or Referer from that site, otherwise it answers 403. ` +
-      'Other errors: 400 for invalid JSON or an invalid address, 429 over the separate 10 requests/minute per-IP budget.',
+      `Other errors: 400 for invalid JSON or an invalid address, 429 over the separate ${VERIFY_REQUESTS_PER_MINUTE} requests/minute per-IP budget.`,
     params: [
       { name: 'address', type: 'string', required: true, description: 'Contract address to verify (0x-prefixed, 42 chars)' },
       { name: 'compilerVersion', type: 'string', required: false, description: 'Accepted for compatibility but ignored: the compiler version recorded for a verified contract is the one Sourcify reports, never a value from the request.' },
@@ -267,12 +269,11 @@ const endpoints: Endpoint[] = [
       2
     ),
   },
-  // Wallet watch is BNB-only in phase 1 (see watchChainGate in lib/watch-route.ts).
-  ...(chainConfig.key === 'bnb' ? ([
+  ...(chainConfig.features.hasWalletWatch ? ([
   {
     method: 'POST',
     path: '/api/v1/watch/addresses',
-    description: 'Add addresses to your watchlist (requires X-API-Key belonging to owner). At most 50 per owner; adding an address you already watch does nothing.',
+    description: `Add addresses to your watchlist (requires X-API-Key belonging to owner). At most ${WATCH_MAX_ADDRESSES} per owner; adding an address you already watch does nothing.`,
     params: [
       { name: 'owner', type: 'string', required: true, description: 'Your address (0x-prefixed); your API key must belong to it' },
       { name: 'addresses', type: 'string[]', required: true, description: 'Addresses to watch (0x-prefixed)' },
@@ -381,8 +382,8 @@ const endpoints: Endpoint[] = [
       { name: 'entity', type: 'string', required: true, description: 'One of: transactions, blocks, tokens, token_transfers, dex_trades' },
       { name: 'filter', type: 'object', required: false, description: 'transactions: one of address, from or to, with an optional blockNumber or blockFrom/blockTo. token_transfers: one of address, from, to or tokenAddress, with an optional blockFrom/blockTo. blocks and dex_trades: blockFrom/blockTo. tokens: none. Block numbers are non-negative integers; any other field, or two of address/from/to/tokenAddress at once, is a 400' },
       { name: 'orderBy', type: 'string', required: false, description: '"asc" or "desc" (default: "desc")' },
-      { name: 'limit', type: 'number', required: false, description: 'Number of results (default: 25, max: 100)' },
-      { name: 'offset', type: 'number', required: false, description: 'Pagination offset (default: 0, max: 10000)' },
+      { name: 'limit', type: 'number', required: false, description: `Number of results (default: ${QUERY_DEFAULT_LIMIT}, max: ${QUERY_MAX_LIMIT})` },
+      { name: 'offset', type: 'number', required: false, description: `Pagination offset (default: 0, max: ${QUERY_MAX_OFFSET})` },
     ],
     exampleResponse: JSON.stringify(
       {
@@ -419,9 +420,9 @@ export default function ApiDocsPage() {
           </code>
         </p>
         <div className="mt-4 rounded-xl border border-hair border-l-[3px] border-l-acc bg-card px-4 py-3 text-sm text-ink2">
-          <strong className="text-ink">Rate Limiting:</strong> API requests are limited to 100 requests per minute per IP address.{' '}
-          <code className="font-mono text-ink">POST /api/v1/verify</code> has its own separate budget of 10 requests per minute per IP address. On the endpoints that take a key (query, keys, webhooks, contract call), a request with a valid{' '}
-          <code className="font-mono text-ink">X-API-Key</code> counts against that key&apos;s own limit, 100 requests per minute, instead of the IP&apos;s. Over a limit the API answers 429.
+          <strong className="text-ink">Rate Limiting:</strong> API requests are limited to {IP_REQUESTS_PER_MINUTE} requests per minute per IP address.{' '}
+          <code className="font-mono text-ink">POST /api/v1/verify</code> has its own separate budget of {VERIFY_REQUESTS_PER_MINUTE} requests per minute per IP address. On the endpoints that take a key (query, keys, webhooks, contract call), a request with a valid{' '}
+          <code className="font-mono text-ink">X-API-Key</code> counts against that key&apos;s own limit, {KEY_REQUESTS_PER_MINUTE} requests per minute, instead of the IP&apos;s. Over a limit the API answers 429.
         </div>
       </div>
 

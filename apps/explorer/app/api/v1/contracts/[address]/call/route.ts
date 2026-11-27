@@ -6,6 +6,7 @@ import { getWebProvider } from '@/lib/rpc'
 import { authFailure, authRequest } from '@/lib/api-auth'
 import { swallow } from '@/lib/observability'
 import { redactSecrets } from '@/lib/redact'
+import { isHexAddress } from '@/lib/hex'
 
 // Errors about the call itself (a revert, bad arguments, undecodable return data).
 // Their `shortMessage` is the reason alone. Transport errors (SERVER_ERROR,
@@ -26,7 +27,7 @@ export async function POST(
   const { address } = await params
   const addr = address.toLowerCase()
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+  if (!isHexAddress(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 

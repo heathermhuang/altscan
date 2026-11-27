@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 
 /** NFT transfers read per side, newest first, before the BEP-721 filter. */
-export const NFT_SIDE_SCAN = 1_000
+const NFT_SIDE_SCAN = 1_000
 
 /**
  * The address page's NFTs tab: the address's newest BEP-721 transfers, at most `limit`.

@@ -6,13 +6,10 @@ import { insertWebhookSql } from '@/lib/webhook-insert'
 import { resolveEventTypes } from '@/lib/webhook-event-types'
 import crypto from 'crypto'
 import { chainConfig } from '@/lib/chain'
+import { isHexAddress, isLowerHexAddress } from '@/lib/hex'
+import { positiveIntEnv } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
-
-const positiveInt = (raw: string | undefined, fallback: number) => {
-  const n = Number(raw)
-  return Number.isInteger(n) && n > 0 ? n : fallback
-}
 
 /**
  * Caps across owners. The per-owner caps below bound one wallet, and a wallet is free: on 2026-10-22 69 fresh wallets
@@ -20,8 +17,8 @@ const positiveInt = (raw: string | undefined, fallback: number) => {
  * So the active webhooks are capped in total, and per URL hostname. Registrations already past either cap stay
  * active; only new ones are refused.
  */
-const WEBHOOK_GLOBAL_MAX = positiveInt(process.env.WEBHOOK_GLOBAL_MAX, 100)
-const WEBHOOK_MAX_PER_HOST = positiveInt(process.env.WEBHOOK_MAX_PER_HOST, 5)
+const WEBHOOK_GLOBAL_MAX = positiveIntEnv('WEBHOOK_GLOBAL_MAX', 100)
+const WEBHOOK_MAX_PER_HOST = positiveIntEnv('WEBHOOK_MAX_PER_HOST', 5)
 
 /** The URL's hostname as the registration check reads it, or null when it does not parse. */
 function hostOf(url: string): string | null {
@@ -35,7 +32,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
-  if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
+  if (!owner || !isLowerHexAddress(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
 
@@ -70,7 +67,7 @@ export async function POST(request: Request) {
 
   const { ownerAddress, url, watchAddress, eventTypes } = body
 
-  if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
+  if (!ownerAddress || !isHexAddress(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 
@@ -103,7 +100,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Webhook URL must use a domain name, not an IP address' }, { status: 400 })
   }
 
-  if (watchAddress && !/^0x[0-9a-fA-F]{40}$/.test(watchAddress)) {
+  if (watchAddress && !isHexAddress(watchAddress)) {
     return NextResponse.json({ error: 'Invalid watchAddress' }, { status: 400 })
   }
 

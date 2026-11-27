@@ -9,8 +9,8 @@ export type Inline =
   | { kind: 'link'; text: string; href: string }
   | { kind: 'pr'; number: number; href: string };
 
-export interface Bullet { tokens: Inline[]; lead: Inline[] | null }
-export interface Section { title: string; bullets: Bullet[] }
+interface Bullet { tokens: Inline[]; lead: Inline[] | null }
+interface Section { title: string; bullets: Bullet[] }
 export interface Release {
   version: string;
   date: string | null;
@@ -19,8 +19,8 @@ export interface Release {
   sections: Section[];
   compareUrl: string | null;
 }
-export interface Changelog { unreleased: Release | null; releases: Release[] }
-export interface TapeBlock { label: string; anchor: string; count: number; fill: number; pending: boolean }
+interface Changelog { unreleased: Release | null; releases: Release[] }
+interface TapeBlock { label: string; anchor: string; count: number; fill: number; pending: boolean }
 
 const UNRELEASED = 'Unreleased';
 const RELEASE = /^## \[([^\]]+)\](?: - (\d{4}-\d{2}-\d{2}))?\s*$/;
@@ -128,8 +128,8 @@ const TTL_S = 3600;
 const TIMEOUT_MS = 2000;
 
 type CacheLike = Pick<Cache, 'match' | 'put'>;
-export interface LoadDeps { fetchImpl?: typeof fetch; cache?: CacheLike }
-export type ChangelogSource = 'hit' | 'miss' | 'bundled';
+interface LoadDeps { fetchImpl?: typeof fetch; cache?: CacheLike }
+type ChangelogSource = 'hit' | 'miss' | 'bundled';
 
 const usable = (text: string): Changelog | null => {
   const changelog = parseChangelog(text);

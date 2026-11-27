@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // bucket: on 2026-10-22, 69 fresh wallets minted 69 keys within one hour on each chain.
 const h = vi.hoisted(() => ({ calls: [] as Array<{ key: string; max?: number; windowMs?: number }>, deny: new Set<string>(), authCalls: 0 }))
 
-vi.mock('@/lib/api-rate-limit', () => ({
+vi.mock('@/lib/api-rate-limit', async (importActual) => ({
+  ...(await importActual<typeof import('@/lib/api-rate-limit')>()),
   checkRateLimit: async (key: string, max?: number, windowMs?: number) => {
     h.calls.push({ key, max, windowMs })
     return ![...h.deny].some((d) => key.startsWith(d))

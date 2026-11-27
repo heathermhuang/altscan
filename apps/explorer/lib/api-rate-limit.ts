@@ -4,7 +4,9 @@
  *
  * SECURITY: key on clientIpFromHeaders() — see the note in explorer-core's rate-limit.ts.
  */
+import { NextResponse } from 'next/server'
 import { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit } from '@altscan/explorer-core'
+import { IP_REQUESTS_PER_MINUTE } from './api-limits'
 
 export { checkRateLimit, clientIpBucket, clientIpFromHeaders, refundRateLimit }
 
@@ -56,5 +58,13 @@ export async function checkIpRateLimit(
     }
     return checkRateLimit(feed ? 'service:altscan-status-feed' : 'service:altscan-mcp', SERVICE_MAX_PER_MINUTE)
   }
-  return checkRateLimit(clientIpBucket(headers), maxRequests)
+  return checkRateLimit(clientIpBucket(headers), maxRequests ?? IP_REQUESTS_PER_MINUTE)
+}
+
+/**
+ * The 429 every JSON route answers with once a limit is spent. API clients and the OpenAPI
+ * spec (RATE_LIMITED in lib/openapi.ts) rely on this body, so it is defined once.
+ */
+export function rateLimitResponse(headers?: HeadersInit): NextResponse {
+  return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, ...(headers ? { headers } : {}) })
 }

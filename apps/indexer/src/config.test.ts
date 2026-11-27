@@ -6,6 +6,8 @@ const DEFAULTS: ConfigDefaults = {
   startBlock: 38_000_000,
   concurrency: 8,
   internalTxPartitionBlocks: 96_000,
+  reorgDepth: 15,
+  asyncTransferWriter: true,
 }
 
 const read = (env: NodeJS.ProcessEnv = {}) => readIndexerConfig(env, DEFAULTS)
@@ -40,11 +42,6 @@ describe('defaults match the values they replaced', () => {
     ['transferWriter.failureAlertThreshold', config.transferWriter.failureAlertThreshold, 5],
     ['transferWriter.profileWindowMs', config.transferWriter.profileWindowMs, 30_000],
     ['transferWriter.poolSize', config.transferWriter.poolSize, 2],
-    ['holders.queueWarnDepth', config.holders.queueWarnDepth, 500],
-    ['holders.countIntervalMin', config.holders.countIntervalMin, 15],
-    ['holders.countLagThreshold', config.holders.countLagThreshold, 1000],
-    ['holders.recomputeChunk', config.holders.recomputeChunk, 2000],
-    ['holders.recomputeSleepMs', config.holders.recomputeSleepMs, 100],
     ['tokenHeal.intervalMin', config.tokenHeal.intervalMin, 10],
     ['tokenHeal.batch', config.tokenHeal.batch, 40],
     ['retention.days', config.retention.days, 7],
@@ -161,10 +158,11 @@ describe('flag polarity', () => {
   })
 
   it('ASYNC_TT_WRITER defaults per chain and accepts an explicit override', () => {
-    expect(read({ CHAIN: 'bnb' }).config.transferWriter.async).toBe(true)
-    expect(read({ CHAIN: 'eth' }).config.transferWriter.async).toBe(false)
-    expect(read({ CHAIN: 'eth', ASYNC_TT_WRITER: '1' }).config.transferWriter.async).toBe(true)
-    expect(read({ CHAIN: 'bnb', ASYNC_TT_WRITER: 'false' }).config.transferWriter.async).toBe(false)
+    const eth = { ...DEFAULTS, asyncTransferWriter: false }
+    expect(read({}).config.transferWriter.async).toBe(true)
+    expect(readIndexerConfig({}, eth).config.transferWriter.async).toBe(false)
+    expect(readIndexerConfig({ ASYNC_TT_WRITER: '1' }, eth).config.transferWriter.async).toBe(true)
+    expect(read({ ASYNC_TT_WRITER: 'false' }).config.transferWriter.async).toBe(false)
   })
 })
 
@@ -240,9 +238,6 @@ describe('one declaration per variable', () => {
     expect(read({ DB_DISK_GB: '221' }).config.retention.dbDiskGb).toBe(221)
   })
 
-  it('holder-balance tracking is off and not env-tunable', () => {
-    expect(read({ HOLDER_BALANCE_TRACKING: '1' }).config.holderBalanceTrackingEnabled).toBe(false)
-  })
 })
 
 describe('the boot log', () => {
@@ -313,3 +308,37 @@ describe('WEBHOOK_SECRET_KEY', () => {
     expect(formatResolvedConfig(resolutions).join('\n')).not.toContain('WEBHOOK_SECRET_KEY')
   })
 })
+
+describe('REORG_DEPTH', () => {
+  it('overrides the chain default exactly as reorg-handler.ts read it (parseInt, positive)', () => {
+    expect(read({ REORG_DEPTH: '25' }).config.reorg.depth).toBe(25)
+    expect(read({}).config.reorg.depth).toBe(15)
+    // The reorg window is a safety setting, so the old reading is kept, prefix included.
+    expect(read({ REORG_DEPTH: '25x' }).config.reorg.depth).toBe(25)
+    for (const v of ['0', '-3', 'abc', '']) expect(read({ REORG_DEPTH: v }).config.reorg.depth).toBe(15)
+    expect(read({ REORG_DEPTH: 'abc' }).resolutions.find((x) => x.name === 'REORG_DEPTH')?.ignored).toBe('abc')
+  })
+})
+
+describe('COMPACT_RETENTION_DAYS', () => {
+  const days = (v?: string) => read(v === undefined ? {} : { COMPACT_RETENTION_DAYS: v }).config.retention.compactDays
+
+  it('is immortal (Infinity) when unset, empty, non-positive or not a number', () => {
+    for (const v of [undefined, '', '0', '-5', 'abc']) expect(days(v), String(v)).toBe(Infinity)
+  })
+
+  it('keeps the parseInt reading it had in retention-policy.ts, prefix included', () => {
+    // Deliberately NOT stricter: rejecting '7d' would turn a running prune into an immortal table.
+    expect(days('180')).toBe(180)
+    expect(days('7d')).toBe(7)
+    expect(days('7.9')).toBe(7)
+  })
+
+  it('shows in the boot log, immortal included', () => {
+    const r = (env: NodeJS.ProcessEnv) => read(env).resolutions.find((x) => x.name === 'COMPACT_RETENTION_DAYS')
+    expect(r({ COMPACT_RETENTION_DAYS: '4' })).toMatchObject({ value: '4', source: 'env' })
+    expect(r({})).toMatchObject({ value: 'Infinity (immortal)', source: 'default' })
+    expect(r({ COMPACT_RETENTION_DAYS: 'abc' })?.ignored).toBe('abc')
+  })
+})
+

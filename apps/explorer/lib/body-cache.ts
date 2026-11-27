@@ -12,6 +12,7 @@
 import { getWebProvider } from './rpc'
 import { getRedis, isRedisUnavailable, kvGet, kvSet } from '@altscan/explorer-core'
 import { bodyCacheKey, serializeTxBody, parseTxBody, type TxBody, type CachedLog } from './body-cache-serde'
+import { positiveIntEnv } from './env'
 
 export type { TxBody, CachedLog } from './body-cache-serde'
 
@@ -59,7 +60,7 @@ export type { TxBody, CachedLog } from './body-cache-serde'
  * BODY_CACHE_TTL_MS still overrides — but re-measure arrival before raising it,
  * and raise the instance first if the product of the two exceeds ~100MB.
  */
-const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(2 * 60 * 60 * 1000), 10)
+const BODY_CACHE_TTL_MS = positiveIntEnv('BODY_CACHE_TTL_MS', 2 * 60 * 60 * 1000)
 
 /**
  * The TTL bounds how LONG an entry lives, not how many bytes arrive: anyone can ask for pruned txs as fast as they
@@ -79,7 +80,7 @@ const BODY_CACHE_TTL_MS = parseInt(process.env.BODY_CACHE_TTL_MS ?? String(2 * 6
  */
 export const BODY_CACHE_MAX_ENTRY_BYTES = 64 * 1024
 export const BODY_CACHE_ENTRY_OVERHEAD_BYTES = 256
-const BODY_CACHE_WINDOW_BYTES = parseInt(process.env.BODY_CACHE_WINDOW_BYTES ?? String(48 * 1024 * 1024), 10)
+const BODY_CACHE_WINDOW_BYTES = positiveIntEnv('BODY_CACHE_WINDOW_BYTES', 48 * 1024 * 1024)
 
 async function admitBody(bytes: number): Promise<boolean> {
   const r = getRedis()

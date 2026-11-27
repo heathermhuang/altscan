@@ -18,7 +18,6 @@ export const COMPACT_TABLES = [
   'transactions', 'token_transfers', 'token_balances',
   'tokens', 'blocks', 'addresses', 'contracts',
 ] as const
-export type CompactTable = typeof COMPACT_TABLES[number]
 
 export type PruneOp =
   | { table: string; kind: 'delete-rows' }
@@ -48,20 +47,15 @@ export const PROTECTED_COLUMNS = new Set([
   'method_id', 'tx_index', 'number', 'token_address', 'log_index', 'body_pruned',
 ])
 
-/** COMPACT_RETENTION_DAYS as a number; Infinity (immortal) when unset/invalid/≤0. */
-export function parseCompactRetentionDays(env: NodeJS.ProcessEnv = process.env): number {
-  const v = env.COMPACT_RETENTION_DAYS
-  if (!v) return Infinity
-  const n = parseInt(v, 10)
-  return Number.isFinite(n) && n > 0 ? n : Infinity
+/**
+ * Compact tables the job will prune for a compact retention (indexerConfig.retention.compactDays,
+ * parsed from COMPACT_RETENTION_DAYS in config.ts): [] when immortal (the default path).
+ */
+export function resolveCompactPruneTables(compactDays: number): readonly string[] {
+  return Number.isFinite(compactDays) ? COMPACT_PRUNE_TABLES : []
 }
 
-/** Compact tables the job will prune for a given env — [] on the default path. */
-export function resolveCompactPruneTables(env: NodeJS.ProcessEnv = process.env): readonly string[] {
-  return Number.isFinite(parseCompactRetentionDays(env)) ? COMPACT_PRUNE_TABLES : []
-}
-
-export type RetentionPlan = {
+type RetentionPlan = {
   bodyDeleteTables: string[]
   nullColumnOps: Extract<PruneOp, { kind: 'null-column' }>[]
   compactDeleteTables: string[]
@@ -86,12 +80,11 @@ export function bodyPruneIsRedundant(bodyDays: number, compactDays: number): boo
   return Number.isFinite(compactDays) && compactDays <= bodyDays
 }
 
-export function buildRetentionPlan(opts: { env?: NodeJS.ProcessEnv; ttPartitioned: boolean }): RetentionPlan {
-  const env = opts.env ?? process.env
+export function buildRetentionPlan(opts: { compactDays: number; ttPartitioned: boolean }): RetentionPlan {
   const bodyDeleteTables = BODY_PRUNE_OPS.filter(o => o.kind === 'delete-rows').map(o => o.table)
   const nullColumnOps = BODY_PRUNE_OPS.filter(
     (o): o is Extract<PruneOp, { kind: 'null-column' }> => o.kind === 'null-column',
   )
-  const compactDeleteTables = [...resolveCompactPruneTables(env)]
+  const compactDeleteTables = [...resolveCompactPruneTables(opts.compactDays)]
   return { bodyDeleteTables, nullColumnOps, compactDeleteTables }
 }

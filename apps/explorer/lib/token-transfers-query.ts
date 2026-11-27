@@ -1,14 +1,6 @@
 import { count, desc, eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
-
-/**
- * How deep the token page's transfer list goes: 400 pages of 25.
- *
- * A page reads every row before it, so without a cap `?page=` sets the cost of
- * the query. In 6h40m of logs on 2026-09-13 crawlers walked to page 198;
- * nothing asked for page 400.
- */
-export const TOKEN_TRANSFERS_MAX_ROWS = 10_000
+import { MAX_LIST_ROWS } from './list-depth'
 
 /**
  * A page of a token's transfers, newest first, for /token/[address].
@@ -40,7 +32,7 @@ export function selectTokenTransfers(db: Db, token: string, page: { limit: numbe
  *
  * COUNT(*) visits every matching row whichever index it uses, so it is as slow
  * as the token is busy: on BNB it hit the statement_timeout 11 times in the
- * same window. Past TOKEN_TRANSFERS_MAX_ROWS the page only needs to know there
+ * same window. Past MAX_LIST_ROWS the page only needs to know there
  * are more.
  *
  * The ORDER BY is what makes the LIMIT a bound: it walks the list's index.
@@ -54,7 +46,7 @@ export function countTokenTransfers(db: Db, token: string) {
     .from(schema.tokenTransfers)
     .where(eq(schema.tokenTransfers.tokenAddress, token))
     .orderBy(desc(schema.tokenTransfers.timestamp))
-    .limit(TOKEN_TRANSFERS_MAX_ROWS + 1)
+    .limit(MAX_LIST_ROWS + 1)
     .as('served')
   return db.select({ value: count() }).from(served)
 }

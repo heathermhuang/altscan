@@ -10,6 +10,8 @@
     // ProviderResult unions, and without strictNullChecks the `ok: true` arm is
     // implicitly nullable, so `!res.ok` cannot exclude it (TS2339 on `.reason`).
     "strictNullChecks": true,
+    // An unused local is usually what a deletion orphaned. Fail on it rather than ship it.
+    "noUnusedLocals": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,

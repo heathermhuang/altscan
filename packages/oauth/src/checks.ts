@@ -3,7 +3,7 @@ import { constantTimeEqual, sha256b64url } from './crypto'
 
 // ── PKCE (RFC 7636), S256 only ────────────────────────────────────────────────
 
-export const CODE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/
+const CODE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/
 export const CODE_CHALLENGE = /^[A-Za-z0-9_-]{43}$/
 
 export async function pkceMatches(verifier: string, challenge: string): Promise<boolean> {
@@ -59,7 +59,7 @@ export function cleanClientName(name: unknown): string | null {
 // EIP-4361-shaped text, so wallets that understand Sign-In with Ethereum can check the domain.
 // The address goes between `before` and `after`; the page and an agent build the same string.
 
-export interface SignIn {
+interface SignIn {
   host: string
   issuer: string
   scopeLabel: string

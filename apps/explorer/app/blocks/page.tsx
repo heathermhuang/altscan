@@ -10,7 +10,7 @@ import { BlockTape } from '@/components/home/BlockTape'
 import { queryRecentTape } from '@/lib/recent-tape'
 import { createPageCache } from '@/lib/page-cache'
 import { MAX_LIST_ROWS } from '@/lib/list-depth'
-import { swallow } from '@/lib/observability'
+import { swallowed } from '@/lib/observability'
 
 // Next.js statically analyses route segment config and cannot resolve an
 // imported identifier here — `export const revalidate = BLOCKS_REVALIDATE_SECONDS`
@@ -33,14 +33,7 @@ export const metadata: Metadata = {
 // blocks) are not served.
 const cachedTape = createPageCache('blocks-tape-v2', BLOCKS_REVALIDATE_SECONDS, queryRecentTape)
 
-async function readTape(): Promise<string | null> {
-  try {
-    return await cachedTape()
-  } catch (e) {
-    swallow('blocks/tape', e)
-    return null
-  }
-}
+const readTape = (): Promise<string | null> => cachedTape().catch(swallowed('blocks/tape', null))
 
 export default async function BlocksPage({
   searchParams,

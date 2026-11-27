@@ -27,7 +27,7 @@ pnpm test    # vitest run (root config, all workspaces)
 ## Testing gotchas
 
 - **PG-gated suites are silently SKIPPED by a bare `pnpm test`.** Each is gated on its own
-  env var, and CI runs sixteen of the eighteen by name:
+  env var, and CI runs seventeen of the nineteen by name:
   | Suite | Gate | In CI? |
   |---|---|---|
   | `apps/indexer/src/backfill-worker.pg.test.ts` | `BACKFILL_TEST_PG_URL` | yes |
@@ -46,6 +46,7 @@ pnpm test    # vitest run (root config, all workspaces)
   | `apps/explorer/lib/gas-percentiles.pg.test.ts` | `GAS_TIERS_TEST_PG_URL` | yes |
   | `apps/explorer/lib/api-key-mint.pg.test.ts` | `API_KEY_MINT_TEST_PG_URL` | yes (own DB, `key_mint_test`) |
   | `apps/explorer/lib/watch-events.pg.test.ts` | `WATCH_EVENTS_TEST_PG_URL` | yes (own DB, `watch_events_test`) |
+  | `apps/indexer/src/schema-parity.pg.test.ts` | `SCHEMA_PARITY_TEST_PG_URL` | yes (own DB, `schema_parity_test`) |
   | `apps/indexer/src/retention-partition-drop.pg.test.ts` | `BACKFILL_TEST_PG_URL` | **no** |
   | `apps/indexer/src/retention-boundary-partition.pg.test.ts` | `BOUNDARY_TEST_PG_URL` | **no** |
   The last two run nowhere unless you run them by hand — do that before touching retention.
@@ -190,9 +191,10 @@ This is the most dangerous code in the repo — it deletes data on a threshold.
 
 ## Known issues (accepted)
 
-- `tokens.holder_count` and `token_balances` are a **frozen snapshot**: per-block holder tracking is
-  hard-disabled (`holderBalanceTrackingEnabled: false`, `apps/indexer/src/config.ts`), so
-  `recomputeHolderCounts()` skips and nothing updates either. Measured on prod BNB: no USDT row for
+- `tokens.holder_count` and `token_balances` are a **frozen snapshot**: per-block holder tracking
+  and the holder-count recompute were hard-disabled, then deleted (the code is in git history),
+  so nothing updates either. Reviving them means rebuilding against the partitioned
+  `token_transfers`, not restoring the old code. Measured on prod BNB: no USDT row for
   the real #1 USDT holder; `holder_count` == `COUNT(token_balances)` (835,871 vs Moralis's 79.8M).
   So the UI labels the count "indexed holders" (`lib/holder-labels.ts`), and never reads a live
   balance from `token_balances` — the address page reads the tracked tokens (stablecoins +

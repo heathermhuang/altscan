@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  detectReorg, detectReorgPinned, resolveReorgDepth, UnresolvedForkError, UNWIND_ORDER, type ReorgDeps,
+  detectReorg, detectReorgPinned, UnresolvedForkError, UNWIND_ORDER, type ReorgDeps,
 } from './reorg-handler'
 import { schema } from '@altscan/db'
 import { getTableColumns, is } from 'drizzle-orm'
@@ -63,14 +63,6 @@ describe('detectReorg', () => {
   })
 })
 
-describe('resolveReorgDepth', () => {
-  it('uses the env override when valid, else the chain default', () => {
-    expect(resolveReorgDepth(15, { REORG_DEPTH: '25' })).toBe(25)
-    expect(resolveReorgDepth(15, {})).toBe(15)
-    for (const v of ['0', '-3', 'abc', '']) expect(resolveReorgDepth(15, { REORG_DEPTH: v })).toBe(15)
-  })
-})
-
 describe('UNWIND_ORDER guardrail — every block-scoped table is unwound, children first', () => {
   it('covers exactly the schema tables carrying a block-number column', () => {
     // Every exported table, not a hand-kept subset: a hand-kept list is how
@@ -80,6 +72,13 @@ describe('UNWIND_ORDER guardrail — every block-scoped table is unwound, childr
       // Moralis history caches keyed by address, filled by the backfill worker
       // and never by processBlock — a reorg of our own index does not touch them.
       'backfillAddressTxs', 'backfillTokenTransfers',
+      // Deleted by unwindFrom itself, FIRST and by raw SQL, before UNWIND_ORDER runs: a
+      // failure there must leave the index untouched (see unwindFrom; the order is pinned by
+      // reorg-unwind-order.test.ts).
+      'poisonBlocks',
+      // Keyed by block HASH: a block replaced by a reorg has a new hash and delivers afresh,
+      // which is the point. Unwinding these rows would only forget deliveries that happened.
+      'webhookDeliveries',
     ])
     const blockScoped = new Set<string>()
     for (const [name, t] of Object.entries(schema)) {

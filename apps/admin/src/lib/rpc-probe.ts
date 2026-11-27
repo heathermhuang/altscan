@@ -1,6 +1,6 @@
 import { rpcSettingsSchema } from '@altscan/settings-schema'
 
-export const PROBE_TIMEOUT_MS = 5000
+const PROBE_TIMEOUT_MS = 5000
 /** Cap what we read from an operator-supplied host. A chain-id/block-number
  *  reply is tens of bytes; anything larger is not an RPC endpoint. */
 export const MAX_RESPONSE_BYTES = 8192

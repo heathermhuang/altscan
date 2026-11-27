@@ -14,7 +14,7 @@ import { gasPct, tapeWeight, type StripTile } from '@/lib/tape'
 
 /** n = block number, txs = transaction count, used = gas used as a percent of the limit (0-100), fee = base fee in wei (null: none). */
 export interface GasTapeRow { n: number; txs: number; used: number; fee: number | null }
-export type GasBasis = 'base-fee' | 'gas-used'
+type GasBasis = 'base-fee' | 'gas-used'
 
 export function rowFromBlock(b: {
   number: number

@@ -4,7 +4,7 @@
  * to call on every startup — either a fresh DB or an existing one.
  */
 import { indexerConfig } from './config-instance'
-import { getDb, dbErrorMessage, unwrapDbError } from './db'
+import { getDb, dbErrorMessage, unwrapDbError, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { getChainConfig, type WhaleConfig } from '@altscan/chain-config'
 
@@ -13,9 +13,12 @@ export async function ensureSchema(): Promise<void> {
   console.log('[indexer] Ensuring BNB schema...')
 
   // Enums (idempotent via DO…EXCEPTION pattern)
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE token_type AS ENUM ('BEP20','BEP721','BEP1155'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE validator_status AS ENUM ('active','inactive','jailed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE verify_source AS ENUM ('own','sourcify'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
+  // Values come from the schema's pgEnums (one definition). CREATE TYPE is skipped when the
+  // type exists, so adding a value to an enum later still needs an ALTER TYPE here.
+  for (const e of [schema.tokenTypeEnum, schema.validatorStatusEnum, schema.verifySourceEnum]) {
+    const values = e.enumValues.map((v) => `'${v}'`).join(',')
+    await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE ${e.enumName} AS ENUM (${values}); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
+  }
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS blocks (
@@ -770,7 +773,7 @@ export async function sweepInvalidIndexes(db: ReturnType<typeof getDb> = getDb()
  * unique index has to exist at every moment; an unfinished or failed build keeps
  * the old one in place.
  */
-export const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
+const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
 
 export function retireOldDexKeySql(replacementValid: boolean): string[] {
   return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS dex_tx_log_unique'] : []
@@ -858,7 +861,7 @@ export const TT_WHALE_IDX = 'tt_whale_idx'
 export const TT_WHALE_COLUMNS = 'token_address, value DESC'
 
 /** The combined whale-size partial index on `token_transfers`. */
-export type TtWhaleIndex = {
+type TtWhaleIndex = {
   /** The name on the monolithic table or the partitioned parent. */
   name: string
   /** `(token_address = '<a1>' AND value > <F1>) OR (…)`: every literal, one arm per tracked token. */
@@ -919,7 +922,7 @@ export function ttWhaleIndex(
 }
 
 /** A partial index on `token_transfers`, built per partition on BNB (ensurePartitionedPartialIndex). */
-export type PartitionedPartialIndex = {
+type PartitionedPartialIndex = {
   /** The name on the monolithic table or the partitioned parent. */
   name: string
   columns: string
@@ -1257,7 +1260,7 @@ async function listAttachedChildIndexes(parent: string): Promise<Set<string>> {
  * Runs in the background after boot: the child builds are CONCURRENTLY over the
  * whole table and are slow, but they never take a write lock.
  */
-export async function ensurePartitionedWhaleIndex(): Promise<void> {
+async function ensurePartitionedWhaleIndex(): Promise<void> {
   const db = getDb()
   if (!(await isPartitioned('token_transfers'))) return
 
@@ -1421,7 +1424,7 @@ export async function ensurePartitionedPartialIndex(ix: PartitionedPartialIndex)
 }
 
 /** How long ensureForwardPartitions waits for token_transfers' lock before leaving the partition to its next run. */
-export const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
+const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
 
 /** Pure. The exclusive upper end of the unbroken run of partitions from `from`; `from` itself means it is not covered. */
 export function coveredUpTo(parts: readonly { lo: number; hi: number }[], from: number): number {

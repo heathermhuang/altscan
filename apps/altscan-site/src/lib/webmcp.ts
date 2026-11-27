@@ -2,8 +2,9 @@
 // explorer registers on its own pages (apps/explorer/components/agent/WebMcpProvider.tsx), plus a
 // `chain` argument. Every tool navigates to an explorer page; none calls an API from the browser.
 import { products, type Product } from '../data/products';
+import { ADDRESS_PATTERN, HASH_PATTERN, isHexAddress, isHexHash } from './hex';
 
-export interface WebMcpTool {
+interface WebMcpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -16,10 +17,6 @@ const chainArg = {
   description: products.map((p) => `"${p.id}" = ${p.chain} (${p.domain})`).join(', '),
 };
 const chainNames = products.map((p) => p.chain).join(' or ');
-
-function hexOf(len: 40 | 64) {
-  return new RegExp(`^0x[0-9a-fA-F]{${len}}$`);
-}
 
 /** The explorer for args.chain, or a throw an agent can read. */
 function explorerFor(args: unknown): { product: Product; a: Record<string, unknown> } {
@@ -47,20 +44,20 @@ export function webMcpTools(navigate: (url: string) => void): WebMcpTool[] {
     {
       name: 'open_transaction',
       description: `Open a ${chainNames} transaction by its 66-character hex hash on that chain's explorer.`,
-      inputSchema: schema('hash', { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'Transaction hash (0x + 64 hex chars).' }),
+      inputSchema: schema('hash', { type: 'string', pattern: HASH_PATTERN, description: 'Transaction hash (0x + 64 hex chars).' }),
       async execute(args) {
         const { product, a } = explorerFor(args);
-        if (typeof a.hash !== 'string' || !hexOf(64).test(a.hash)) throw new Error('Invalid transaction hash.');
+        if (!isHexHash(a.hash)) throw new Error('Invalid transaction hash.');
         return go(`${product.url}/tx/${a.hash}`);
       },
     },
     {
       name: 'open_address',
       description: `Open a ${chainNames} address (EOA or contract) on that chain's explorer.`,
-      inputSchema: schema('address', { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$', description: 'Address (0x + 40 hex chars).' }),
+      inputSchema: schema('address', { type: 'string', pattern: ADDRESS_PATTERN, description: 'Address (0x + 40 hex chars).' }),
       async execute(args) {
         const { product, a } = explorerFor(args);
-        if (typeof a.address !== 'string' || !hexOf(40).test(a.address)) throw new Error('Invalid address.');
+        if (!isHexAddress(a.address)) throw new Error('Invalid address.');
         return go(`${product.url}/address/${a.address}`);
       },
     },

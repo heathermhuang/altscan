@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { getDb, type Db } from '@altscan/db'
-import { END_OF_BLOCK, decodeCursor, encodeCursor } from './watch-cursor'
+import { END_OF_BLOCK, decodeWatchCursor, encodeWatchCursor } from './watch-cursor'
 import { WATCH_REWIND_BLOCKS, readWatchEvents, type WatchFeed } from './watch-events'
 import { WATCH_MAX_ADDRESSES, addWatchAddresses, listWatchAddresses, removeWatchAddress } from './watch-addresses'
 
@@ -104,7 +104,7 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
     const hashOf = (n: number, salt = 0) => '0x' + (n + salt * 1_000_000).toString(16).padStart(64, '0')
     const txh = (n: number) => '0x' + (0xf000000 + n).toString(16).padStart(64, '0')
     const A = addr(0xa1), B = addr(0xb1), X = addr(0xc1), USDT = addr(0x55)
-    const at = (b: number) => encodeCursor({ b, h: hashOf(b), k: END_OF_BLOCK, i: 0, w: '' })
+    const at = (b: number) => encodeWatchCursor({ b, h: hashOf(b), k: END_OF_BLOCK, i: 0, w: '' })
 
     const seedBlocks = (from: number, to: number) => db.execute(sql`
       INSERT INTO blocks (number, hash, timestamp)
@@ -125,11 +125,11 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       const seen: string[] = []
       let cursor = start
       for (let guard = 0; guard < 50; guard++) {
-        const page = ok(await readWatchEvents(db, OWNER, decodeCursor(cursor), limit))
+        const page = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(cursor), limit))
         seen.push(...page.events.map((e) => `${e.blockNumber}:${e.type}:${e.direction}:${e.watched === A ? 'A' : 'B'}`))
         if (page.cursor === cursor) break
         cursor = page.cursor
-        if (page.events.length === 0 && decodeCursor(cursor)!.b >= page.tip) break
+        if (page.events.length === 0 && decodeWatchCursor(cursor)!.b >= page.tip) break
       }
       return seen
     }
@@ -150,7 +150,7 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       const first = ok(await readWatchEvents(db, OWNER, null, 100))
       expect(first.events).toEqual([])
       expect(first.tip).toBe(20)
-      expect(decodeCursor(first.cursor)).toMatchObject({ b: 20, k: END_OF_BLOCK })
+      expect(decodeWatchCursor(first.cursor)).toMatchObject({ b: 20, k: END_OF_BLOCK })
     })
 
     it('pages through every matching transfer exactly once, in chain order', async () => {
@@ -172,11 +172,11 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       await seedBlocks(1, 30)
       await durable(20)
       await tokenTx(1, 25, 0, X, A, '1')
-      const before = ok(await readWatchEvents(db, OWNER, decodeCursor(at(1)), 100))
+      const before = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(at(1)), 100))
       expect(before.events).toEqual([])
-      expect(decodeCursor(before.cursor)!.b).toBe(20)
+      expect(decodeWatchCursor(before.cursor)!.b).toBe(20)
       await durable(30)
-      const after = ok(await readWatchEvents(db, OWNER, decodeCursor(before.cursor), 100))
+      const after = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(before.cursor), 100))
       expect(after.events.map((e) => e.blockNumber)).toEqual([25])
     })
 
@@ -184,12 +184,12 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       await seedBlocks(1, 3000)
       await durable(3000)
       await tokenTx(1, 2500, 0, X, A, '1')
-      const p1 = ok(await readWatchEvents(db, OWNER, decodeCursor(at(1)), 100))
+      const p1 = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(at(1)), 100))
       expect(p1.events).toEqual([])
-      expect(decodeCursor(p1.cursor)!.b).toBe(1200)
-      const p2 = ok(await readWatchEvents(db, OWNER, decodeCursor(p1.cursor), 100))
-      expect(decodeCursor(p2.cursor)!.b).toBe(2399)
-      const p3 = ok(await readWatchEvents(db, OWNER, decodeCursor(p2.cursor), 100))
+      expect(decodeWatchCursor(p1.cursor)!.b).toBe(1200)
+      const p2 = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(p1.cursor), 100))
+      expect(decodeWatchCursor(p2.cursor)!.b).toBe(2399)
+      const p3 = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(p2.cursor), 100))
       expect(p3.events.map((e) => e.blockNumber)).toEqual([2500])
     })
 
@@ -197,7 +197,7 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       await seedBlocks(10, 30)
       await durable(30)
       await db.execute(sql`UPDATE indexer_cursor SET compact_cutoff_block = 10`)
-      expect(await readWatchEvents(db, OWNER, decodeCursor(at(5)), 100)).toEqual({ status: 'gone', oldestAvailableBlock: 10 })
+      expect(await readWatchEvents(db, OWNER, decodeWatchCursor(at(5)), 100)).toEqual({ status: 'gone', oldestAvailableBlock: 10 })
     })
 
     it('rewinds when the cursor\'s block was replaced by a reorg', async () => {
@@ -206,7 +206,7 @@ describe.skipIf(!PG_URL)('wallet watch — against a real Postgres', () => {
       const cursor = at(20)
       await db.execute(sql`UPDATE blocks SET hash = ${hashOf(20, 1)} WHERE number = 20`)
       await tokenTx(1, 20 - WATCH_REWIND_BLOCKS + 3, 0, X, A, '1')
-      const page = ok(await readWatchEvents(db, OWNER, decodeCursor(cursor), 100))
+      const page = ok(await readWatchEvents(db, OWNER, decodeWatchCursor(cursor), 100))
       expect(page.rewound).toBe(true)
       expect(page.events.map((e) => e.blockNumber)).toEqual([20 - WATCH_REWIND_BLOCKS + 3])
     })

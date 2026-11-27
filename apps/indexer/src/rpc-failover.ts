@@ -44,7 +44,7 @@ export function markNotEndpointFault<E>(err: E): E {
 }
 
 /** True when the error was explicitly attributed to something else. */
-export function isEndpointFault(err: unknown): boolean {
+function isEndpointFault(err: unknown): boolean {
   return !(err && typeof err === 'object' && (err as Record<symbol, unknown>)[NOT_ENDPOINT_FAULT] === true)
 }
 
@@ -71,7 +71,7 @@ export function isEndpointFault(err: unknown): boolean {
  * — one endpoint tried each time, never the whole pool. Acting on that count is
  * what turns a loss-limiting mechanism into a producer of invisible bad data.
  */
-export type FailoverFailureKind = 'exhausted-clean' | 'aborted-dirty' | 'unknown'
+type FailoverFailureKind = 'exhausted-clean' | 'aborted-dirty' | 'unknown'
 
 const FAILOVER_KIND = Symbol.for('altscan.failoverKind')
 
@@ -109,13 +109,13 @@ function markFailoverKind<E>(err: E, kind: Exclude<FailoverFailureKind, 'unknown
 }
 
 /** Notified on each failed attempt, so a sick endpoint is visible in logs. */
-export type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
+type FailoverReporter<P> = (block: number, provider: P, err: unknown) => void
 
 /**
  * The unit of work. `onSideEffect` MUST be called the instant before the first
  * durable write, so failover knows the attempt can no longer be safely replayed.
  */
-export type FailoverWork<P> = (
+type FailoverWork<P> = (
   block: number,
   provider: P,
   onSideEffect: () => void,

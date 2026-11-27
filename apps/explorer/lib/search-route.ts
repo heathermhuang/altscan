@@ -1,3 +1,4 @@
+import { isHexAddress, isHexHash } from './hex'
 /**
  * Where a search-box query goes: a block, a tx, an address, or the token search page.
  * Pure so the box (components/layout/SearchBar.tsx), the /search page and their tests share one definition.
@@ -27,14 +28,14 @@ export function normaliseSearchQuery(raw: string): string {
   return q
 }
 
-export type QueryKind = 'block' | 'tx' | 'address' | 'text'
+type QueryKind = 'block' | 'tx' | 'address' | 'text'
 
 /** What a query opens, and the normalised text it opens it with. */
 export function classifyQuery(raw: string): { kind: QueryKind; q: string } {
   const q = normaliseSearchQuery(raw)
   if (/^\d+$/.test(q)) return { kind: 'block', q }
-  if (/^0x[0-9a-fA-F]{64}$/.test(q)) return { kind: 'tx', q }
-  if (/^0x[0-9a-fA-F]{40}$/.test(q)) return { kind: 'address', q }
+  if (isHexHash(q)) return { kind: 'tx', q }
+  if (isHexAddress(q)) return { kind: 'address', q }
   return { kind: 'text', q }
 }
 

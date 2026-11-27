@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { DB_TIMEOUT_MS, withTimeout } from './with-timeout'
 
 beforeEach(() => { vi.useFakeTimers() })
@@ -42,5 +44,34 @@ describe('withTimeout', () => {
     await vi.advanceTimersByTimeAsync(DB_TIMEOUT_MS)
     await settled
     expect(DB_TIMEOUT_MS).toBe(8000)
+  })
+})
+
+describe('withTimeout label', () => {
+  it('names what was slow', async () => {
+    const p = withTimeout(new Promise<number>(() => {}), 10, 'whales native')
+    const settled = expect(p).rejects.toThrow(/^whales native timeout$/)
+    await vi.advanceTimersByTimeAsync(10)
+    await settled
+  })
+})
+
+// One wait-bound helper in the explorer. Two private copies had drifted from it: one resolved
+// a fallback and never cleared its timer, one put the bound in its message.
+const ROOT = join(__dirname, '..')
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name)
+    if (name === 'node_modules' || name === '.next' || name.startsWith('.')) return []
+    if (statSync(p).isDirectory()) return sources(p)
+    return /\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name) ? [p] : []
+  })
+}
+
+describe('one withTimeout in apps/explorer', () => {
+  it('no other module declares its own', () => {
+    const declares = /\b(?:function|const|let)\s+withTimeout\b/
+    const hits = sources(ROOT).filter((f) => declares.test(readFileSync(f, 'utf8'))).map((f) => f.slice(ROOT.length + 1))
+    expect(hits).toEqual([join('lib', 'with-timeout.ts')])
   })
 })

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { bestOfMs } from '@/test-support/timing'
 import { hintFor, indexOfKey, nextActive, suggestTokensFor, tokenQuery, type TokenSuggestion } from '@/lib/search-suggest'
 
 const TX = 'aB'.repeat(32)
@@ -89,14 +90,12 @@ describe('indexOfKey: the highlight follows the option, not its position', () =>
 })
 
 describe('adversarial input in the box', () => {
-  const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t }
-
-  it('groups a 16,000-digit block number (capped at 200 digits) in under 5 ms', () => {
+  it('groups a 16,000-digit block number (capped at 200 digits) in under 5 ms', async () => {
     const q = '1'.repeat(16_000)
     hintFor(q) // warm up
-    expect(ms(() => hintFor(q))).toBeLessThan(5)
+    expect(await bestOfMs(() => hintFor(q))).toBeLessThan(5)
     expect(hintFor(q)?.value).toBe('#' + '1'.repeat(200).replace(/\B(?=(\d{3})+(?!\d))/g, ','))
-    expect(ms(() => hintFor(q + 'x'))).toBeLessThan(5)
-    expect(ms(() => tokenQuery(q + 'x'))).toBeLessThan(5)
+    expect(await bestOfMs(() => hintFor(q + 'x'))).toBeLessThan(5)
+    expect(await bestOfMs(() => tokenQuery(q + 'x'))).toBeLessThan(5)
   })
 })

@@ -3,7 +3,9 @@ import type { NextRequest } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
+import { CHAINS } from '@altscan/chain-config'
 import { formatNativeToken, formatGwei, formatNumber, safeBigInt } from '@/lib/format'
+import { isHexHash } from '@/lib/hex'
 
 // Markdown-for-Agents (content negotiation).
 // Middleware routes incoming requests with `Accept: text/markdown` here;
@@ -62,9 +64,7 @@ function aboutMarkdown(): string {
     '',
     '## Sister site',
     '',
-    c.key === 'bnb'
-      ? '- Ethereum explorer: https://ethscan.io'
-      : '- BNB Chain explorer: https://bnbscan.com',
+    `- ${Object.values(CHAINS).find((p) => `https://${p.domain}` === c.peerUrl)?.name ?? 'Sister'} explorer: ${c.peerUrl}`,
     '',
     '## Data retention',
     '',
@@ -134,7 +134,6 @@ const STATIC_HANDLERS: Record<string, Handler> = {
   '/api-docs': apiDocsMarkdown,
 }
 
-const TX_HASH = /^0x[0-9a-fA-F]{64}$/
 const BLOCK_NUMBER = /^\d{1,12}$/
 
 async function txMarkdown(hash: string): Promise<string | null> {
@@ -280,7 +279,7 @@ async function dispatch(path: string): Promise<RouteResult> {
   const txMatch = /^\/tx\/(.+)$/.exec(path)
   if (txMatch) {
     const hash = txMatch[1]
-    if (!TX_HASH.test(hash)) {
+    if (!isHexHash(hash)) {
       return { body: notFoundMarkdown('tx', hash), status: 404, cacheControl: 'public, max-age=60' }
     }
     try {

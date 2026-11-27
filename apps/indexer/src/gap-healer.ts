@@ -36,7 +36,7 @@ import { DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG } from './config'
 /** Just the slice of the drizzle client this needs — keeps it unit-testable. */
 type DbLike = { execute: (query: unknown) => Promise<unknown> }
 
-export type HealDeps = {
+type HealDeps = {
   db: DbLike
   /** Re-index one block. Must throw on failure; must be idempotent on replay. */
   reindexBlock: (blockNumber: number) => Promise<void>
@@ -78,12 +78,12 @@ export const LAG_RECHECK_EVERY = 10
  * the lease lapses, while staying short enough that a crashed holder does not
  * park a gap for long.
  */
-export const DEFAULT_HEAL_LEASE_MS = 600_000
+const DEFAULT_HEAL_LEASE_MS = 600_000
 
 /** Stop this many ms before the lease lapses, so work never outlives the claim. */
-export const LEASE_SAFETY_MS = 30_000
+const LEASE_SAFETY_MS = 30_000
 
-export type HealOutcome =
+type HealOutcome =
   /** Nothing unhealed intersects the retained window. */
   | { status: 'idle' }
   /** Indexer is behind — healing deferred so it cannot deepen the lag. */

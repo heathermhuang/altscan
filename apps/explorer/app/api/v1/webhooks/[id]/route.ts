@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { and, eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { isHexAddress } from '@/lib/hex'
 
 export async function DELETE(
   request: Request,
@@ -17,7 +18,7 @@ export async function DELETE(
   // Require ownerAddress + matching API key to prevent unauthorized deletion
   const { searchParams } = new URL(request.url)
   const ownerAddress = searchParams.get('ownerAddress')?.toLowerCase()
-  if (!ownerAddress || !/^0x[0-9a-f]{40}$/i.test(ownerAddress)) {
+  if (!ownerAddress || !isHexAddress(ownerAddress)) {
     return NextResponse.json({ error: 'ownerAddress query param required' }, { status: 400 })
   }
 

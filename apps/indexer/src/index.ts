@@ -16,24 +16,9 @@ import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
 import {
-  processBlock,
-  initTransferWriter,
-  setDurableFloor,
-  enqueueQuarantinedBlock,
-  getTransferQueueDepth,
-  flushTransferWriter,
-  rollbackTransferWriterTo,
-  ASYNC_TT_WRITER,
-  TT_QUEUE_HIGH_WATER_ROWS,
-  TT_QUEUE_HIGH_WATER_BLOCKS,
-  noteWorkerParked,
-  noteWorkerActive,
-  setProfileWorkerCount,
-  retraceMissedBlocks,
-  forgetTraceMissesFrom,
-  retraceBacklogStats,
-  warmPairCache,
+  processBlock, retraceMissedBlocks, forgetTraceMissesFrom, retraceBacklogStats, warmPairCache,
 } from './block-processor'
+import { initTransferWriter, setDurableFloor, enqueueQuarantinedBlock, getTransferQueueDepth, flushTransferWriter, rollbackTransferWriterTo, ASYNC_TT_WRITER, TT_QUEUE_HIGH_WATER_ROWS, TT_QUEUE_HIGH_WATER_BLOCKS, noteWorkerParked, noteWorkerActive, setProfileWorkerCount } from './transfer-writer'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock, planMaxLagSkip } from './index-gaps'
@@ -43,7 +28,7 @@ import {
 } from './poison-block'
 import { healNextGap } from './gap-healer'
 import { RPC_URLS as SHARED_RPC_URLS, TRACE_RPC_URLS, safeRpcError } from './provider'
-import { detectReorgPinned, makeReorgDepsFrom, resolveReorgDepth, unwindFrom } from './reorg-handler'
+import { detectReorgPinned, makeReorgDepsFrom, unwindFrom } from './reorg-handler'
 import { syncValidators } from './validator-syncer'
 import { startTokenMetadataHealer } from './token-metadata-healer'
 import { startRetentionCleanup, reportIndexerLag } from './retention-cleanup'
@@ -319,7 +304,7 @@ async function main() {
 
   // A3 reorg safety. REORG_CHECK=0 is the kill switch; REORG_DEPTH overrides K.
   const REORG_CHECK = indexerConfig.reorg.checkEnabled
-  const REORG_DEPTH = resolveReorgDepth(chain.reorgDepth)
+  const REORG_DEPTH = indexerConfig.reorg.depth
   // The healer's territory rule assumes a reorg can never reach a range the healer
   // owns: the healer only takes gaps older than RESUME_GAP_SCAN_BLOCKS from the tip,
   // and a reorg is bounded at K. Defaults hold that by a wide margin (K = 15 BNB / 3

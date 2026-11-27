@@ -28,10 +28,12 @@ import { formatUnits } from 'ethers'
 import type { WhaleConfig } from '@altscan/chain-config'
 import { safeBigInt } from '@/lib/format'
 import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
+import { isLowerHexAddress } from './hex'
+import { withTimeout } from './with-timeout'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
-export type TokenFilter = {
+type TokenFilter = {
   address: string
   minValue: string
   /** The token's whale partial-index floor (chain-config `indexFloor`): the whale arm's `value >` literal. */
@@ -55,7 +57,7 @@ export type WhaleTx = {
 
 /** null = the query failed; [] = it succeeded and found nothing. The page
  *  renders those two differently, so they must not collapse into one value. */
-export type WhaleResult = {
+type WhaleResult = {
   native: WhaleTx[] | null
   token: WhaleTx[] | null
 }
@@ -116,7 +118,7 @@ export function rawWeiLiteral(wei: string): SQL {
  * literal would be valid, match nothing, and fall back to the latest arm alone without a single error.
  */
 function rawAddressLiteral(address: string): SQL {
-  if (!/^0x[0-9a-f]{40}$/.test(address)) {
+  if (!isLowerHexAddress(address)) {
     throw new Error(`whales: token address must be 0x + 40 lowercase hex, got ${JSON.stringify(address)}`)
   }
   return sql.raw(`'${address}'`)
@@ -246,13 +248,6 @@ function parseWhaleRow(row: unknown): WhaleTx {
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
-    p.then(v => { clearTimeout(t); resolve(v) }, e => { clearTimeout(t); reject(e) })
-  })
-}
-
 /**
  * Settle both halves independently. The previous Promise.all meant the token
  * query's rejection also threw away a native result that had already succeeded,
@@ -281,13 +276,13 @@ export async function settleWhaleQueries(
 }
 
 /** A transfer with what the page needs to show and rank it: its token's decimals and its USD value. */
-export type RankedWhale = WhaleTx & {
+type RankedWhale = WhaleTx & {
   decimals: number
   /** value x price, a plain number, or null when this row has no price: shown as "no price", ranked last. */
   usd: number | null
 }
 
-export type WhaleFetch = {
+type WhaleFetch = {
   rows: RankedWhale[]
   /** The native price the rows were ranked with, or null when none could be had. The page says which. */
   nativeUsd: number | null

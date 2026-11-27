@@ -15,7 +15,7 @@
 import { Contract } from 'ethers'
 import { swallow } from './observability'
 import { getWebProvider } from './rpc'
-import { registerCache } from './cache-registry'
+import { createTtlCache } from './ttl-cache'
 import { isDefinitiveRevert, readTokenText } from './token-text-call'
 
 export type TokenMeta = { symbol: string | null; decimals: number | null }
@@ -24,22 +24,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
 ]
 
-const TTL_MS = 24 * 60 * 60 * 1000
-const MAX_ENTRIES = 5_000
-const cache = new Map<string, { meta: TokenMeta; expires: number }>()
-registerCache('token-meta', () => cache.size)
-
-function readCache(addr: string): TokenMeta | null {
-  const hit = cache.get(addr)
-  if (!hit) return null
-  if (Date.now() > hit.expires) { cache.delete(addr); return null }
-  return hit.meta
-}
-
-function writeCache(addr: string, meta: TokenMeta): void {
-  if (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value!)
-  cache.set(addr, { meta, expires: Date.now() + TTL_MS })
-}
+const cache = createTtlCache<TokenMeta>({ name: 'token-meta', max: 5_000, ttlMs: 24 * 60 * 60 * 1000 })
 
 /**
  * Resolve metadata for several tokens at once. Never throws and never rejects:
@@ -51,7 +36,7 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
   const misses: string[] = []
 
   for (const raw of new Set(addresses.map((a) => a.toLowerCase()))) {
-    const hit = readCache(raw)
+    const hit = cache.get(raw) ?? null
     if (!hit) misses.push(raw)
     // A cached "reverts on both" stays absent, like any token this cannot
     // resolve; it is just not asked again.
@@ -94,7 +79,7 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
         swallow('token/metadata', firstErr ?? new Error(`${addr}: no symbol() or decimals()`))
         // Both reverted: this contract has no metadata to give, on this visit or
         // any later one. Cache that, or every visit re-asks and re-logs it.
-        if (!transportFailed) writeCache(addr, { symbol: null, decimals: null })
+        if (!transportFailed) cache.set(addr, { symbol: null, decimals: null })
         return
       }
       const meta: TokenMeta = {
@@ -104,7 +89,7 @@ export async function fetchTokenMetadata(addresses: string[]): Promise<Map<strin
       if (meta.decimals != null && (!Number.isInteger(meta.decimals) || meta.decimals < 0 || meta.decimals > 36)) {
         meta.decimals = null
       }
-      if (!transportFailed) writeCache(addr, meta)
+      if (!transportFailed) cache.set(addr, meta)
       out.set(addr, meta)
     } catch (e) { swallow('token/metadata', e) }  // caller degrades to the raw amount
   }))

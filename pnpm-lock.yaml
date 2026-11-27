@@ -87,6 +87,9 @@ importers:
 
   apps/altscan-site:
     dependencies:
+      '@altscan/chain-config':
+        specifier: workspace:*
+        version: link:../../packages/chain-config
       '@altscan/oauth':
         specifier: workspace:*
         version: link:../../packages/oauth
@@ -106,6 +109,9 @@ importers:
         specifier: ^7.4.12
         version: 7.4.12(@types/node@26.6.6)(esbuild@0.28.2)(ioredis@5.9.3)(jiti@1.21.7)(tsx@4.23.15)(yaml@2.9.1)
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261117.1
+        version: 5.20261117.1
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -133,9 +139,6 @@ importers:
       '@altscan/settings-schema':
         specifier: workspace:*
         version: link:../../packages/settings-schema
-      '@altscan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       axios:
         specifier: ^1.21.1
         version: 1.21.1
@@ -206,9 +209,6 @@ importers:
       '@altscan/providers':
         specifier: workspace:*
         version: link:../../packages/providers
-      '@altscan/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       axios:
         specifier: ^1.21.1
         version: 1.21.1
@@ -315,8 +315,6 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
-
-  packages/types: {}
 
 packages:
 

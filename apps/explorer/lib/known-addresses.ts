@@ -26,9 +26,9 @@
 // web service (render.yaml), so this resolves identically on the server.
 import { chainConfig } from './chain-client'
 
-export type AddressCategory = 'exchange' | 'defi' | 'token' | 'bridge' | 'system'
-export type AddressLabel = { label: string; category: AddressCategory }
-export type ChainKey = 'bnb' | 'eth'
+type AddressCategory = 'exchange' | 'defi' | 'token' | 'bridge' | 'system'
+type AddressLabel = { label: string; category: AddressCategory }
+type ChainKey = 'bnb' | 'eth'
 
 /** Chain-agnostic: the same burn sinks exist on every EVM chain. */
 export const SHARED_ADDRESSES: Record<string, AddressLabel> = {
@@ -81,8 +81,4 @@ export function getLabelForChain(chain: ChainKey, address: string): AddressLabel
 
 export function getAddressLabel(address: string): string | null {
   return getLabelForChain(chainConfig.key as ChainKey, address)?.label ?? null
-}
-
-export function getAddressCategory(address: string): string | null {
-  return getLabelForChain(chainConfig.key as ChainKey, address)?.category ?? null
 }

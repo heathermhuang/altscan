@@ -1,3 +1,5 @@
+import { CHAINS } from '@altscan/chain-config';
+
 export interface Product {
   id: 'bnb' | 'eth';
   brand: string;        // "BNBScan"
@@ -14,13 +16,13 @@ export interface Product {
   miniWindowS: number;
 }
 
+// Brand, domain and chain name come from chain-config, which owns them; the rest is this site's.
+const fromChain = (id: Product['id']) => {
+  const c = CHAINS[id];
+  return { id, brand: c.brandName, domain: c.domain, url: `https://${c.domain}`, chain: c.name };
+};
+
 export const products: Product[] = [
-  {
-    id: 'bnb', brand: 'BNBScan', domain: 'bnbscan.com', url: 'https://bnbscan.com',
-    chain: 'BNB Chain', logoLetter: 'B', tapeBlocks: 150, miniWindowS: 30,
-  },
-  {
-    id: 'eth', brand: 'EthScan', domain: 'ethscan.io', url: 'https://ethscan.io',
-    chain: 'Ethereum', logoLetter: 'E', tapeBlocks: 16, miniWindowS: 30,
-  },
+  { ...fromChain('bnb'), logoLetter: 'B', tapeBlocks: 150, miniWindowS: 30 },
+  { ...fromChain('eth'), logoLetter: 'E', tapeBlocks: 16, miniWindowS: 30 },
 ];

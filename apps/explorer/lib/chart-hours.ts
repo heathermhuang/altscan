@@ -5,7 +5,7 @@
  * index only caught the end of are not plotted.
  */
 
-export const HOUR_MS = 3_600_000
+const HOUR_MS = 3_600_000
 
 /**
  * How far after the hour start the first hour's earliest block may land and still count as a whole

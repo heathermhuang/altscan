@@ -14,6 +14,7 @@
  * - repeated misses are negative-cached by fetchTxFactsFromRpc
  */
 import { fetchTxFactsFromRpc, type RpcTxFacts } from './rpc-fallback'
+import { createTtlCache } from './ttl-cache'
 
 export type ChainLookup =
   | { kind: 'found'; tx: RpcTxFacts }
@@ -22,28 +23,22 @@ export type ChainLookup =
 
 const MAX_CONCURRENT = 8
 const DEADLINE_MS = 8_000
-const HIT_TTL_MS = 10 * 60_000
-const HIT_CACHE_MAX = 500
 // Far past either chain's reorg window (BNB ~15 blocks x 0.45s, ETH ~3 x 12s).
 const SETTLED_AGE_MS = 10 * 60_000
 
 const inFlight = new Map<string, Promise<ChainLookup>>()
-const hits = new Map<string, { tx: RpcTxFacts; expires: number }>()
+const hits = createTtlCache<RpcTxFacts>({ name: 'tx-lookup-hits', max: 500, ttlMs: 10 * 60_000 })
 let running = 0
 
 function remember(key: string, tx: RpcTxFacts) {
   if (tx.pending || !tx.timestamp || Date.now() - tx.timestamp.getTime() < SETTLED_AGE_MS) return
-  if (hits.size >= HIT_CACHE_MAX) hits.delete(hits.keys().next().value!)
-  hits.set(key, { tx, expires: Date.now() + HIT_TTL_MS })
+  hits.set(key, tx)
 }
 
 export function lookupTxOnChain(hash: string): Promise<ChainLookup> {
   const key = hash.toLowerCase()
   const hit = hits.get(key)
-  if (hit) {
-    if (Date.now() < hit.expires) return Promise.resolve({ kind: 'found', tx: hit.tx })
-    hits.delete(key)
-  }
+  if (hit) return Promise.resolve({ kind: 'found', tx: hit })
   // The node call stays registered until it settles, past any caller's deadline: a retry for a
   // slow hash shares it instead of starting a duplicate that takes another slot.
   let work = inFlight.get(key)

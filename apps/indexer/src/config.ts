@@ -35,7 +35,7 @@ export const DEFAULT_HEAL_MAX_LAG = 50
 export const DEFAULT_QUARANTINE_AFTER = 5
 
 /** What one variable resolved to, and why. Drives the boot log. */
-export type Resolution = {
+type Resolution = {
   name: string
   /** Rendered value — never the raw secret for URL-ish vars. */
   value: string
@@ -165,6 +165,30 @@ class EnvReader {
   }
 
   /**
+   * A positive whole number read the way its old call site read it: parseInt, so a prefix
+   * like '25x' or '7d' still reads as 25 or 7. Only for values moved here from a parseInt
+   * site where a stricter parse could change a running safety setting (the reorg window, the
+   * compact-retention prune). New variables use `int`, which rejects a prefix. Only the
+   * boot-log visibility is new for these.
+   */
+  leadingPositiveInt(name: string, fallback: number, describeFallback = String(fallback)): number {
+    const raw = this.env[name]
+    const n = raw ? parseInt(raw, 10) : Number.NaN
+    const ok = Number.isFinite(n) && n > 0
+    this.record(name, ok ? String(n) : describeFallback, raw, ok)
+    return ok ? n : fallback
+  }
+
+  /**
+   * Days of retention, or Infinity ("immortal": never prune) when unset or not positive. A
+   * stricter parse would turn a prune that runs today into an immortal table that fills the
+   * disk until the emergency path fires, hence `leadingPositiveInt`.
+   */
+  daysOrImmortal(name: string): number {
+    return this.leadingPositiveInt(name, Infinity, 'Infinity (immortal)')
+  }
+
+  /**
    * Whole percent, 1-100, falling back with a warning on anything else.
    *
    * Moved from retention-cleanup.ts UNCHANGED, including the warnings, and now
@@ -208,8 +232,6 @@ export function redact(value: string): string {
   }
 }
 
-export type IndexerConfig = ReturnType<typeof readIndexerConfig>['config']
-
 /**
  * Defaults this module cannot derive on its own.
  *
@@ -224,6 +246,10 @@ export type ConfigDefaults = {
   concurrency: number
   /** internal_transactions partition width; a fraction of the retention window on each chain. */
   internalTxPartitionBlocks: number
+  /** chain-config's `reorgDepth`: how far back a reorg check walks (K). */
+  reorgDepth: number
+  /** Whether the async token_transfers writer is on unless ASYNC_TT_WRITER says otherwise. */
+  asyncTransferWriter: boolean
 }
 
 /** @param env process.env, or a fixture. Pure with respect to it. */
@@ -280,6 +306,8 @@ export function readIndexerConfig(
   const reorg = {
     /** ON unless explicitly '0'. */
     checkEnabled: r.enabledUnlessZero('REORG_CHECK'),
+    /** K, the deepest reorg the tail check walks. index.ts asserts it stays below RESUME_GAP_SCAN_BLOCKS. */
+    depth: r.leadingPositiveInt('REORG_DEPTH', defaults.reorgDepth),
     idleCheckMs: r.int('IDLE_REORG_CHECK_MS', 30_000, { min: 1 }),
     quarantineEnabled: r.enabledUnlessZero('POISON_BLOCK_QUARANTINE'),
     quarantineAfter: r.int('POISON_BLOCK_QUARANTINE_AFTER', DEFAULT_QUARANTINE_AFTER, { min: 1 }),
@@ -300,8 +328,8 @@ export function readIndexerConfig(
   }
 
   const transferWriter = {
-    /** Default ON for BNB (0.45s blocks need it), OFF for ETH. */
-    async: r.tristate('ASYNC_TT_WRITER', (env.CHAIN ?? 'bnb') === 'bnb'),
+    /** Default per chain (config-instance.ts): ON for BNB, OFF for ETH. */
+    async: r.tristate('ASYNC_TT_WRITER', defaults.asyncTransferWriter),
     /**
      * Backpressure bound on pending rows. Must never be NaN: the dual-bound
      * loops break on `rows <= bound` and `x <= NaN` is always false, so a NaN
@@ -323,14 +351,6 @@ export function readIndexerConfig(
     poolSize: r.int('TT_WRITER_POOL_SIZE', 2, { min: 1 }),
   }
 
-  const holders = {
-    queueWarnDepth: r.int('HOLDER_QUEUE_WARN_DEPTH', 500, { min: 1 }),
-    countIntervalMin: r.int('HOLDER_COUNT_INTERVAL_MIN', 15, { min: 1 }),
-    countLagThreshold: r.int('HOLDER_COUNT_LAG_THRESHOLD', 1000, { min: 0 }),
-    recomputeChunk: r.int('HOLDER_RECOMPUTE_CHUNK', 2000, { min: 1 }),
-    recomputeSleepMs: r.int('HOLDER_RECOMPUTE_SLEEP_MS', 100, { min: 0 }),
-  }
-
   const tokenHeal = {
     /** ON unless '0'. Re-fetches token metadata a one-shot first-sight fetch left as a placeholder. */
     enabled: r.enabledUnlessZero('TOKEN_HEAL_ENABLED'),
@@ -342,6 +362,12 @@ export function readIndexerConfig(
 
   const retention = {
     days: r.int('RETENTION_DAYS', 7, { min: 1 }),
+    /**
+     * COMPACT_RETENTION_DAYS: when finite, compact tables are pruned below this age (the
+     * per-chain override for the heavy chains). Infinity = compact tables are immortal.
+     * Never set it below RETENTION_DAYS on BNB (AGENTS.md): that brings back the ~20h UPDATE.
+     */
+    compactDays: r.daysOrImmortal('COMPACT_RETENTION_DAYS'),
     deleteBatch: r.int('RETENTION_DELETE_BATCH', 50_000, { min: 1 }),
     batchSleepMs: r.int('RETENTION_BATCH_SLEEP_MS', 250, { min: 0 }),
     /** Lag above which retention pauses between batches. 0 disables. */
@@ -407,10 +433,6 @@ export function readIndexerConfig(
     diskStopPct: r.int('BACKFILL_DISK_STOP_PCT', 70, { min: 1 }),
   }
 
-  const verifier = {
-    sourcifyApi: r.string('SOURCIFY_API', 'https://sourcify.dev/server'),
-  }
-
   const webhooks = {
     /** 64 hex chars; seals webhook signing keys at rest (webhook-secret.ts). Unset = plaintext, as before. */
     secretKey: r.credential('WEBHOOK_SECRET_KEY'),
@@ -423,23 +445,8 @@ export function readIndexerConfig(
   }
 
   const config = {
-    indexing, rpc, reorg, gapHeal, transferWriter, holders, tokenHeal,
-    retention, partitions, internalTx, backfill, verifier, webhooks, runtime,
-
-    /**
-     * Per-block holder-balance tracking.
-     *
-     * Hardcoded off, and NOT env-tunable — it lives here rather than in
-     * block-processor.ts so retention-cleanup.ts can read it without importing
-     * a 1,833-line module (and executing its module side effects, including a
-     * console.warn) for one boolean.
-     *
-     * While OFF, token_balances receives no per-block writes, so the periodic
-     * holder_count recompute has no new input and is skipped — it would
-     * otherwise full-scan a frozen token_balances for minutes and stall block
-     * ingestion via disk-I/O contention while updating zero rows.
-     */
-    holderBalanceTrackingEnabled: false,
+    indexing, rpc, reorg, gapHeal, transferWriter, tokenHeal,
+    retention, partitions, internalTx, backfill, webhooks, runtime,
 
     /**
      * Floored AT the backpressure bound, so a misconfigured override can never

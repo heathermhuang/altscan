@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '@altscan/db'
-import { END_OF_BLOCK, encodeCursor, type WatchCursor } from '@/lib/watch-cursor'
+import { END_OF_BLOCK, encodeWatchCursor, type WatchCursor } from '@/lib/watch-cursor'
 import { safeBigInt } from '@/lib/format'
 
 /** apps/indexer/src/token-metadata.ts stores this symbol when a token's metadata could not be read. */
@@ -177,7 +177,7 @@ export async function readWatchEvents(db: Db, owner: string, cursor: WatchCursor
     if (!tip) return { status: 'not_ready' }
     const floor = await retentionFloor(tx)
     const page = (events: WatchEvent[], next: WatchCursor, rewound: boolean): WatchPage =>
-      ({ status: 'ok', body: { events, cursor: encodeCursor(next), tip: tip.number, oldestAvailableBlock: floor, rewound } })
+      ({ status: 'ok', body: { events, cursor: encodeWatchCursor(next), tip: tip.number, oldestAvailableBlock: floor, rewound } })
     const endOf = (ref: BlockRef): WatchCursor => ({ b: ref.number, h: ref.hash, k: END_OF_BLOCK, i: 0, w: '' })
 
     // First call: start at the tip. Only events after the client started watching, no backlog.

@@ -31,6 +31,7 @@ import { getBlockStrip } from '@/lib/block-strip'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { txShareOfBlock } from '@/lib/tape'
 import { BlockStrip } from '@/components/tape/BlockStrip'
+import { isHexHash, isLowerHexAddress } from '@/lib/hex'
 
 // 60s (not 300): with ISR a transient miss — a just-broadcast tx during
 // RPC/indexer lag — caches its 404 for everyone until the next revalidate.
@@ -117,7 +118,7 @@ const NOT_FOUND_METADATA: Metadata = {
 
 export async function generateMetadata({ params }: { params: Promise<{ hash: string }> }): Promise<Metadata> {
   const { hash } = await params
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+  if (!isHexHash(hash)) {
     return { title: 'Transaction Not Found', ...NOT_FOUND_METADATA }
   }
   const { dbTx, rpcTx } = await getTx(hash)
@@ -203,7 +204,7 @@ function decodeTransferInput(input: string | null): { to: string; amount: bigint
   try {
     const to = ('0x' + input.slice(34, 74)).toLowerCase()
     const amount = BigInt('0x' + input.slice(74))
-    if (!/^0x[0-9a-f]{40}$/.test(to)) return null
+    if (!isLowerHexAddress(to)) return null
     return { to, amount }
   } catch {
     return null
@@ -222,7 +223,7 @@ export default async function TxDetailPage({
   params: Promise<{ hash: string }>
 }) {
   const { hash } = await params
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) notFound()
+  if (!isHexHash(hash)) notFound()
 
   const { dbTx, rpcTx, body, kind } = await getTx(hash)
   const tx = dbTx ?? rpcTx

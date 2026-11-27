@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { END_OF_BLOCK, decodeCursor, encodeCursor, type WatchCursor } from './watch-cursor'
+import { END_OF_BLOCK, decodeWatchCursor, encodeWatchCursor, type WatchCursor } from './watch-cursor'
 
 const H = '0x' + 'ab'.repeat(32)
 const W = '0x' + 'cd'.repeat(20)
@@ -7,14 +7,14 @@ const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url')
 
 describe('watch cursor', () => {
   it('accepts the largest int4 index', () => {
-    expect(decodeCursor(enc([1, H, 0, 2147483647, W]))?.i).toBe(2147483647)
+    expect(decodeWatchCursor(enc([1, H, 0, 2147483647, W]))?.i).toBe(2147483647)
   })
 
   it('round-trips an event position and an end-of-block position', () => {
     const at: WatchCursor = { b: 12345678, h: H, k: 1, i: 4, w: W }
     const end: WatchCursor = { b: 12345678, h: H, k: END_OF_BLOCK, i: 0, w: '' }
-    expect(decodeCursor(encodeCursor(at))).toEqual(at)
-    expect(decodeCursor(encodeCursor(end))).toEqual(end)
+    expect(decodeWatchCursor(encodeWatchCursor(at))).toEqual(at)
+    expect(decodeWatchCursor(encodeWatchCursor(end))).toEqual(end)
   })
 
   it.each([
@@ -29,6 +29,6 @@ describe('watch cursor', () => {
     ['bad watched address', enc([1, H, 0, 0, '0xzz'])],
     ['oversized', 'a'.repeat(513)],
   ])('refuses %s', (_, s) => {
-    expect(decodeCursor(s)).toBeNull()
+    expect(decodeWatchCursor(s)).toBeNull()
   })
 })

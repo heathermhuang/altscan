@@ -12,29 +12,18 @@ import { indexerConfig } from './config-instance'
 import { getMaintenanceDb, dbErrorMessage, unwrapDbError } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listPartitions, ensureForwardPartitions, ensureInternalTxPartitions, type PartitionedParent } from './ensure-schema'
-import { buildRetentionPlan, parseCompactRetentionDays, bodyPruneIsRedundant } from './retention-policy'
+import { buildRetentionPlan, bodyPruneIsRedundant } from './retention-policy'
 
 const RETENTION_DAYS = indexerConfig.retention.days
-const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
-// Holder-count recompute scans token_balances and updates tokens — takes
-// 10-20s on BNB under load and holds DB-pool slots while running, which
-// starves the block indexer and web queries. Every 15min is a reasonable
-// default (token-page holder counts are eventually consistent anyway).
-// Override with HOLDER_COUNT_INTERVAL_MIN env var if you want faster freshness.
-const HOLDER_COUNT_EVERY_MS = indexerConfig.holders.countIntervalMin * 60 * 1000
 // Disk size of the DB's attached volume in GB (from Render plan). Used to
 // compute disk-% usage in size reports so we catch "DB is 80% full but retention
 // found nothing to delete" situations before the disk-full alert fires.
 // 0 means unknown — size is still reported, percentage is not.
 const DB_DISK_GB     = indexerConfig.retention.dbDiskGb
-// Skip expensive maintenance (holder-count recompute) when the indexer is
-// too far behind the tip. Prevents a 30-60s DB-hogging query from compounding
-// lag when we're already losing the race to catch up.
-const HOLDER_COUNT_LAG_THRESHOLD = indexerConfig.holders.countLagThreshold
 
 // ── Batched-maintenance tuning ──────────────────────────────────────
-// Every heavy DELETE and the holder-count recompute run in bounded chunks with a
+// Every heavy DELETE runs in bounded chunks with a
 // sleep between them, so they trickle disk I/O to the live indexer instead of
 // running as one multi-minute statement. Before this, a single unbounded DELETE +
 // a 6-min monolithic recompute saturated the DB's disk I/O and crawled block
@@ -62,15 +51,12 @@ const RETENTION_LAG_THRESHOLD = indexerConfig.retention.lagThreshold
 const RETENTION_MAX_YIELD_MS = indexerConfig.retention.maxYieldMin * 60_000
 const RETENTION_YIELD_POLL_MS = 5_000
 
-const HOLDER_RECOMPUTE_CHUNK = indexerConfig.holders.recomputeChunk
-const HOLDER_RECOMPUTE_SLEEP_MS = indexerConfig.holders.recomputeSleepMs
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// Indexer lag reporter — index.ts pushes lag on every batch advance so
-// recomputeHolderCounts can decide whether to skip this tick.
+// Indexer lag reporter — index.ts pushes lag on every batch advance so the
+// batched deletes can yield to a lagging indexer (getLag below).
 let reportedLag = 0
 export function reportIndexerLag(lag: number): void {
   reportedLag = lag
@@ -807,7 +793,7 @@ async function reportSizes(): Promise<number> {
 
 async function runCleanup(override?: { bodyDays?: number; compactDays?: number }): Promise<void> {
   const days = override?.bodyDays ?? RETENTION_DAYS
-  const compactDays = override?.compactDays ?? parseCompactRetentionDays()
+  const compactDays = override?.compactDays ?? indexerConfig.retention.compactDays
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const tag = override !== undefined ? `${days}d body/${compactDays}d compact emergency` : `${days}d body`
   console.log(`[retention] Running cleanup — body cutoff ${cutoff.toISOString()} (${tag}); ` +
@@ -868,7 +854,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   // transactions and token_transfers are compact-immortal here — transactions keeps
   // its row (input is nulled below), token_transfers is untouched. Compact-table row
   // deletes happen only under the explicit finite override (see the compact block).
-  const plan = buildRetentionPlan({ ttPartitioned })
+  const plan = buildRetentionPlan({ compactDays: indexerConfig.retention.compactDays, ttPartitioned })
   const blockNumberTables = plan.bodyDeleteTables   // ['logs','dex_trades','gas_history']
 
   let totalDeleted = 0
@@ -1154,77 +1140,6 @@ async function runVacuumFull(): Promise<void> {
 }
 
 /**
- * Recompute tokens.holder_count from current token_balances, in throttled chunks.
- *
- * Gated on indexerConfig.holderBalanceTrackingEnabled: while per-block balance writes are
- * disabled, token_balances is static, so this has no new input and is skipped
- * entirely. The old monolithic single-statement version had grown to ~6 min and
- * saturated disk I/O, stalling block ingestion while updating zero rows.
- *
- * When tracking is on, it pages over tokens by address (keyset) and updates
- * holder_count a chunk at a time with a sleep between chunks, so it never holds the
- * DB's I/O for minutes. Semantics match the old full recompute: a token with no
- * balance>0 rows is set to 0 (LEFT JOIN + COALESCE), and only rows whose count
- * actually changes are written. Eventual consistency is fine for holder counts.
- */
-let holderCountDisabledLogged = false
-async function recomputeHolderCounts(): Promise<void> {
-  if (!indexerConfig.holderBalanceTrackingEnabled) {
-    // Static token_balances → nothing to recompute. Log the reason once, stay quiet after.
-    if (!holderCountDisabledLogged) {
-      console.log('[holder-count] recompute disabled — holder-balance tracking is off (token_balances static); skipping')
-      holderCountDisabledLogged = true
-    }
-    return
-  }
-  if (reportedLag > HOLDER_COUNT_LAG_THRESHOLD) {
-    console.log(`[holder-count] skipping — indexer lag ${reportedLag} > ${HOLDER_COUNT_LAG_THRESHOLD}`)
-    return
-  }
-  const db = getMaintenanceDb()
-  const start = Date.now()
-  let cursor = ''
-  let pages = 0
-  let updated = 0
-  try {
-    for (;;) {
-      // Keyset page of token addresses (indexed scan on the PK, no OFFSET blowup).
-      const page = await db.execute(
-        sql`SELECT address FROM tokens WHERE address > ${cursor} ORDER BY address LIMIT ${HOLDER_RECOMPUTE_CHUNK}`
-      )
-      const addrs = Array.from(page).map(r => (r as Record<string, unknown>).address as string)
-      if (addrs.length === 0) break
-      cursor = addrs[addrs.length - 1]
-      pages++
-
-      const addrValues = sql.join(addrs.map(a => sql`(${a})`), sql`, `)
-      const result = await db.execute(sql`
-        WITH page(address) AS (VALUES ${addrValues}),
-        new_counts AS (
-          SELECT token_address, COUNT(*)::int AS cnt
-          FROM token_balances
-          WHERE balance > 0 AND token_address IN (SELECT address FROM page)
-          GROUP BY token_address
-        )
-        UPDATE tokens t
-        SET holder_count = COALESCE(nc.cnt, 0)
-        FROM page
-        LEFT JOIN new_counts nc ON nc.token_address = page.address
-        WHERE t.address = page.address
-          AND t.holder_count IS DISTINCT FROM COALESCE(nc.cnt, 0)
-      `)
-      updated += Number((result as any).count ?? (result as any).rowCount ?? 0)
-
-      if (addrs.length < HOLDER_RECOMPUTE_CHUNK) break
-      await sleep(HOLDER_RECOMPUTE_SLEEP_MS)
-    }
-    console.log(`[holder-count] chunked recompute done in ${Date.now() - start}ms (${pages} pages, ${updated} tokens updated)`)
-  } catch (err) {
-    console.warn('[holder-count] recompute failed:', dbErrorMessage(err))
-  }
-}
-
-/**
  * Single-flight wrapper (exported for tests). A retention cycle can outlast
  * RUN_EVERY_MS on a high-volume day — first observed 2026-07-17, when a
  * ~3.4M-row input-null band ran 3h42m+ against the 6h cadence. Overlapping
@@ -1264,8 +1179,8 @@ export async function startRetentionCleanup(): Promise<void> {
   // Previously awaited runCleanup() here so getLastIndexedBlock saw a clean
   // state. But with 3-day retention on a 15GB/day DB, the startup DELETE
   // saturates the 12-connection pool for 30+ minutes — starving the block
-  // workers and the holder-balance queue drainer, causing the queue to grow
-  // unboundedly on every restart. The 6h interval below catches the same
+  // workers (and, while it existed, the holder-balance queue drainer) on every
+  // restart. The 6h interval below catches the same
   // work without blocking startup; the pool stays hot for block processing.
   const STARTUP_DELAY_MS = 15 * 60 * 1000
   console.log(`[retention] startup cleanup deferred by ${STARTUP_DELAY_MS / 60_000}min to avoid DB-pool starvation`)
@@ -1282,14 +1197,4 @@ export async function startRetentionCleanup(): Promise<void> {
   setInterval(() => {
     runCleanupGuarded().catch(err => console.error('[retention] cleanup error:', unwrapDbError(err)))
   }, RUN_EVERY_MS)
-
-  // Recompute holder_count periodically (replaces per-block inline tracking).
-  // First run is delayed so it doesn't collide with the retention job above.
-  console.log(`[holder-count] recompute every ${HOLDER_COUNT_EVERY_MS / 60_000}min`)
-  setTimeout(() => {
-    recomputeHolderCounts().catch(err => console.error('[holder-count] initial error:', unwrapDbError(err)))
-    setInterval(() => {
-      recomputeHolderCounts().catch(err => console.error('[holder-count] interval error:', unwrapDbError(err)))
-    }, HOLDER_COUNT_EVERY_MS)
-  }, 60_000)
 }

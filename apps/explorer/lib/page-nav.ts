@@ -1,7 +1,7 @@
 import { formatNumber } from '@/lib/format'
 import { MAX_LIST_ROWS, lastListPage } from '@/lib/list-depth'
 
-export type PageNav = { label: string; hasPrev: boolean; hasNext: boolean }
+type PageNav = { label: string; hasPrev: boolean; hasNext: boolean }
 
 /**
  * What <Pagination> prints and links, as pure data. Null when there is nothing to page through.

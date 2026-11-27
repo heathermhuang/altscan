@@ -7,9 +7,9 @@
  *  - 'rpc'    : no row at all (predates the local index) → render entirely from RPC.
  *  - 'missing': neither DB nor RPC has it → 404.
  */
-export type DbTxLike = { bodyPruned?: boolean | null } | null | undefined
-export type RpcTxLike = unknown | null | undefined
-export type TxViewKind = 'local' | 'pruned' | 'rpc' | 'missing'
+type DbTxLike = { bodyPruned?: boolean | null } | null | undefined
+type RpcTxLike = unknown | null | undefined
+type TxViewKind = 'local' | 'pruned' | 'rpc' | 'missing'
 
 export function resolveTxViewKind(dbTx: DbTxLike, rpcTx: RpcTxLike): TxViewKind {
   if (dbTx) return dbTx.bodyPruned ? 'pruned' : 'local'
@@ -17,7 +17,7 @@ export function resolveTxViewKind(dbTx: DbTxLike, rpcTx: RpcTxLike): TxViewKind 
   return 'missing'
 }
 
-export type TxOutcome = 'success' | 'failed' | 'pending'
+type TxOutcome = 'success' | 'failed' | 'pending'
 
 /**
  * What the page may say a tx did. `pending` (no receipt yet) wins over `status`: rpc-fallback has

@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { chainConfig } from '@/lib/chain-client'
+import { ADDRESS_PATTERN, HASH_PATTERN, isHexAddress, isHexHash } from '@/lib/hex'
 
 /**
  * WebMCP (https://webmachinelearning.github.io/webmcp/) — exposes a small
@@ -29,10 +30,6 @@ function hasModelContext(nav: Navigator): nav is Navigator & { modelContext: Mod
   return typeof (nav as unknown as { modelContext?: unknown }).modelContext === 'object'
 }
 
-function isHexHash(s: unknown, length: 40 | 64): boolean {
-  return typeof s === 'string' && new RegExp(`^0x[0-9a-fA-F]{${length}}$`).test(s)
-}
-
 export function WebMcpProvider() {
   useEffect(() => {
     if (typeof navigator === 'undefined' || !hasModelContext(navigator)) return
@@ -51,14 +48,14 @@ export function WebMcpProvider() {
           properties: {
             hash: {
               type: 'string',
-              pattern: '^0x[0-9a-fA-F]{64}$',
+              pattern: HASH_PATTERN,
               description: 'Transaction hash (0x + 64 hex chars).',
             },
           },
         },
         execute: async (raw) => {
           const args = raw as { hash?: string } | undefined
-          if (!args || !isHexHash(args.hash, 64)) throw new Error('Invalid transaction hash.')
+          if (!args || !(typeof args.hash === 'string' && isHexHash(args.hash))) throw new Error('Invalid transaction hash.')
           window.location.assign(`/tx/${args.hash}`)
           return { navigatedTo: `/tx/${args.hash}` }
         },
@@ -73,14 +70,14 @@ export function WebMcpProvider() {
           properties: {
             address: {
               type: 'string',
-              pattern: '^0x[0-9a-fA-F]{40}$',
+              pattern: ADDRESS_PATTERN,
               description: 'Address (0x + 40 hex chars).',
             },
           },
         },
         execute: async (raw) => {
           const args = raw as { address?: string } | undefined
-          if (!args || !isHexHash(args.address, 40)) throw new Error('Invalid address.')
+          if (!args || !(typeof args.address === 'string' && isHexAddress(args.address))) throw new Error('Invalid address.')
           window.location.assign(`/address/${args.address}`)
           return { navigatedTo: `/address/${args.address}` }
         },

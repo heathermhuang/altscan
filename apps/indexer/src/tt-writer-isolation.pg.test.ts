@@ -50,7 +50,7 @@ const BAD_VALUE = { value: 'not-a-number' }   // 22P02, class 22: the block's ow
 
 describe.skipIf(!PG_URL)('transfer writer isolates a failing block — real Postgres', () => {
   const conn = createMaintenanceConnection(PG_URL as string)
-  type Writer = typeof import('./block-processor')
+  type Writer = typeof import('./transfer-writer')
   let w: Writer
   let errors: string[]
   const W = () => w.getTransferQueueDepth().durableBlock
@@ -64,7 +64,7 @@ describe.skipIf(!PG_URL)('transfer writer isolates a failing block — real Post
   async function boot(seed: number) {
     await conn.unsafe(`UPDATE indexer_cursor SET transfers_durable_block = ${seed} WHERE id = 1`)
     vi.resetModules()
-    w = await import('./block-processor')
+    w = await import('./transfer-writer')
     w.initTransferWriter(seed)
   }
 

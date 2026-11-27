@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  initTransferWriter, rollbackTransferWriterTo, purgeTransferQueueAbove,
-  enqueueTransferWrite, getTransferQueueDepth,
-} from './block-processor'
+import { initTransferWriter, rollbackTransferWriterTo, purgeTransferQueueAbove, enqueueTransferWrite, getTransferQueueDepth } from './transfer-writer'
 
 // Isolated in its OWN test file: initTransferWriter seeds module-level state, and a
 // seeded writer drains on every enqueue — vitest gives each test file a fresh module

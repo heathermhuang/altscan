@@ -1,7 +1,9 @@
+import { LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT } from './api-limits'
 /**
- * How deep the explorer's newest-first lists go: the newest 10,000 rows, as the token
- * page's transfer list already does (TOKEN_TRANSFERS_MAX_ROWS) and POST /api/v1/query's
- * MAX_OFFSET allows.
+ * How deep the explorer's newest-first lists go, the token page's transfer list included:
+ * the newest 10,000 rows (400 pages of 25). In 6h40m of logs on 2026-09-13 crawlers walked
+ * the token list to page 198; nothing asked for page 400. POST /api/v1/query's offset cap
+ * (QUERY_MAX_OFFSET, lib/api-limits.ts) is the same depth, kept as its own published limit.
  *
  * Every page reads every row before it: OFFSET n makes Postgres walk and discard n rows,
  * so without a cap `?page=` sets the cost of the query, and each distinct page number is
@@ -27,10 +29,10 @@ export function clampListPage(page: number, perPage: number): number {
  */
 export function apiListPage(params: URLSearchParams): { page: number; limit: number; offset: number } | { error: string } {
   const rawPage = Number(params.get('page') ?? 1)
-  const rawLimit = Number(params.get('limit') ?? 20)
+  const rawLimit = Number(params.get('limit') ?? LIST_DEFAULT_LIMIT)
   if (!Number.isFinite(rawPage) || !Number.isFinite(rawLimit)) return { error: 'Invalid pagination parameters' }
   const page = Math.max(1, Math.floor(rawPage))
-  const limit = Math.min(50, Math.max(1, Math.floor(rawLimit)))
+  const limit = Math.min(LIST_MAX_LIMIT, Math.max(1, Math.floor(rawLimit)))
   const offset = (page - 1) * limit
   if (offset >= MAX_LIST_ROWS) {
     return {

@@ -19,7 +19,7 @@ import type { Lookalike } from './lookalike-note'
 export type TrackedToken = { address: string; symbol: string; decimals: number; kind: 'stablecoin' | 'wrapped' }
 
 /** Where a row's USD value came from: a $1 stablecoin, the native coin's price, or the data provider. */
-export type HoldingBasis = 'stablecoin' | 'native' | 'provider'
+type HoldingBasis = 'stablecoin' | 'native' | 'provider'
 
 export type HoldingRow = {
   tokenAddress: string

@@ -1,5 +1,7 @@
 import { db, schema } from '@/lib/db'
-import { countTokenTransfers, selectTokenTransfers, TOKEN_TRANSFERS_MAX_ROWS } from '@/lib/token-transfers-query'
+import { countTokenTransfers, selectTokenTransfers } from '@/lib/token-transfers-query'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
+import { parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
@@ -31,6 +33,8 @@ import { RiskSignals } from './RiskSignals'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
+import { isHexAddress } from '@/lib/hex'
+import { withTimeout } from '@/lib/with-timeout'
 
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
@@ -47,14 +51,6 @@ type OnDemandToken = {
   holderCount: number
   address: string
   type: string
-}
-
-/** Resolve a fallback after `ms` so a slow DB/RPC call never blocks the page render. */
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ])
 }
 
 // Wrapped in cache() so generateMetadata and the page render share one RPC round-trip
@@ -138,7 +134,7 @@ const NOT_FOUND_METADATA: Metadata = {
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+  if (!isHexAddress(address)) {
     return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   let token: typeof schema.tokens.$inferSelect | null = null
@@ -173,7 +169,6 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
 
 export const revalidate = 300
 
-const PAGE_SIZE = 25
 
 export default async function TokenDetailPage({
   params,
@@ -183,12 +178,12 @@ export default async function TokenDetailPage({
   searchParams: Promise<{ page?: string }>
 }) {
   const { address } = await params
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
+  if (!isHexAddress(address)) notFound()
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
-  // The list stops at TOKEN_TRANSFERS_MAX_ROWS, so a deeper ?page= gets its last page.
-  const page = Math.min(TOKEN_TRANSFERS_MAX_ROWS / PAGE_SIZE, Math.max(1, parseInt(pageStr ?? '1', 10) || 1))
-  const offset = (page - 1) * PAGE_SIZE
+  // The list stops at MAX_LIST_ROWS, so a deeper ?page= gets its last page.
+  const page = parsePageParam(pageStr)
+  const offset = (page - 1) * PER_PAGE
 
   let token: typeof schema.tokens.$inferSelect | null = null
   try {
@@ -231,42 +226,31 @@ export default async function TokenDetailPage({
   // holders client-side via <HoldersLazy> → /api/internal/token/<addr>/holders (bots don't run
   // the XHR, so they never spend CU — same model as the address tabs). This removes the last
   // unguarded SSR Moralis call; the edge /token/ Managed Challenge + holders bucket cap remain.
-  const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
+  const marketDataPromise = withTimeout(getTokenMarketData(addr), 6000).catch(() => null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [NO_LOCAL_TRANSFERS, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
-        withTimeout(
-          selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset })
-            .catch(() => null),
-          6000,
-          null,
-        ),
+        withTimeout(selectTokenTransfers(db, addr, { limit: PER_PAGE, offset }), 6000).catch(() => null),
         // Counts at most one row past the list. -1 = "unknown" (timed out /
         // errored) so we never render a misleading "0 total".
-        withTimeout(
-          countTokenTransfers(db, addr)
-            .then(([r]) => r?.value ?? 0)
-            .catch(() => -1),
-          5000,
-          -1,
-        ),
-        withTimeout(getTokenHolders(addr, { skipProvider: true }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
-        withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
+        withTimeout(countTokenTransfers(db, addr).then(([r]) => r?.value ?? 0), 5000).catch(() => -1),
+        withTimeout(getTokenHolders(addr, { skipProvider: true }), 6000).catch(() => EMPTY_HOLDERS),
+        withTimeout(analyzeTokenRisk(addr), 5000).catch(() => [] as RiskSignal[]),
       ])
   const marketData = await marketDataPromise
   const countKnown = totalTransfersRaw >= 0
   const totalTransfers = countKnown ? totalTransfersRaw : 0
   // More than the list serves reads as "10,000+".
-  const totalLabel = totalTransfers > TOKEN_TRANSFERS_MAX_ROWS
-    ? `${formatNumber(TOKEN_TRANSFERS_MAX_ROWS)}+`
+  const totalLabel = totalTransfers > MAX_LIST_ROWS
+    ? `${formatNumber(MAX_LIST_ROWS)}+`
     : formatNumber(totalTransfers)
   // When the exact count is unknown, estimate just enough to drive prev/next:
   // assume another page exists only if this one came back full.
   const pageRows = transfers ?? []
   const transfersState = transfersEmptyState({ rows: transfers, count: totalTransfersRaw, offset })
-  const paginationTotal = Math.min(TOKEN_TRANSFERS_MAX_ROWS, countKnown
+  const paginationTotal = Math.min(MAX_LIST_ROWS, countKnown
     ? totalTransfers
-    : offset + pageRows.length + (pageRows.length === PAGE_SIZE ? PAGE_SIZE : 0))
+    : offset + pageRows.length + (pageRows.length === PER_PAGE ? PER_PAGE : 0))
 
   // The DB column is NOT NULL, so only a token resolved live can have unknown decimals (a failed decimals() read).
   const decimals = readDecimals(token.decimals)
@@ -511,7 +495,7 @@ export default async function TokenDetailPage({
       <Pagination
         page={page}
         total={paginationTotal}
-        perPage={PAGE_SIZE}
+        perPage={PER_PAGE}
         baseUrl={`/token/${addr}`}
       />
     </div>

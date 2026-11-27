@@ -21,7 +21,7 @@ type Caller = { call(tx: { to: string; data: string }): Promise<string> }
  * oversized return, data that is not an ABI string). Otherwise the read failed for a reason that says nothing about
  * the contract, and must not be cached.
  */
-export type TextRead = { settled: true; text: string | null } | { settled: false; err: unknown }
+type TextRead = { settled: true; text: string | null } | { settled: false; err: unknown }
 
 const TRANSPORT_RPC_CODES = new Set([-32005, -32007, -32029, 429])
 const TRANSPORT_TEXT = /rate.?limit|limit reached|too many requests|\b429\b|timed? ?out|timeout|throttl|capacity|unavailable/i

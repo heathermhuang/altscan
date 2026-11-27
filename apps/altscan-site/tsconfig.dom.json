@@ -1,0 +1,6 @@
+{
+  // Typecheck for the scripts Astro bundles for the browser and for the node test harness:
+  // the DOM lib. See tsconfig.worker.json.
+  "extends": "./tsconfig.json",
+  "include": ["src/scripts/**/*", "test/**/*"]
+}

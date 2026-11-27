@@ -368,14 +368,14 @@ describe.skipIf(!PG_URL)('round-5 indexes — against a real Postgres', () => {
     // Retention DROPs the oldest partition. If the build was part-way, the last UNCOVERED partition can be
     // the one dropped: every remaining partition is then indexed, yet Postgres only re-evaluates a parent's
     // validity when a child is ATTACHED — so it would stay invalid for ever. The fix is a repeated ATTACH of an
-    // already-attached child, which counts on 16.14, 18.4 and 18.6 (all measured) but NOT on 18.1 and 18.3
+    // already-attached child, which counts on 16.14, 18.4 and 18.6 (all measured) but NOT on 16.13, 18.1 and 18.3
     // (measured): there the parent stays invalid with every partition indexed, which is harmless (the planner
     // uses the leaf indexes, never the parent's flag) and must not error. Production: BNB (partitioned) is 18.4;
     // ETH is 18.3 but not partitioned, so this path never runs there.
     it('re-validates a parent left invalid because retention dropped the last uncovered partition', async () => {
       const w = BNB_SPEC
       const [{ v }] = await rows(`SELECT current_setting('server_version_num')::int AS v`)
-      const reAttachRevalidates = !(Number(v) >= 180000 && Number(v) < 180004)
+      const reAttachRevalidates = !(Number(v) >= 180000 && Number(v) < 180004) && !(Number(v) >= 160000 && Number(v) < 160014)
       await conn.unsafe(`DROP INDEX ${w.name}`)
       await conn.unsafe('CREATE TABLE token_transfers_p_9200000 PARTITION OF token_transfers FOR VALUES FROM (9200000) TO (9300000)')  // no parent yet: not cloned
       const covered = (await partitionNames()).filter(p => p !== 'token_transfers_p_9200000')

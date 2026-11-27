@@ -43,3 +43,24 @@ describe('apiListPage', () => {
     expect(apiListPage(q('page=1000000000'))).toHaveProperty('error')
   })
 })
+
+// One rule for a `?page=` value: parsePageParam (lib/list-pages.ts). The address and token pages
+// parsed it with parseInt, so `?page=3abc` served page 3 there and page 1 everywhere else.
+describe('page params are parsed in one place', () => {
+  it('no page or component parses a ?page= value by hand', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const root = join(__dirname, '..')
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => {
+      const p = join(dir, n)
+      if (n === 'node_modules' || n.startsWith('.')) return []
+      if (statSync(p).isDirectory()) return walk(p)
+      return /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n) ? [p] : []
+    })
+    const handParse = /\b(?:parseInt|Number)\(\s*(?:pageStr|page|sp\.page|searchParams\.page|params\.page)\b/
+    const hits = [...walk(join(root, 'app')), ...walk(join(root, 'components'))]
+      .filter((f) => handParse.test(readFileSync(f, 'utf8'))).map((f) => f.slice(root.length + 1))
+    expect(hits).toEqual([])
+    expect(handParse.test("parseInt(pageStr ?? '1', 10)")).toBe(true)
+  })
+})

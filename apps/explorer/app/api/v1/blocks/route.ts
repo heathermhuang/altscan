@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { desc, sql } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, rateLimitResponse } from '@/lib/api-rate-limit'
 import { apiListPage } from '@/lib/list-depth'
 import { apiJson } from '@/lib/api-serialize'
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   if (!(await checkIpRateLimit(request.headers))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   const { searchParams } = new URL(request.url)

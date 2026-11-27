@@ -64,10 +64,6 @@ export function formatNativeToken(wei: bigint | string, maxDecimals = 4): string
   return combined.includes('.') ? combined.replace(/0+$/, '').replace(/\.$/, '') : combined
 }
 
-/** @deprecated Use formatNativeToken instead */
-export const formatBNB = formatNativeToken
-export const formatETH = formatNativeToken
-
 export function formatGwei(wei: bigint | string): string {
   const gwei = Number(formatUnits(safeBigInt(wei), 'gwei'))
   if (gwei === 0) return '0'
@@ -75,10 +71,6 @@ export function formatGwei(wei: bigint | string): string {
   // Use adaptive precision and trim trailing zeros so 0.1 shows as "0.1", not "0.10".
   const decimals = gwei < 0.01 ? 6 : gwei < 1 ? 4 : 2
   return gwei.toFixed(decimals).replace(/\.?0+$/, '')
-}
-
-export function formatAddress(addr: string, chars = 6): string {
-  return `${addr.slice(0, chars)}...${addr.slice(-4)}`
 }
 
 export function formatNumber(n: number | bigint): string {
@@ -184,10 +176,6 @@ export function formatUtc(date: Date | string | number): string {
   const p2 = (n: number) => String(n).padStart(2, '0')
   const ymd = `${String(d.getUTCFullYear()).padStart(4, '0')}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`
   return `${ymd} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())} UTC`
-}
-
-export function formatHash(hash: string, chars = 16): string {
-  return `${hash.slice(0, chars)}...${hash.slice(-4)}`
 }
 
 /**

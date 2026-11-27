@@ -15,7 +15,6 @@
     "@altscan/chain-config": "workspace:*",
     "@altscan/db": "workspace:*",
     "@altscan/providers": "workspace:*",
-    "@altscan/types": "workspace:*",
     "axios": "^1.21.1",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.4",

@@ -13,7 +13,7 @@
  */
 import { safeBigInt } from './format'
 
-export type GasBreakdown = {
+type GasBreakdown = {
   /** gasUsed x effectiveGasPrice — the fee shown at the top of the page. */
   total: bigint
   /** Destroyed by the protocol. */
