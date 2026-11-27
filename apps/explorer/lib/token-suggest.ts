@@ -38,7 +38,7 @@ export const SUGGEST_LIMIT = 5
  * would show five lookalikes of a stablecoin (several out-hold the real contract); ranking real before
  * lookalike over a wider set lets the real token surface.
  */
-export const SUGGEST_CANDIDATES = SEARCH_CANDIDATE_LIMIT
+const SUGGEST_CANDIDATES = SEARCH_CANDIDATE_LIMIT
 /** The lowercased, trimmed prefix to look up, or null when the text cannot be a suggestion query. */
 export function suggestPrefix(raw: string | null): string | null {
   const q = raw?.trim().toLowerCase() ?? ''
@@ -52,9 +52,9 @@ export function likePrefixPattern(prefix: string): string {
 }
 
 /** Arm 1 reads this many of the most-held tokens and keeps those matching the prefix: every well-known token. */
-export const SUGGEST_POPULAR_ROWS = 5000
+const SUGGEST_POPULAR_ROWS = 5000
 /** Arm 2 reads this many matches in symbol order: every match of a prefix long enough to be rare. */
-export const SUGGEST_PREFIX_ROWS = 300
+const SUGGEST_PREFIX_ROWS = 300
 
 /**
  * Candidates for the prefix, most-held first, plain DESC like /search (the column is NOT NULL). `prefix` comes
@@ -189,7 +189,7 @@ export function shapeSuggestions(
 }
 
 /** /token's search box: what is longer than any symbol, name or address is dropped before it is matched. */
-export const TOKEN_LIST_QUERY_MAX = 64
+const TOKEN_LIST_QUERY_MAX = 64
 
 /**
  * /token?q=: the tokens of one type that match `raw`, most-held first, at most `limit`, read by bounded lookups only.

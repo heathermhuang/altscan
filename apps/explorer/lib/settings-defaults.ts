@@ -104,8 +104,8 @@ export function resolveAds(
   }
 }
 
-export type BinanceCandidate = { kind: 'binance'; weight: number }
-export type HouseCandidate = {
+type BinanceCandidate = { kind: 'binance'; weight: number }
+type HouseCandidate = {
   kind: 'house'
   weight: number
   creativeId: string
@@ -116,9 +116,9 @@ export type HouseCandidate = {
   imageUrl?: string
   imageAlt?: string
 }
-export type ResolvedCandidate = BinanceCandidate | HouseCandidate
+type ResolvedCandidate = BinanceCandidate | HouseCandidate
 
-export type AdConfigPayload = {
+type AdConfigPayload = {
   /** Whether Binance candidates may run: the visitor is not geo-restricted AND a
    *  referral code is configured. Kept for pre-Phase-B clients holding a cached config shape. */
   eligible: boolean

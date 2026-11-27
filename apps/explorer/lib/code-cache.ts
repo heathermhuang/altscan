@@ -2,9 +2,9 @@ import type { CodeClass } from './contract-status'
 import { createTtlCache } from './ttl-cache'
 
 /** Only settled verdicts are cacheable. 'malformed' is a failure, not an answer. */
-export type CacheableClass = Extract<CodeClass, 'none' | 'code'>
+type CacheableClass = Extract<CodeClass, 'none' | 'code'>
 
-export interface CodeClassCache {
+interface CodeClassCache {
   get(address: string): CacheableClass | undefined
   set(address: string, cls: CacheableClass): void
   size(): number

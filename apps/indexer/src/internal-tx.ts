@@ -35,7 +35,7 @@ export type RawTraceTx = {
   error?: string
 }
 
-export type InternalTxCallType = 'call' | 'callcode' | 'create' | 'create2' | 'selfdestruct'
+type InternalTxCallType = 'call' | 'callcode' | 'create' | 'create2' | 'selfdestruct'
 
 export type InternalTxRow = {
   txHash: string

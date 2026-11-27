@@ -21,7 +21,7 @@
  * call rides along in an RPC batch the page already issues.
  */
 
-export type ContractStatus = {
+type ContractStatus = {
   isContract: boolean
   /** false only when nothing could determine it (RPC failed, not in the registry). */
   known: boolean
@@ -88,7 +88,7 @@ export function resolveContractStatusFromClass(input: { cls: CodeClass | null; v
   return verified ? { isContract: true, known: true } : { isContract: false, known: false }
 }
 
-export type NativeBalance = {
+type NativeBalance = {
   value: bigint
   /** false when the live lookup failed — render "unavailable", never a zero. */
   known: boolean

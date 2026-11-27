@@ -1,7 +1,7 @@
 import type { ExplorerRow } from './schema'
 import type { DeploySummary, UpstreamResult } from './fleet'
 
-export async function fetchJson(
+async function fetchJson(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<UpstreamResult> {
@@ -19,7 +19,7 @@ export async function fetchJson(
   }
 }
 
-export function adminSecretFor(env: Env, explorer: ExplorerRow): string | null {
+function adminSecretFor(env: Env, explorer: ExplorerRow): string | null {
   const secret = (env as unknown as Record<string, unknown>)[explorer.adminSecretBinding]
   return typeof secret === 'string' && secret.length > 0 ? secret : null
 }

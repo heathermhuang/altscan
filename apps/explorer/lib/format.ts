@@ -73,10 +73,6 @@ export function formatGwei(wei: bigint | string): string {
   return gwei.toFixed(decimals).replace(/\.?0+$/, '')
 }
 
-export function formatAddress(addr: string, chars = 6): string {
-  return `${addr.slice(0, chars)}...${addr.slice(-4)}`
-}
-
 export function formatNumber(n: number | bigint): string {
   if (typeof n === 'bigint') return n.toLocaleString('en-US')
   return Number(n).toLocaleString('en-US')

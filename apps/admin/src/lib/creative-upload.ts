@@ -16,7 +16,7 @@ export const MAX_CREATIVE_BYTES = 256 * 1024
  */
 export const MAX_CREATIVE_OBJECTS_PER_EXPLORER = 200
 
-export type CreativeContentType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+type CreativeContentType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
 
 const EXTENSION: Record<CreativeContentType, string> = {
   'image/png': 'png',
@@ -63,7 +63,7 @@ export function sniffImageType(bytes: Uint8Array): CreativeContentType | null {
  * and far below a bomb.
  */
 export const MAX_CREATIVE_DIMENSION = 4096
-export const MAX_CREATIVE_PIXELS = 16_000_000
+const MAX_CREATIVE_PIXELS = 16_000_000
 
 /** Smallest byte length that can hold each format's header. A signature match
  *  alone proved nothing about the rest of the file — an 8-byte buffer that is

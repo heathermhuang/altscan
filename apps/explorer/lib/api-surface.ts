@@ -9,7 +9,7 @@
  * `routeFile` is only needed when the on-disk path cannot be derived from the
  * advertised path by the ':param' -> '[address]' rule.
  */
-export type ApiEndpoint = {
+type ApiEndpoint = {
   path: string
   summary: string
   /** Include this endpoint's family as an RFC 9727 linkset anchor. */

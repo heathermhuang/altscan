@@ -4,7 +4,7 @@ import { safeBigInt } from '@/lib/format'
 export interface LedgerRow { t: number; dir: 'in' | 'out'; native: boolean; spam: boolean }
 
 /** The fields both txn sources share: local `transactions` rows and provider `HistoryRow`s. */
-export interface LedgerInput {
+interface LedgerInput {
   time: Date | string
   fromAddress: string
   toAddress: string | null

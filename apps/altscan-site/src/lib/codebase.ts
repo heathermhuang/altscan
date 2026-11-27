@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 export interface Pkg { path: string; lines: number; tests: number }
 
 /** The packages a block passes through, in order. */
-export const PATH = ['packages/chain-config', 'packages/providers', 'apps/indexer', 'packages/db', 'packages/explorer-core', 'apps/explorer'];
+const PATH = ['packages/chain-config', 'packages/providers', 'apps/indexer', 'packages/db', 'packages/explorer-core', 'apps/explorer'];
 
 const SOURCE = /\.tsx?$/;
 const TEST = /\.test\.|\/test\//;

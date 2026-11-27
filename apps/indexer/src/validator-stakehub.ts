@@ -28,7 +28,7 @@ export const STAKE_HUB_ABI = [
  * `validators.commission` is `numeric(5,4)` and the UI multiplies by 100, so the
  * stored value is a fraction: rate 900 -> "0.0900" -> "9.0%".
  */
-export const COMMISSION_BASE = 10_000
+const COMMISSION_BASE = 10_000
 
 export function toCommissionFraction(rate: bigint): string {
   return (Number(rate) / COMMISSION_BASE).toFixed(4)
@@ -44,7 +44,7 @@ export function toCommissionFraction(rate: bigint): string {
  * failed, leaving the last good stored value alone. `values` still carries a moniker
  * for the first INSERT, where a placeholder beats a NOT NULL error.
  */
-export type ValidatorWrite = {
+type ValidatorWrite = {
   values: { address: string; moniker: string; votingPower: string; commission: string | null; status: 'active'; updatedAt: Date }
   update: { votingPower: string; status: 'active'; updatedAt: Date; moniker?: string; commission?: string }
 }

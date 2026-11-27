@@ -18,7 +18,6 @@ export const COMPACT_TABLES = [
   'transactions', 'token_transfers', 'token_balances',
   'tokens', 'blocks', 'addresses', 'contracts',
 ] as const
-export type CompactTable = typeof COMPACT_TABLES[number]
 
 export type PruneOp =
   | { table: string; kind: 'delete-rows' }
@@ -61,7 +60,7 @@ export function resolveCompactPruneTables(env: NodeJS.ProcessEnv = process.env):
   return Number.isFinite(parseCompactRetentionDays(env)) ? COMPACT_PRUNE_TABLES : []
 }
 
-export type RetentionPlan = {
+type RetentionPlan = {
   bodyDeleteTables: string[]
   nullColumnOps: Extract<PruneOp, { kind: 'null-column' }>[]
   compactDeleteTables: string[]

@@ -7,7 +7,7 @@ import { safeBigInt, formatTokenAmount, sanitizeSymbolOr } from './format'
 import { lookalikeOf } from './lookalike'
 import { anyLinkLike } from './link-in-name'
 
-export interface DecodedTx {
+interface DecodedTx {
   summary: string
   type: 'transfer' | 'swap' | 'approval' | 'contract_deploy' | 'contract_call' | 'other'
 }

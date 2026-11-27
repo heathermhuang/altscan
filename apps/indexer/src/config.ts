@@ -35,7 +35,7 @@ export const DEFAULT_HEAL_MAX_LAG = 50
 export const DEFAULT_QUARANTINE_AFTER = 5
 
 /** What one variable resolved to, and why. Drives the boot log. */
-export type Resolution = {
+type Resolution = {
   name: string
   /** Rendered value — never the raw secret for URL-ish vars. */
   value: string
@@ -207,8 +207,6 @@ export function redact(value: string): string {
     return value.includes('://') ? '***' : value
   }
 }
-
-export type IndexerConfig = ReturnType<typeof readIndexerConfig>['config']
 
 /**
  * Defaults this module cannot derive on its own.

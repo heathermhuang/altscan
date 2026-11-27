@@ -33,7 +33,7 @@ export function gasTiersFrom(row: GasTierRow | undefined): GasTiers | null {
   return { slow, standard, fast, baseFee }
 }
 
-export type GasTile = { label: 'Slow' | 'Standard' | 'Fast'; gwei: string; basis: string }
+type GasTile = { label: 'Slow' | 'Standard' | 'Fast'; gwei: string; basis: string }
 
 const TIERS = [['Slow', '25th', 'slow'], ['Standard', '50th', 'standard'], ['Fast', '75th', 'fast']] as const
 

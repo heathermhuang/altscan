@@ -3,7 +3,7 @@
 // `chain` argument. Every tool navigates to an explorer page; none calls an API from the browser.
 import { products, type Product } from '../data/products';
 
-export interface WebMcpTool {
+interface WebMcpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;

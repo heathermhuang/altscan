@@ -55,7 +55,7 @@ import { getMaintenanceDb, dbErrorMessage, unwrapDbError } from './db'
 
 /** The two db shapes the worker needs — structurally satisfied by drizzle's
  *  Db and its transaction handle, and cheap to fake in unit tests. */
-export type Executor = Pick<Db, 'execute'>
+type Executor = Pick<Db, 'execute'>
 export type WorkerDb = Pick<Db, 'execute' | 'transaction'>
 
 /** `lease_lost` is a return value only, never a stored watermark status: the
@@ -137,7 +137,7 @@ function parseBlockTimestamp(ts: string): Date {
   return /^\d+$/.test(ts) ? new Date(Number(ts) * 1000) : new Date(ts)
 }
 
-export type HistoryInsertRow = {
+type HistoryInsertRow = {
   address: string
   txHash: string
   blockNumber: number
@@ -170,7 +170,7 @@ export function mapHistoryRows(address: string, txs: ProviderTx[]): HistoryInser
   }))
 }
 
-export type TransferInsertRow = {
+type TransferInsertRow = {
   scopeAddress: string
   txHash: string
   logIndex: number
@@ -523,7 +523,7 @@ export async function releaseClaim(db: WorkerDb, entity: ClaimedEntity): Promise
 /** The provider bucket an entity's page will actually spend from: address
  *  history acquires `history`, token transfers acquire `assets` (see the
  *  Moralis adapter). Politeness must watch the matching counter. */
-export type ProviderBucket = 'history' | 'assets'
+type ProviderBucket = 'history' | 'assets'
 export function bucketFor(entityType: ClaimedEntity['entity_type']): ProviderBucket {
   return entityType === 'address_txs' ? 'history' : 'assets'
 }

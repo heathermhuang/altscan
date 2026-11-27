@@ -10,7 +10,7 @@
  * @param count  how many transfers the count query found (capped by the list's depth); -1 = unknown (it failed or timed out)
  * @param offset the first row index this page asks for
  */
-export type TransfersState = 'rows' | 'none' | 'unavailable'
+type TransfersState = 'rows' | 'none' | 'unavailable'
 
 export function transfersEmptyState(o: { rows: readonly unknown[] | null; count: number; offset: number }): TransfersState {
   if (o.rows === null) return 'unavailable'

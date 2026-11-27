@@ -58,7 +58,7 @@ export type ReorgDeps = {
   rpcBlock(n: number): Promise<{ hash: string; parentHash: string } | null>
 }
 
-export type ReorgCheck = { isReorg: false } | { isReorg: true; forkPoint: number }
+type ReorgCheck = { isReorg: false } | { isReorg: true; forkPoint: number }
 
 /**
  * Detect a reorg relative to `lastIndexed` (our highest indexed block).

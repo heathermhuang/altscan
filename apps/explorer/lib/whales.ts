@@ -33,7 +33,7 @@ import { withTimeout } from './with-timeout'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
-export type TokenFilter = {
+type TokenFilter = {
   address: string
   minValue: string
   /** The token's whale partial-index floor (chain-config `indexFloor`): the whale arm's `value >` literal. */
@@ -57,7 +57,7 @@ export type WhaleTx = {
 
 /** null = the query failed; [] = it succeeded and found nothing. The page
  *  renders those two differently, so they must not collapse into one value. */
-export type WhaleResult = {
+type WhaleResult = {
   native: WhaleTx[] | null
   token: WhaleTx[] | null
 }
@@ -276,13 +276,13 @@ export async function settleWhaleQueries(
 }
 
 /** A transfer with what the page needs to show and rank it: its token's decimals and its USD value. */
-export type RankedWhale = WhaleTx & {
+type RankedWhale = WhaleTx & {
   decimals: number
   /** value x price, a plain number, or null when this row has no price: shown as "no price", ranked last. */
   usd: number | null
 }
 
-export type WhaleFetch = {
+type WhaleFetch = {
   rows: RankedWhale[]
   /** The native price the rows were ranked with, or null when none could be had. The page says which. */
   nativeUsd: number | null

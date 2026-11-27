@@ -12,7 +12,7 @@ import { isHexHash } from './hex'
 export const TRANSFER_TOPIC0 =
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
-export type TransferLogLike = {
+type TransferLogLike = {
   address: string
   topic0: string | null
   topic1: string | null
@@ -21,7 +21,7 @@ export type TransferLogLike = {
   data: string | null
 }
 
-export type DecodedTransfer = {
+type DecodedTransfer = {
   tokenAddress: string
   fromAddress: string
   toAddress: string
@@ -35,7 +35,7 @@ function addressFromTopic(topic: string | null): string | null {
   return `0x${topic.slice(26).toLowerCase()}`
 }
 
-export type DecodedNftTransfer = {
+type DecodedNftTransfer = {
   tokenAddress: string
   fromAddress: string
   toAddress: string

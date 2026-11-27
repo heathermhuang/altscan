@@ -18,7 +18,7 @@ function decodeJson(part: string): unknown {
 // RFC 9068-shaped JWTs, HS256 with a key only the issuing origin holds: each origin verifies its own
 // tokens, so nothing needs a published key (no jwks_uri).
 
-export interface AccessClaims {
+interface AccessClaims {
   iss: string
   aud: string
   /** The lowercase EVM address the holder proved control of. */

@@ -9,7 +9,7 @@ const SOURCIFY_BASE = 'https://sourcify.dev/server'
  * forget to pick a chain: this module once hardcoded BNB's id (56), so ethscan.io checked
  * BNB Chain's Sourcify records and could never verify an Ethereum contract.
  */
-export type VerifierChain = Pick<ChainConfig, 'chainId' | 'name'>
+type VerifierChain = Pick<ChainConfig, 'chainId' | 'name'>
 
 /**
  * Sourcify API v2: `GET /v2/contract/{chainId}/{address}` is 200 with `match` of

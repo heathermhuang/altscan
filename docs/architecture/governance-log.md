@@ -21,6 +21,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 8 | Every package `typecheck` script runs in CI (one step replaces the oauth-only one); the providers script, broken unnoticed, fixed | CI `Typecheck packages` |
 | 9 | One explorer env-number parser (`lib/env.ts` `positiveIntEnv`); seven hand-rolled parses migrated. `BODY_CACHE_TTL_MS`/`BODY_CACHE_WINDOW_BYTES` used `parseInt`, which read `2h` as 2 ms | `lib/env.test.ts` |
 | 10 | De-flaked `search-route.test.ts`: best-of-five timing against 25 ms (the regression it guards cost ~150 ms) instead of one 5 ms sample | — |
+| 11 | Narrowed module interfaces: ~100 exports that no file imports (tests included) are now module-private; three fully dead declarations deleted (`format.ts` `formatAddress`, `IndexerConfig`, `CompactTable`). Found with an import-resolving scan; the first name-based scan missed `formatAddress` because a private function elsewhere shared its name | tsc in every workspace |
 
 ## Task pool
 
@@ -33,10 +34,10 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 - **Explorer env reads.** 25 `process.env` names across ~20 explorer files, no registry.
   Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
   `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.
-- **Exported-for-tests internals.** ~350 exports are referenced only by their own file
-  and its test. Mostly a deliberate test seam; review the indexer's
-  `ensure-schema.ts` (25), `block-processor.ts` (20) and `token-metadata.ts` (16) for
-  real dead code.
+- **altscan-site has no CI typecheck** and `tsc -p apps/altscan-site` reports 10 errors on
+  main, all from missing `cloudflare:workers` types (Worker types are not generated in a
+  plain checkout). Generate them (`wrangler types`) or add an ambient declaration, then
+  add the site to the CI typecheck step.
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
   `render.yaml` triggers a Blueprint sync, so fold the fix into the next intended

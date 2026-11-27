@@ -20,7 +20,7 @@ export interface ProducerInput {
   power: bigint | null
 }
 
-export interface ProducerStrip {
+interface ProducerStrip {
   tiles: StripTile[]
   /** Validators that produced at least one block in the window. */
   producing: number

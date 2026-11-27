@@ -2,7 +2,7 @@ import type { AdPlacement, AdsSettings } from '@altscan/settings-schema'
 import type { BinanceReferralPlacement, BinanceReferralVariant } from './binance-referral'
 import { resolveAds } from './settings-defaults'
 
-export type ReservedVariant = 'card' | 'compact' | 'footer'
+type ReservedVariant = 'card' | 'compact' | 'footer'
 
 /**
  * Which reserve box a placement gets, or null for none. A placement that can

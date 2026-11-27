@@ -29,7 +29,7 @@ const resolved = readIndexerConfig(process.env, {
 })
 
 export const indexerConfig = resolved.config
-export const configResolutions = resolved.resolutions
+const configResolutions = resolved.resolutions
 
 /** Call once at boot, before anything reads config, so the log records what this
  *  process is actually running with rather than what the repo says it should. */

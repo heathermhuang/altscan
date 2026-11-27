@@ -54,7 +54,7 @@ const PATHS = {
   code: <path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />,
 }
 
-export type IconName = keyof typeof PATHS
+type IconName = keyof typeof PATHS
 
 export function Icon({ name, className = 'h-4 w-4' }: { name: IconName; className?: string }) {
   return (

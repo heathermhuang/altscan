@@ -770,7 +770,7 @@ export async function sweepInvalidIndexes(db: ReturnType<typeof getDb> = getDb()
  * unique index has to exist at every moment; an unfinished or failed build keeps
  * the old one in place.
  */
-export const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
+const DEX_NATURAL_KEY_IDX = 'dex_block_log_unique'
 
 export function retireOldDexKeySql(replacementValid: boolean): string[] {
   return replacementValid ? ['DROP INDEX CONCURRENTLY IF EXISTS dex_tx_log_unique'] : []
@@ -858,7 +858,7 @@ export const TT_WHALE_IDX = 'tt_whale_idx'
 export const TT_WHALE_COLUMNS = 'token_address, value DESC'
 
 /** The combined whale-size partial index on `token_transfers`. */
-export type TtWhaleIndex = {
+type TtWhaleIndex = {
   /** The name on the monolithic table or the partitioned parent. */
   name: string
   /** `(token_address = '<a1>' AND value > <F1>) OR (…)`: every literal, one arm per tracked token. */
@@ -919,7 +919,7 @@ export function ttWhaleIndex(
 }
 
 /** A partial index on `token_transfers`, built per partition on BNB (ensurePartitionedPartialIndex). */
-export type PartitionedPartialIndex = {
+type PartitionedPartialIndex = {
   /** The name on the monolithic table or the partitioned parent. */
   name: string
   columns: string
@@ -1257,7 +1257,7 @@ async function listAttachedChildIndexes(parent: string): Promise<Set<string>> {
  * Runs in the background after boot: the child builds are CONCURRENTLY over the
  * whole table and are slow, but they never take a write lock.
  */
-export async function ensurePartitionedWhaleIndex(): Promise<void> {
+async function ensurePartitionedWhaleIndex(): Promise<void> {
   const db = getDb()
   if (!(await isPartitioned('token_transfers'))) return
 
@@ -1421,7 +1421,7 @@ export async function ensurePartitionedPartialIndex(ix: PartitionedPartialIndex)
 }
 
 /** How long ensureForwardPartitions waits for token_transfers' lock before leaving the partition to its next run. */
-export const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
+const FORWARD_PARTITION_LOCK_TIMEOUT = '2s'
 
 /** Pure. The exclusive upper end of the unbroken run of partitions from `from`; `from` itself means it is not covered. */
 export function coveredUpTo(parts: readonly { lo: number; hi: number }[], from: number): number {

@@ -1,6 +1,6 @@
 import { formatNumber } from './format'
 
-export type TxCountDisplay = {
+type TxCountDisplay = {
   /** What to paginate and list against: the index's count, never the RPC nonce. */
   total: number
   /** false = the index cannot vouch for a count, so no page text may print one. */

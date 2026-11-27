@@ -46,7 +46,7 @@ export type BinanceReferralPlacement =
   | 'not_found'
   | 'footer_strip'
 
-export const BINANCE_RESTRICTED_COUNTRIES = new Set([
+const BINANCE_RESTRICTED_COUNTRIES = new Set([
   'US',
   'AS',
   'GU',

@@ -13,7 +13,7 @@ export const PAIR_RESOLVE_PER_BLOCK = 64
 /** Reads in flight at once, across every block, for each of the two kinds. */
 export const POST_WRITE_CONCURRENCY = 8
 
-export type Limiter = <T>(fn: () => Promise<T>) => Promise<T>
+type Limiter = <T>(fn: () => Promise<T>) => Promise<T>
 
 /** A FIFO semaphore: at most `max` of the functions it runs are in flight at once. */
 export function createLimiter(max: number): Limiter {

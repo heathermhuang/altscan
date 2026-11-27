@@ -9,7 +9,7 @@ import { isHexAddress } from './hex'
 const MAX_OFFSET = 10_000
 
 const ENTITIES = ['transactions', 'blocks', 'tokens', 'token_transfers', 'dex_trades'] as const
-export type Entity = typeof ENTITIES[number]
+type Entity = typeof ENTITIES[number]
 
 /**
  * The filters each entity takes. Every combination they allow is served by an index in the
@@ -46,7 +46,7 @@ export type Filter = {
   blockFrom?: number
   blockTo?: number
 }
-export type Query = { entity: Entity; filter: Filter; orderBy: 'asc' | 'desc'; limit: number; offset: number }
+type Query = { entity: Entity; filter: Filter; orderBy: 'asc' | 'desc'; limit: number; offset: number }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 

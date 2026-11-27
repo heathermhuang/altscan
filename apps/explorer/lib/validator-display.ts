@@ -18,7 +18,7 @@ export type ValidatorRow = {
   updatedAt: Date
 }
 
-export type ValidatorDisplay = {
+type ValidatorDisplay = {
   name: string
   status: { label: string; variant: 'success' | 'fail' | 'default' }
   /** The stored voting power is a placeholder 0 from the ValidatorSet fallback: show no number. */

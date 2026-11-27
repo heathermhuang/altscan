@@ -3,7 +3,7 @@
 /** Chain head older than this (seconds) is a stale head, not an operational one. */
 export const STALE_LAG_SECONDS = 120
 
-export interface Classified {
+interface Classified {
   status: 'operational' | 'degraded'
   latestBlock: number | null
   lagSeconds: number | null

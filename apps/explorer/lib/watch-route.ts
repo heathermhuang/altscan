@@ -9,7 +9,7 @@ import { isLowerHexAddress } from './hex'
  * none, so the feed's tip would never advance there. Enabling ETH needs ASYNC_TT_WRITER on eth-indexer
  * or a watermark on the inline path. null = this chain serves wallet watch.
  */
-export function watchChainGate(): Response | null {
+function watchChainGate(): Response | null {
   return chainConfig.key === 'bnb'
     ? null
     : NextResponse.json({ error: 'Wallet watch is available on BNBScan only' }, { status: 404 })
@@ -23,7 +23,7 @@ export async function admitWatchRequest(request: Request): Promise<Response | nu
   return auth.ok ? null : authFailure(auth)
 }
 
-export type WatchOwner = { ok: true; owner: string } | { ok: false; response: Response }
+type WatchOwner = { ok: true; owner: string } | { ok: false; response: Response }
 
 /** The owner must be an address and the request's X-API-Key must belong to it — as /api/v1/webhooks. */
 export async function requireWatchOwner(request: Request, rawOwner: unknown): Promise<WatchOwner> {

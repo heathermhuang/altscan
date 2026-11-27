@@ -28,7 +28,7 @@ export function normaliseSearchQuery(raw: string): string {
   return q
 }
 
-export type QueryKind = 'block' | 'tx' | 'address' | 'text'
+type QueryKind = 'block' | 'tx' | 'address' | 'text'
 
 /** What a query opens, and the normalised text it opens it with. */
 export function classifyQuery(raw: string): { kind: QueryKind; q: string } {

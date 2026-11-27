@@ -17,7 +17,7 @@ import { registerCache } from './cache-registry'
  * `get` returns undefined for a miss, so a cached `null` (a remembered negative answer) is a
  * hit. Values must not be `undefined`.
  */
-export interface TtlCache<V> {
+interface TtlCache<V> {
   get(key: string): V | undefined
   /** `ttlMs` overrides the cache's default for this entry. */
   set(key: string, value: Exclude<V, undefined>, ttlMs?: number): void

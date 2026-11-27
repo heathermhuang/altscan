@@ -5,11 +5,11 @@
 import { products, type Product } from '../data/products';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'] as const; // newest first
-export const SERVER_INFO = { name: 'altscan', title: 'Altscan explorers', version: '0.1.0' };
+const SERVER_INFO = { name: 'altscan', title: 'Altscan explorers', version: '0.1.0' };
 
 /** Fetches an explorer API URL; the Worker adds its service token and a deadline. */
 export type Upstream = (url: string) => Promise<Response>;
-export type McpLog = (line: Record<string, string | number | boolean>) => void;
+type McpLog = (line: Record<string, string | number | boolean>) => void;
 
 /**
  * One Analytics Engine row per tool call (dataset altscan_mcp_calls), so the pilot's success bar
