@@ -177,6 +177,19 @@ reader and the mocked insert chain still resolves; the 400-digit page test match
 and would fail without the clamp; the unique-exports scan sees the repo and its exceptions
 are real. Its suggestion, distinct names for the wallet-watch cursor codec, was applied.
 
+## Final verification and stopping condition
+
+On the final commit: the full gate (every workspace typecheck including altscan-site, lint,
+3,511 unit tests, the site harness) and all 19 Postgres-gated suites on a local Postgres 16
+(indexer 10 files / 98 tests, explorer + db client 9 files / 170 tests). Five independent
+reviews cover every commit; the last two found no defects, only a naming suggestion (applied).
+
+Stopped on convergence. The task pool is empty; every checklist area ends in a batch or a
+recorded reason; the measured scans that would find more (import-resolving dead-export scan,
+cycle scan, workspace graph, section-coupling scan of every file over 800 lines, duplicate
+regex/helper/constant greps, schema parity, unique-exports) all come back clean or with
+listed exceptions. Further rounds were returning naming-level nits, not entropy.
+
 ## Pending owner decisions
 
 None. The two pre-merge checks once listed here were removed by #35 instead of left to the
