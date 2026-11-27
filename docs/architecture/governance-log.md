@@ -43,6 +43,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 30 | altscan.io's product cards take brand, domain, URL and chain name from chain-config instead of restating them (new approved edge site → chain-config, consumed from source via a Vite alias + tsconfig path as apps/admin does). Rendered values identical; site typecheck, harness 27/27 and `astro build` pass | `scripts/workspace-graph.test.ts` (edge approved there) |
 | 31 | altscan.io's address/hash shapes defined once (`src/lib/hex.ts`): /mcp and the WebMCP tools spelled them six times, one as a template-literal regex. ADR 0001 within the app; the explorers' copy stays separate per ADR 0002 | site harness `test/hex.test.ts` |
 | 32 | Third independent review (batches 21–31) found one unnamed change: the canonical `parsePageParam` used `Number()`, so #27 also made `?page=1e2` page 100 and `?page=0x10` page 16 on the address and token pages. The canonical rule is now plain decimal digits (fraction floored), everything else page 1, on every list page. Valid pages unchanged | `lib/page-cache.test.ts` (junk spellings added) |
+| 33 | `render.yaml`'s two comments no longer cite the deleted `@altscan/types` as a current fact. Checked with Render's `POST /v1/blueprints/validate` against the live account: valid, `totalActions: 0`, so the merge's Blueprint sync changes no deployed field | `scripts/render-install-frozen.test.ts` still passes |
 
 ## Task pool
 
@@ -157,11 +158,6 @@ spellings. Noted: altscan.io's browser WebMCP script now bundles the chain-confi
 
 ## Pending owner decisions
 
-- **Fold the stale `render.yaml` comment into the next real `render.yaml` change.** Two
-  comments there cite the deleted `@altscan/types` as the reason the indexer build avoids
-  `--filter @altscan/indexer... build`. A merge that touches `render.yaml` re-applies the
-  Blueprint and can revert dashboard-only changes (AGENTS.local.md), so a comment-only edit
-  is not worth a sync. It does not affect any build.
 - **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
   if it is set to anything but a plain whole number, it now falls back to the chain
   default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
