@@ -15,6 +15,7 @@
  */
 import type { ChainConfig } from '@altscan/chain-config'
 import { API_SURFACE } from '@/lib/api-surface'
+import { ADDRESS_PATTERN, HASH_PATTERN } from './hex'
 
 type Schema = Record<string, unknown>
 
@@ -30,8 +31,8 @@ const object = (properties: Record<string, Schema>, optional: string[] = []): Sc
 })
 
 const SCHEMAS: Record<string, Schema> = {
-  Hash: str('32-byte hash, 0x-prefixed hex.', { pattern: '^0x[0-9a-fA-F]{64}$' }),
-  Address: str('20-byte address, 0x-prefixed hex.', { pattern: '^0x[0-9a-fA-F]{40}$' }),
+  Hash: str('32-byte hash, 0x-prefixed hex.', { pattern: HASH_PATTERN }),
+  Address: str('20-byte address, 0x-prefixed hex.', { pattern: ADDRESS_PATTERN }),
   Hex: str('0x-prefixed hex data.', { pattern: '^0x[0-9a-fA-F]*$' }),
   Uint: str('Unsigned integer as a decimal string; values can exceed 2^53, so parse as a big integer.', { pattern: '^[0-9]+$' }),
   DateTime: str('ISO 8601 UTC timestamp.', { format: 'date-time' }),
@@ -180,7 +181,7 @@ const pathParam = (name: string, schema: Schema, description: string): Schema =>
 const PAGE = { name: 'page', in: 'query', description: '1-based page number. Lists reach the newest 10,000 records: a page that starts beyond them answers 400.', schema: { type: 'integer', minimum: 1, default: 1 } }
 const LIMIT = { name: 'limit', in: 'query', description: 'Page size. Values outside 1–50 are clamped.', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }
 const PAGE_BAD = error('page or limit is not a number, or the page starts beyond the newest 10,000 records.')
-const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' }, `${description} Any letter case.`)
+const ADDRESS_PARAM = (description: string) => pathParam('address', { type: 'string', pattern: ADDRESS_PATTERN }, `${description} Any letter case.`)
 
 type Operation = { operationId: string; parameters?: Schema[]; responses: Record<string, unknown> }
 
@@ -226,7 +227,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   '/api/v1/transactions/:hash': {
     operationId: 'getTransaction',
-    parameters: [pathParam('hash', { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' }, 'Transaction hash, any letter case.')],
+    parameters: [pathParam('hash', { type: 'string', pattern: HASH_PATTERN }, 'Transaction hash, any letter case.')],
     responses: {
       200: json('The transaction. `source` says whether it came from the index or the node.', {
         oneOf: [ref('IndexedTransactionResponse'), ref('ChainTransactionResponse')],

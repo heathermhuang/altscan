@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkRateLimit, clientIpBucket, refundRateLimit } from '@/lib/api-rate-limit'
 import { withClientAdmission } from '@altscan/providers'
-
-const ADDR = /^0x[0-9a-fA-F]{40}$/
+import { isHexAddress } from './hex'
 
 /**
  * Guard for the unauthenticated /api/internal/* Moralis-proxy routes.
@@ -22,7 +21,7 @@ export async function guardInternalAddress(
   maxPerMin = 30,
 ): Promise<NextResponse | null> {
   const headers = { 'cache-control': 'private, no-store' }
-  if (!ADDR.test(address)) {
+  if (!isHexAddress(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400, headers })
   }
   // Namespaced bucket so it doesn't collide with the /api/v1 IP limiter.

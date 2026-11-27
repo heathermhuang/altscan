@@ -27,6 +27,7 @@ import type { ChainKey } from '@altscan/chain-config'
 import { lookalikeOf } from '@/lib/lookalike'
 import { rankTokenMatches, SEARCH_CANDIDATE_LIMIT } from '@/lib/token-search-rank'
 import { SUGGEST_MAX_CHARS, SUGGEST_MIN_CHARS, type TokenSuggestion } from '@/lib/search-suggest'
+import { isLowerHexAddress } from './hex'
 
 type TokenType = typeof schema.tokens.$inferSelect['type']
 
@@ -206,7 +207,7 @@ export async function tokenListSearch(db: Db, raw: string, type: TokenType, limi
   const q = raw.slice(0, TOKEN_LIST_QUERY_MAX).trim().toLowerCase()
   if (!q) return []
   const t = schema.tokens
-  if (/^0x[0-9a-f]{40}$/.test(q)) {
+  if (isLowerHexAddress(q)) {
     return db.select().from(t).where(and(eq(t.address, q), eq(t.type, type))).limit(1)
   }
   const [byHolders, exact] = await Promise.all([

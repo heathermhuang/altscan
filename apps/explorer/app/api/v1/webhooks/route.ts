@@ -6,6 +6,7 @@ import { insertWebhookSql } from '@/lib/webhook-insert'
 import { resolveEventTypes } from '@/lib/webhook-event-types'
 import crypto from 'crypto'
 import { chainConfig } from '@/lib/chain'
+import { isHexAddress, isLowerHexAddress } from '@/lib/hex'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
-  if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
+  if (!owner || !isLowerHexAddress(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
 
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
 
   const { ownerAddress, url, watchAddress, eventTypes } = body
 
-  if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
+  if (!ownerAddress || !isHexAddress(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Webhook URL must use a domain name, not an IP address' }, { status: 400 })
   }
 
-  if (watchAddress && !/^0x[0-9a-fA-F]{40}$/.test(watchAddress)) {
+  if (watchAddress && !isHexAddress(watchAddress)) {
     return NextResponse.json({ error: 'Invalid watchAddress' }, { status: 400 })
   }
 

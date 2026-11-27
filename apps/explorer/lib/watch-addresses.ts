@@ -1,5 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
+import { isHexAddress } from './hex'
 
 /** Watched addresses per owner. Sized for individuals and small bots, not deposit-monitor services. */
 export const WATCH_MAX_ADDRESSES = (() => {
@@ -7,14 +8,12 @@ export const WATCH_MAX_ADDRESSES = (() => {
   return Number.isInteger(n) && n > 0 ? n : 50
 })()
 
-const ADDRESS = /^0x[0-9a-fA-F]{40}$/
-
 export type Normalized = { ok: true; addresses: string[] } | { ok: false; invalid: string[] }
 
 /** Lowercased, deduped addresses, or every entry that is not one. An empty or non-array input is invalid. */
 export function normalizeAddresses(input: unknown): Normalized {
   if (!Array.isArray(input) || input.length === 0) return { ok: false, invalid: [] }
-  const invalid = input.filter((a) => typeof a !== 'string' || !ADDRESS.test(a)).map((a) => String(a))
+  const invalid = input.filter((a) => typeof a !== 'string' || !isHexAddress(a)).map((a) => String(a))
   if (invalid.length > 0) return { ok: false, invalid }
   return { ok: true, addresses: [...new Set((input as string[]).map((a) => a.toLowerCase()))] }
 }

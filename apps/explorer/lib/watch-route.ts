@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import { chainConfig } from '@/lib/chain'
-
-const OWNER = /^0x[0-9a-f]{40}$/
+import { isLowerHexAddress } from './hex'
 
 /**
  * Phase 1 is BNB-only: the feed serves only up to the async token-transfer writer's durable watermark
@@ -29,7 +28,7 @@ export type WatchOwner = { ok: true; owner: string } | { ok: false; response: Re
 /** The owner must be an address and the request's X-API-Key must belong to it — as /api/v1/webhooks. */
 export async function requireWatchOwner(request: Request, rawOwner: unknown): Promise<WatchOwner> {
   const owner = typeof rawOwner === 'string' ? rawOwner.toLowerCase() : ''
-  if (!OWNER.test(owner)) {
+  if (!isLowerHexAddress(owner)) {
     return { ok: false, response: NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 }) }
   }
   const ownerAuth = await requireApiKeyOwner(request, owner)

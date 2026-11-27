@@ -3,8 +3,7 @@ import { db, schema } from '@/lib/db'
 import { checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
 import { triggerSourcifyVerification } from '@/lib/verifier'
 import { chainConfig } from '@/lib/chain'
-
-const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
+import { isHexAddress } from '@/lib/hex'
 
 export async function POST(request: Request) {
   // Tighter rate limit for write operations — 10 per minute per IP. Own `verify:`
@@ -37,7 +36,7 @@ export async function POST(request: Request) {
   // contract, so a caller cannot stamp an arbitrary compiler string onto a verified contract.
   const { address } = body
 
-  if (!address || !ADDRESS_REGEX.test(address)) {
+  if (!address || !isHexAddress(address)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 
@@ -49,7 +48,7 @@ export async function POST(request: Request) {
         .insert(schema.contracts)
         .values({
           // ⚠ MUST be lowercased. contracts.address is the primary key and every
-          // reader looks it up lowercased, but ADDRESS_REGEX accepts checksummed
+          // reader looks it up lowercased, but isHexAddress accepts checksummed
           // input — so persisting the caller's casing wrote a row nothing could
           // find, and the address page showed a verified contract as Unverified.
           address: address.toLowerCase(),

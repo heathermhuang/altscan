@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { chainConfig } from '@/lib/chain-client'
+import { ADDRESS_PATTERN, HASH_PATTERN } from '@/lib/hex'
 
 /**
  * WebMCP (https://webmachinelearning.github.io/webmcp/) — exposes a small
@@ -51,7 +52,7 @@ export function WebMcpProvider() {
           properties: {
             hash: {
               type: 'string',
-              pattern: '^0x[0-9a-fA-F]{64}$',
+              pattern: HASH_PATTERN,
               description: 'Transaction hash (0x + 64 hex chars).',
             },
           },
@@ -73,7 +74,7 @@ export function WebMcpProvider() {
           properties: {
             address: {
               type: 'string',
-              pattern: '^0x[0-9a-fA-F]{40}$',
+              pattern: ADDRESS_PATTERN,
               description: 'Address (0x + 40 hex chars).',
             },
           },

@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { isHexAddress } from '@/lib/hex'
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
@@ -15,7 +16,7 @@ export function VerifyForm() {
     e.preventDefault()
     const trimmed = address.trim()
     if (!trimmed) return
-    if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    if (!isHexAddress(trimmed)) {
       setStatus('error')
       setMessage('Invalid address format. Must be a 0x-prefixed 40-character hex string.')
       return

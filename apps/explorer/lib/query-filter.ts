@@ -1,9 +1,9 @@
+import { isHexAddress } from './hex'
 /**
  * POST /api/v1/query's body, checked before any database call: the filters each entity takes
  * and the combinations an index serves. Kept out of the route file, which Next.js allows to
  * export only its handlers.
  */
-const ADDR = /^0x[0-9a-fA-F]{40}$/
 // Deeper pages walk the index row by row up to the statement timeout, for any
 // anonymous caller; narrow with blockFrom/blockTo instead.
 const MAX_OFFSET = 10_000
@@ -72,7 +72,7 @@ export function parseQuery(body: unknown): { ok: true; query: Query } | { ok: fa
       return { ok: false, error: `${entity} takes ${allowed.length ? `only filter.${allowed.join(', filter.')}` : 'no filters'}; not filter.${key}` }
     }
     if ((KEY_FILTERS as readonly string[]).includes(key)) {
-      if (typeof value !== 'string' || !ADDR.test(value)) return { ok: false, error: `Invalid filter.${key}` }
+      if (typeof value !== 'string' || !isHexAddress(value)) return { ok: false, error: `Invalid filter.${key}` }
       filter[key as typeof KEY_FILTERS[number]] = value.toLowerCase()
     } else {
       if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {

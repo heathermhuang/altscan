@@ -31,6 +31,7 @@ import { RiskSignals } from './RiskSignals'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
+import { isHexAddress } from '@/lib/hex'
 
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
@@ -138,7 +139,7 @@ const NOT_FOUND_METADATA: Metadata = {
 
 export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
   const { address } = await params
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+  if (!isHexAddress(address)) {
     return { title: 'Token Not Found', ...NOT_FOUND_METADATA }
   }
   let token: typeof schema.tokens.$inferSelect | null = null
@@ -183,7 +184,7 @@ export default async function TokenDetailPage({
   searchParams: Promise<{ page?: string }>
 }) {
   const { address } = await params
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) notFound()
+  if (!isHexAddress(address)) notFound()
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
   // The list stops at TOKEN_TRANSFERS_MAX_ROWS, so a deeper ?page= gets its last page.

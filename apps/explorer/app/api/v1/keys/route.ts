@@ -7,6 +7,7 @@ import { keyRequestTimestampError } from '@/lib/key-request'
 import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
+import { isHexAddress, isLowerHexAddress } from '@/lib/hex'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
-  if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
+  if (!owner || !isLowerHexAddress(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
 
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
   const body = await request.json() as { ownerAddress: string; label?: string; signature?: string; timestamp?: number }
   const { ownerAddress, label, signature, timestamp } = body
 
-  if (!ownerAddress || !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
+  if (!ownerAddress || !isHexAddress(ownerAddress)) {
     return NextResponse.json({ error: 'Invalid ownerAddress' }, { status: 400 })
   }
 

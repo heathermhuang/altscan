@@ -11,6 +11,7 @@
  */
 import { getAddress } from 'ethers'
 import { looksLikeUrlOrHandle } from './link-in-name'
+import { isHexAddress, isLowerHexHash } from './hex'
 
 /**
  * EIP-55 checksummed form of `address`.
@@ -40,7 +41,7 @@ export function toChecksumAddress(address: string): string {
  */
 export function shortenAddress(address: string, lead = 6, tail = 5): string {
   const checksummed = toChecksumAddress(address)
-  if (!/^0x[0-9a-fA-F]{40}$/.test(checksummed)) return checksummed
+  if (!isHexAddress(checksummed)) return checksummed
   return `${checksummed.slice(0, 2 + lead)}…${checksummed.slice(-tail)}`
 }
 
@@ -51,7 +52,7 @@ export function shortenAddress(address: string, lead = 6, tail = 5): string {
  */
 export function shortHash(hash: string, lead = 6, tail = 5): string {
   const lower = (hash ?? '').toLowerCase()
-  if (!/^0x[0-9a-f]{64}$/.test(lower)) return hash ?? ''
+  if (!isLowerHexHash(lower)) return hash ?? ''
   return `${lower.slice(0, 2 + lead)}…${lower.slice(-tail)}`
 }
 

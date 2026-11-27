@@ -12,10 +12,9 @@ import { chainConfig } from '@/lib/chain'
 import { readCoverage } from '@/lib/address-coverage'
 import { trackedTokens } from '@/lib/holdings'
 import { readTrackedBalances } from '@/lib/tracked-balances'
+import { isHexAddress } from '@/lib/hex'
 
 export const dynamic = 'force-dynamic'
-
-const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/
 
 /**
  * Live balances from the chain: the native coin, and the tracked tokens (the
@@ -50,12 +49,12 @@ export async function GET(
 
   const { address: rawAddress } = await params
 
-  if (!ADDRESS_REGEX.test(rawAddress)) {
+  if (!isHexAddress(rawAddress)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
   // ⚠ Normalize BEFORE querying. The indexer stores every address lowercased
   // (block-processor lowercases from/to/token/miner) and contracts.address is a
-  // lowercased primary key, but ADDRESS_REGEX accepts checksummed input. This
+  // lowercased primary key, but isHexAddress accepts checksummed input. This
   // route was the one reader that did not normalize, so a checksummed request
   // silently returned empty transactions, empty transfers, AND a missed contracts
   // row — the address page has always done this at its own entry point.

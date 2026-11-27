@@ -3,10 +3,9 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { checkIpRateLimit } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
+import { isHexAddress } from '@/lib/hex'
 
 export const dynamic = 'force-dynamic'
-
-const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
 
 export async function GET(
   request: Request,
@@ -18,7 +17,7 @@ export async function GET(
 
   const { address: raw } = await params
 
-  if (!ADDRESS_REGEX.test(raw)) {
+  if (!isHexAddress(raw)) {
     return NextResponse.json({ error: 'Invalid address' }, { status: 400 })
   }
 

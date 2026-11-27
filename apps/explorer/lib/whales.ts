@@ -28,6 +28,7 @@ import { formatUnits } from 'ethers'
 import type { WhaleConfig } from '@altscan/chain-config'
 import { safeBigInt } from '@/lib/format'
 import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
+import { isLowerHexAddress } from './hex'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
@@ -116,7 +117,7 @@ export function rawWeiLiteral(wei: string): SQL {
  * literal would be valid, match nothing, and fall back to the latest arm alone without a single error.
  */
 function rawAddressLiteral(address: string): SQL {
-  if (!/^0x[0-9a-f]{40}$/.test(address)) {
+  if (!isLowerHexAddress(address)) {
     throw new Error(`whales: token address must be 0x + 40 lowercase hex, got ${JSON.stringify(address)}`)
   }
   return sql.raw(`'${address}'`)

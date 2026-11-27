@@ -14,6 +14,7 @@ import { AdReserve } from '@/components/ads/AdReserve'
 import { isBinanceIntentQuery } from '@/lib/binance-referral'
 import type { Metadata } from 'next'
 import { swallow } from '@/lib/observability'
+import { isHexAddress, isHexHash } from '@/lib/hex'
 
 export const metadata: Metadata = {
   title: 'Search',
@@ -36,8 +37,8 @@ export default async function SearchPage({
 
   // Server-side redirect for recognized query patterns
   if (query) {
-    if (/^0x[0-9a-fA-F]{64}$/.test(query)) redirect(`/tx/${query}`)
-    if (/^0x[0-9a-fA-F]{40}$/.test(query)) redirect(`/address/${query}`)
+    if (isHexHash(query)) redirect(`/tx/${query}`)
+    if (isHexAddress(query)) redirect(`/address/${query}`)
     if (/^\d+$/.test(query)) redirect(`/blocks/${query}`)
   }
 

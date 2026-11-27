@@ -1,3 +1,4 @@
+import { isHexHash } from './hex'
 /**
  * Decode ERC-20 Transfer events out of a receipt's logs.
  *
@@ -30,7 +31,7 @@ export type DecodedTransfer = {
 
 /** A 32-byte topic holds a left-padded address in its low 20 bytes. */
 function addressFromTopic(topic: string | null): string | null {
-  if (!topic || !/^0x[0-9a-fA-F]{64}$/.test(topic)) return null
+  if (!topic || !isHexHash(topic)) return null
   return `0x${topic.slice(26).toLowerCase()}`
 }
 
@@ -59,7 +60,7 @@ export function decodeNftTransferLogs(logs: TransferLogLike[]): DecodedNftTransf
     const fromAddress = addressFromTopic(log.topic1)
     const toAddress = addressFromTopic(log.topic2)
     if (!fromAddress || !toAddress) continue
-    if (!/^0x[0-9a-fA-F]{64}$/.test(log.topic3)) continue
+    if (!isHexHash(log.topic3)) continue
 
     let tokenId: string
     try {

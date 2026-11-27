@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { and, eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
+import { isLowerHexAddress } from '@/lib/hex'
 
 const MAX_SERIAL = 2_147_483_647 // api_keys.id is a 4-byte serial; a larger id would be a database error
 
@@ -24,7 +25,7 @@ export async function DELETE(
 
   const { searchParams } = new URL(request.url)
   const owner = searchParams.get('owner')?.toLowerCase()
-  if (!owner || !/^0x[0-9a-f]{40}$/.test(owner)) {
+  if (!owner || !isLowerHexAddress(owner)) {
     return NextResponse.json({ error: 'Missing or invalid owner address' }, { status: 400 })
   }
 
