@@ -32,6 +32,7 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { shortHash, shortenAddress, toChecksumAddress } from '@/lib/address-display'
 import { isHexAddress } from '@/lib/hex'
+import { withTimeout } from '@/lib/with-timeout'
 
 const ERC20_ABI = [
   'function decimals() view returns (uint8)',
@@ -48,14 +49,6 @@ type OnDemandToken = {
   holderCount: number
   address: string
   type: string
-}
-
-/** Resolve a fallback after `ms` so a slow DB/RPC call never blocks the page render. */
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ])
 }
 
 // Wrapped in cache() so generateMetadata and the page render share one RPC round-trip
@@ -232,27 +225,16 @@ export default async function TokenDetailPage({
   // holders client-side via <HoldersLazy> → /api/internal/token/<addr>/holders (bots don't run
   // the XHR, so they never spend CU — same model as the address tabs). This removes the last
   // unguarded SSR Moralis call; the edge /token/ Managed Challenge + holders bucket cap remain.
-  const marketDataPromise = withTimeout(getTokenMarketData(addr).catch(() => null), 6000, null)
+  const marketDataPromise = withTimeout(getTokenMarketData(addr), 6000).catch(() => null)
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [NO_LOCAL_TRANSFERS, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
-        withTimeout(
-          selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset })
-            .catch(() => null),
-          6000,
-          null,
-        ),
+        withTimeout(selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset }), 6000).catch(() => null),
         // Counts at most one row past the list. -1 = "unknown" (timed out /
         // errored) so we never render a misleading "0 total".
-        withTimeout(
-          countTokenTransfers(db, addr)
-            .then(([r]) => r?.value ?? 0)
-            .catch(() => -1),
-          5000,
-          -1,
-        ),
-        withTimeout(getTokenHolders(addr, { skipProvider: true }).catch(() => EMPTY_HOLDERS), 6000, EMPTY_HOLDERS),
-        withTimeout(analyzeTokenRisk(addr).catch(() => [] as RiskSignal[]), 5000, [] as RiskSignal[]),
+        withTimeout(countTokenTransfers(db, addr).then(([r]) => r?.value ?? 0), 5000).catch(() => -1),
+        withTimeout(getTokenHolders(addr, { skipProvider: true }), 6000).catch(() => EMPTY_HOLDERS),
+        withTimeout(analyzeTokenRisk(addr), 5000).catch(() => [] as RiskSignal[]),
       ])
   const marketData = await marketDataPromise
   const countKnown = totalTransfersRaw >= 0

@@ -29,6 +29,7 @@ import type { WhaleConfig } from '@altscan/chain-config'
 import { safeBigInt } from '@/lib/format'
 import { fetchNativeUsd, NATIVE_PRICE_BUDGET_MS } from '@/lib/native-price'
 import { isLowerHexAddress } from './hex'
+import { withTimeout } from './with-timeout'
 
 export type WhalePeriod = '1h' | '24h' | '7d' | 'all'
 
@@ -245,13 +246,6 @@ function parseWhaleRow(row: unknown): WhaleTx {
     tokenSymbol: r.tokenSymbol ? String(r.tokenSymbol) : undefined,
     tokenAddress: r.tokenAddress ? String(r.tokenAddress).toLowerCase() : undefined,
   }
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
-    p.then(v => { clearTimeout(t); resolve(v) }, e => { clearTimeout(t); reject(e) })
-  })
 }
 
 /**
