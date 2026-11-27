@@ -53,6 +53,22 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
   explorer's `ttl-cache.ts` (packages do not import apps). Leave unless a third package
   needs one.
 
+## Considered and declined
+
+Recorded so the next pass does not redo the analysis.
+
+- **Duplicate keccak topic constants** (`Transfer`, `Approval` in `erc20-transfers.ts`,
+  `event-decoder.ts`, `tx-decoder.ts`, the indexer). Each is the hash of a fixed
+  signature, so the copies cannot drift. No guard needed.
+- **Per-file `sleep` one-liners** in the indexer (11). `node:timers/promises` would be the
+  canonical form, but `block-processor-integrity.test.ts` uses fake timers, and moving the
+  backoff sleeps off the patched global `setTimeout` risks hanging it. The helper cannot
+  drift, so the risk buys nothing.
+- **Sharing `withTimeout` / address validation across apps**: see ADR 0002.
+- **API error shape**: already uniform (`{ error }` at every `/api/v1` site).
+- **Design tokens**: only the ad components use raw colours (Binance brand yellow, on
+  purpose).
+
 ## Independent review (batches 1–8)
 
 A fresh reviewer read `git diff origin/main..HEAD` against these questions: any deleted
