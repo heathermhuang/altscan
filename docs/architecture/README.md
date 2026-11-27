@@ -45,7 +45,8 @@ packages/{chain-config, db, explorer-core, oauth, settings-schema}: leaves
 
 ## Canonical modules
 
-One implementation per concern. "Guard" names the test that fails on a second copy; "—"
+One implementation per concern. "Guard" names the test that fails on a second copy (for the
+database shape: on drift between `schema.ts` and the built database, PG-gated, run in CI); "—"
 means none yet. Paths are repo-relative, and `scripts/architecture-map.test.ts` fails when one
 no longer exists, so this inventory cannot silently rot.
 

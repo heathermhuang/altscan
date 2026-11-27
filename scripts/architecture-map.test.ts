@@ -11,13 +11,17 @@ import { describe, expect, it } from 'vitest'
  */
 const ROOT = join(__dirname, '..')
 const doc = readFileSync(join(ROOT, 'docs/architecture/README.md'), 'utf8')
-const table = doc.slice(doc.indexOf('## Canonical modules'), doc.indexOf('## State ownership'))
+const start = doc.indexOf('## Canonical modules')
+const end = doc.indexOf('\n## ', start + 1)
+const table = start === -1 ? '' : doc.slice(start, end === -1 ? undefined : end)
 const rows = table.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Concern') && !l.startsWith('|---'))
 const tracked = new Set(execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n'))
-const PATH = /`((?:apps|packages|scripts)\/[^`\s]+\.(?:ts|tsx))`/g
+// Any backticked repo path with a source-like extension, whatever its top-level directory.
+const PATH = /`((?:apps|packages|scripts|docs|docker|deploy|\.github)\/[^`\s]+\.(?:ts|tsx|mts|mjs|js|astro|json|ya?ml|md))`/g
 
 describe('the canonical-module inventory', () => {
   it('lists concepts (cannot pass vacuously)', () => {
+    expect(start, 'the README has a "## Canonical modules" section').toBeGreaterThan(-1)
     expect(rows.length).toBeGreaterThan(20)
   })
 

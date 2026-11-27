@@ -178,6 +178,14 @@ reader and the mocked insert chain still resolves; the 400-digit page test match
 and would fail without the clamp; the unique-exports scan sees the repo and its exceptions
 are real. Its suggestion, distinct names for the wallet-watch cursor codec, was applied.
 
+## Independent review (batch 38)
+
+A sixth fresh reviewer opened the file behind every row of the canonical-modules table and
+found each accurate. Its three minor notes are handled: the database-shape guard is now
+described as a drift check (PG-gated, in CI); the path check covers any top-level directory
+and more extensions; and a missing or renamed section heading fails the test instead of
+truncating the table.
+
 ## Final verification and stopping condition
 
 On the final commit: the full gate (every workspace typecheck including altscan-site, lint,
