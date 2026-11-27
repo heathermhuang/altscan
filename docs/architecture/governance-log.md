@@ -50,6 +50,28 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 Empty. Every remaining item is either declined below (with the reason) or waits on an
 owner decision at the end of this file.
 
+## Convergence
+
+Every area on the governance checklist was scanned; this is where each one ended.
+
+| Area | Outcome |
+|---|---|
+| UI components and design system | One ad-slot layout (#14). Tokens respected everywhere except the Binance brand colour, on purpose. Page-local helpers folded into `lib/` (#24) |
+| Business logic and domain model | Token standards from the DB enum (#28); one list depth (#26) and page rule (#27); chain facts in chain-config (#12, #23, #30) |
+| API and data contracts | One 429 body (#16); published limits named once and quoted by every docs surface (#25); error shape already uniform |
+| State and data flow | Indexer module state audited: no duplicate state. The transfer writer, receipts and addresses coalescer are their own modules (#20, #22) |
+| Data access and caching | DB env var required (#3); `schema.ts` declares every table, enforced against the built DB (#29); one in-process cache (#5) |
+| Configuration and env | Indexer env read only in `config.ts` (#7, #18, #23); explorer numbers through one parser and one owner per variable (#9, #19) |
+| Error handling and retries | One wait bound (#4); swallow-and-fallback through `swallowed()` (#24); retry backoff sleeps declined (no drift risk) |
+| Logging and observability | Two caches made visible to `/api/health` (#5); `REORG_DEPTH` and `COMPACT_RETENTION_DAYS` now in the boot log (#7, #18) |
+| Auth and permissions | Rate-limit and OAuth budgets named once (#16, #25); the CORS peer opt-in kept separate on purpose (fork safety) |
+| Naming, layout, boundaries | Workspace graph declared and enforced (#6); dead code and ~100 needless exports removed (#1, #11) |
+| Utilities and shared infra | Hex shapes once per app (#2, #31); ADR 0002 on what is shared across apps |
+| Tests, build, toolchain | Every package typechecks in CI (#8), the site too (#17); `noUnusedLocals` everywhere (#13); three flaky or version-bound tests fixed (#10, #15, #21) |
+
+No safe improvement remains that this pass could find: the task pool is empty, each declined
+item has its reason above, and the remaining items need an owner (below).
+
 ## Considered and declined
 
 Recorded so the next pass does not redo the analysis.
