@@ -8,6 +8,7 @@ import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
 import { verifyMessage } from 'ethers'
 import { isHexAddress, isLowerHexAddress } from '@/lib/hex'
+import { positiveIntEnv } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,10 +17,7 @@ export const dynamic = 'force-dynamic'
  * minted 69 keys within one hour on each chain. The per-minute limits could not see that, so minting has an hourly
  * bucket of its own.
  */
-const API_KEY_MINTS_PER_HOUR = (() => {
-  const n = Number(process.env.API_KEY_MINTS_PER_HOUR)
-  return Number.isInteger(n) && n > 0 ? n : 5
-})()
+const API_KEY_MINTS_PER_HOUR = positiveIntEnv('API_KEY_MINTS_PER_HOUR', 5)
 const HOUR_MS = 60 * 60 * 1000
 
 /** Message the client must sign: deterministic and timestamped; reusable only inside the skew window. */

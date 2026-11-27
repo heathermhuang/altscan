@@ -16,6 +16,7 @@ import { verifyBearer, wwwAuthenticate } from '@altscan/oauth'
 import { checkIpRateLimit, checkRateLimit, clientIpBucket, clientIpFromHeaders, isAltscanService } from '@/lib/api-rate-limit'
 import { oauthConfig } from '@/lib/oauth'
 import crypto from 'crypto'
+import { positiveIntEnv } from './env'
 
 /** An OAuth token's budget: the same as an API key's, shared by every token for one address. */
 const TOKEN_REQUESTS_PER_MINUTE = 100
@@ -27,10 +28,7 @@ const TOKEN_REQUESTS_PER_MINUTE = 100
  * ceiling sits above any single budget (100/min), so it only binds a client spreading across credentials. The
  * altscan.io service token is exempt: it calls from Cloudflare's shared Worker address and has its own capped buckets.
  */
-const API_IP_CEILING_PER_MINUTE = (() => {
-  const n = Number(process.env.API_IP_CEILING_PER_MINUTE)
-  return Number.isInteger(n) && n > 0 ? n : 300
-})()
+const API_IP_CEILING_PER_MINUTE = positiveIntEnv('API_IP_CEILING_PER_MINUTE', 300)
 
 export type OwnerAuthResult =
   | { ok: true }

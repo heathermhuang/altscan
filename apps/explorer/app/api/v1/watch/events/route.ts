@@ -5,6 +5,7 @@ import { admitWatchRequest, requireWatchOwner, watchUnavailable } from '@/lib/wa
 import { decodeCursor } from '@/lib/watch-cursor'
 import { readWatchEvents } from '@/lib/watch-events'
 import { hasSqlState, isUndefinedTable } from '@/lib/watch-addresses'
+import { positiveIntEnv } from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,10 +13,7 @@ export const dynamic = 'force-dynamic'
  * Feed reads in flight per process. The web pool is 3 connections and each read holds one for up to its 5 s
  * statement timeout, so past the cap the route answers 503 at once instead of queueing (cf. api-tx-lookup.ts).
  */
-const MAX_CONCURRENT = (() => {
-  const n = Number(process.env.WATCH_FEED_MAX_CONCURRENT)
-  return Number.isInteger(n) && n > 0 ? n : 1
-})()
+const MAX_CONCURRENT = positiveIntEnv('WATCH_FEED_MAX_CONCURRENT', 1)
 let running = 0
 
 const busy = () => NextResponse.json({ error: 'Wallet watch is busy; retry shortly' }, { status: 503, headers: { 'Retry-After': '2' } })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkRateLimit, clientIpBucket, refundRateLimit } from '@/lib/api-rate-limit'
 import { withClientAdmission } from '@altscan/providers'
 import { isHexAddress } from './hex'
+import { positiveIntEnv } from './env'
 
 /**
  * Guard for the unauthenticated /api/internal/* Moralis-proxy routes.
@@ -37,10 +38,7 @@ export async function guardInternalAddress(
  * spending the fleet's shared allowance (BNB's whole month is 250k CU). This counts only the calls that reach the
  * provider (packages/providers client-admission.ts); past it, that client's tabs show the local index.
  */
-export const PROVIDER_CALLS_PER_CLIENT_PER_HOUR = (() => {
-  const n = Number(process.env.PROVIDER_CALLS_PER_CLIENT_PER_HOUR)
-  return Number.isInteger(n) && n > 0 ? n : 60
-})()
+export const PROVIDER_CALLS_PER_CLIENT_PER_HOUR = positiveIntEnv('PROVIDER_CALLS_PER_CLIENT_PER_HOUR', 60)
 
 /** Run a provider call charged to this request's client, only if it is billed. */
 export function asClient<T>(req: Request, fn: () => Promise<T>): Promise<T> {

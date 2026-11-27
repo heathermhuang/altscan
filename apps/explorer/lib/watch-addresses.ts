@@ -1,12 +1,10 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@altscan/db'
 import { isHexAddress } from './hex'
+import { positiveIntEnv } from './env'
 
 /** Watched addresses per owner. Sized for individuals and small bots, not deposit-monitor services. */
-export const WATCH_MAX_ADDRESSES = (() => {
-  const n = Number(process.env.WATCH_MAX_ADDRESSES)
-  return Number.isInteger(n) && n > 0 ? n : 50
-})()
+export const WATCH_MAX_ADDRESSES = positiveIntEnv('WATCH_MAX_ADDRESSES', 50)
 
 export type Normalized = { ok: true; addresses: string[] } | { ok: false; invalid: string[] }
 

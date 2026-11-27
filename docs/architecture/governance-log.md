@@ -19,6 +19,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 6 | The workspace dependency graph is declared and checked; architecture map and ADRs 0001–0002 written | `scripts/workspace-graph.test.ts` (checked to fail) |
 | 7 | Indexer env boundary: `REORG_DEPTH` moved into `config.ts` (now in the boot log); `backfill.ts` reuses `provider.ts` instead of re-parsing the RPC list | `apps/indexer/src/env-boundary.test.ts` |
 | 8 | Every package `typecheck` script runs in CI (one step replaces the oauth-only one); the providers script, broken unnoticed, fixed | CI `Typecheck packages` |
+| 9 | One explorer env-number parser (`lib/env.ts` `positiveIntEnv`); seven hand-rolled parses migrated. `BODY_CACHE_TTL_MS`/`BODY_CACHE_WINDOW_BYTES` used `parseInt`, which read `2h` as 2 ms | `lib/env.test.ts` |
 
 ## Task pool
 
@@ -46,6 +47,24 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
   failed once at 28 ms under full-suite load. Raise the bound or assert complexity
   (compare a 1k and a 16k input) instead of wall time.
 
+## Independent review (batches 1–8)
+
+A fresh reviewer read `git diff origin/main..HEAD` against these questions: any deleted
+symbol still referenced (including docker/, deploy/, render.yaml), a case rule changed
+by the hex migration, a falsy-vs-undefined cache bug, a bare `getDb()` caller, and the
+CI step order. It found no breakage. It confirmed these deliberate differences:
+
+- `REORG_DEPTH` is now whole-number-or-default (was `parseInt`, so `20.0` read as 20).
+- The whales timeout log line lost its `(8000ms)` suffix. Nothing parses it.
+- `/api/health` `caches` gains two keys: `tx-lookup-hits`, `code-class`.
+- The migrated caches evict LRU instead of FIFO, expire lazily, and no longer run 30s
+  sweep timers. Caps and TTLs are unchanged.
+
 ## Pending owner decisions
 
-None yet.
+- **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
+  if it is set to anything but a plain whole number, it now falls back to the chain
+  default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
+- **Same check for `BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** on both web services:
+  a non-integer value now falls back to the default instead of being parsed by
+  `parseInt`.
