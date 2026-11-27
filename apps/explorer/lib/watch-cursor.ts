@@ -13,11 +13,11 @@ export type WatchCursor = { b: number; h: string; k: 0 | 1 | 2; i: number; w: st
 
 export const END_OF_BLOCK = 2
 
-export function encodeCursor(c: WatchCursor): string {
+export function encodeWatchCursor(c: WatchCursor): string {
   return Buffer.from(JSON.stringify([c.b, c.h, c.k, c.i, c.w])).toString('base64url')
 }
 
-export function decodeCursor(s: string): WatchCursor | null {
+export function decodeWatchCursor(s: string): WatchCursor | null {
   if (s.length > 512) return null
   let v: unknown
   try {

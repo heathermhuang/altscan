@@ -17,14 +17,6 @@ const ALLOWED: Record<string, { files: string[]; reason: string }> = {
     files: ['apps/explorer/lib/chain-client.ts', 'apps/explorer/lib/chain.ts'],
     reason: 'server (CHAIN) and client (NEXT_PUBLIC_CHAIN, inlined at build) views of chain-config',
   },
-  'apps/explorer:encodeCursor': {
-    files: ['apps/explorer/lib/backfill-serve.ts', 'apps/explorer/lib/watch-cursor.ts'],
-    reason: 'two cursor formats: backfill-serve falls back to "head" on junk, the wallet-watch feed rejects it',
-  },
-  'apps/explorer:decodeCursor': {
-    files: ['apps/explorer/lib/backfill-serve.ts', 'apps/explorer/lib/watch-cursor.ts'],
-    reason: 'see encodeCursor',
-  },
 }
 
 const CONVENTION = new Set([

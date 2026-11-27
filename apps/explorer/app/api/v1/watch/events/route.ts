@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { admitWatchRequest, requireWatchOwner, watchUnavailable } from '@/lib/watch-route'
-import { decodeCursor } from '@/lib/watch-cursor'
+import { decodeWatchCursor } from '@/lib/watch-cursor'
 import { readWatchEvents } from '@/lib/watch-events'
 import { hasSqlState, isUndefinedTable } from '@/lib/watch-addresses'
 import { positiveIntEnv } from '@/lib/env'
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   const limit = parseLimit(params.get('limit'))
   if (limit === null) return NextResponse.json({ error: `limit must be an integer from 1 to ${MAX_LIMIT}` }, { status: 400 })
   const rawCursor = params.get('cursor')
-  const cursor = rawCursor === null ? null : decodeCursor(rawCursor)
+  const cursor = rawCursor === null ? null : decodeWatchCursor(rawCursor)
   if (rawCursor !== null && cursor === null) return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 })
 
   // Adoption measurement: distinct owners per week, without logging their addresses.

@@ -47,7 +47,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 34 | Deleted the hard-disabled per-block holder tracking: `holder-balances.ts`, its two call sites and profile phase, `recomputeHolderCounts` and its schedule, the five `HOLDER_*` config entries and the constant `holderBalanceTrackingEnabled`. The product state is unchanged (counts were already a frozen snapshot); AGENTS.md's known issue now says the code is in history and a revival is a rebuild. All 10 indexer PG suites 98/98; compiled modules load. `HOLDER_*` vars still set on Render are now ignored | config/reorg tests; gate |
 | 35 | `REORG_DEPTH` reads exactly as before (parseInt, positive) through `EnvReader.leadingPositiveInt`, the one lenient reader for values moved from parseInt sites where a stricter parse could change a safety setting; `daysOrImmortal` is now that reader with an Infinity fallback. Still printed at boot. This removes the last pre-merge check; the `BODY_CACHE_*` difference is recorded as accepted | `config.test.ts` |
 | 36 | Fourth review follow-up: removed `totalInserted` and the inline insert's `RETURNING`, which existed only to gate the holder enqueue #34 deleted (`noUnusedLocals` misses a `+=`-only variable); pinned that a 400-digit `?page=` resolves to the last page, never Infinity | `lib/page-cache.test.ts` |
-| 37 | Machine-checked inventory: no two modules in a workspace export the same name. The whole repo had three repeats, each a different concept (server/client `chainConfig`; two cursor formats with opposite junk handling), allowed by name with the reason | `scripts/unique-exports.test.ts` (checked to fail) |
+| 37 | Machine-checked inventory: no two modules in a workspace export the same name. The whole repo had three repeats, each a different concept (server/client `chainConfig`; two cursor formats with opposite junk handling), allowed by name with the reason; after review the wallet-watch codec was renamed `encodeWatchCursor`/`decodeWatchCursor`, leaving `chainConfig` the only exception | `scripts/unique-exports.test.ts` (checked to fail) |
 
 ## Task pool
 
@@ -169,6 +169,13 @@ phase was removed consistently and retention's lag-yield and schedule are intact
 `daysOrImmortal` is unchanged. Findings: the orphaned `totalInserted`/`RETURNING` and an
 untested >308-digit page, both handled in #36; `'+5'`, `'5.'` and similar junk spellings are
 now page 1, covered by the accepted `?page=` change.
+
+## Independent review (batches 36–37)
+
+A fifth fresh reviewer read `git diff dd1d1d3..HEAD`: the dropped `RETURNING` had no other
+reader and the mocked insert chain still resolves; the 400-digit page test matches the code
+and would fail without the clamp; the unique-exports scan sees the repo and its exceptions
+are real. Its suggestion, distinct names for the wallet-watch cursor codec, was applied.
 
 ## Pending owner decisions
 
