@@ -54,12 +54,14 @@ One implementation per concern. "Guard" names the test that fails on a second co
 | Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | `src/env-boundary.test.ts` (listed exceptions) |
 | Chain differences (incl. per-chain features such as wallet watch) | `@altscan/chain-config` (`features`); explorer reads it via `lib/chain.ts` (server) and `lib/chain-client.ts` (client components, `NEXT_PUBLIC_CHAIN`) | `lib/client-chain-config.test.ts` |
 | Address / hash shape | explorer `lib/hex.ts` | `lib/hex.test.ts` |
+| Numeric env tunables (explorer) | `lib/env.ts` `positiveIntEnv` | `lib/env.test.ts` |
 | Bounding a wait | explorer `lib/with-timeout.ts`; indexer `src/rpc-failover.ts` `withTimeout` (ADR 0002) | `lib/with-timeout.test.ts` |
 | In-process cache | explorer `lib/ttl-cache.ts` (bounded LRU, registered for `/api/health`) | `lib/ttl-cache.test.ts` |
 | Shared cache across instances | `@altscan/explorer-core` `kvGet`/`kvSet` (Redis, bounded fallback) | — |
 | List-page data cache | explorer `lib/page-cache.ts` | its own tests |
+| Ad-slot layout | `components/ads/AdFrame.tsx` (creatives supply content) | — |
 | Swallowed-error logging | explorer `lib/observability.ts` (`swallow`, `swallowed`) | — |
-| Per-IP rate limiting | `@altscan/explorer-core` `checkRateLimit` keyed by `clientIpBucket`; explorer `lib/api-rate-limit.ts` | `lib/ip-bucket-callers.test.ts` |
+| Per-IP rate limiting and the 429 body | `@altscan/explorer-core` `checkRateLimit` keyed by `clientIpBucket`; explorer `lib/api-rate-limit.ts` (`checkIpRateLimit`, `rateLimitResponse`) | `lib/ip-bucket-callers.test.ts`, `lib/rate-limit-response.test.ts` |
 | Number, amount and time formatting | explorer `lib/format.ts`; address display `lib/address-display.ts` | — |
 | Token symbol sanitizing | `@altscan/explorer-core/format` `sanitizeSymbol` | — |
 | RPC for the web tier | explorer `lib/rpc.ts` (`getWebProvider`, sequential failover) | — |

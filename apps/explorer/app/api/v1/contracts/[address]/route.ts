@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, rateLimitResponse } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { isHexAddress } from '@/lib/hex'
 
@@ -12,7 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ address: string }> },
 ) {
   if (!(await checkIpRateLimit(request.headers))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   const { address: raw } = await params

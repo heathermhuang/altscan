@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, rateLimitResponse } from '@/lib/api-rate-limit'
 import { getWebProvider } from '@/lib/rpc'
 
 // Cache gas price for 30 seconds to avoid hitting RPC on every stats request
@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   if (!(await checkIpRateLimit(request.headers))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   // Fast path: reltuples + MAX(number) — all complete in <100ms

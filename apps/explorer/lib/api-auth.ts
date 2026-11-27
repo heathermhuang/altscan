@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq, and, sql } from 'drizzle-orm'
 import { verifyBearer, wwwAuthenticate } from '@altscan/oauth'
-import { checkIpRateLimit, checkRateLimit, clientIpBucket, clientIpFromHeaders, isAltscanService } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, checkRateLimit, clientIpBucket, clientIpFromHeaders, isAltscanService, rateLimitResponse } from '@/lib/api-rate-limit'
 import { oauthConfig } from '@/lib/oauth'
 import crypto from 'crypto'
 import { positiveIntEnv } from './env'
@@ -78,7 +78,7 @@ export function authFailure(auth: Extract<AuthResult, { ok: false }>): NextRespo
       { status: 401, headers: cfg ? { 'WWW-Authenticate': wwwAuthenticate(cfg, true) } : {} },
     )
   }
-  return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+  return rateLimitResponse()
 }
 
 /**

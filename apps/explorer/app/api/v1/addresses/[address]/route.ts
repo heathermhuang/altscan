@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { selectByAddress } from '@/lib/address-query'
 import { swallow, swallowed } from '@/lib/observability'
-import { checkIpRateLimit } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, rateLimitResponse } from '@/lib/api-rate-limit'
 import { apiJson } from '@/lib/api-serialize'
 import { getWebProvider } from '@/lib/rpc'
 import { classifyCode, resolveContractStatusFromClass, type CodeClass } from '@/lib/contract-status'
@@ -44,7 +44,7 @@ export async function GET(
   { params }: { params: Promise<{ address: string }> },
 ) {
   if (!(await checkIpRateLimit(request.headers))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   const { address: rawAddress } = await params

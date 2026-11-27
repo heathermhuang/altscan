@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, clientIpBucket, refundRateLimit } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket, rateLimitResponse, refundRateLimit } from '@/lib/api-rate-limit'
 import { withClientAdmission } from '@altscan/providers'
 import { isHexAddress } from './hex'
 import { positiveIntEnv } from './env'
@@ -27,7 +27,7 @@ export async function guardInternalAddress(
   }
   // Namespaced bucket so it doesn't collide with the /api/v1 IP limiter.
   if (!(await checkRateLimit(`internal:${clientIpBucket(req.headers)}`, maxPerMin))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers })
+    return rateLimitResponse(headers)
   }
   return null
 }

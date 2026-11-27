@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
-import { checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
+import { checkRateLimit, clientIpBucket, rateLimitResponse } from '@/lib/api-rate-limit'
 import { triggerSourcifyVerification } from '@/lib/verifier'
 import { chainConfig } from '@/lib/chain'
 import { isHexAddress } from '@/lib/hex'
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   // bucket (Redis `rl:verify:<ip>`): the bare `<ip>` bucket is the 100/min budget
   // every other route increments, so sharing it let 11 ordinary calls 429 a verify.
   if (!(await checkRateLimit(`verify:${clientIpBucket(request.headers)}`, 10))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   // Origin check — verify request comes from our domains (CSRF protection)

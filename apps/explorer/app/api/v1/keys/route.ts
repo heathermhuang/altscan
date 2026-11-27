@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { eq } from 'drizzle-orm'
 import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
-import { checkIpRateLimit, checkRateLimit, clientIpBucket } from '@/lib/api-rate-limit'
+import { checkIpRateLimit, checkRateLimit, clientIpBucket, rateLimitResponse } from '@/lib/api-rate-limit'
 import { keyRequestTimestampError } from '@/lib/key-request'
 import { mintApiKey } from '@/lib/api-key-mint'
 import crypto from 'crypto'
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!(await checkIpRateLimit(request.headers))
       || !(await checkRateLimit(`mint:${clientIpBucket(request.headers)}`, API_KEY_MINTS_PER_HOUR, HOUR_MS))) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    return rateLimitResponse()
   }
 
   const body = await request.json() as { ownerAddress: string; label?: string; signature?: string; timestamp?: number }

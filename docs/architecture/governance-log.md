@@ -25,6 +25,8 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 12 | Wallet watch's chain gate is `chainConfig.features.hasWalletWatch` (with the watermark reason next to it) instead of `key === 'bnb'` in five files; removed the `CHAIN_ID` batch 1 orphaned in `goplus.ts` | the flag is the single source; tsc |
 | 13 | `noUnusedLocals` on in every workspace tsconfig except altscan-site (pre-existing errors). Fixed the 7 hits, incl. retention-cleanup's stale `BATCH_SIZE`, a second definition of the delete batch that config already owns | tsc everywhere (lint had missed an orphan from batch 1) |
 | 14 | One ad-slot layout (`components/ads/AdFrame.tsx`): the Binance creative (moved verbatim out of the stateful `AdSlot` into `BinanceAd.tsx`) and `HouseAd` each repeated all five variant layouts. Proven with a throwaway harness: all 15 variant/creative renders byte-identical to the pre-change static HTML, and the harness failed on a one-space change | — |
+| 15 | One timing helper for duration-bounded tests (`test-support/timing.ts` `bestOfMs`); a second single-sample test flaked at 187 ms | — |
+| 16 | One 429 body (`lib/api-rate-limit.ts` `rateLimitResponse`), replacing 14 spelled-out copies. The CSV export (text body) and OAuth (its own Retry-After contract) keep theirs | `lib/rate-limit-response.test.ts` |
 
 ## Task pool
 
