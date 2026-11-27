@@ -17,6 +17,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "strict": true,
+    "noUnusedLocals": true,
     "declaration": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

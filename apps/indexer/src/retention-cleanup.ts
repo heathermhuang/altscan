@@ -15,7 +15,6 @@ import { isPartitioned, listPartitions, ensureForwardPartitions, ensureInternalT
 import { buildRetentionPlan, parseCompactRetentionDays, bodyPruneIsRedundant } from './retention-policy'
 
 const RETENTION_DAYS = indexerConfig.retention.days
-const BATCH_SIZE     = 50_000  // rows per delete batch — 5K was too slow to catch up
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
 // Holder-count recompute scans token_balances and updates tokens — takes
 // 10-20s on BNB under load and holds DB-pool slots while running, which

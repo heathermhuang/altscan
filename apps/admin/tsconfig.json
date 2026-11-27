@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "react",
+    "noUnusedLocals": true,
     "types": ["@cloudflare/workers-types"],
     "paths": {
       // Mirrors the vite alias in astro.config.mjs. That alias only fixes the

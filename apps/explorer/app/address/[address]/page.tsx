@@ -149,7 +149,6 @@ export default async function AddressPage({
   const addr = address.toLowerCase()
   // The tabs stop at the newest MAX_LIST_ROWS rows, so a deeper ?page= gets its last page.
   const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
-  const offset = (page - 1) * PAGE_SIZE
 
   if (!isHexAddress(addr)) notFound()
 

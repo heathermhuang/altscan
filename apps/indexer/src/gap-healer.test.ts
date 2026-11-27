@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   healNextGap, LAG_RECHECK_EVERY,
-  DEFAULT_HEAL_BATCH, DEFAULT_HEAL_MAX_LAG,
+  DEFAULT_HEAL_MAX_LAG,
 } from './gap-healer'
 
 /**
