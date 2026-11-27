@@ -8,7 +8,6 @@
 import { createTtlCache } from './ttl-cache'
 
 const BASE = 'https://api.gopluslabs.io/api/v1'
-const CHAIN_ID = '56' // BSC
 
 export type AddressRisk = {
   isContract: boolean

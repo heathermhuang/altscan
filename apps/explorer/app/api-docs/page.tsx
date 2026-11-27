@@ -267,8 +267,7 @@ const endpoints: Endpoint[] = [
       2
     ),
   },
-  // Wallet watch is BNB-only in phase 1 (see watchChainGate in lib/watch-route.ts).
-  ...(chainConfig.key === 'bnb' ? ([
+  ...(chainConfig.features.hasWalletWatch ? ([
   {
     method: 'POST',
     path: '/api/v1/watch/addresses',

@@ -71,6 +71,13 @@ export type ChainFeatures = {
   hasEns: boolean
   /** Uses EIP-1559 base fee + priority fee */
   hasEip1559: boolean
+  /**
+   * Serves wallet watch (/api/v1/watch/*). The feed reads only up to the async token-transfer
+   * writer's durable watermark (indexer_cursor.transfers_durable_block). ETH's indexer runs the
+   * inline writer, which publishes none, so its feed tip would never advance. Turning this on
+   * for ETH needs ASYNC_TT_WRITER on eth-indexer, or a watermark on the inline path.
+   */
+  hasWalletWatch: boolean
 }
 
 /** Historical-data provider for established chains (spec §3.5). null = no
@@ -335,6 +342,7 @@ export const BSC: ChainConfig = {
     hasDex: true,
     hasEns: false,
     hasEip1559: false,
+    hasWalletWatch: true,
   },
 }
 
@@ -430,6 +438,7 @@ export const ETH: ChainConfig = {
     hasDex: true,
     hasEns: true,
     hasEip1559: true,
+    hasWalletWatch: false,
   },
 }
 

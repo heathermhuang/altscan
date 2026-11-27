@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ chain: 'bnb', auth: 0 }))
 
-vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain } } }))
+vi.mock('@/lib/chain', () => ({ chainConfig: { get key() { return h.chain }, get features() { return { hasWalletWatch: h.chain === 'bnb' } } } }))
 vi.mock('@/lib/api-auth', () => ({
   authRequest: async () => { h.auth++; return { ok: true, limited: false } },
   authFailure: () => new Response(null, { status: 429 }),

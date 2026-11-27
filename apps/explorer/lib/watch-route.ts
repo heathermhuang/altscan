@@ -3,14 +3,9 @@ import { authFailure, authRequest, requireApiKeyOwner } from '@/lib/api-auth'
 import { chainConfig } from '@/lib/chain'
 import { isLowerHexAddress } from './hex'
 
-/**
- * Phase 1 is BNB-only: the feed serves only up to the async token-transfer writer's durable watermark
- * (indexer_cursor.transfers_durable_block), and the ETH indexer runs the inline writer, which publishes
- * none, so the feed's tip would never advance there. Enabling ETH needs ASYNC_TT_WRITER on eth-indexer
- * or a watermark on the inline path. null = this chain serves wallet watch.
- */
+/** null = this chain serves wallet watch (chain-config `features.hasWalletWatch` says why ETH does not). */
 function watchChainGate(): Response | null {
-  return chainConfig.key === 'bnb'
+  return chainConfig.features.hasWalletWatch
     ? null
     : NextResponse.json({ error: 'Wallet watch is available on BNBScan only' }, { status: 404 })
 }
