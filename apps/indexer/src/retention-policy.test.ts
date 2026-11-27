@@ -10,7 +10,7 @@ import { readIndexerConfig } from './config'
 // Env fixtures go through the real config parser, so these pin env -> plan end to end: the
 // policy functions take the resolved number, and config.ts is the one place it is parsed.
 const days = (env: NodeJS.ProcessEnv) =>
-  readIndexerConfig(env, { startBlock: 0, concurrency: 1, internalTxPartitionBlocks: 1, reorgDepth: 1 }).config.retention.compactDays
+  readIndexerConfig(env, { startBlock: 0, concurrency: 1, internalTxPartitionBlocks: 1, reorgDepth: 1, asyncTransferWriter: false }).config.retention.compactDays
 
 describe('retention guardrail — compact indexes are immortal on the default path', () => {
   const compact = new Set<string>(COMPACT_TABLES)

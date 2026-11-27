@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
 import { chainConfig } from '@/lib/chain'
+import { CHAINS } from '@altscan/chain-config'
 import { formatNativeToken, formatGwei, formatNumber, safeBigInt } from '@/lib/format'
 import { isHexHash } from '@/lib/hex'
 
@@ -63,9 +64,7 @@ function aboutMarkdown(): string {
     '',
     '## Sister site',
     '',
-    c.key === 'bnb'
-      ? '- Ethereum explorer: https://ethscan.io'
-      : '- BNB Chain explorer: https://bnbscan.com',
+    `- ${Object.values(CHAINS).find((p) => `https://${p.domain}` === c.peerUrl)?.name ?? 'Sister'} explorer: ${c.peerUrl}`,
     '',
     '## Data retention',
     '',

@@ -33,6 +33,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 20 | Split the async transfer writer out of `block-processor.ts` (2,386 → 1,291 lines) into `transfer-writer.ts`, and the disabled holder-balance queue into `holder-balances.ts`. Coupling was measured first: the writer shared only `enqueueTransferWrite` with the rest. Moved verbatim; `SQL_BATCH_CHUNK` and `isDeadlock` (used by all three) moved to the indexer `db.ts`; no re-export layer, all 11 importers repointed. Verified: tsc, 782 indexer unit tests, all 9 indexer PG suites on local Postgres 16.13 (one failure, also on main: a version predicate, fixed in #21), the compiled modules load under Node with no cycle | workspace graph, cycle scan |
 | 21 | `tt-whale-index.pg.test.ts`: the "repeated ATTACH re-validates" version predicate excluded only PG 18.0–18.3; 16.13 (measured here) does not re-validate either, so the suite failed on any PG 16 older than 16.14. CI's `postgres:16` is newer, so it never showed there | the test itself |
 | 22 | Two more zero-coupling seams out of `block-processor.ts` (1,291 → 1,070): `receipts.ts` (eth_getBlockReceipts and its pre-write field checks; it was filed under the DEX-pair header) and `address-activity.ts` (the addresses coalescer, which used nothing else in the file). Verbatim moves; all 9 indexer PG suites 95/95, compiled modules load | cycle scan, workspace graph |
+| 23 | Chain-key audit: every `key === 'bnb'` in apps reviewed. The md route's hardcoded sister-site line now comes from chain-config (`peerUrl` + the peer's name; output identical on both chains). The indexer's `ASYNC_TT_WRITER` default moved from `config.ts` reading `env.CHAIN` itself to `config-instance.ts`, beside the other per-chain indexer defaults, so only chain-config resolves `CHAIN` | — |
 
 ## Task pool
 
@@ -65,6 +66,13 @@ Recorded so the next pass does not redo the analysis.
   backoff sleeps off the patched global `setTimeout` risks hanging it. The helper cannot
   drift, so the risk buys nothing.
 - **Sharing `withTimeout` / address validation across apps**: see ADR 0002.
+- **CORS peer from chain-config.** `lib/cors.ts` allows the peer origin only when
+  `NEXT_PUBLIC_PEER_URL` is set; chain-config's `peerUrl` holds the same hosted value. Kept
+  separate on purpose: a fork must not allowlist the hosted sites' origins by default (same
+  rule as `GA_MEASUREMENT_ID` / `BINANCE_REF_CODE` in AGENTS.md).
+- **Remaining chain-key lookups** (`LOGOS[chainConfig.key]`, `V2_FACTORIES[key]`, the
+  per-chain indexer defaults in `config-instance.ts`) are keyed tables, not scattered
+  decisions. Fine as they are.
 - **An explorer env registry** (the indexer's `config.ts` model). Inventoried: every
   app-specific variable is read in exactly one file, numeric ones through `positiveIntEnv`.
   A registry would only forward those reads. Enforced instead: `lib/env.test.ts` fails when

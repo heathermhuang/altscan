@@ -26,6 +26,8 @@ const resolved = readIndexerConfig(process.env, {
   // retention would never drop one.
   internalTxPartitionBlocks: chain.key === 'bnb' ? 96_000 : 7_200,
   reorgDepth: chain.reorgDepth,
+  // BNB's 0.45s blocks need the async transfer writer; ETH's 12s blocks are fine inline.
+  asyncTransferWriter: chain.key === 'bnb',
 })
 
 export const indexerConfig = resolved.config

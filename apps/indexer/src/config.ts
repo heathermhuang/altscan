@@ -241,6 +241,8 @@ export type ConfigDefaults = {
   internalTxPartitionBlocks: number
   /** chain-config's `reorgDepth`: how far back a reorg check walks (K). */
   reorgDepth: number
+  /** Whether the async token_transfers writer is on unless ASYNC_TT_WRITER says otherwise. */
+  asyncTransferWriter: boolean
 }
 
 /** @param env process.env, or a fixture. Pure with respect to it. */
@@ -319,8 +321,8 @@ export function readIndexerConfig(
   }
 
   const transferWriter = {
-    /** Default ON for BNB (0.45s blocks need it), OFF for ETH. */
-    async: r.tristate('ASYNC_TT_WRITER', (env.CHAIN ?? 'bnb') === 'bnb'),
+    /** Default per chain (config-instance.ts): ON for BNB, OFF for ETH. */
+    async: r.tristate('ASYNC_TT_WRITER', defaults.asyncTransferWriter),
     /**
      * Backpressure bound on pending rows. Must never be NaN: the dual-bound
      * loops break on `rows <= bound` and `x <= NaN` is always false, so a NaN

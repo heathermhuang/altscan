@@ -7,6 +7,7 @@ const DEFAULTS: ConfigDefaults = {
   concurrency: 8,
   internalTxPartitionBlocks: 96_000,
   reorgDepth: 15,
+  asyncTransferWriter: true,
 }
 
 const read = (env: NodeJS.ProcessEnv = {}) => readIndexerConfig(env, DEFAULTS)
@@ -162,10 +163,11 @@ describe('flag polarity', () => {
   })
 
   it('ASYNC_TT_WRITER defaults per chain and accepts an explicit override', () => {
-    expect(read({ CHAIN: 'bnb' }).config.transferWriter.async).toBe(true)
-    expect(read({ CHAIN: 'eth' }).config.transferWriter.async).toBe(false)
-    expect(read({ CHAIN: 'eth', ASYNC_TT_WRITER: '1' }).config.transferWriter.async).toBe(true)
-    expect(read({ CHAIN: 'bnb', ASYNC_TT_WRITER: 'false' }).config.transferWriter.async).toBe(false)
+    const eth = { ...DEFAULTS, asyncTransferWriter: false }
+    expect(read({}).config.transferWriter.async).toBe(true)
+    expect(readIndexerConfig({}, eth).config.transferWriter.async).toBe(false)
+    expect(readIndexerConfig({ ASYNC_TT_WRITER: '1' }, eth).config.transferWriter.async).toBe(true)
+    expect(read({ ASYNC_TT_WRITER: 'false' }).config.transferWriter.async).toBe(false)
   })
 })
 
