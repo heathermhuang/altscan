@@ -45,30 +45,37 @@ packages/{chain-config, db, explorer-core, oauth, settings-schema}: leaves
 
 ## Canonical modules
 
-One implementation per concern. "Guard" names the test that fails on a second copy.
+One implementation per concern. "Guard" names the test that fails on a second copy; "—"
+means none yet. Paths are repo-relative, and `scripts/architecture-map.test.ts` fails when one
+no longer exists, so this inventory cannot silently rot.
 
 | Concern | Canonical module | Guard |
 |---|---|---|
 | Workspace dependencies | `scripts/workspace-graph.test.ts` (the approved graph) | itself |
 | One module per exported name | `scripts/unique-exports.test.ts` (listed exceptions with reasons) | itself |
-| DB pool for the running chain | indexer `src/db.ts`, explorer `lib/db.ts`; `@altscan/db` getters require the env var | `apps/indexer/src/db.test.ts` (compile-time) |
-| Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | `src/env-boundary.test.ts` (provider.ts endpoint lists and one CLI excepted) |
-| Chain differences (incl. per-chain features such as wallet watch) | `@altscan/chain-config` (`features`); explorer reads it via `lib/chain.ts` (server) and `lib/chain-client.ts` (client components, `NEXT_PUBLIC_CHAIN`) | `lib/client-chain-config.test.ts` |
-| Address / hash shape | explorer `lib/hex.ts` | `lib/hex.test.ts` |
-| Explorer env variables | read once, in the module that owns each; numbers via `lib/env.ts` `positiveIntEnv` | `lib/env.test.ts` |
-| Bounding a wait | explorer `lib/with-timeout.ts`; indexer `src/rpc-failover.ts` `withTimeout` (ADR 0002) | `lib/with-timeout.test.ts` |
-| In-process cache | explorer `lib/ttl-cache.ts` (bounded LRU, registered for `/api/health`) | `lib/ttl-cache.test.ts` |
-| Shared cache across instances | `@altscan/explorer-core` `kvGet`/`kvSet` (Redis, bounded fallback) | — |
-| List-page data cache | explorer `lib/page-cache.ts` | its own tests |
-| Ad-slot layout | `components/ads/AdFrame.tsx` (creatives supply content) | — |
-| Swallowed-error logging | explorer `lib/observability.ts` (`swallow`, `swallowed`) | — |
-| Published API limits (rates, page sizes, offsets) | explorer `lib/api-limits.ts`, quoted by every docs page | `lib/api-limits.test.ts` |
-| Per-IP rate limiting and the 429 body | `@altscan/explorer-core` `checkRateLimit` keyed by `clientIpBucket`; explorer `lib/api-rate-limit.ts` (`checkIpRateLimit`, `rateLimitResponse`) | `lib/ip-bucket-callers.test.ts`, `lib/rate-limit-response.test.ts` |
-| Number, amount and time formatting | explorer `lib/format.ts`; address display `lib/address-display.ts` | — |
-| Token symbol sanitizing | `@altscan/explorer-core/format` `sanitizeSymbol` | — |
-| RPC for the web tier | explorer `lib/rpc.ts` (`getWebProvider`, sequential failover) | — |
-| Async token_transfers writer and durable watermark | indexer `src/transfer-writer.ts` | — |
-| RPC for the indexer | indexer `src/rpc-failover.ts`, `src/provider.ts` | — |
+| Concept inventory (this table) | `scripts/architecture-map.test.ts` | itself |
+| DB pool for the running chain | `apps/indexer/src/db.ts`, `apps/explorer/lib/db.ts`; `packages/db/client.ts` getters require the env var | `apps/indexer/src/db.test.ts` (compile-time) |
+| Database shape | `packages/db/schema.ts` (every table, enum) | `apps/indexer/src/schema-parity.pg.test.ts` |
+| Indexer environment variables | `apps/indexer/src/config.ts` (typed, printed at boot) | `apps/indexer/src/env-boundary.test.ts` |
+| Chain differences (incl. per-chain features such as wallet watch) | `packages/chain-config/src/index.ts` (`features`); read via `apps/explorer/lib/chain.ts` (server) and `apps/explorer/lib/chain-client.ts` (client) | `apps/explorer/lib/client-chain-config.test.ts` |
+| Address / hash shape | `apps/explorer/lib/hex.ts`; altscan.io `apps/altscan-site/src/lib/hex.ts` (ADR 0002) | `apps/explorer/lib/hex.test.ts`, `apps/altscan-site/test/hex.test.ts` |
+| Explorer env variables | read once, in the module that owns each; numbers via `apps/explorer/lib/env.ts` | `apps/explorer/lib/env.test.ts` |
+| Bounding a wait | `apps/explorer/lib/with-timeout.ts`; indexer `apps/indexer/src/rpc-failover.ts` (ADR 0002) | `apps/explorer/lib/with-timeout.test.ts` |
+| In-process cache | `apps/explorer/lib/ttl-cache.ts` (bounded LRU, registered for `/api/health`) | `apps/explorer/lib/ttl-cache.test.ts` |
+| Shared cache across instances | `packages/explorer-core/src/kv-cache.ts` (Redis, bounded fallback) | — |
+| List-page data cache | `apps/explorer/lib/page-cache.ts` | `apps/explorer/lib/page-cache.test.ts` |
+| List depth and `?page=` parsing | `apps/explorer/lib/list-depth.ts`, `apps/explorer/lib/list-pages.ts` | `apps/explorer/lib/list-depth.test.ts` |
+| Token standards | `apps/explorer/lib/token-type-label.ts` (from the schema enum) | `apps/explorer/lib/token-type-label.test.ts` |
+| Ad-slot layout | `apps/explorer/components/ads/AdFrame.tsx` (creatives supply content) | — |
+| Swallowed-error logging | `apps/explorer/lib/observability.ts` (`swallow`, `swallowed`) | — |
+| Published API limits (rates, page sizes, offsets) | `apps/explorer/lib/api-limits.ts`, quoted by every docs page | `apps/explorer/lib/api-limits.test.ts` |
+| Per-IP rate limiting and the 429 body | `packages/explorer-core/src/rate-limit.ts`; `apps/explorer/lib/api-rate-limit.ts` | `apps/explorer/lib/ip-bucket-callers.test.ts`, `apps/explorer/lib/rate-limit-response.test.ts` |
+| Number, amount and time formatting | `apps/explorer/lib/format.ts`; address display `apps/explorer/lib/address-display.ts` | — |
+| Token symbol sanitizing | `packages/explorer-core/src/format.ts` (`sanitizeSymbol`) | — |
+| RPC for the web tier | `apps/explorer/lib/rpc.ts` (sequential failover) | — |
+| Async token_transfers writer and durable watermark | `apps/indexer/src/transfer-writer.ts` | — |
+| Receipts and their pre-write checks | `apps/indexer/src/receipts.ts` | — |
+| RPC for the indexer | `apps/indexer/src/rpc-failover.ts`, `apps/indexer/src/provider.ts` | — |
 
 ## State ownership
 

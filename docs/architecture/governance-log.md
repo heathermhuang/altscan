@@ -48,6 +48,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 35 | `REORG_DEPTH` reads exactly as before (parseInt, positive) through `EnvReader.leadingPositiveInt`, the one lenient reader for values moved from parseInt sites where a stricter parse could change a safety setting; `daysOrImmortal` is now that reader with an Infinity fallback. Still printed at boot. This removes the last pre-merge check; the `BODY_CACHE_*` difference is recorded as accepted | `config.test.ts` |
 | 36 | Fourth review follow-up: removed `totalInserted` and the inline insert's `RETURNING`, which existed only to gate the holder enqueue #34 deleted (`noUnusedLocals` misses a `+=`-only variable); pinned that a 400-digit `?page=` resolves to the last page, never Infinity | `lib/page-cache.test.ts` |
 | 37 | Machine-checked inventory: no two modules in a workspace export the same name. The whole repo had three repeats, each a different concept (server/client `chainConfig`; two cursor formats with opposite junk handling), allowed by name with the reason; after review the wallet-watch codec was renamed `encodeWatchCursor`/`decodeWatchCursor`, leaving `chainConfig` the only exception | `scripts/unique-exports.test.ts` (checked to fail) |
+| 38 | The concept inventory is machine-checked: the README's canonical-modules table now names every module and guard by repo path (26 concepts), and a test fails if any named file stops existing or a concept names no module | `scripts/architecture-map.test.ts` (checked to fail) |
 
 ## Task pool
 
