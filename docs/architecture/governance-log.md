@@ -78,6 +78,17 @@ CI step order. It found no breakage. It confirmed these deliberate differences:
 - The migrated caches evict LRU instead of FIFO, expire lazily, and no longer run 30s
   sweep timers. Caps and TTLs are unchanged.
 
+## Independent review (batches 9–20)
+
+A second fresh reviewer read `git diff e2a91ea..HEAD`. No production behavior change, nothing
+in use removed. It verified by line-multiset diff that `transfer-writer.ts` and
+`holder-balances.ts` are verbatim moves with no shared mutable state left behind and a
+one-way import chain; that `daysOrImmortal` returns the old parser's result for every
+probed input; and that the ad frame, 429 body and wallet-watch flag changes render and
+answer identically. Noted, not defects: the wallet-watch 404 text still names BNBScan (it
+would need rewording only if ETH enabled the flag), and `COMPACT_RETENTION_DAYS` is now read
+once at boot instead of per run (env cannot change without a redeploy).
+
 ## Pending owner decisions
 
 - **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
