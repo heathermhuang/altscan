@@ -108,8 +108,14 @@ export function parseBlock(row: CachedBlock): typeof schema.blocks.$inferSelect 
   return { ...row, timestamp: new Date(row.timestamp), gasUsed: BigInt(row.gasUsed), gasLimit: BigInt(row.gasLimit) }
 }
 
-/** Page numbers come straight off the query string; a deeper page gets the last one served (lib/list-depth.ts). */
-export function parsePageParam(raw: string | undefined, perPage = PER_PAGE): number {
-  const n = Number(raw ?? 1)
-  return clampListPage(Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1, perPage)
+/**
+ * Page numbers come straight off the query string; a deeper page gets the last one served
+ * (lib/list-depth.ts). Only plain decimal digits count (a fraction is floored); anything else,
+ * `1e2`, `0x10`, `3abc` or a repeated `?page=`, reads as page 1. Each distinct spelling a
+ * crawler can send would otherwise render and cache as a page of its own.
+ */
+const PAGE_NUMBER = /^\d+(?:\.\d+)?$/
+export function parsePageParam(raw: string | string[] | undefined, perPage = PER_PAGE): number {
+  const n = typeof raw === 'string' && PAGE_NUMBER.test(raw) ? Math.floor(Number(raw)) : 1
+  return clampListPage(n >= 1 ? n : 1, perPage)
 }

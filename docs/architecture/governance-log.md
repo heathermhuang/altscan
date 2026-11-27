@@ -42,6 +42,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 29 | `schema.ts` now describes the whole database, enforced. A new PG suite runs the real `ensureSchema()` (twice, for idempotency) on an empty DB and compares tables, columns, nullability and enum values both ways. It found four tables that existed only in raw DDL (`webhook_deliveries`, `indexer_cursor`, `poison_blocks`, `index_gaps` + its three heal columns), now declared; the enum `CREATE TYPE`s are generated from the schema's pgEnums. The reorg guardrail, which scans schema tables, now sees `poison_blocks` and `webhook_deliveries` and excludes each by name with its reason. In CI with its own DB; AGENTS.md table updated | `apps/indexer/src/schema-parity.pg.test.ts` |
 | 30 | altscan.io's product cards take brand, domain, URL and chain name from chain-config instead of restating them (new approved edge site → chain-config, consumed from source via a Vite alias + tsconfig path as apps/admin does). Rendered values identical; site typecheck, harness 27/27 and `astro build` pass | `scripts/workspace-graph.test.ts` (edge approved there) |
 | 31 | altscan.io's address/hash shapes defined once (`src/lib/hex.ts`): /mcp and the WebMCP tools spelled them six times, one as a template-literal regex. ADR 0001 within the app; the explorers' copy stays separate per ADR 0002 | site harness `test/hex.test.ts` |
+| 32 | Third independent review (batches 21–31) found one unnamed change: the canonical `parsePageParam` used `Number()`, so #27 also made `?page=1e2` page 100 and `?page=0x10` page 16 on the address and token pages. The canonical rule is now plain decimal digits (fraction floored), everything else page 1, on every list page. Valid pages unchanged | `lib/page-cache.test.ts` (junk spellings added) |
 
 ## Task pool
 
@@ -142,6 +143,17 @@ probed input; and that the ad frame, 429 body and wallet-watch flag changes rend
 answer identically. Noted, not defects: the wallet-watch 404 text still names BNBScan (it
 would need rewording only if ETH enabled the flag), and `COMPACT_RETENTION_DAYS` is now read
 once at boot instead of per run (env cannot change without a redeploy).
+
+## Independent review (batches 21–31)
+
+A third fresh reviewer read `git diff 0576a35..HEAD`. It confirmed the receipts and
+addresses moves are verbatim with no shared state or cycle, the sister-site line and
+`ASYNC_TT_WRITER` default resolve identically, every enforced limit equals the literal it
+replaced, `TOKEN_TYPES` keeps its order and never reaches a client bundle, nothing queries
+the four newly declared tables through Drizzle, and altscan.io's products and hex checks
+are unchanged. One finding, fixed in #32: `parsePageParam` accepted exponent and hex
+spellings. Noted: altscan.io's browser WebMCP script now bundles the chain-config literal
+(public URLs only, a few KB).
 
 ## Pending owner decisions
 
