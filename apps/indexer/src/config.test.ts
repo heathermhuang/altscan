@@ -310,11 +310,12 @@ describe('WEBHOOK_SECRET_KEY', () => {
 })
 
 describe('REORG_DEPTH', () => {
-  it('overrides the chain default with a positive whole number, and only that', () => {
+  it('overrides the chain default exactly as reorg-handler.ts read it (parseInt, positive)', () => {
     expect(read({ REORG_DEPTH: '25' }).config.reorg.depth).toBe(25)
     expect(read({}).config.reorg.depth).toBe(15)
-    // '25x' was read as 25 by the parseInt this replaced; a typo now falls back, and the boot log says so.
-    for (const v of ['0', '-3', 'abc', '', '25x']) expect(read({ REORG_DEPTH: v }).config.reorg.depth).toBe(15)
+    // The reorg window is a safety setting, so the old reading is kept, prefix included.
+    expect(read({ REORG_DEPTH: '25x' }).config.reorg.depth).toBe(25)
+    for (const v of ['0', '-3', 'abc', '']) expect(read({ REORG_DEPTH: v }).config.reorg.depth).toBe(15)
     expect(read({ REORG_DEPTH: 'abc' }).resolutions.find((x) => x.name === 'REORG_DEPTH')?.ignored).toBe('abc')
   })
 })

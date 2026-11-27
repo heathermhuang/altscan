@@ -45,6 +45,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 32 | Third independent review (batches 21–31) found one unnamed change: the canonical `parsePageParam` used `Number()`, so #27 also made `?page=1e2` page 100 and `?page=0x10` page 16 on the address and token pages. The canonical rule is now plain decimal digits (fraction floored), everything else page 1, on every list page. Valid pages unchanged | `lib/page-cache.test.ts` (junk spellings added) |
 | 33 | `render.yaml`'s two comments no longer cite the deleted `@altscan/types` as a current fact. Checked with Render's `POST /v1/blueprints/validate` against the live account: valid, `totalActions: 0`, so the merge's Blueprint sync changes no deployed field | `scripts/render-install-frozen.test.ts` still passes |
 | 34 | Deleted the hard-disabled per-block holder tracking: `holder-balances.ts`, its two call sites and profile phase, `recomputeHolderCounts` and its schedule, the five `HOLDER_*` config entries and the constant `holderBalanceTrackingEnabled`. The product state is unchanged (counts were already a frozen snapshot); AGENTS.md's known issue now says the code is in history and a revival is a rebuild. All 10 indexer PG suites 98/98; compiled modules load. `HOLDER_*` vars still set on Render are now ignored | config/reorg tests; gate |
+| 35 | `REORG_DEPTH` reads exactly as before (parseInt, positive) through `EnvReader.leadingPositiveInt`, the one lenient reader for values moved from parseInt sites where a stricter parse could change a safety setting; `daysOrImmortal` is now that reader with an Infinity fallback. Still printed at boot. This removes the last pre-merge check; the `BODY_CACHE_*` difference is recorded as accepted | `config.test.ts` |
 
 ## Task pool
 
@@ -129,7 +130,7 @@ symbol still referenced (including docker/, deploy/, render.yaml), a case rule c
 by the hex migration, a falsy-vs-undefined cache bug, a bare `getDb()` caller, and the
 CI step order. It found no breakage. It confirmed these deliberate differences:
 
-- `REORG_DEPTH` is now whole-number-or-default (was `parseInt`, so `20.0` read as 20).
+- `REORG_DEPTH` was made whole-number-or-default; #35 restored the exact parseInt reading.
 - The whales timeout log line lost its `(8000ms)` suffix. Nothing parses it.
 - `/api/health` `caches` gains two keys: `tx-lookup-hits`, `code-class`.
 - The migrated caches evict LRU instead of FIFO, expire lazily, and no longer run 30s
@@ -159,12 +160,16 @@ spellings. Noted: altscan.io's browser WebMCP script now bundles the chain-confi
 
 ## Pending owner decisions
 
-Only one item needs the owner, because it needs production access this session was not
-granted (the permission classifier refused reading Render env vars):
+None. The two pre-merge checks once listed here were removed by #35 instead of left to the
+owner: `REORG_DEPTH` keeps its exact old reading, and the `BODY_CACHE_*` difference is an
+accepted, named change (below).
 
-- **Check deployed `REORG_DEPTH`** on `bnbscan-indexer` and `eth-indexer` before merging:
-  if it is set to anything but a plain whole number, it now falls back to the chain
-  default (15 BNB, 3 ETH). The boot log line `ignored` will show it after deploy.
-- **Same check for `BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** on both web services:
-  a non-integer value now falls back to the default instead of being parsed by
-  `parseInt`.
+## Accepted behavior changes (named, deliberate)
+
+- **`BODY_CACHE_TTL_MS` / `BODY_CACHE_WINDOW_BYTES`** (#9): a value that is not a positive
+  whole number now falls back to the default. Before, `parseInt` read `2h` as a 2 ms TTL and
+  garbage or an empty value as NaN. Cache-sizing knobs, not safety bounds; plain integers read
+  the same as before.
+- **`?page=` junk** (#27, #32): anything but decimal digits is page 1 on every list page.
+- **Logs**: the whales timeout line lost its `(8000ms)` suffix (#4); two holder lines left the
+  indexer boot log (#34).

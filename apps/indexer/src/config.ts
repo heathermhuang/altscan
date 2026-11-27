@@ -165,20 +165,27 @@ class EnvReader {
   }
 
   /**
-   * Days of retention, or Infinity ("immortal": never prune) when unset or not positive.
-   *
-   * Moved from retention-policy.ts UNCHANGED, parseInt included. Unlike `int`, a prefix
-   * like '7d' still reads as 7: this guards a destructive path, and making the parse
-   * stricter would turn a prune that runs today into an immortal table that fills the disk
-   * until the emergency path fires. Only the boot-log visibility is new.
+   * A positive whole number read the way its old call site read it: parseInt, so a prefix
+   * like '25x' or '7d' still reads as 25 or 7. Only for values moved here from a parseInt
+   * site where a stricter parse could change a running safety setting (the reorg window, the
+   * compact-retention prune). New variables use `int`, which rejects a prefix. Only the
+   * boot-log visibility is new for these.
    */
-  daysOrImmortal(name: string): number {
+  leadingPositiveInt(name: string, fallback: number, describeFallback = String(fallback)): number {
     const raw = this.env[name]
     const n = raw ? parseInt(raw, 10) : Number.NaN
     const ok = Number.isFinite(n) && n > 0
-    const value = ok ? n : Infinity
-    this.record(name, ok ? String(n) : 'Infinity (immortal)', raw, ok)
-    return value
+    this.record(name, ok ? String(n) : describeFallback, raw, ok)
+    return ok ? n : fallback
+  }
+
+  /**
+   * Days of retention, or Infinity ("immortal": never prune) when unset or not positive. A
+   * stricter parse would turn a prune that runs today into an immortal table that fills the
+   * disk until the emergency path fires, hence `leadingPositiveInt`.
+   */
+  daysOrImmortal(name: string): number {
+    return this.leadingPositiveInt(name, Infinity, 'Infinity (immortal)')
   }
 
   /**
@@ -300,7 +307,7 @@ export function readIndexerConfig(
     /** ON unless explicitly '0'. */
     checkEnabled: r.enabledUnlessZero('REORG_CHECK'),
     /** K, the deepest reorg the tail check walks. index.ts asserts it stays below RESUME_GAP_SCAN_BLOCKS. */
-    depth: r.int('REORG_DEPTH', defaults.reorgDepth, { min: 1 }),
+    depth: r.leadingPositiveInt('REORG_DEPTH', defaults.reorgDepth),
     idleCheckMs: r.int('IDLE_REORG_CHECK_MS', 30_000, { min: 1 }),
     quarantineEnabled: r.enabledUnlessZero('POISON_BLOCK_QUARANTINE'),
     quarantineAfter: r.int('POISON_BLOCK_QUARANTINE_AFTER', DEFAULT_QUARANTINE_AFTER, { min: 1 }),
