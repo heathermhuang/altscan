@@ -325,3 +325,25 @@ describe('REORG_DEPTH', () => {
   })
 })
 
+describe('COMPACT_RETENTION_DAYS', () => {
+  const days = (v?: string) => read(v === undefined ? {} : { COMPACT_RETENTION_DAYS: v }).config.retention.compactDays
+
+  it('is immortal (Infinity) when unset, empty, non-positive or not a number', () => {
+    for (const v of [undefined, '', '0', '-5', 'abc']) expect(days(v), String(v)).toBe(Infinity)
+  })
+
+  it('keeps the parseInt reading it had in retention-policy.ts, prefix included', () => {
+    // Deliberately NOT stricter: rejecting '7d' would turn a running prune into an immortal table.
+    expect(days('180')).toBe(180)
+    expect(days('7d')).toBe(7)
+    expect(days('7.9')).toBe(7)
+  })
+
+  it('shows in the boot log, immortal included', () => {
+    const r = (env: NodeJS.ProcessEnv) => read(env).resolutions.find((x) => x.name === 'COMPACT_RETENTION_DAYS')
+    expect(r({ COMPACT_RETENTION_DAYS: '4' })).toMatchObject({ value: '4', source: 'env' })
+    expect(r({})).toMatchObject({ value: 'Infinity (immortal)', source: 'default' })
+    expect(r({ COMPACT_RETENTION_DAYS: 'abc' })?.ignored).toBe('abc')
+  })
+})
+

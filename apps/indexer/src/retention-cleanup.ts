@@ -12,7 +12,7 @@ import { indexerConfig } from './config-instance'
 import { getMaintenanceDb, dbErrorMessage, unwrapDbError } from './db'
 import { sql, type SQL } from 'drizzle-orm'
 import { isPartitioned, listPartitions, ensureForwardPartitions, ensureInternalTxPartitions, type PartitionedParent } from './ensure-schema'
-import { buildRetentionPlan, parseCompactRetentionDays, bodyPruneIsRedundant } from './retention-policy'
+import { buildRetentionPlan, bodyPruneIsRedundant } from './retention-policy'
 
 const RETENTION_DAYS = indexerConfig.retention.days
 const RUN_EVERY_MS   = 6 * 60 * 60 * 1000    // 6 hours
@@ -806,7 +806,7 @@ async function reportSizes(): Promise<number> {
 
 async function runCleanup(override?: { bodyDays?: number; compactDays?: number }): Promise<void> {
   const days = override?.bodyDays ?? RETENTION_DAYS
-  const compactDays = override?.compactDays ?? parseCompactRetentionDays()
+  const compactDays = override?.compactDays ?? indexerConfig.retention.compactDays
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const tag = override !== undefined ? `${days}d body/${compactDays}d compact emergency` : `${days}d body`
   console.log(`[retention] Running cleanup — body cutoff ${cutoff.toISOString()} (${tag}); ` +
@@ -867,7 +867,7 @@ async function runCleanup(override?: { bodyDays?: number; compactDays?: number }
   // transactions and token_transfers are compact-immortal here — transactions keeps
   // its row (input is nulled below), token_transfers is untouched. Compact-table row
   // deletes happen only under the explicit finite override (see the compact block).
-  const plan = buildRetentionPlan({ ttPartitioned })
+  const plan = buildRetentionPlan({ compactDays: indexerConfig.retention.compactDays, ttPartitioned })
   const blockNumberTables = plan.bodyDeleteTables   // ['logs','dex_trades','gas_history']
 
   let totalDeleted = 0

@@ -5,6 +5,12 @@ import {
   COMPACT_TABLES, BODY_PRUNE_OPS, COMPACT_PRUNE_TABLES, PROTECTED_COLUMNS,
   resolveCompactPruneTables, buildRetentionPlan, bodyPruneIsRedundant,
 } from './retention-policy'
+import { readIndexerConfig } from './config'
+
+// Env fixtures go through the real config parser, so these pin env -> plan end to end: the
+// policy functions take the resolved number, and config.ts is the one place it is parsed.
+const days = (env: NodeJS.ProcessEnv) =>
+  readIndexerConfig(env, { startBlock: 0, concurrency: 1, internalTxPartitionBlocks: 1, reorgDepth: 1 }).config.retention.compactDays
 
 describe('retention guardrail — compact indexes are immortal on the default path', () => {
   const compact = new Set<string>(COMPACT_TABLES)
@@ -25,25 +31,25 @@ describe('retention guardrail — compact indexes are immortal on the default pa
   })
 
   it('default env prunes ZERO compact tables (partitioned or not)', () => {
-    expect(resolveCompactPruneTables({})).toEqual([])
-    expect(buildRetentionPlan({ env: {}, ttPartitioned: false }).compactDeleteTables).toEqual([])
-    expect(buildRetentionPlan({ env: {}, ttPartitioned: true }).compactDeleteTables).toEqual([])
+    expect(resolveCompactPruneTables(days({}))).toEqual([])
+    expect(buildRetentionPlan({ compactDays: days({}), ttPartitioned: false }).compactDeleteTables).toEqual([])
+    expect(buildRetentionPlan({ compactDays: days({}), ttPartitioned: true }).compactDeleteTables).toEqual([])
   })
 
   it('finite COMPACT_RETENTION_DAYS enables exactly the compact bridge tables', () => {
-    expect(resolveCompactPruneTables({ COMPACT_RETENTION_DAYS: '180' })).toEqual([...COMPACT_PRUNE_TABLES])
-    expect(buildRetentionPlan({ env: { COMPACT_RETENTION_DAYS: '180' }, ttPartitioned: false }).compactDeleteTables)
+    expect(resolveCompactPruneTables(days({ COMPACT_RETENTION_DAYS: '180' }))).toEqual([...COMPACT_PRUNE_TABLES])
+    expect(buildRetentionPlan({ compactDays: days({ COMPACT_RETENTION_DAYS: '180' }), ttPartitioned: false }).compactDeleteTables)
       .toEqual([...COMPACT_PRUNE_TABLES])
   })
 
   it('invalid / non-positive COMPACT_RETENTION_DAYS stays immortal (fails safe)', () => {
     for (const v of ['', '0', '-5', 'abc']) {
-      expect(resolveCompactPruneTables({ COMPACT_RETENTION_DAYS: v }), `value ${JSON.stringify(v)}`).toEqual([])
+      expect(resolveCompactPruneTables(days({ COMPACT_RETENTION_DAYS: v })), `value ${JSON.stringify(v)}`).toEqual([])
     }
   })
 
   it('body delete tables are the refetchable/secondary ones only', () => {
-    expect(buildRetentionPlan({ env: {}, ttPartitioned: true }).bodyDeleteTables)
+    expect(buildRetentionPlan({ compactDays: days({}), ttPartitioned: true }).bodyDeleteTables)
       .toEqual(['logs', 'dex_trades', 'gas_history', 'webhook_deliveries'])
   })
 
@@ -52,7 +58,7 @@ describe('retention guardrail — compact indexes are immortal on the default pa
   // That sweep iterates plan.bodyDeleteTables — pin that under a finite-compact
   // env it is still exactly the refetchable set and never a compact table.
   it('body sweep input under a finite compact env is still never a compact table', () => {
-    const plan = buildRetentionPlan({ env: { COMPACT_RETENTION_DAYS: '4' }, ttPartitioned: false })
+    const plan = buildRetentionPlan({ compactDays: days({ COMPACT_RETENTION_DAYS: '4' }), ttPartitioned: false })
     expect(plan.bodyDeleteTables).toEqual(['logs', 'dex_trades', 'gas_history', 'webhook_deliveries'])
     for (const t of plan.bodyDeleteTables) {
       expect(compact.has(t), `body sweep must not target compact table ${t}`).toBe(false)
@@ -152,7 +158,7 @@ describe('A4b invariant 1 — backfill tables are retention-exempt by constructi
     ]
     for (const env of envs) {
       for (const ttPartitioned of [true, false]) {
-        const plan = buildRetentionPlan({ env, ttPartitioned })
+        const plan = buildRetentionPlan({ compactDays: days(env), ttPartitioned })
         const touched = [
           ...plan.bodyDeleteTables,
           ...plan.compactDeleteTables,
@@ -170,7 +176,7 @@ describe('A4b invariant 1 — backfill tables are retention-exempt by constructi
     // construction, not by filtering. This test pins that property — if anyone
     // ever makes that function read the env, this is what catches it.
     const plan = buildRetentionPlan({
-      env: { COMPACT_RETENTION_DAYS: '1', COMPACT_PRUNE_TABLES: 'backfill_address_txs,transactions' },
+      compactDays: days({ COMPACT_RETENTION_DAYS: '1', COMPACT_PRUNE_TABLES: 'backfill_address_txs,transactions' }),
       ttPartitioned: false,
     })
     expect(plan.compactDeleteTables).not.toContain('backfill_address_txs')

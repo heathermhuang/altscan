@@ -15,7 +15,6 @@ const ALLOWED: Record<string, string> = {
   'config-instance.ts': 'hands process.env to the pure parser',
   'provider.ts': 'the canonical RPC endpoint lists; the env var name is per chain, and boot logs them redacted',
   'migrate-partition-tt.ts': 'one-off CLI: its own connection string for a maintenance connection',
-  'retention-policy.ts': 'PENDING: COMPACT_RETENTION_DAYS; move into config.ts after running the hand-run retention PG suites',
 }
 
 const SRC = __dirname

@@ -28,18 +28,13 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 15 | One timing helper for duration-bounded tests (`test-support/timing.ts` `bestOfMs`); a second single-sample test flaked at 187 ms | — |
 | 16 | One 429 body (`lib/api-rate-limit.ts` `rateLimitResponse`), replacing 14 spelled-out copies. The CSV export (text body) and OAuth (its own Retry-After contract) keep theirs | `lib/rate-limit-response.test.ts` |
 | 17 | altscan-site typechecks in CI: Worker code (`tsconfig.worker.json`, workers-types) and browser scripts + test harness (`tsconfig.dom.json`) get their own configs, since their lib types conflict. 10 errors on main → 0; `noUnusedLocals` on there too | CI `Typecheck altscan-site` (checked to fail) |
+| 18 | `COMPACT_RETENTION_DAYS` read in `config.ts` (`EnvReader.daysOrImmortal`, parseInt semantics kept on purpose: it guards a destructive path) and printed at boot; retention-policy functions take the resolved number. The last `env-boundary` exemption is gone. Both hand-run retention PG suites + `retention-sizes` ran on a local Postgres before (8/8) and after (8/8) | `env-boundary.test.ts`, retention guardrail tests via the real parser |
+| 19 | One owning file per explorer env variable, enforced (inventory found no shared reads, so no registry: see declined items) | `lib/env.test.ts` |
 
 ## Task pool
 
 Ordered by value over risk. Pick from the top; move to Done with the commit.
 
-- **`COMPACT_RETENTION_DAYS` into `config.ts`.** The last pending exemption in
-  `env-boundary.test.ts`. It is the retention path: run the two hand-run retention PG suites
-  (AGENTS.md) before and after. Its parser returns `Infinity` for unset/invalid, which
-  `EnvReader.int` cannot express, so it needs a reader method of its own.
-- **Explorer env reads.** 25 `process.env` names across ~20 explorer files, no registry.
-  Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
-  `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
   `render.yaml` triggers a Blueprint sync, so fold the fix into the next intended
@@ -60,6 +55,10 @@ Recorded so the next pass does not redo the analysis.
   backoff sleeps off the patched global `setTimeout` risks hanging it. The helper cannot
   drift, so the risk buys nothing.
 - **Sharing `withTimeout` / address validation across apps**: see ADR 0002.
+- **An explorer env registry** (the indexer's `config.ts` model). Inventoried: every
+  app-specific variable is read in exactly one file, numeric ones through `positiveIntEnv`.
+  A registry would only forward those reads. Enforced instead: `lib/env.test.ts` fails when
+  a variable gets a second reader.
 - **API error shape**: already uniform (`{ error }` at every `/api/v1` site).
 - **Design tokens**: only the ad components use raw colours (Binance brand yellow, on
   purpose).

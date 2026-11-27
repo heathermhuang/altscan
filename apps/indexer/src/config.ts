@@ -165,6 +165,23 @@ class EnvReader {
   }
 
   /**
+   * Days of retention, or Infinity ("immortal": never prune) when unset or not positive.
+   *
+   * Moved from retention-policy.ts UNCHANGED, parseInt included. Unlike `int`, a prefix
+   * like '7d' still reads as 7: this guards a destructive path, and making the parse
+   * stricter would turn a prune that runs today into an immortal table that fills the disk
+   * until the emergency path fires. Only the boot-log visibility is new.
+   */
+  daysOrImmortal(name: string): number {
+    const raw = this.env[name]
+    const n = raw ? parseInt(raw, 10) : Number.NaN
+    const ok = Number.isFinite(n) && n > 0
+    const value = ok ? n : Infinity
+    this.record(name, ok ? String(n) : 'Infinity (immortal)', raw, ok)
+    return value
+  }
+
+  /**
    * Whole percent, 1-100, falling back with a warning on anything else.
    *
    * Moved from retention-cleanup.ts UNCHANGED, including the warnings, and now
@@ -344,6 +361,12 @@ export function readIndexerConfig(
 
   const retention = {
     days: r.int('RETENTION_DAYS', 7, { min: 1 }),
+    /**
+     * COMPACT_RETENTION_DAYS: when finite, compact tables are pruned below this age (the
+     * per-chain override for the heavy chains). Infinity = compact tables are immortal.
+     * Never set it below RETENTION_DAYS on BNB (AGENTS.md): that brings back the ~20h UPDATE.
+     */
+    compactDays: r.daysOrImmortal('COMPACT_RETENTION_DAYS'),
     deleteBatch: r.int('RETENTION_DELETE_BATCH', 50_000, { min: 1 }),
     batchSleepMs: r.int('RETENTION_BATCH_SLEEP_MS', 250, { min: 0 }),
     /** Lag above which retention pauses between batches. 0 disables. */
