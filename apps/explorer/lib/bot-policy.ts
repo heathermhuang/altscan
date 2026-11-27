@@ -14,8 +14,8 @@
 
 /** AI retrieval / search-index / user-triggered fetchers — ALLOWED.
  *  Deliberately given no robots.txt group of their own (under REP a UA with
- *  no matching group inherits `User-agent: *`) and never throttled by the
- *  middleware. The list itself is the policy manifest: a UA's absence from
+ *  no matching group inherits `User-agent: *`), except those in CRAWL_DELAYED,
+ *  and never throttled by the middleware. The list itself is the policy manifest: a UA's absence from
  *  TRAINING_BLOCKED is what allows it. */
 export const RETRIEVAL_ALLOWED = [
   'OAI-SearchBot',    // ChatGPT search index
@@ -27,6 +27,13 @@ export const RETRIEVAL_ALLOWED = [
   'Applebot',         // Siri/Spotlight search (training opt-out is Applebot-Extended)
   'DuckAssistBot',    // DuckDuckGo AI answers
 ] as const
+
+/** Allowed crawlers asked to slow down with a robots.txt `Crawl-delay` (seconds).
+ *  Claude-SearchBot was ~3k requests/hour per site in Nov 2026: 72% of ethscan's
+ *  requests and 87% of its bytes, every URL fetched once. It honours robots.txt. */
+export const CRAWL_DELAYED: Record<string, number> = {
+  'Claude-SearchBot': 2,
+}
 
 /** Training / bulk-corpus crawlers — robots `Disallow: /` + middleware 429 on
  *  heavy paths. Google-Extended and Applebot-Extended are robots.txt-only
