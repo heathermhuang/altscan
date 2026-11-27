@@ -40,9 +40,11 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
   Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
   `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.
 - **altscan-site has no CI typecheck** and `tsc -p apps/altscan-site` reports 10 errors on
-  main, all from missing `cloudflare:workers` types (Worker types are not generated in a
-  plain checkout). Generate them (`wrangler types`) or add an ambient declaration, then
-  add the site to the CI typecheck step.
+  main, all from missing `cloudflare:workers` types. Tried adding `@cloudflare/workers-types`
+  as admin does: it then conflicts with the DOM types the browser script
+  `src/scripts/tapes.ts` needs (`HTMLElement` not assignable to `ParentNode`), because
+  Worker and browser code share one tsconfig. Fix: a separate tsconfig for `src/scripts/`
+  (DOM lib) and one for the Worker side (workers-types), then add both to CI.
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
   `render.yaml` triggers a Blueprint sync, so fold the fix into the next intended
