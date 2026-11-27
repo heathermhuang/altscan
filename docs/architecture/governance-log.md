@@ -23,10 +23,11 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 10 | De-flaked `search-route.test.ts`: best-of-five timing against 25 ms (the regression it guards cost ~150 ms) instead of one 5 ms sample | — |
 | 11 | Narrowed module interfaces: ~100 exports that no file imports (tests included) are now module-private; three fully dead declarations deleted (`format.ts` `formatAddress`, `IndexerConfig`, `CompactTable`). Found with an import-resolving scan; the first name-based scan missed `formatAddress` because a private function elsewhere shared its name | tsc in every workspace |
 | 12 | Wallet watch's chain gate is `chainConfig.features.hasWalletWatch` (with the watermark reason next to it) instead of `key === 'bnb'` in five files; removed the `CHAIN_ID` batch 1 orphaned in `goplus.ts` | the flag is the single source; tsc |
-| 13 | `noUnusedLocals` on in every workspace tsconfig except altscan-site (pre-existing errors). Fixed the 7 hits, incl. retention-cleanup's stale `BATCH_SIZE`, a second definition of the delete batch that config already owns | tsc everywhere (lint had missed an orphan from batch 1) |
+| 13 | `noUnusedLocals` on in every workspace tsconfig (altscan-site followed in #17). Fixed the 7 hits, incl. retention-cleanup's stale `BATCH_SIZE`, a second definition of the delete batch that config already owns | tsc everywhere (lint had missed an orphan from batch 1) |
 | 14 | One ad-slot layout (`components/ads/AdFrame.tsx`): the Binance creative (moved verbatim out of the stateful `AdSlot` into `BinanceAd.tsx`) and `HouseAd` each repeated all five variant layouts. Proven with a throwaway harness: all 15 variant/creative renders byte-identical to the pre-change static HTML, and the harness failed on a one-space change | — |
 | 15 | One timing helper for duration-bounded tests (`test-support/timing.ts` `bestOfMs`); a second single-sample test flaked at 187 ms | — |
 | 16 | One 429 body (`lib/api-rate-limit.ts` `rateLimitResponse`), replacing 14 spelled-out copies. The CSV export (text body) and OAuth (its own Retry-After contract) keep theirs | `lib/rate-limit-response.test.ts` |
+| 17 | altscan-site typechecks in CI: Worker code (`tsconfig.worker.json`, workers-types) and browser scripts + test harness (`tsconfig.dom.json`) get their own configs, since their lib types conflict. 10 errors on main → 0; `noUnusedLocals` on there too | CI `Typecheck altscan-site` (checked to fail) |
 
 ## Task pool
 
@@ -39,12 +40,6 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 - **Explorer env reads.** 25 `process.env` names across ~20 explorer files, no registry.
   Decide whether a typed `lib/env.ts` (the indexer's model) pays off for a Next app whose
   `NEXT_PUBLIC_*` values are inlined at build time. Inventory first.
-- **altscan-site has no CI typecheck** and `tsc -p apps/altscan-site` reports 10 errors on
-  main, all from missing `cloudflare:workers` types. Tried adding `@cloudflare/workers-types`
-  as admin does: it then conflicts with the DOM types the browser script
-  `src/scripts/tapes.ts` needs (`HTMLElement` not assignable to `ParentNode`), because
-  Worker and browser code share one tsconfig. Fix: a separate tsconfig for `src/scripts/`
-  (DOM lib) and one for the Worker side (workers-types), then add both to CI.
 - **`render.yaml` comment cites the deleted `@altscan/types`** as the reason for not
   using `--filter @altscan/indexer... build`. The reason is now stale. Changing
   `render.yaml` triggers a Blueprint sync, so fold the fix into the next intended

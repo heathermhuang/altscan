@@ -98,6 +98,12 @@ jobs:
       - name: Typecheck packages
         run: pnpm -r --filter './packages/*' run typecheck
 
+      # altscan.io's deploy (astro build) never runs tsc. Worker code and the browser
+      # scripts need conflicting lib types, so the script checks each with its own
+      # tsconfig (apps/altscan-site/tsconfig.worker.json, tsconfig.dom.json).
+      - name: Typecheck altscan-site
+        run: pnpm --filter @altscan/site run typecheck
+
       - name: Create seam-test database
         run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE seam_test'
 

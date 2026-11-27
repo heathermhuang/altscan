@@ -10,7 +10,8 @@
     "preview": "wrangler dev",
     "deploy": "astro build && wrangler deploy",
     "test": "tsx test/chains.test.ts && tsx test/tape.test.ts && tsx test/agent.test.ts && tsx test/mcp.test.ts && tsx test/oauth.test.ts && tsx test/ip-bucket.test.ts && tsx test/changelog.test.ts",
-    "astro": "astro"
+    "astro": "astro",
+    "typecheck": "tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.dom.json"
   },
   "dependencies": {
     "@altscan/oauth": "workspace:*",
@@ -21,6 +22,7 @@
     "astro": "^7.4.12"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261117.1",
     "tsx": "^4.23.15",
     "wrangler": "^4.164.0"
   }

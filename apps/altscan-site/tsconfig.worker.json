@@ -1,0 +1,11 @@
+{
+  // Typecheck for what runs on the Worker or at build: Workers runtime types. Browser scripts
+  // (src/scripts/) and the node test harness (test/) need the DOM lib's types instead, which
+  // conflict with @cloudflare/workers-types, so they are checked by tsconfig.dom.json.
+  // tsconfig.json stays the editor/astro config.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "exclude": ["dist", "src/scripts", "test"]
+}
