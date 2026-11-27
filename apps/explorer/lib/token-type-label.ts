@@ -1,3 +1,14 @@
+import { schema } from '@altscan/db'
+
+/** The token standards as stored: the DB enum on every chain (packages/db/schema.ts). */
+export const TOKEN_TYPES = schema.tokenTypeEnum.enumValues
+export type TokenType = (typeof TOKEN_TYPES)[number]
+
+/** The stored standard a query parameter names, or null for anything else. */
+export function parseTokenType(raw: string | null | undefined): TokenType | null {
+  return (TOKEN_TYPES as readonly string[]).includes(raw ?? '') ? (raw as TokenType) : null
+}
+
 /**
  * The label a visitor sees for a token's standard. `tokens.type` is the DB enum
  * 'BEP20' | 'BEP721' | 'BEP1155' on EVERY chain (packages/db/schema.ts), so the enum value is a

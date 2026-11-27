@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db'
 import { desc, eq, sql } from 'drizzle-orm'
 import { checkIpRateLimit, rateLimitResponse } from '@/lib/api-rate-limit'
 import { apiListPage } from '@/lib/list-depth'
+import { parseTokenType } from '@/lib/token-type-label'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,13 +16,11 @@ export async function GET(request: Request) {
   const paging = apiListPage(searchParams)
   if ('error' in paging) return NextResponse.json({ error: paging.error }, { status: 400 })
   const { limit, offset } = paging
-  const type = searchParams.get('type') as 'BEP20' | 'BEP721' | 'BEP1155' | null
-
-  const validTypes = ['BEP20', 'BEP721', 'BEP1155']
+  const type = parseTokenType(searchParams.get('type'))
 
   let query = db.select().from(schema.tokens).$dynamic()
 
-  if (type && validTypes.includes(type)) {
+  if (type) {
     query = query.where(eq(schema.tokens.type, type))
   }
 

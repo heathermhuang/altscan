@@ -38,6 +38,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 25 | Published API limits named once (`lib/api-limits.ts`): per-IP, verify, per-key, OAuth token and OAuth mint budgets, list and query page sizes, query max offset. The enforcing code reads them, and api-docs, developer, auth.md, llms.txt and the OpenAPI spec interpolate them (plus `WATCH_MAX_ADDRESSES`) instead of restating 15 literals. The guard caught two copies the first pass missed | `lib/api-limits.test.ts` |
 | 26 | One list depth: the token transfer list's own `TOKEN_TRANSFERS_MAX_ROWS` (same 10,000, same OFFSET rationale) and its hand-rolled page clamp → `lib/list-depth.ts` `MAX_LIST_ROWS` / `clampListPage` (identical result: 400 pages of 25). Token-transfers PG suite 24/24 locally | — |
 | 27 | One `?page=` rule and page size: the address and token pages had their own `PAGE_SIZE = 25` and `parseInt` parsing → `list-pages.ts` `PER_PAGE` / `parsePageParam`, as `/txs`, `/blocks`, `/dex` use. Valid page numbers serve the same page; junk like `?page=3abc` now serves page 1 there too (was page 3) | `lib/list-depth.test.ts` |
+| 28 | The token standards come from the DB enum: `token-type-label.ts` exports `TOKEN_TYPES` (= `schema.tokenTypeEnum.enumValues`) and `parseTokenType`; the tokens API, token list page and both OpenAPI enums stop re-typing `['BEP20','BEP721','BEP1155']` | `lib/token-type-label.test.ts` |
 
 ## Task pool
 

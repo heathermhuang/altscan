@@ -6,7 +6,7 @@ import { shortenAddress } from '@/lib/address-display'
 import { lookalikeOf, lookalikeNote } from '@/lib/lookalike'
 import { anyLinkLike } from '@/lib/link-in-name'
 import { LinkInName } from '@/components/ui/LinkInName'
-import { tokenTypeLabel } from '@/lib/token-type-label'
+import { TOKEN_TYPES, parseTokenType, tokenTypeLabel } from '@/lib/token-type-label'
 import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import type { Metadata } from 'next'
@@ -41,10 +41,7 @@ export default async function TokenListPage({
   searchParams: Promise<{ type?: string; q?: string }>
 }) {
   const { type: typeParam, q: searchQuery } = await searchParams
-  const validTypes = ['BEP20', 'BEP721', 'BEP1155'] as const
-  const tokenType = validTypes.includes(typeParam as typeof validTypes[number])
-    ? (typeParam as typeof validTypes[number])
-    : 'BEP20'
+  const tokenType = parseTokenType(typeParam) ?? 'BEP20'
 
   let tokens: typeof schema.tokens.$inferSelect[] = []
   try {
@@ -96,7 +93,7 @@ export default async function TokenListPage({
       </div>
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex gap-2">
-          {validTypes.map(t => (
+          {TOKEN_TYPES.map(t => (
             <a
               key={t}
               href={`/token?type=${t}`}

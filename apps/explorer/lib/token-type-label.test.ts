@@ -24,3 +24,30 @@ describe('tokenTypeLabel', () => {
     expect(tokenTypeLabel('', 'ERC-20')).toBe('')
   })
 })
+
+// The standards are the DB enum (packages/db/schema.ts tokenTypeEnum), read through TOKEN_TYPES.
+// The tokens API, the token list page and the OpenAPI spec each re-typed the three values.
+describe('the token standards are listed once', () => {
+  it('TOKEN_TYPES is the schema enum', async () => {
+    const { TOKEN_TYPES, parseTokenType } = await import('./token-type-label')
+    expect([...TOKEN_TYPES]).toEqual(['BEP20', 'BEP721', 'BEP1155'])
+    expect(parseTokenType('BEP721')).toBe('BEP721')
+    expect(parseTokenType('ERC20')).toBeNull()
+    expect(parseTokenType(null)).toBeNull()
+  })
+
+  it('no explorer source re-lists them', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const root = join(__dirname, '..')
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => {
+      const p = join(dir, n)
+      if (n === 'node_modules' || n.startsWith('.')) return []
+      if (statSync(p).isDirectory()) return walk(p)
+      return /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n) ? [p] : []
+    })
+    const relist = /['"]BEP20['"],\s*['"]BEP721['"]/
+    expect(walk(root).filter((f) => relist.test(readFileSync(f, 'utf8'))).map((f) => f.slice(root.length + 1))).toEqual([])
+    expect(relist.test("['BEP20', 'BEP721', 'BEP1155']")).toBe(true)
+  })
+})
