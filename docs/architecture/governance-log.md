@@ -20,6 +20,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 7 | Indexer env boundary: `REORG_DEPTH` moved into `config.ts` (now in the boot log); `backfill.ts` reuses `provider.ts` instead of re-parsing the RPC list | `apps/indexer/src/env-boundary.test.ts` |
 | 8 | Every package `typecheck` script runs in CI (one step replaces the oauth-only one); the providers script, broken unnoticed, fixed | CI `Typecheck packages` |
 | 9 | One explorer env-number parser (`lib/env.ts` `positiveIntEnv`); seven hand-rolled parses migrated. `BODY_CACHE_TTL_MS`/`BODY_CACHE_WINDOW_BYTES` used `parseInt`, which read `2h` as 2 ms | `lib/env.test.ts` |
+| 10 | De-flaked `search-route.test.ts`: best-of-five timing against 25 ms (the regression it guards cost ~150 ms) instead of one 5 ms sample | — |
 
 ## Task pool
 
@@ -43,9 +44,6 @@ Ordered by value over risk. Pick from the top; move to Done with the commit.
 - **`kv-cache` fallback in `explorer-core`** is another bounded TTL map. It cannot use the
   explorer's `ttl-cache.ts` (packages do not import apps). Leave unless a third package
   needs one.
-- **Flaky wall-clock assertion**: `search-route.test.ts` asserts `< 5 ms` per call and
-  failed once at 28 ms under full-suite load. Raise the bound or assert complexity
-  (compare a 1k and a 16k input) instead of wall time.
 
 ## Independent review (batches 1–8)
 
