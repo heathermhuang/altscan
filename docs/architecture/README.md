@@ -36,7 +36,7 @@ packages/{chain-config, db, explorer-core, oauth, settings-schema}: leaves
 | `apps/admin` | The admin console on Cloudflare: tenants and members (D1), and the UI that edits explorer settings by proxying to each explorer | The settings values themselves (each explorer stores its own) |
 | `apps/altscan-site` | altscan.io on Cloudflare: landing page, `/mcp`, OAuth for altscan.io | Chain data (it calls the explorers) |
 | `apps/status` | The status page | — |
-| `packages/db` | Drizzle schema (source of truth for tables) and the pool getters | Chain selection: callers pass `dbEnvVar` |
+| `packages/db` | Drizzle schema (every table, enforced against the built DB) and the pool getters | Chain selection: callers pass `dbEnvVar` |
 | `packages/chain-config` | Everything that differs between BNB and ETH, selected by `CHAIN` | Runtime env overrides (those live in each app's config) |
 | `packages/explorer-core` | Redis client, kv cache, IP rate limiting, `sanitizeSymbol` | Anything Next- or Node-app-specific |
 | `packages/providers` | The Moralis client, its CU budget and response cache | — |
@@ -74,7 +74,7 @@ One implementation per concern. "Guard" names the test that fails on a second co
 | State | Owner (writer) | Readers |
 |---|---|---|
 | Chain tables (`blocks`, `transactions`, `token_transfers`, …) | indexer | explorer |
-| Schema DDL | indexer `ensure-schema.ts` at boot; `packages/db/schema.ts` describes it | everyone |
+| Schema DDL | indexer `ensure-schema.ts` at boot; `packages/db/schema.ts` declares every table, checked against the built database by `apps/indexer/src/schema-parity.pg.test.ts` | everyone |
 | Explorer settings (`explorer_settings`) | explorer `/api/admin/settings`, called by the admin console | explorer `lib/settings.ts` (60s cache, tag `settings`) |
 | Admin tenants and members | admin (D1) | admin |
 | API keys, webhooks, watch lists | explorer `/api/v1` | indexer (webhook delivery) |

@@ -4,7 +4,7 @@
  * to call on every startup — either a fresh DB or an existing one.
  */
 import { indexerConfig } from './config-instance'
-import { getDb, dbErrorMessage, unwrapDbError } from './db'
+import { getDb, dbErrorMessage, unwrapDbError, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { getChainConfig, type WhaleConfig } from '@altscan/chain-config'
 
@@ -13,9 +13,12 @@ export async function ensureSchema(): Promise<void> {
   console.log('[indexer] Ensuring BNB schema...')
 
   // Enums (idempotent via DO…EXCEPTION pattern)
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE token_type AS ENUM ('BEP20','BEP721','BEP1155'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE validator_status AS ENUM ('active','inactive','jailed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
-  await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE verify_source AS ENUM ('own','sourcify'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
+  // Values come from the schema's pgEnums (one definition). CREATE TYPE is skipped when the
+  // type exists, so adding a value to an enum later still needs an ALTER TYPE here.
+  for (const e of [schema.tokenTypeEnum, schema.validatorStatusEnum, schema.verifySourceEnum]) {
+    const values = e.enumValues.map((v) => `'${v}'`).join(',')
+    await db.execute(sql.raw(`DO $$ BEGIN CREATE TYPE ${e.enumName} AS ENUM (${values}); EXCEPTION WHEN duplicate_object THEN NULL; END $$`))
+  }
 
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS blocks (

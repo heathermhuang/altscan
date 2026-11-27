@@ -417,3 +417,53 @@ export const backfillBudget = pgTable('backfill_budget', {
   bucketHour: timestamp('bucket_hour', { withTimezone: true }).primaryKey(),
   pagesUsed:  integer('pages_used').notNull().default(0),
 })
+
+// ── Tables the indexer created in raw DDL only ──────────────────────────────
+// ensure-schema.ts creates these; they are declared here so this file describes the whole
+// database (apps/indexer/src/schema-parity.pg.test.ts checks every table and column against
+// what ensureSchema() actually creates). Raw SQL reads and writes them; nothing below changes
+// that, and the DDL stays in ensure-schema.ts.
+
+/** One row per webhook delivered for a block. Keyed by block HASH, so a block replaced by a
+ *  reorg delivers afresh and its rows are deliberately never unwound. */
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  webhookId:   integer('webhook_id').notNull(),
+  blockHash:   varchar('block_hash', { length: 66 }).notNull(),
+  blockNumber: bigint('block_number', { mode: 'number' }).notNull(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  pk:       primaryKey({ columns: [t.webhookId, t.blockHash] }),
+  blockIdx: index('webhook_deliveries_block_idx').on(t.blockNumber),
+}))
+
+/** The single row (id = 1) of indexer watermarks: the async transfer writer's durable block,
+ *  where gap tracking starts, and the compact-retention floor published by retention. */
+export const indexerCursor = pgTable('indexer_cursor', {
+  id:                    integer('id').primaryKey().default(1),
+  transfersDurableBlock: bigint('transfers_durable_block', { mode: 'number' }).notNull().default(0),
+  gapTrackingFromBlock:  bigint('gap_tracking_from_block', { mode: 'number' }),
+  compactCutoffBlock:    bigint('compact_cutoff_block', { mode: 'number' }),
+})
+
+/** Heights quarantined after repeated processBlock failures. Deleted FIRST by unwindFrom,
+ *  before any block-scoped table (reorg-unwind-order.test.ts pins that order). */
+export const poisonBlocks = pgTable('poison_blocks', {
+  blockNumber: bigint('block_number', { mode: 'number' }).primaryKey(),
+  failures:    integer('failures').notNull().default(0),
+  recordedAt:  timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** Height ranges the indexer stepped over (abandoned, quarantined, skipped). Keyed on
+ *  from_block; writers merge on conflict. healed_at is set once a range is re-indexed. */
+export const indexGaps = pgTable('index_gaps', {
+  fromBlock: bigint('from_block', { mode: 'number' }).primaryKey(),
+  toBlock:   bigint('to_block', { mode: 'number' }).notNull(),
+  reason:    text('reason').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  healedAt:  timestamp('healed_at', { withTimezone: true }),
+  /** Blocks at or below this have been re-indexed, drained and verified (the healer's progress). */
+  healCursor:     bigint('heal_cursor', { mode: 'number' }),
+  /** The gap healer's lease on this range. */
+  healLeaseOwner: text('heal_lease_owner'),
+  healLeaseUntil: timestamp('heal_lease_until', { withTimezone: true }),
+})

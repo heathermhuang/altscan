@@ -72,6 +72,13 @@ describe('UNWIND_ORDER guardrail — every block-scoped table is unwound, childr
       // Moralis history caches keyed by address, filled by the backfill worker
       // and never by processBlock — a reorg of our own index does not touch them.
       'backfillAddressTxs', 'backfillTokenTransfers',
+      // Deleted by unwindFrom itself, FIRST and by raw SQL, before UNWIND_ORDER runs: a
+      // failure there must leave the index untouched (see unwindFrom; the order is pinned by
+      // reorg-unwind-order.test.ts).
+      'poisonBlocks',
+      // Keyed by block HASH: a block replaced by a reorg has a new hash and delivers afresh,
+      // which is the point. Unwinding these rows would only forget deliveries that happened.
+      'webhookDeliveries',
     ])
     const blockScoped = new Set<string>()
     for (const [name, t] of Object.entries(schema)) {

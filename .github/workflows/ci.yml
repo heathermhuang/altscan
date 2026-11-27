@@ -253,6 +253,17 @@ jobs:
           WATCH_EVENTS_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/watch_events_test
         run: npx vitest run apps/explorer/lib/watch-events.pg.test.ts
 
+      # schema.ts against what the indexer's ensureSchema() actually builds: every table,
+      # column, nullability and enum value. It drops and recreates the public schema, so it
+      # gets a database of its own.
+      - name: Create schema-parity-test database
+        run: PGPASSWORD=x psql -h 127.0.0.1 -U postgres -d worker_test -c 'CREATE DATABASE schema_parity_test'
+
+      - name: PG-gated indexer suite (schema.ts matches the built database)
+        env:
+          SCHEMA_PARITY_TEST_PG_URL: postgres://postgres:x@127.0.0.1:5432/schema_parity_test
+        run: npx vitest run apps/indexer/src/schema-parity.pg.test.ts
+
       # Gated on its own var like the PG suites above. It CONFIG SETs maxmemory
       # on the server to reproduce a full noeviction instance, so it needs the
       # throwaway service and must never be pointed at a shared Redis.

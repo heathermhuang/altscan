@@ -261,9 +261,9 @@ export async function unwindFrom(fromBlockNumber: number): Promise<void> {
   // only means those heights lose an exclusion, and they are still present in
   // `blocks`, which the resume scan skips anyway. The retry re-runs the whole unwind.
   //
-  // Deliberately NOT in UNWIND_ORDER: that manifest is guardrail-tested to cover
-  // exactly the drizzle schema tables carrying a block number, and poison_blocks is
-  // created in ensure-schema.ts rather than declared in the schema.
+  // Deliberately NOT in UNWIND_ORDER, which runs after this: the ordering above is the
+  // point. The UNWIND_ORDER guardrail (reorg-handler.test.ts) excludes poisonBlocks by name
+  // for this reason.
   await db.execute(sql`DELETE FROM poison_blocks WHERE block_number >= ${fromBlockNumber}`)
 
   // Rewind any heal_cursor that sits above the fork, for the same reason: it is a
