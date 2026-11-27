@@ -40,3 +40,24 @@ describe('one env number parser in apps/explorer', () => {
     for (const s of ['Number(process.env.X)', 'parseInt(process.env.X ?? "1", 10)', 'positiveInt(process.env.X, 5)']) expect(parse.test(s)).toBe(true)
   })
 })
+
+// Each environment variable has one owning module, which reads it and exports what it means.
+// That is why the explorer has no env registry: every variable is already read in exactly one
+// place, and a registry would only forward the read. A second reader is where two parses of
+// one variable start to disagree. NODE_ENV and NEXT_RUNTIME are the framework's, read freely.
+describe('one owner per environment variable in apps/explorer', () => {
+  it('no variable is read in two files', () => {
+    const read = /process\.env\.([A-Z_0-9]+)|positiveIntEnv\('([A-Z_0-9]+)'/g
+    const owners = new Map<string, Set<string>>()
+    for (const f of sources(ROOT)) {
+      for (const m of readFileSync(f, 'utf8').matchAll(read)) {
+        const name = m[1] ?? m[2]
+        if (name === 'NODE_ENV' || name === 'NEXT_RUNTIME') continue
+        owners.set(name, (owners.get(name) ?? new Set()).add(f.slice(ROOT.length + 1)))
+      }
+    }
+    const shared = [...owners].filter(([, files]) => files.size > 1).map(([name, files]) => `${name}: ${[...files].join(', ')}`)
+    expect(shared).toEqual([])
+    expect(owners.has('BODY_CACHE_TTL_MS') && owners.has('OAUTH_SECRET')).toBe(true) // the scan sees both read styles
+  })
+})
