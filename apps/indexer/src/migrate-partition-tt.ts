@@ -3,7 +3,7 @@
  * into a RANGE-partitioned table (by block_number) WITHOUT copying the 32GB of
  * existing data — the live table is attached as the historical "legacy" partition.
  *
- * Pairs with the async transfer-writer (block-processor.ts): the writer's
+ * Pairs with the async transfer-writer (transfer-writer.ts): the writer's
  * DELETE+INSERT-per-range idempotency means token_transfers no longer needs a
  * UNIQUE constraint, which is what lets the legacy table attach cleanly (a
  * partitioned table's unique would have to include the partition key).

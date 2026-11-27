@@ -1,9 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 import {
-  fetchBlockReceipts,
-  assertReceiptCoverage,
-  isUsableLogIndex,
+  fetchBlockReceipts, assertReceiptCoverage, isUsableLogIndex,
 } from './block-processor'
 
 /**

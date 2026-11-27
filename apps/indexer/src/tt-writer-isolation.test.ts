@@ -38,14 +38,14 @@ const row = (n: number) => ({
   value: '1', tokenId: null, blockNumber: n, timestamp: new Date(0), tokenType: 'BEP20' as const,
 })
 
-type Writer = typeof import('./block-processor')
+type Writer = typeof import('./transfer-writer')
 let w: Writer
 
 beforeEach(async () => {
   fake.fail.clear()
   fake.tries.clear()
   vi.resetModules()
-  w = await import('./block-processor')
+  w = await import('./transfer-writer')
 })
 
 describe('classifyWriteFailure', () => {

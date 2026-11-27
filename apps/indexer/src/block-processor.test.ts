@@ -2,9 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import type { JsonRpcProvider } from 'ethers'
 import { DrizzleQueryError } from 'drizzle-orm'
 import {
-  fetchBlockReceipts, enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth,
-  orderByAddress, isDeadlock,
+  fetchBlockReceipts, orderByAddress,
 } from './block-processor'
+import { enqueueTransferWrite, purgeTransferQueueAbove, getTransferQueueDepth } from './transfer-writer'
+import { isDeadlock } from './db'
 
 // Simulate the real failure mode observed on 2026-04-16: three consecutive
 // eth_getBlockReceipts 429s from a rate-limited BSC dataseed RPC.

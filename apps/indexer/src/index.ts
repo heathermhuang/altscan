@@ -16,24 +16,9 @@ import 'dotenv/config'
 import { JsonRpcProvider, Network } from 'ethers'
 import { getChainConfig } from '@altscan/chain-config'
 import {
-  processBlock,
-  initTransferWriter,
-  setDurableFloor,
-  enqueueQuarantinedBlock,
-  getTransferQueueDepth,
-  flushTransferWriter,
-  rollbackTransferWriterTo,
-  ASYNC_TT_WRITER,
-  TT_QUEUE_HIGH_WATER_ROWS,
-  TT_QUEUE_HIGH_WATER_BLOCKS,
-  noteWorkerParked,
-  noteWorkerActive,
-  setProfileWorkerCount,
-  retraceMissedBlocks,
-  forgetTraceMissesFrom,
-  retraceBacklogStats,
-  warmPairCache,
+  processBlock, retraceMissedBlocks, forgetTraceMissesFrom, retraceBacklogStats, warmPairCache,
 } from './block-processor'
+import { initTransferWriter, setDurableFloor, enqueueQuarantinedBlock, getTransferQueueDepth, flushTransferWriter, rollbackTransferWriterTo, ASYNC_TT_WRITER, TT_QUEUE_HIGH_WATER_ROWS, TT_QUEUE_HIGH_WATER_BLOCKS, noteWorkerParked, noteWorkerActive, setProfileWorkerCount } from './transfer-writer'
 import { processWithFailover, readWithFailover, redactRpcUrl, withTimeout, failoverKind } from './rpc-failover'
 import { createEndpointHealth } from './endpoint-health'
 import { recordIndexGap, recordPoisonGapIfAbsent, isPoisonBlock, planMaxLagSkip } from './index-gaps'

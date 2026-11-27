@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-// phaseFor is PURE — no getDb(), no queue mutation. Importing block-processor is
+// phaseFor is PURE — no getDb(), no queue mutation. Importing transfer-writer is
 // safe here because its module scope only parses env; getDb() is called inside
 // functions. Do NOT extend this file to call setDurableFloor/enqueueTransferWrite:
 // apps/indexer/.env supplies DATABASE_URL, so those write to a live database.
-import { phaseFor } from './block-processor'
+import { phaseFor } from './transfer-writer'
 
 /**
  * Wiring guard for the produce/drain diagnostic.
@@ -40,7 +40,7 @@ describe('tt-writer produce/drain profile wiring', () => {
   })
 
   it('writeTransferBlocks records a drain pass', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     expect(s).toContain('recordDrainPass(')
     // Phase must be snapshotted BEFORE the transaction: a long drain is what
     // parks the workers, so sampling at completion labels everything "blocked".
@@ -110,7 +110,7 @@ describe('phaseFor', () => {
   })
 
   it('marks a window inconclusive rather than reporting a clean number', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     expect(s).toContain('pool size UNSET')
     expect(s).toContain('need both none+all passes to conclude')
   })
@@ -123,7 +123,7 @@ describe('phaseFor', () => {
    * is unsound.
    */
   it('measures event-loop lag independently, bucketed BY PHASE', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     expect(s).toContain('startLoopLagProbe')
     // Window-wide lag lets an `all` spike make `none` acquisition look
     // scheduler-bound, reintroducing the M1/M2 confusion. (codex P2.)
@@ -136,7 +136,7 @@ describe('phaseFor', () => {
   it('emits on a timer, not only after a successful drain', () => {
     // If transactions keep failing before callback entry no drain completes, so
     // a drain-driven emitter prints nothing for the whole failure period.
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     const probe = s.slice(s.indexOf('function startLoopLagProbe'))
     expect(probe.slice(0, probe.indexOf('timer.unref'))).toContain('maybeEmitProfile()')
   })
@@ -145,7 +145,7 @@ describe('phaseFor', () => {
     // Every drain awaits persistDurableBlock; on the shared pool it would queue
     // behind the very workers the dedicated arm exists to escape, so a
     // no-improvement result could not rule out starvation. (codex P2.)
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     const fn = s.slice(s.indexOf('async function persistDurableBlock'))
     // Bound the window at the function's own body, not a byte count — a longer
     // comment must not silently move the assertion off the code it guards.
@@ -158,7 +158,7 @@ describe('phaseFor', () => {
    * leaving only fast successful acquisitions and a false "no starvation here".
    */
   it('counts acquisitions that fail before callback entry, and rethrows', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
     expect(fn).toMatch(/tEnter === 0\) ttProf\.preCbFail\+\+/)
     // The writer's retry/alerting owns this error — the probe must not swallow it.
@@ -170,12 +170,12 @@ describe('phaseFor', () => {
     // An `all` pass drains a high-water backlog; a `none` pass is small. Fixed
     // per-transaction overhead alone makes those rates differ at identical
     // resource availability. (codex P2.)
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     expect(s).toMatch(/r\+\$\{.*blocks\[p\].*\}blk\/pass/s)
   })
 
   it('routes the writer through getWriterDb and announces the A/B arm', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     const fn = s.slice(s.indexOf('async function writeTransferBlocks'))
     expect(fn).toMatch(/const db = getWriterDb\(\)/)
     // Both arms printed from the resolved env value, so a run can never be
@@ -185,7 +185,7 @@ describe('phaseFor', () => {
   })
 
   it('boot states the RESOLVED profile setting, both ways', () => {
-    const s = src('block-processor.ts')
+    const s = src('transfer-writer.ts')
     expect(s).toContain('produce/drain PROFILE ON')
     expect(s).toContain('produce/drain profile OFF')
   })

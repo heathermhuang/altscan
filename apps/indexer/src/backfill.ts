@@ -4,13 +4,8 @@ import { getChainConfig } from '@altscan/chain-config'
 import { getProvider } from './provider'
 import {
   processBlock,
-  initTransferWriter,
-  flushTransferWriter,
-  getTransferQueueDepth,
-  ASYNC_TT_WRITER,
-  TT_QUEUE_HIGH_WATER_ROWS,
-  TT_QUEUE_HIGH_WATER_BLOCKS,
 } from './block-processor'
+import { initTransferWriter, flushTransferWriter, getTransferQueueDepth, ASYNC_TT_WRITER, TT_QUEUE_HIGH_WATER_ROWS, TT_QUEUE_HIGH_WATER_BLOCKS } from './transfer-writer'
 
 const chain = getChainConfig()
 

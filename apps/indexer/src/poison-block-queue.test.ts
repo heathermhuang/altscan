@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  enqueueTransferWrite, enqueueQuarantinedBlock,
-  purgeTransferQueueAbove, getTransferQueueDepth,
-} from './block-processor'
+import { enqueueTransferWrite, enqueueQuarantinedBlock, purgeTransferQueueAbove, getTransferQueueDepth } from './transfer-writer'
 
 /**
  * The quarantine batch state machine.
