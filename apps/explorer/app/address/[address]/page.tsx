@@ -36,7 +36,8 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { swallow } from '@/lib/observability'
 import { selectByAddress } from '@/lib/address-query'
 import { nftTransfersQuery } from '@/lib/nft-transfers'
-import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
+import { parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { fetchNativeUsd } from '@/lib/native-price'
 import { priceTracked, trackedClause, trackedTokens } from '@/lib/holdings'
 import { FLOW_SAMPLE_CAP, flowLabel, flowValue, parseFlowRow, type FlowSample } from '@/lib/address-analytics'
@@ -132,7 +133,6 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
   }
 }
 
-const PAGE_SIZE = 25
 
 // Kicker-style column header, matching components/transactions/TxTable.
 const TH = 'text-left px-3 sm:px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-mut'
@@ -148,7 +148,7 @@ export default async function AddressPage({
   const { tab, page: pageStr, cursor } = await searchParams
   const addr = address.toLowerCase()
   // The tabs stop at the newest MAX_LIST_ROWS rows, so a deeper ?page= gets its last page.
-  const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
+  const page = parsePageParam(pageStr)
 
   if (!isHexAddress(addr)) notFound()
 
@@ -450,14 +450,14 @@ async function TxnsTab({
   isBot: boolean
   firstSeen: Date | null
 }) {
-  const offset = (page - 1) * PAGE_SIZE
+  const offset = (page - 1) * PER_PAGE
   let txs: typeof schema.transactions.$inferSelect[] = []
 
   try {
     // Not `from = addr OR to = addr`: that form hits the statement timeout on busy addresses.
     // The cast narrows the helper's both-tables row type to the table passed in.
     txs = await selectByAddress(db, schema.transactions, addr, [], {
-      order: 'desc', limit: PAGE_SIZE, offset, tieBreak: schema.transactions.txIndex,
+      order: 'desc', limit: PER_PAGE, offset, tieBreak: schema.transactions.txIndex,
     }) as typeof txs
   } catch (e) {
     swallow('addr/txns', e)
@@ -544,7 +544,7 @@ async function TxnsTab({
       <Pagination
         page={page}
         total={Math.min(total, MAX_LIST_ROWS)}
-        perPage={PAGE_SIZE}
+        perPage={PER_PAGE}
         baseUrl={`/address/${addr}?tab=txns`}
       />
     </div>
@@ -554,7 +554,7 @@ async function TxnsTab({
 // ---- Token Transfers Tab ----
 
 async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; page: number; isBot: boolean; firstSeen: Date | null }) {
-  const offset = (page - 1) * PAGE_SIZE
+  const offset = (page - 1) * PER_PAGE
   let transfers: typeof schema.tokenTransfers.$inferSelect[] = []
   let total = 0
 
@@ -562,10 +562,10 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
     // Fetch one extra row to detect "has next page" — avoids COUNT(*) on token_transfers
     // which is a full table scan with OR across two columns on millions of rows.
     // (timestamp, block_number) order, which is block order: a block's timestamp never runs backwards.
-    const rows = await selectByAddress(db, schema.tokenTransfers, addr, [], { order: 'desc', limit: PAGE_SIZE + 1, offset }) as typeof transfers
-    transfers = rows.slice(0, PAGE_SIZE)
-    // Estimate total for pagination: if we got more than PAGE_SIZE, there are more pages
-    total = rows.length > PAGE_SIZE ? offset + PAGE_SIZE + 1 : offset + rows.length
+    const rows = await selectByAddress(db, schema.tokenTransfers, addr, [], { order: 'desc', limit: PER_PAGE + 1, offset }) as typeof transfers
+    transfers = rows.slice(0, PER_PAGE)
+    // Estimate total for pagination: if we got more than PER_PAGE, there are more pages
+    total = rows.length > PER_PAGE ? offset + PER_PAGE + 1 : offset + rows.length
   } catch (e) {
     swallow('addr/transfers', e)
     // DB error
@@ -636,7 +636,7 @@ async function TransfersTab({ addr, page, isBot, firstSeen }: { addr: string; pa
       <Pagination
         page={page}
         total={Math.min(total, MAX_LIST_ROWS)}
-        perPage={PAGE_SIZE}
+        perPage={PER_PAGE}
         baseUrl={`/address/${addr}?tab=transfers`}
       />
     </div>

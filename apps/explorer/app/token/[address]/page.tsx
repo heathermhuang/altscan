@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db'
 import { countTokenTransfers, selectTokenTransfers } from '@/lib/token-transfers-query'
-import { clampListPage, MAX_LIST_ROWS } from '@/lib/list-depth'
+import { MAX_LIST_ROWS } from '@/lib/list-depth'
+import { parsePageParam, PER_PAGE } from '@/lib/list-pages'
 import { eq } from 'drizzle-orm'
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
@@ -168,7 +169,6 @@ export async function generateMetadata({ params }: { params: Promise<{ address: 
 
 export const revalidate = 300
 
-const PAGE_SIZE = 25
 
 export default async function TokenDetailPage({
   params,
@@ -182,8 +182,8 @@ export default async function TokenDetailPage({
   const { page: pageStr } = await searchParams
   const addr = address.toLowerCase()
   // The list stops at MAX_LIST_ROWS, so a deeper ?page= gets its last page.
-  const page = clampListPage(parseInt(pageStr ?? '1', 10) || 1, PAGE_SIZE)
-  const offset = (page - 1) * PAGE_SIZE
+  const page = parsePageParam(pageStr)
+  const offset = (page - 1) * PER_PAGE
 
   let token: typeof schema.tokens.$inferSelect | null = null
   try {
@@ -230,7 +230,7 @@ export default async function TokenDetailPage({
   const [transfers, totalTransfersRaw, holdersResult, riskSignals] = isLive
     ? [NO_LOCAL_TRANSFERS, -1, EMPTY_HOLDERS, [] as RiskSignal[]]
     : await Promise.all([
-        withTimeout(selectTokenTransfers(db, addr, { limit: PAGE_SIZE, offset }), 6000).catch(() => null),
+        withTimeout(selectTokenTransfers(db, addr, { limit: PER_PAGE, offset }), 6000).catch(() => null),
         // Counts at most one row past the list. -1 = "unknown" (timed out /
         // errored) so we never render a misleading "0 total".
         withTimeout(countTokenTransfers(db, addr).then(([r]) => r?.value ?? 0), 5000).catch(() => -1),
@@ -250,7 +250,7 @@ export default async function TokenDetailPage({
   const transfersState = transfersEmptyState({ rows: transfers, count: totalTransfersRaw, offset })
   const paginationTotal = Math.min(MAX_LIST_ROWS, countKnown
     ? totalTransfers
-    : offset + pageRows.length + (pageRows.length === PAGE_SIZE ? PAGE_SIZE : 0))
+    : offset + pageRows.length + (pageRows.length === PER_PAGE ? PER_PAGE : 0))
 
   // The DB column is NOT NULL, so only a token resolved live can have unknown decimals (a failed decimals() read).
   const decimals = readDecimals(token.decimals)
@@ -495,7 +495,7 @@ export default async function TokenDetailPage({
       <Pagination
         page={page}
         total={paginationTotal}
-        perPage={PAGE_SIZE}
+        perPage={PER_PAGE}
         baseUrl={`/token/${addr}`}
       />
     </div>
