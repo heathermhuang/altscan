@@ -753,10 +753,9 @@ async function processReceiptsBatch(
       } else {
         // Bulk insert token transfers — chunked to avoid stack overflow in Drizzle
         const sI = PROFILE_ENABLED ? performance.now() : 0
-        let totalInserted = 0
         for (let i = 0; i < rows.length; i += SQL_BATCH_CHUNK) {
           const chunk = rows.slice(i, i + SQL_BATCH_CHUNK)
-          const inserted = await db.insert(schema.tokenTransfers)
+          await db.insert(schema.tokenTransfers)
             .values(chunk.map(r => ({
               txHash: r.txHash,
               logIndex: r.logIndex,
@@ -769,11 +768,6 @@ async function processReceiptsBatch(
               timestamp: r.timestamp,
             })))
             .onConflictDoNothing()
-            // Count inserted rows only (gates the holder-balance enqueue below). We
-            // return block_number (NOT NULL) purely so `.length` is correct — there is
-            // no `id` column anymore (dropped 2026-06-20 after int4 seq overflow).
-            .returning({ b: schema.tokenTransfers.blockNumber })
-          totalInserted += inserted.length
         }
         if (t) t.dbInsertTokenTransfers = performance.now() - sI
       }

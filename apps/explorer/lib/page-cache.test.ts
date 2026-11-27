@@ -63,6 +63,11 @@ describe('parsePageParam', () => {
     expect(parsePageParam(raw as string | string[] | undefined)).toBe(expected)
   })
 
+  it('a digit run too long for a float is the last page, not Infinity', () => {
+    // 400 digits: Number() is Infinity, which must never reach (page - 1) * 25 as an OFFSET.
+    expect(parsePageParam('9'.repeat(400))).toBe(400)
+  })
+
   it('does not return Infinity for a huge param', () => {
     // Number('1e999') is Infinity, and (Infinity - 1) * 25 is NaN as an OFFSET.
     expect(Number.isFinite(parsePageParam('1e999'))).toBe(true)

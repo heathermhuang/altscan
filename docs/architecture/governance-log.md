@@ -46,6 +46,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 33 | `render.yaml`'s two comments no longer cite the deleted `@altscan/types` as a current fact. Checked with Render's `POST /v1/blueprints/validate` against the live account: valid, `totalActions: 0`, so the merge's Blueprint sync changes no deployed field | `scripts/render-install-frozen.test.ts` still passes |
 | 34 | Deleted the hard-disabled per-block holder tracking: `holder-balances.ts`, its two call sites and profile phase, `recomputeHolderCounts` and its schedule, the five `HOLDER_*` config entries and the constant `holderBalanceTrackingEnabled`. The product state is unchanged (counts were already a frozen snapshot); AGENTS.md's known issue now says the code is in history and a revival is a rebuild. All 10 indexer PG suites 98/98; compiled modules load. `HOLDER_*` vars still set on Render are now ignored | config/reorg tests; gate |
 | 35 | `REORG_DEPTH` reads exactly as before (parseInt, positive) through `EnvReader.leadingPositiveInt`, the one lenient reader for values moved from parseInt sites where a stricter parse could change a safety setting; `daysOrImmortal` is now that reader with an Infinity fallback. Still printed at boot. This removes the last pre-merge check; the `BODY_CACHE_*` difference is recorded as accepted | `config.test.ts` |
+| 36 | Fourth review follow-up: removed `totalInserted` and the inline insert's `RETURNING`, which existed only to gate the holder enqueue #34 deleted (`noUnusedLocals` misses a `+=`-only variable); pinned that a 400-digit `?page=` resolves to the last page, never Infinity | `lib/page-cache.test.ts` |
 
 ## Task pool
 
@@ -157,6 +158,16 @@ the four newly declared tables through Drizzle, and altscan.io's products and he
 are unchanged. One finding, fixed in #32: `parsePageParam` accepted exponent and hex
 spellings. Noted: altscan.io's browser WebMCP script now bundles the chain-config literal
 (public URLs only, a few KB).
+
+## Independent review (batches 32–35)
+
+A fourth fresh reviewer read `git diff 29a7b49..HEAD`. Valid page numbers parse as before;
+`render.yaml` changed comments only; none of the deleted holder code could run, the profile
+phase was removed consistently and retention's lag-yield and schedule are intact;
+`leadingPositiveInt` returns the old `REORG_DEPTH` result for every probed input and
+`daysOrImmortal` is unchanged. Findings: the orphaned `totalInserted`/`RETURNING` and an
+untested >308-digit page, both handled in #36; `'+5'`, `'5.'` and similar junk spellings are
+now page 1, covered by the accepted `?page=` change.
 
 ## Pending owner decisions
 
