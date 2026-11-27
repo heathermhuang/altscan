@@ -71,3 +71,14 @@ describe('one definition of the address and hash shapes', () => {
     expect(readFileSync(join(__dirname, 'hex.ts'), 'utf8')).toMatch(SHAPE)
   })
 })
+
+// A regex built at run time (a template literal) slips past the literal scan above: WebMcpProvider
+// carried its own isHexHash(s, 40 | 64) that way. So no other module may declare these names either.
+describe('the hex predicates are declared once', () => {
+  it('only lib/hex.ts declares them', () => {
+    const declares = /\b(?:function|const|let)\s+is(?:Lower)?Hex(?:Address|Hash)\b/
+    const hits = sources(ROOT).filter((f) => declares.test(readFileSync(f, 'utf8'))).map((f) => f.slice(ROOT.length + 1))
+    expect(hits).toEqual([join('lib', 'hex.ts')])
+  })
+})
+

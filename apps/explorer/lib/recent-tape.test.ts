@@ -5,7 +5,10 @@ vi.mock('@/lib/db', async () => {
   const { schema } = await import('@altscan/db')
   return { schema, db: { select: () => ({ from: () => ({ orderBy: () => ({ limit }) }) }) } }
 })
-vi.mock('@/lib/observability', () => ({ swallow }))
+vi.mock('@/lib/observability', () => ({
+  swallow,
+  swallowed: <T>(tag: string, fallback: T) => (e: unknown) => { swallow(tag, e); return fallback },
+}))
 
 import { fetchRecentTape, queryRecentTape } from './recent-tape'
 import { TAPE_LATEST } from '@/lib/tape'

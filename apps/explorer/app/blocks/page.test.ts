@@ -11,7 +11,10 @@ const { queryRecentTape, createPageCache, swallow, fetchBlockPage } = vi.hoisted
 }))
 vi.mock('@/lib/page-cache', () => ({ createPageCache }))
 vi.mock('@/lib/recent-tape', () => ({ queryRecentTape }))
-vi.mock('@/lib/observability', () => ({ swallow }))
+vi.mock('@/lib/observability', () => ({
+  swallow,
+  swallowed: <T>(tag: string, fallback: T) => (e: unknown) => { swallow(tag, e); return fallback },
+}))
 vi.mock('@/lib/list-pages', async (orig) => ({ ...(await orig<typeof import('@/lib/list-pages')>()), fetchBlockPage }))
 
 import BlocksPage from './page'

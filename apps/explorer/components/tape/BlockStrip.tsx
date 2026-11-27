@@ -1,8 +1,7 @@
 import type { CSSProperties } from 'react'
-import { formatShare, ordinal } from '@/lib/format'
+import { formatNumber, formatShare, ordinal } from '@/lib/format'
 import { stripFills, stripWeight, txShareOfBlock, type StripTx } from '@/lib/tape'
 
-const fmt = (n: number) => n.toLocaleString('en-US')
 const LEGEND = 'width = gas used · fill = gas price paid · ▨ failed · in block order'
 
 /**
@@ -33,7 +32,7 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
   const weights = txs.map(t => stripWeight(t.gas))
   const weightSum = weights.reduce((s, w) => s + w, 0)
   const centre = curPos >= 0 ? (weights.slice(0, curPos).reduce((s, w) => s + w, 0) + weights[curPos] / 2) / weightSum : 0
-  const label = `${chainName} block ${fmt(blockNumber)}: ${txs.length} transactions, ${failed} failed`
+  const label = `${chainName} block ${formatNumber(blockNumber)}: ${txs.length} transactions, ${failed} failed`
     + (cur ? `; this one is the ${ordinal(curPos + 1)}${share !== null ? ` and used ${share}% of the block's gas` : ''}` : '')
 
   return (
@@ -42,7 +41,7 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
         <span className="flex items-center min-w-0">
           <span className="tp-dot" aria-hidden="true" />
           <span className="text-ink truncate">
-            Block #{fmt(blockNumber)}<span className="hidden sm:inline text-mut">, transaction by transaction</span>
+            Block #{formatNumber(blockNumber)}<span className="hidden sm:inline text-mut">, transaction by transaction</span>
           </span>
         </span>
         <span className="tp-stats">
@@ -57,7 +56,7 @@ export function BlockStrip({ txs, blockNumber, gasLimit, chainName, current, cla
             return (
               <i key={t.i} className={cls || undefined} style={{ '--w': weights[k], '--f': `${fills[k]}%` } as CSSProperties}>
                 {k === curPos && (
-                  <span className={`tp-chip bs-chip${centre < 0.5 ? ' l' : ''}`}>this tx · {fmt(t.gas)} gas</span>
+                  <span className={`tp-chip bs-chip${centre < 0.5 ? ' l' : ''}`}>this tx · {formatNumber(t.gas)} gas</span>
                 )}
               </i>
             )

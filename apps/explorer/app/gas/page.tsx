@@ -4,7 +4,7 @@ import { chainConfig } from '@/lib/chain'
 import { BreadcrumbJsonLd } from '@/components/seo/Breadcrumbs'
 import { AdReserve } from '@/components/ads/AdReserve'
 import type { Metadata } from 'next'
-import { swallow } from '@/lib/observability'
+import { swallow, swallowed } from '@/lib/observability'
 import { confirmationWindow } from '@/lib/confirmation-window'
 import { feeCard, GAS_TIER_BLOCKS, gasTiersNote, gasTiles } from '@/lib/gas-tiers'
 import { fetchGasTiers, GAS_REVALIDATE_SECONDS } from '@/lib/gas-percentiles'
@@ -26,14 +26,7 @@ export const metadata: Metadata = {
 // OUTSIDE the cache: a rejection is never stored, and the page just draws without the strip.
 const cachedTape = createPageCache('gas-tape', GAS_REVALIDATE_SECONDS, queryGasTape)
 
-async function readTape() {
-  try {
-    return await cachedTape()
-  } catch (e) {
-    swallow('gas/tape', e)
-    return null
-  }
-}
+const readTape = () => cachedTape().catch(swallowed('gas/tape', null))
 
 export default async function GasPage() {
   const tapeQuery = readTape()   // beside the RPC reads below; it never rejects

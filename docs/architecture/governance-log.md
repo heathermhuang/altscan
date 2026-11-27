@@ -34,6 +34,7 @@ providers → indexer `tsc`), explorer/admin/oauth `tsc`, `pnpm lint`, `pnpm tes
 | 21 | `tt-whale-index.pg.test.ts`: the "repeated ATTACH re-validates" version predicate excluded only PG 18.0–18.3; 16.13 (measured here) does not re-validate either, so the suite failed on any PG 16 older than 16.14. CI's `postgres:16` is newer, so it never showed there | the test itself |
 | 22 | Two more zero-coupling seams out of `block-processor.ts` (1,291 → 1,070): `receipts.ts` (eth_getBlockReceipts and its pre-write field checks; it was filed under the DEX-pair header) and `address-activity.ts` (the addresses coalescer, which used nothing else in the file). Verbatim moves; all 9 indexer PG suites 95/95, compiled modules load | cycle scan, workspace graph |
 | 23 | Chain-key audit: every `key === 'bnb'` in apps reviewed. The md route's hardcoded sister-site line now comes from chain-config (`peerUrl` + the peer's name; output identical on both chains). The indexer's `ASYNC_TT_WRITER` default moved from `config.ts` reading `env.CHAIN` itself to `config-instance.ts`, beside the other per-chain indexer defaults, so only chain-config resolves `CHAIN` | — |
+| 24 | Audit of page- and component-local helpers against `lib/`: WebMcpProvider had a third address/hash checker built from a template literal (past the batch-2 literal scan) → `lib/hex`, and the hex guard now also rejects any other declaration of those predicate names; three hand-rolled try/await/swallow/fallback blocks → the existing `swallowed()`; `BlockStrip`'s private `fmt` → `formatNumber`. Kept: `BlockTape`'s one-liner (client component; `lib/format` imports ethers) and the search page's try/catch (its callee can throw while building the query, which `.catch` would not see) | `lib/hex.test.ts` (extended) |
 
 ## Task pool
 
@@ -70,6 +71,14 @@ Recorded so the next pass does not redo the analysis.
   `NEXT_PUBLIC_PEER_URL` is set; chain-config's `peerUrl` holds the same hosted value. Kept
   separate on purpose: a fork must not allowlist the hosted sites' origins by default (same
   rule as `GA_MEASUREMENT_ID` / `BINANCE_REF_CODE` in AGENTS.md).
+- **Large but cohesive files** (`ensure-schema.ts` 1,605, `retention-cleanup.ts` 1,295,
+  `moralis.ts` 1,217, indexer `index.ts` 999). Each owns one responsibility (boot DDL,
+  retention, the Moralis client, the boot loop). The section-coupling scan found no seam
+  that is not just a size cut; splitting by size alone is the directory shuffling the goal
+  rules out.
+- **Indexer module-level state**: every module-level Map/Set was listed; each holds distinct
+  state (writer queue, retry bookkeeping, healer strikes, constant allowlists). No two
+  duplicate each other.
 - **Remaining chain-key lookups** (`LOGOS[chainConfig.key]`, `V2_FACTORIES[key]`, the
   per-chain indexer defaults in `config-instance.ts`) are keyed tables, not scattered
   decisions. Fine as they are.
